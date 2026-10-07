@@ -632,6 +632,38 @@ class Api:
         config.save(cfg)
         return {"ok": True, "assigned": found}
 
+    def browse(self, path: str = "") -> dict:
+        """Przeglądarka folderów dla pada: dyski albo podfoldery `path`.
+        Przy folderze liczba rozpoznanych systemów (pomaga trafić w kolekcję)."""
+        import os
+        if not path:
+            drives = []
+            for d in os.listdrives():
+                label = winutil.volume_label(d)
+                kind = winutil.drive_kind(d)
+                drives.append({"name": d.rstrip("\\") + (f"  {label}" if label else ""),
+                               "path": d, "info": kind})
+            return {"path": "", "parent": None, "entries": drives, "systems": 0}
+        p = Path(path)
+        try:
+            subs = sorted((e for e in os.scandir(p) if e.is_dir(follow_symlinks=True)
+                           and not e.name.startswith(("$", "."))
+                           and e.name not in ("System Volume Information",)),
+                          key=lambda e: e.name.lower())
+        except OSError as ex:
+            return {"path": str(p), "parent": str(p.parent) if p.parent != p else "",
+                    "entries": [], "systems": 0, "error": str(ex)}
+        entries = []
+        recognized = 0
+        for e in subs:
+            es = systems.match_folder(e.name)
+            if es:
+                recognized += 1
+            entries.append({"name": e.name, "path": e.path,
+                            "info": systems.info(es)["display"] if es else ""})
+        parent = "" if p.parent == p else str(p.parent)
+        return {"path": str(p), "parent": parent, "entries": entries, "systems": recognized}
+
     def pick_folder(self, start: str = "") -> str:
         import webview
         if not self._window:

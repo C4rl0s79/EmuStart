@@ -453,3 +453,64 @@ function instInput(a) {
     if (a === "b") { api().install_cancel(); toast("Przerywam po bieżącym pliku…"); }
   } else if (INST.mode === "done" && (a === "a" || a === "b")) instClose();
 }
+
+
+/* ───────────── wybór folderu padem ───────────── */
+const FB = { path: "", data: null, idx: 0, onPick: null, prevModal: null, title: "", memory: {} };
+
+async function folderBrowse(title, start, onPick) {
+  Object.assign(FB, { title, onPick, prevModal: S.modal, idx: 0 });
+  S.modal = "fbrowse";
+  $("fbrowse").classList.remove("hidden");
+  // start: istniejący folder (np. obecne ustawienie) albo lista dysków
+  await fbLoad(start || "");
+  if (FB.data.error && start) await fbLoad("");
+}
+async function fbLoad(path, focusName) {
+  const prev = FB.path;
+  FB.data = await api().browse(path);
+  FB.path = FB.data.path;
+  FB.memory[prev] = FB.idx;
+  const back = focusName ? FB.data.entries.findIndex((e) => e.name === focusName || e.path === focusName) : -1;
+  FB.idx = back >= 0 ? back : (FB.memory[FB.path] || 0);
+  renderFb();
+}
+function renderFb() {
+  const d = FB.data;
+  $("fbTitle").textContent = FB.title;
+  $("fbPath").textContent = d.path || "Komputer";
+  $("fbInfo").textContent = d.error ? `Brak dostępu: ${d.error}`
+    : !d.path ? "Wybierz dysk"
+    : d.systems ? `Rozpoznane systemy w tym folderze: ${d.systems}` : `${d.entries.length} ${plural(d.entries.length, "folder", "foldery", "folderów")}`;
+  $("fbList").innerHTML = d.entries.map((e, i) =>
+    `<li class="${i === FB.idx ? "sel" : ""}" data-i="${i}"><span>📁 ${esc(e.name)}</span><span class="gv">${esc(e.info || "")}</span></li>`).join("")
+    || `<li class="off"><span>(brak podfolderów)</span></li>`;
+  $("fbList").querySelectorAll("li[data-i]").forEach((li) => {
+    li.addEventListener("click", () => { FB.idx = +li.dataset.i; renderFb(); });
+    li.addEventListener("dblclick", () => { FB.idx = +li.dataset.i; fbInput("a"); });
+  });
+  $("fbList").querySelector("li.sel")?.scrollIntoView({ block: "nearest" });
+  const h = [["a", "Otwórz"], ["b", d.path ? "W górę" : "Anuluj"]];
+  if (d.path) h.unshift(["x", "Wybierz ten folder"]);
+  h.push(["start", "Anuluj"]);
+  setHints(h, $("fbHints"));
+}
+function fbClose(path) {
+  $("fbrowse").classList.add("hidden");
+  S.modal = FB.prevModal;
+  if (path && FB.onPick) FB.onPick(path);
+}
+async function fbInput(a) {
+  const d = FB.data, n = d.entries.length;
+  if (a === "up" && n) FB.idx = (FB.idx - 1 + n) % n;
+  else if (a === "down" && n) FB.idx = (FB.idx + 1) % n;
+  else if (a === "lb" && n) FB.idx = Math.max(0, FB.idx - 10);
+  else if (a === "rb" && n) FB.idx = Math.min(n - 1, FB.idx + 10);
+  else if ((a === "a" || a === "right") && n) return fbLoad(d.entries[FB.idx].path);
+  else if (a === "b" || a === "left") {
+    if (!d.path) return a === "b" ? fbClose(null) : undefined;
+    return fbLoad(d.parent || "", d.path);
+  } else if (a === "x" && d.path) return fbClose(d.path);
+  else if (a === "start") return fbClose(null);
+  renderFb();
+}

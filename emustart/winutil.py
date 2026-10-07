@@ -141,3 +141,19 @@ def send_keys(combo: str, hold: float = 0.08) -> None:
 
 def foreground() -> int:
     return (_u32.GetForegroundWindow() or 0) if IS_WIN else 0
+
+
+def volume_label(root: str) -> str:
+    """Etykieta dysku („Dane”, „NAS”) albo ''."""
+    if not IS_WIN:
+        return ""
+    buf = ctypes.create_unicode_buffer(261)
+    ok = ctypes.windll.kernel32.GetVolumeInformationW(root, buf, 261, None, None, None, None, 0)
+    return buf.value if ok else ""
+
+
+def drive_kind(root: str) -> str:
+    if not IS_WIN:
+        return ""
+    t = ctypes.windll.kernel32.GetDriveTypeW(root)
+    return {2: "wymienny", 3: "dysk", 4: "sieć", 5: "CD/DVD", 6: "RAM"}.get(t, "")

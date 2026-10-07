@@ -150,6 +150,7 @@ function press(a, fromPad) {
   if (S.modal === "scan") return;
   if (S.modal === "osk") return oskInput(a);
   if (S.modal === "inst") return instInput(a);
+  if (S.modal === "fbrowse") return fbInput(a);
   if (S.modal === "gopt") return goptInput(a);
   if (S.screen === "pads") return padsInput(a);
   if (S.screen === "profiles") return profilesInput(a);
@@ -623,7 +624,7 @@ function setValue(r) {
   const c = S.settings;
   if (r.type === "system") return r.sys.enabled ? (r.sys.label || "brak emulatora") : (r.sys.known ? "wyłączony" : "nierozpoznany folder — wyłączony");
   if (r.type === "root") return r.path;
-  if (r.type === "addroot") return "A wpisz ścieżkę · X wybierz folder";
+  if (r.type === "addroot") return "A wybierz folder";
   if (r.type === "action") return "";
   const v = c[r.key];
   return r.fmt ? r.fmt(v) : v;
@@ -641,7 +642,7 @@ function renderSettings() {
         `<span class="v">${esc(setValue(r))}</span><span class="arrows">${sel ? "◀ ▶" : ""}</span></div>`;
     }
     const arrows = sel && ["num", "enum", "bool"].includes(r.type) ? "◀ ▶"
-      : sel && r.type === "path" ? "A edytuj · X wybierz"
+      : sel && r.type === "path" ? "A wybierz folder"
       : sel && r.type === "root" ? "◀ ▶ kolejność · Y usuń" : "";
     return `<div class="setrow${sel}${r.type === "action" ? " action" : ""}" data-i="${i}"><span class="k">${esc(r.k)}</span>` +
       `<span class="v" id="sv${i}">${esc(setValue(r))}</span><span class="arrows">${arrows}</span></div>`;
@@ -652,8 +653,8 @@ function renderSettings() {
   const sel = list.querySelector(".setrow.sel");
   if (sel) sel.scrollIntoView({ block: "nearest" });
   const r = S.setRows[S.setIdx] || {};
-  const h = [["dpad", "Zmień"], ["a", r.type === "action" ? "Wykonaj" : ["path", "root", "addroot"].includes(r.type) ? "Edytuj" : "Przełącz"]];
-  if (["path", "root", "addroot"].includes(r.type)) h.push(["x", "Wybierz folder"]);
+  const h = [["dpad", "Zmień"], ["a", r.type === "action" ? "Wykonaj" : ["path", "root", "addroot"].includes(r.type) ? "Wybierz folder" : "Przełącz"]];
+  if (["path", "root", "addroot"].includes(r.type)) h.push(["x", "Okno Windows (mysz)"]);
   if (r.type === "root") h.push(["y", "Usuń"]);
   h.push(["b", "Wstecz"]);
   setHints(h);
@@ -724,7 +725,7 @@ async function settingsInput(a) {
       roots[at] = path.trim();
       await saveRoots(roots);
     };
-    if (a === "a") return oskOpen(r.type === "root" ? "Folder z grami" : "Nowy folder z grami", r.path || "", put);
+    if (a === "a") return folderBrowse(r.type === "root" ? "Folder z grami" : "Nowy folder z grami", r.path || "", put);
     if (a === "x") return put(await api().pick_folder(r.path || ""));
     if (r.type === "root" && a === "y") { roots.splice(r.idx, 1); return saveRoots(roots); }
     if (r.type === "root" && (a === "left" || a === "right")) {
@@ -735,7 +736,8 @@ async function settingsInput(a) {
       return saveRoots(roots);
     }
   } else if (r.type === "path") {
-    if (a === "a") return startEdit(S.setIdx);
+    if (a === "a") return folderBrowse(r.k, S.settings[r.key] || "", async (p) => { await saveSetting(r.key, p); renderSettings(); });
+    if (a === "y") return startEdit(S.setIdx);      // wpisanie ścieżki klawiaturą — tylko na życzenie
     if (a === "x") {
       const p = await api().pick_folder(S.settings[r.key]);
       if (p) { await saveSetting(r.key, p); if (r.key === "rom_root") { S.settings = await api().get_settings(); buildSetRows(); } }

@@ -4,6 +4,16 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 [Keep a Changelog](https://keepachangelog.com/pl/1.1.0/), wersje według
 [SemVer](https://semver.org/lang/pl/).
 
+## [0.6.1] — 2026-10-07
+
+### Zmienione
+- **Wybór folderu padem** zamiast wpisywania ścieżki: lista dysków (z etykietą
+  i rodzajem — dysk, sieć), wchodzenie w podfoldery (A / →), w górę (B / ←),
+  X wybiera bieżący folder. Przy folderze widać, ile systemów EmuStart w nim
+  rozpoznaje, a przy podfolderach — jaki to system. Dotyczy folderów z grami,
+  folderu emulatorów i pamięci podręcznej. Okno Windows (mysz) zostaje pod X
+  w ustawieniach, wpisanie ścieżki klawiaturą — pod Y.
+
 ## [0.6.0] — 2026-10-07
 
 ### Dodane
