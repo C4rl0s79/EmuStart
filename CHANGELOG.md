@@ -19,6 +19,13 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 - Import kluczy SteamGridDB / IGDB / TheGamesDB z `config.json` PyLinksWeb.
 - Podgląd gry na liście też korzysta z dopasowania po liście plików libretro.
 
+### Zmienione
+- Dystrybucja jako katalog w ZIP (`EmuStart.exe` + `_internal\`) zamiast
+  pojedynczego exe — jednoplikowa wersja PyInstallera była przez Windows
+  Defender błędnie oznaczana jako `Trojan:Win32/Bearfoos.A!ml`.
+- Exe ma metadane wersji (nazwa produktu, wersja, opis) — mniej podejrzany
+  dla heurystyk antywirusów.
+
 ### Naprawione
 - Menu w grze nie wybiera już samo „Wróć do gry” przy puszczaniu A+Y:
   reaguje dopiero, gdy pad jest puszczony przez chwilę i minęło pół sekundy
