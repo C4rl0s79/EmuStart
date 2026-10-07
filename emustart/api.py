@@ -14,7 +14,7 @@ import threading
 import time
 from pathlib import Path
 
-from emustart import (__version__, art, art_sources, cache, ingame, installer, logos, metadata, pads, profiles, uipad, config, emulators, launcher, library,
+from emustart import (__version__, art, art_sources, cache, ingame, installer, launchbox, logos, metadata, pads, profiles, uipad, config, emulators, launcher, library,
                       paths, scanner, systems, winutil)
 
 log = logging.getLogger("emustart.api")
@@ -46,7 +46,7 @@ class Api:
     def __init__(self):
         self._cfg = config.load()
         self._window = None
-        self._fetcher = art.Fetcher()
+        self._fetcher = art.Fetcher(logos=lambda: bool(self._cfg.get("games_logo")))
         self._session: launcher.Session | None = None
         self._background: list = []          # sesje, które jeszcze kopiują w tle
         self._pin_jobs: dict = {}            # game_id → Session-like (kopiowanie przypiętych)
@@ -129,6 +129,7 @@ class Api:
             "cache": cache.usage(cfg),
             "copying": self._copying(),
             "py_pad": bool(self._window) and uipad.xinput.available(),
+            "games_logo": bool(self._cfg.get("games_logo")),
             "profile": profiles.get(self._profile),
             "profiles": len(profiles.all_profiles()),
         }
@@ -163,6 +164,7 @@ class Api:
             r["players"] = _players(f.get("players", ""))
             r["developer"], r["publisher"] = f.get("developer", ""), f.get("publisher", "")
             r["regions"] = _regions(r["tags"])
+            r["logo"] = art.media_url(es, r["name"], "logo") if r["art_logo"] == art.HAS else ""
             r["box"] = art.media_url(es, r["name"], "box") if r["art_box"] == art.HAS else ""
             r["snap"] = art.media_url(es, r["name"], "snap") if r["art_snap"] == art.HAS else ""
         return rows
@@ -175,12 +177,13 @@ class Api:
         out = {}
         con = library.db()
         for gid in game_ids:
-            r = con.execute("SELECT es,name,art_box,art_snap FROM games WHERE id=?",
+            r = con.execute("SELECT es,name,art_box,art_snap,art_logo FROM games WHERE id=?",
                             (int(gid),)).fetchone()
             if r:
                 out[str(gid)] = {
                     "box": art.media_url(r["es"], r["name"], "box") if r["art_box"] == art.HAS else "",
                     "snap": art.media_url(r["es"], r["name"], "snap") if r["art_snap"] == art.HAS else "",
+                    "logo": art.media_url(r["es"], r["name"], "logo") if r["art_logo"] == art.HAS else "",
                     "checked": bool(r["art_box"] and r["art_snap"])}
         return out
 
@@ -436,9 +439,10 @@ class Api:
 
     def art_candidates(self, game_id: int, kind: str, query: str = "") -> list:
         g = library.game(int(game_id))
-        if not g or kind not in ("box", "snap"):
+        if not g or kind not in ("box", "snap", "logo"):
             return []
-        return art_sources.candidates(self._cfg, g["es"], g["name"], kind, query or "")
+        setname = Path(g["rel"]).stem if systems.info(g["es"])["kind"] == "arcade" else ""
+        return art_sources.candidates(self._cfg, g["es"], g["name"], kind, query or "", setname)
 
     def art_choose(self, game_id: int, kind: str, url: str) -> dict:
         g = library.game(int(game_id))
@@ -612,15 +616,28 @@ class Api:
                             "unchecked": r["unchecked"] or 0} for r in rows),
                           key=lambda x: x["display"].lower())
         keys = self._cfg.get("art_keys") or {}
+        desc = dict(library.db().execute("""
+            SELECT g.es, SUM(m.data LIKE '%"description"%' OR m.data LIKE '%"wiki"%')
+            FROM games g LEFT JOIN game_meta m ON m.game_id=g.id WHERE g.hidden=0 GROUP BY g.es""").fetchall())
+        logo_n = dict(library.db().execute(
+            "SELECT es, SUM(art_logo=1) FROM games WHERE hidden=0 GROUP BY es").fetchall())
+        for s_ in systems_:
+            s_["desc"] = desc.get(s_["es"]) or 0
+            s_["logo"] = logo_n.get(s_["es"]) or 0
+        upd = getattr(self, "_lb_update", None)
         return {"systems": systems_, "sources": art_sources.Sources(self._cfg).enabled(),
+                "launchbox": launchbox.status(), "games_logo": bool(self._cfg.get("games_logo")),
+                "lb_update": upd.status() if upd else None,
                 "keys_from": keys.get("source", ""),
                 "job": self._art_job.status() if getattr(self, "_art_job", None) else None}
 
-    def art_start(self, es: str = "") -> dict:
+    def art_start(self, es: str = "", mode: str = "art") -> dict:
+        """mode: art | meta | meta_wiki | all (grafiki + metadane)."""
         job = getattr(self, "_art_job", None)
         if job and not job.finished:
-            return {"ok": False, "reason": "Pobieranie grafik już trwa."}
-        self._art_job = art.Job(self._cfg, es or None)
+            return {"ok": False, "reason": "Pobieranie już trwa."}
+        self._art_job = art.Job(self._cfg, es or None, art=mode in ("art", "all"),
+                                meta=mode in ("meta", "meta_wiki", "all"), wiki=mode == "meta_wiki")
         self._art_job.start()
         return {"ok": True}
 
@@ -632,6 +649,18 @@ class Api:
         job = getattr(self, "_art_job", None)
         if job:
             job.cancel.set()
+
+    def launchbox_update(self) -> dict:
+        upd = getattr(self, "_lb_update", None)
+        if upd and not upd.finished:
+            return {"ok": False, "reason": "Pobieranie bazy LaunchBox już trwa."}
+        self._lb_update = launchbox.Updater()
+        self._lb_update.start()
+        return {"ok": True}
+
+    def launchbox_status(self) -> dict:
+        upd = getattr(self, "_lb_update", None)
+        return {"db": launchbox.status(), "update": upd.status() if upd else None}
 
     def import_pylinks_keys(self) -> dict:
         keys = art_sources.import_pylinks_keys()
@@ -691,6 +720,7 @@ class Api:
                 "lan_threshold_mbps": cfg.get("lan_threshold_mbps", 200),
                 "fullscreen": cfg.get("fullscreen", True),
                 "hide_arcade_clones": cfg.get("hide_arcade_clones", True),
+                "games_logo": cfg.get("games_logo", False),
                 "systems": rows}
 
     def emulator_options(self, es: str) -> list:
@@ -713,7 +743,7 @@ class Api:
                     cfg[k] = max(1, int(data[k]))
                 except (TypeError, ValueError):
                     pass
-        for k in ("fullscreen", "hide_arcade_clones"):
+        for k in ("fullscreen", "hide_arcade_clones", "games_logo"):
             if k in data:
                 cfg[k] = bool(data[k])
         if "systems" in data:
@@ -791,7 +821,8 @@ class Api:
         """Przerywa zadania w tle przed wyjściem z programu (grafiki, pobieranie
         emulatorów, kopiowanie do cache). Część z nich (pula wątków grafik)
         zatrzymywałaby zamknięcie procesu aż do końca pracy — nawet godzinami."""
-        for job in (getattr(self, "_art_job", None), getattr(self, "_install_job", None)):
+        for job in (getattr(self, "_art_job", None), getattr(self, "_install_job", None),
+                    getattr(self, "_lb_update", None)):
             if job:
                 job.cancel.set()
         for j in self._pin_jobs.values():

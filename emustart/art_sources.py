@@ -29,7 +29,7 @@ from emustart import paths, systems
 log = logging.getLogger("emustart.art_sources")
 
 MATCH_MIN = 0.8
-UA = {"User-Agent": "EmuStart/0.8"}
+UA = {"User-Agent": "EmuStart/0.9"}
 INDEX_TTL = 30 * 86400
 
 # platformy IGDB / TheGamesDB dla kodów z systems.py
@@ -208,6 +208,21 @@ class Sgdb:
             return []
         return obj.get("data", []) if obj.get("success", True) else []
 
+    def logo(self, title: str) -> bytes | None:
+        """Przezroczyste logo gry (SteamGridDB „logos”)."""
+        if not self.key:
+            return None
+        res = [r for r in self._get("search/autocomplete/" + urllib.parse.quote(title))
+               if similarity(title, r.get("name", "")) >= MATCH_MIN]
+        if not res:
+            return None
+        best = max(res, key=lambda r: similarity(title, r.get("name", "")))
+        for g in self._get(f"logos/game/{best['id']}?limit=3"):
+            data = fetch(g.get("url", ""))
+            if is_image(data):
+                return data
+        return None
+
     def box(self, title: str) -> bytes | None:
         if not self.key:
             return None
@@ -385,13 +400,24 @@ class Sources:
                 "igdb": bool(self.igdb.cid and self.igdb.secret), "tgdb": bool(self.tgdb.key),
                 "tgdb_remaining": Tgdb.remaining}
 
-    def find(self, es: str, name: str, need: set) -> dict:
-        """{kind: (bytes, źródło)} dla rodzajów z `need` ({'box','snap'})."""
+    def find(self, es: str, name: str, need: set, setname: str = "") -> dict:
+        """{kind: (bytes, źródło)} dla rodzajów z `need` ({'box','snap','logo'})."""
+        from emustart import launchbox
         out = {}
-        for kind in need:
+        for kind in need - {"logo"}:
             data = from_libretro(es, name, kind)
             if data:
                 out[kind] = (data, "libretro")
+        rest = need - set(out)
+        if rest and launchbox.ready():
+            # LaunchBox: grafiki posegregowane (okładka, zrzut, Clear Logo), baza lokalna
+            g = launchbox.find_game(es, name, setname)
+            for kind in list(rest) if g else []:
+                for img in launchbox.images(g["id"], kind)[:3]:
+                    data = fetch(img["url"])
+                    if is_image(data):
+                        out[kind] = (data, "launchbox")
+                        break
         rest = need - set(out)
         if not rest:
             return out
@@ -401,6 +427,11 @@ class Sources:
             data = self.sgdb.box(title)
             if data:
                 out["box"] = (data, "sgdb")
+        if "logo" in rest:
+            data = self.sgdb.logo(title)
+            if data:
+                out["logo"] = (data, "sgdb")
+        need = need - {"logo"}          # IGDB/TGDB nie mają logo gier
         for src, client in (("igdb", self.igdb), ("tgdb", self.tgdb)):
             rest = need - set(out)
             if not rest:
@@ -436,9 +467,25 @@ def libretro_ranked(name: str, names: list, limit: int = 8) -> list:
     return [c for _s, c in scored[:limit]]
 
 
-def candidates(cfg: dict, es: str, name: str, kind: str, query: str = "") -> list:
+def candidates(cfg: dict, es: str, name: str, kind: str, query: str = "",
+               setname: str = "") -> list:
     """[{url, thumb, source, label}] — propozycje grafiki do wyboru padem."""
+    from emustart import launchbox
     out = []
+    if launchbox.ready():
+        g = launchbox.find_game(es, query or name, setname)
+        for img in launchbox.images(g["id"], kind)[:24] if g else []:
+            out.append({"url": img["url"], "thumb": img["url"], "source": "LaunchBox",
+                        "label": img["type"] + (f" · {img['region']}" if img["region"] else "")})
+    if kind == "logo":
+        k = keys(cfg)
+        if k.get("sgdb_key"):
+            sg = Sgdb(k["sgdb_key"])
+            for game in sg._get("search/autocomplete/" + urllib.parse.quote(query or plain_title(name)))[:2]:
+                for lg in sg._get(f"logos/game/{game['id']}?limit=8"):
+                    out.append({"url": lg.get("url", ""), "thumb": lg.get("thumb") or lg.get("url", ""),
+                                "source": "SteamGridDB", "label": game.get("name", "")})
+        return [c for c in out if c["url"]]
     sysname = systems.info(es)["libretro"]
     folder = {"box": "Named_Boxarts", "snap": "Named_Snaps"}[kind]
     for n in libretro_ranked(query or name, _index(sysname, folder)):

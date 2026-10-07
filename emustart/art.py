@@ -62,7 +62,8 @@ def _download(es: str, name: str, kind: str) -> int | None:
 class Fetcher:
     """Kolejka priorytetowa pobierania miniatur, kilka wątków."""
 
-    def __init__(self, workers: int = 4):
+    def __init__(self, workers: int = 4, logos=lambda: False):
+        self._logos = logos          # czy pobierać też logo gier (ustawienie)
         self._heap: list = []
         self._queued: set = set()
         self._cv = threading.Condition()
@@ -102,10 +103,12 @@ class Fetcher:
                 log.exception("art %s", gid)
 
     def _fetch(self, gid: int) -> None:
-        r = library.db().execute("SELECT es, name, art_box, art_snap FROM games WHERE id=?",
+        r = library.db().execute("SELECT es, name, rel, art_box, art_snap, art_logo FROM games WHERE id=?",
                                  (gid,)).fetchone()
         if not r:
             return
+        if self._logos() and not r["art_logo"]:
+            self._fetch_logo(gid, r)
         for kind, state in (("box", r["art_box"]), ("snap", r["art_snap"])):
             if state:
                 continue
@@ -118,6 +121,25 @@ class Fetcher:
         self.done += 1
 
 
+    def _fetch_logo(self, gid: int, r) -> None:
+        from emustart import launchbox
+        if media_path(r["es"], r["name"], "logo").exists():
+            library.set_art(gid, "logo", HAS)
+            return
+        if not launchbox.ready():
+            return
+        setname = Path(r["rel"]).stem if systems.info(r["es"])["kind"] == "arcade" else ""
+        g = launchbox.find_game(r["es"], r["name"], setname)
+        for img in launchbox.images(g["id"], "logo")[:2] if g else []:
+            data = art_sources.fetch(img["url"])
+            if art_sources.is_image(data):
+                save(r["es"], r["name"], "logo", data)
+                library.set_art(gid, "logo", HAS)
+                return
+        if art_sources.online():
+            library.set_art(gid, "logo", MISSING)
+
+
 class Job:
     """Zbiorcze pobieranie brakujących grafik (narzędzie „Grafiki”).
 
@@ -125,12 +147,17 @@ class Job:
     także te oznaczone wcześniej jako „brak” — mogły się pojawić nowe źródła.
     """
 
-    def __init__(self, cfg: dict, es: str | None = None, workers: int = 4):
+    def __init__(self, cfg: dict, es: str | None = None, workers: int = 4,
+                 art: bool = True, meta: bool = False, wiki: bool = False):
         self.es = es
+        self.cfg = cfg
+        self.do_art, self.do_meta, self.do_wiki = art, meta, wiki
+        self.kinds = ("box", "snap") + (("logo",) if cfg.get("games_logo") else ())
+        self.meta_found = {"description": 0, "wiki": 0}
         self.sources = art_sources.Sources(cfg)
         self.cancel = threading.Event()
         self.total = self.done = 0
-        self.found = {"box": 0, "snap": 0}
+        self.found = {"box": 0, "snap": 0, "logo": 0}
         self.by_source: dict = {}
         self.missing = 0
         self.current = ""
@@ -149,12 +176,20 @@ class Job:
         return {"running": not self.finished, "es": self.es, "total": self.total,
                 "done": self.done, "found": dict(self.found), "missing": self.missing,
                 "by_source": dict(self.by_source), "current": self.current,
+                "meta": dict(self.meta_found), "mode": {"art": self.do_art, "meta": self.do_meta,
+                                                        "wiki": self.do_wiki},
                 "eta": (self.total - self.done) / rate if rate else None,
                 "cancelled": self.cancel.is_set()}
 
     def _run(self) -> None:
         try:
-            q = "SELECT id, es, name, title, art_box, art_snap FROM games "                 "WHERE hidden=0 AND (art_box!=1 OR art_snap!=1)"
+            cond = []
+            if self.do_art:
+                cond += [f"art_{k}!=1" for k in self.kinds]
+            if self.do_meta:
+                cond.append("1")         # metadane: sprawdzamy każdą grę (pomijanie w _one)
+            q = ("SELECT id, es, name, title, rel, art_box, art_snap, art_logo FROM games "
+                 "WHERE hidden=0 AND (" + " OR ".join(cond or ["0"]) + ")")
             args = ()
             if self.es:
                 q += " AND es=?"
@@ -173,15 +208,31 @@ class Job:
         if self.cancel.is_set():
             return
         self.current = f"{g['title']}"
+        if self.do_meta:
+            try:
+                from emustart import metadata
+                metadata.ensure_local(self.cfg, g)
+                if metadata.fill_launchbox(self.cfg, g):
+                    self.meta_found["description"] += 1
+                if self.do_wiki and not metadata.get(g["id"]).get("description") \
+                        and metadata.fill_wikipedia(g):
+                    self.meta_found["wiki"] += 1
+            except Exception:
+                log.exception("metadane %s", g["name"])
+        if not self.do_art:
+            with self._lock:
+                self.done += 1
+            return
         need = set()
-        for kind in ("box", "snap"):
+        for kind in self.kinds:
             if g[f"art_{kind}"] == HAS:
                 continue
             if media_path(g["es"], g["name"], kind).exists():
                 library.set_art(g["id"], kind, HAS)
                 continue
             need.add(kind)
-        got = self.sources.find(g["es"], g["name"], need) if need else {}
+        setname = Path(g["rel"]).stem if systems.info(g["es"])["kind"] == "arcade" else ""
+        got = self.sources.find(g["es"], g["name"], need, setname) if need else {}
         if need and not got and not art_sources.online():
             self.done += 1          # brak sieci — nie oznaczamy jako „brak grafiki”
             return

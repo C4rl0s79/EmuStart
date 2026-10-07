@@ -103,6 +103,7 @@ function goptItems() {
     { label: "Metadane i opis", value: [det.meta.developer, det.meta.year].filter(Boolean).join(" · "), act: () => goPage("meta") },
     { label: "Okładka", value: g.box ? "jest" : "brak", act: () => openArtPicker("box") },
     { label: "Zrzut ekranu", value: g.snap ? "jest" : "brak", act: () => openArtPicker("snap") },
+    { label: "Logo gry (tytuł jako grafika)", value: g.logo ? "jest" : "brak", act: () => openArtPicker("logo") },
     { label: "Pobierz opis z sieci", value: "Wikipedia, IGDB, TheGamesDB", act: async () => {
       await api().meta_fetch(GO.id, true); toast("Pobieram opis…"); setTimeout(refreshGoDetail, 4000); } },
     { label: g.pinned ? "Odepnij (pozwól usunąć z dysku)" : "Przypnij (trzymaj na dysku)", act: async () => { await togglePin(); closeGopt(); } },
@@ -145,7 +146,8 @@ async function reloadGo(page) { GO.data = await api().game_options(GO.id); goPag
 function goPage(page) { GO.page = page; GO.idx = 0; renderGopt(); }
 
 function renderGopt() {
-  const titles = { main: "Opcje gry", emus: "Emulator dla tej gry", states: "Wczytaj zapis", meta: "Metadane", art: GO.art?.kind === "snap" ? "Zrzut ekranu" : "Okładka" };
+  const titles = { main: "Opcje gry", emus: "Emulator dla tej gry", states: "Wczytaj zapis", meta: "Metadane",
+                   art: { snap: "Zrzut ekranu", logo: "Logo gry", box: "Okładka" }[GO.art?.kind] || "Okładka" };
   $("goTitle").textContent = GO.detail?.title || "";
   $("goPage").textContent = titles[GO.page];
   const isArt = GO.page === "art";
@@ -189,6 +191,7 @@ function renderArtPicker() {
     A_.list.length ? `${A_.list.length} propozycji` + (A_.query ? ` dla „${A_.query}”` : "") :
     "Nic nie znaleziono. X: szukaj pod inną nazwą.";
   grid.classList.toggle("snapgrid", A_.kind === "snap");
+  grid.classList.toggle("logopick", A_.kind === "logo");
   grid.innerHTML = (A_.list || []).map((c, i) =>
     `<figure class="${i === A_.idx ? "sel" : ""}" data-i="${i}"><img src="${esc(c.thumb)}" alt="" referrerpolicy="no-referrer" data-i="${i}">` +
     `<figcaption>${esc(c.source)}<br><small>${esc(c.label)}</small></figcaption></figure>`).join("");
@@ -230,7 +233,8 @@ async function artPickInput(a) {
     if (!r.ok) return toast(r.reason);
     const g = S.games.find((x) => x.id === GO.id);
     if (g) g[A_.kind] = r.url;
-    toast(A_.kind === "box" ? "Okładka zmieniona." : "Zrzut zmieniony.");
+    if (A_.kind === "logo" && g) g.art_logo = 1;
+    toast({ box: "Okładka zmieniona.", snap: "Zrzut zmieniony.", logo: "Logo gry zmienione." }[A_.kind]);
     schedulePreview();
     return goPage("main");
   }

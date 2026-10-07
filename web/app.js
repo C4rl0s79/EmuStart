@@ -285,7 +285,8 @@ function renderGames() {
     if (g.pinned) icons.push('<span class="tag p">📌</span>');
     if (g.cached) icons.push('<span class="tag c">lokalnie</span>');
     html.push(`<div class="row${i === S.gameIdx ? " sel" : ""}" data-i="${i}" style="top:${(i - top) * rh}px">` +
-      `<span class="t">${esc(g.title)}</span><span class="g">${esc(g.tags)}</span>` +
+      (S.state?.games_logo && g.logo ? `<img class="tlogo" src="${esc(g.logo)}" alt="${esc(g.title)}">` : `<span class="t">${esc(g.title)}</span>`) +
+      `<span class="g">${esc(g.tags)}</span>` +
       `<span class="ic">${icons.join("")}</span></div>`);
   }
   box.innerHTML = html.join("");
@@ -297,11 +298,30 @@ function renderGames() {
             ["lb", "Strona"], ["lt", "Litera"], ["b", "Wstecz"], ["start", "Menu"]]);
   schedulePreview();
   // okładki dla widocznej strony — w tle
-  const ids = S.games.slice(Math.max(0, top), top + vis).filter((g) => !g.box && !g.art_box).map((g) => g.id);
-  if (ids.length) api().request_art(ids);
+  const page = S.games.slice(Math.max(0, top), top + vis);
+  const want = (g) => (!g.box && !g.art_box) || (S.state?.games_logo && !g.logo && !g.art_logo);
+  const ids = page.filter(want).map((g) => g.id);
+  if (ids.length) { api().request_art(ids); scheduleRowArt(ids); }
 }
 
 $("rows").addEventListener("wheel", (e) => { gamesInput(e.deltaY > 0 ? "down" : "up"); e.preventDefault(); }, { passive: false });
+
+// grafiki widocznych wierszy (logo/okładki) dociągane w tle — odśwież po chwili
+let rowArtTimer;
+function scheduleRowArt(ids) {
+  clearTimeout(rowArtTimer);
+  rowArtTimer = setTimeout(async () => {
+    const res = await api().art_for(ids);
+    let changed = false;
+    for (const g of S.games) {
+      const r = res[g.id];
+      if (!r) continue;
+      for (const k of ["box", "snap", "logo"]) if (r[k] && g[k] !== r[k]) { g[k] = r[k]; changed = true; }
+      if (r.logo) g.art_logo = 1;
+    }
+    if (changed && S.screen === "games" && !S.modal) renderGames();
+  }, 2500);
+}
 
 function jumpLetter(dir) {
   const key = (g) => (g.title[0] || "").toUpperCase().replace(/[^A-Z]/, "#");
@@ -348,13 +368,14 @@ async function updatePreview() {
   $("pvTitle").textContent = g.title;
   $("pvTags").textContent = g.tags;
   setArt(g);
-  if (!g.box || !g.snap) {
+  if (!g.box || !g.snap || (S.state?.games_logo && !g.logo && !g.art_logo)) {
     api().request_art([g.id]);
     let tries = 0;
     artPoll = setInterval(async () => {
       const r = (await api().art_for([g.id]))[g.id];
       if (!r || S.games[S.gameIdx] !== g) return clearInterval(artPoll);
       g.box = r.box; g.snap = r.snap;
+      if (r.logo) { g.logo = r.logo; g.art_logo = 1; }
       setArt(g);
       if (r.checked || ++tries > 20) clearInterval(artPoll);
     }, 500);
@@ -400,7 +421,14 @@ function renderDesc(m) {
   if (m.wiki) parts.push(`<span class="wl">Wikipedia (${esc(m.wiki_lang || "")})</span><br>${esc(m.wiki)}`);
   $("pvDesc").innerHTML = parts.join("<br><br>");
 }
+function setTitleArt(g, title) {
+  const useLogo = !!(S.state?.games_logo && g.logo);
+  $("pvLogo").classList.toggle("hidden", !useLogo);
+  $("pvTitle").classList.toggle("hidden", useLogo);
+  if (useLogo && $("pvLogo").getAttribute("src") !== g.logo) { $("pvLogo").src = g.logo; $("pvLogo").alt = title; }
+}
 function setArt(g) {
+  setTitleArt(g, g.title);
   const box = $("pvBox"), snap = $("pvSnap");
   box.classList.toggle("hidden", !g.box);
   $("pvBoxEmpty").classList.toggle("hidden", !!g.box);
@@ -559,7 +587,7 @@ setInterval(async () => {
 function openMenu() {
   const items = [
     ["Ustawienia", () => openSettings()],
-    ["Grafiki: pobierz brakujące", () => openArt()],
+    ["Grafiki i metadane", () => openArt()],
     ["Zmień profil", () => openProfiles()],
     ["Kolejność padów", () => openPads()],
     ["Skanuj kolekcję ponownie", () => startScan()],
@@ -635,6 +663,7 @@ function buildSetRows() {
   rows.push({ head: "Wygląd" });
   rows.push({ k: "Pełny ekran", key: "fullscreen", type: "bool", fmt: (v) => (v ? "tak" : "nie") + " (po restarcie)" });
   rows.push({ k: "Ukryj klony arcade", key: "hide_arcade_clones", type: "bool", fmt: (v) => (v ? "tak" : "nie") });
+  rows.push({ k: "Tytuły gier jako logo", key: "games_logo", type: "bool", fmt: (v) => (v ? "tak (Clear Logo z LaunchBox, gdy jest)" : "nie") });
   rows.push({ head: "Akcje" });
   rows.push({ k: "Wykryj emulatory i skanuj", type: "action", run: async () => { toast("Wykrywam emulatory…", 60000); const r = await api().autodetect(); if (!r.ok) return toast(r.reason, 4000); toast(`Przypisano emulatory: ${r.assigned}`); startScan(async () => { await openSettings(); }); } });
   rows.push({ k: "Pobierz brakujące emulatory", type: "action", run: () => askInstallMissing() });
@@ -806,14 +835,22 @@ function buildArtRows() {
     rows.push({ k: label, v: d.sources[k] ? '<span class="ok">aktywne</span>' : '<span class="no">brak klucza</span>' });
   rows.push({ k: "Importuj klucze z PyLinksWeb", act: "import",
               v: d.keys_from ? esc("z " + d.keys_from) : "SteamGridDB, IGDB, TheGamesDB" });
-  rows.push({ head: "Pobieranie" });
-  const tot = d.systems.reduce((a, s) => ({ g: a.g + s.games, b: a.b + s.box, s: a.s + s.snap }), { g: 0, b: 0, s: 0 });
-  rows.push({ k: "Pobierz brakujące we wszystkich systemach", act: "all",
-              v: `okładki ${tot.b}/${tot.g} · zrzuty ${tot.s}/${tot.g}` });
-  rows.push({ head: "Systemy  ·  A pobierz brakujące" });
+  const lb = d.launchbox || {};
+  rows.push({ head: "Baza LaunchBox (opisy, metadane, grafiki w kategoriach — offline)" });
+  rows.push({ k: lb.ready ? "Aktualizuj bazę LaunchBox" : "Pobierz bazę LaunchBox (108 MB)", act: "lb",
+              v: lb.ready ? `${lb.games.toLocaleString("pl-PL")} gier · z ${lb.updated}` : "potrzebna do opisów i logo gier" });
+  rows.push({ head: "Pobieranie (wszystkie systemy)" });
+  const tot = d.systems.reduce((a, s) => ({ g: a.g + s.games, b: a.b + s.box, s: a.s + s.snap, d: a.d + s.desc, l: a.l + s.logo }),
+                               { g: 0, b: 0, s: 0, d: 0, l: 0 });
+  rows.push({ k: "Pobierz brakujące grafiki", act: "all", mode: "art",
+              v: `okładki ${tot.b}/${tot.g} · zrzuty ${tot.s}/${tot.g}` + (d.games_logo ? ` · logo ${tot.l}/${tot.g}` : "") });
+  rows.push({ k: "Pobierz brakujące metadane i opisy", act: "all", mode: "meta", v: `opisy ${tot.d}/${tot.g} · LaunchBox + baza RetroArcha` });
+  rows.push({ k: "… oraz Wikipedia dla gier bez opisu", act: "all", mode: "meta_wiki", v: "wolniej: ok. 1–2 s na grę" });
+  rows.push({ head: "Systemy  ·  A pobierz brakujące grafiki i metadane" });
   for (const s of d.systems)
-    rows.push({ k: s.display, act: "sys", es: s.es,
-                v: `okładki ${s.box}/${s.games} · zrzuty ${s.snap}/${s.games}` + (s.unchecked ? ` · niesprawdzone ${s.unchecked}` : "") });
+    rows.push({ k: s.display, act: "sys", es: s.es, mode: "all",
+                v: `okładki ${s.box}/${s.games} · zrzuty ${s.snap}/${s.games} · opisy ${s.desc}/${s.games}` +
+                   (d.games_logo ? ` · logo ${s.logo}/${s.games}` : "") });
   A.rows = rows;
   if (!A.rows[A.idx] || !A.rows[A.idx].act) A.idx = A.rows.findIndex((r) => r.act);
 }
@@ -832,19 +869,40 @@ function renderArt() {
   renderArtJob(job);
 }
 function renderArtJob(job) {
+  const up = A.data?.lb_update;
+  if (up && (up.running || up.error)) {            // pobieranie bazy LaunchBox
+    $("artJob").classList.remove("hidden");
+    const pct = up.total ? (100 * up.done) / up.total : 0;
+    $("ajBar").style.width = (up.total ? pct : 100).toFixed(1) + "%";
+    $("ajPct").textContent = up.total ? Math.floor(pct) + "%" : "";
+    $("ajLine").textContent = up.error ? `Błąd: ${up.error}` : up.text;
+    $("ajCur").textContent = "";
+    return;
+  }
   $("artJob").classList.toggle("hidden", !job);
   if (!job) return;
   const pct = job.total ? (100 * job.done) / job.total : 100;
   $("ajBar").style.width = pct.toFixed(1) + "%";
   $("ajPct").textContent = Math.floor(pct) + "%";
   const src = Object.entries(job.by_source).map(([k, n]) => `${(SRC[k] || k).split(" ")[0]} ${n}`).join(", ");
-  $("ajLine").textContent = `${job.done} / ${job.total} gier · nowe okładki ${job.found.box} · nowe zrzuty ${job.found.snap}` +
-    ` · bez grafiki ${job.missing}` + (src ? ` · źródła: ${src}` : "") +
+  const m = job.mode || { art: true };
+  $("ajLine").textContent = `${job.done} / ${job.total} gier` +
+    (m.art ? ` · nowe okładki ${job.found.box} · nowe zrzuty ${job.found.snap}` + (job.found.logo ? ` · logo ${job.found.logo}` : "") + ` · bez grafiki ${job.missing}` : "") +
+    (m.meta ? ` · nowe opisy ${job.meta.description}` + (m.wiki ? ` · z Wikipedii ${job.meta.wiki}` : "") : "") +
+    (src ? ` · źródła: ${src}` : "") +
     (job.running ? ` · zostało ${fmtEta(job.eta)}` : job.cancelled ? " · zatrzymano" : " · gotowe");
   $("ajCur").textContent = job.running ? job.current : "";
 }
 async function artTick() {
   if (S.screen !== "art") return clearInterval(A.timer);
+  if (A.data?.lb_update?.running) {
+    const st = await api().launchbox_status();
+    A.data.lb_update = st.update;
+    if (!st.update.running) { A.data = await api().art_overview(); buildArtRows(); renderArt();
+      toast(st.update.error ? `Baza LaunchBox: ${st.update.error}` : "Baza LaunchBox gotowa.", 4000); }
+    else renderArtJob(null);
+    return;
+  }
   const job = await api().art_status();
   const was = A.data.job && A.data.job.running;
   A.data.job = job;
@@ -864,8 +922,11 @@ async function artInput(a) {
     if (r.act === "import") {
       const res = await api().import_pylinks_keys();
       toast(res.ok ? "Zaimportowano klucze z PyLinksWeb." : res.reason, 3500);
+    } else if (r.act === "lb") {
+      const res = await api().launchbox_update();
+      if (!res.ok) toast(res.reason);
     } else {
-      const res = await api().art_start(r.act === "sys" ? r.es : "");
+      const res = await api().art_start(r.act === "sys" ? r.es : "", r.mode || "art");
       if (!res.ok) toast(res.reason);
     }
     A.data = await api().art_overview();

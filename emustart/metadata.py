@@ -316,17 +316,28 @@ def prepare_system(cfg: dict, es: str) -> int:
     rows = con.execute("""SELECT g.id, g.es, g.name, g.rel, m.data, m.edits, m.online
                           FROM games g LEFT JOIN game_meta m ON m.game_id=g.id
                           WHERE g.es=? AND g.hidden=0""", (es,)).fetchall()
+    from emustart import launchbox
+    lb = launchbox.ready()
+    arcade_ = systems.info(es)["kind"] == "arcade"
     todo = []
     now = time.time()
     for r in rows:
         data = json.loads(r["data"] or "{}") if r["data"] else {}
-        if data.get("_rdb_checked"):
+        if data.get("_rdb_checked") and (data.get("_lb_checked") or not lb):
             continue
-        rec = rdb_lookup(cfg, {"es": r["es"], "name": r["name"], "rel": r["rel"]})
-        if rec:
-            for k, v in from_rdb(rec).items():
-                data.setdefault(k, v)
-        data["_rdb_checked"] = 1
+        if not data.get("_rdb_checked"):
+            rec = rdb_lookup(cfg, {"es": r["es"], "name": r["name"], "rel": r["rel"]})
+            if rec:
+                for k, v in from_rdb(rec).items():
+                    data.setdefault(k, v)
+            data["_rdb_checked"] = 1
+        if lb and not data.get("_lb_checked"):
+            g = launchbox.find_game(es, r["name"], Path(r["rel"]).stem if arcade_ else "")
+            if g:
+                for k, v in launchbox.metadata_of(g).items():
+                    if v and not data.get(k):          # rdb (No-Intro/Redump) wygrywa
+                        data[k] = v
+            data["_lb_checked"] = 1
         todo.append((r["id"], json.dumps(data, ensure_ascii=False), r["edits"] or "{}",
                      r["online"] or 0, now))
     if todo:
@@ -362,12 +373,48 @@ def system_fields(es: str) -> dict:
     return out
 
 
+def fill_launchbox(cfg: dict, game: dict) -> bool:
+    """Metadane i opis z lokalnej bazy LaunchBox. Pola z rdb (No-Intro/Redump —
+    pewniejsze) zostają; opis LaunchBoksa wchodzi zawsze, gdy go nie było.
+    Zwraca True, gdy przybył opis."""
+    from emustart import launchbox
+    m = get(game["id"])
+    auto = m.get("_auto", {})
+    if auto.get("_lb_checked") or not launchbox.ready():
+        return False
+    setname = Path(game["rel"]).stem if systems.info(game["es"])["kind"] == "arcade" else ""
+    g = launchbox.find_game(game["es"], game["name"], setname)
+    got = {"_lb_checked": 1}
+    new_desc = False
+    if g:
+        for k, v in launchbox.metadata_of(g).items():
+            if k == "description":
+                if not auto.get("description"):
+                    got[k] = v
+                    new_desc = True
+            elif not auto.get(k):
+                got[k] = v
+    _store(game["id"], got)
+    return new_desc
+
+
+def fill_wikipedia(game: dict) -> bool:
+    """Streszczenie z Wikipedii (sieć). True, gdy znaleziono."""
+    m = get(game["id"])
+    if m.get("_auto", {}).get("_wiki_checked"):
+        return False
+    got = from_wikipedia(art_sources.plain_title(game["name"]))
+    _store(game["id"], {**got, "_wiki_checked": 1})
+    return bool(got)
+
+
 def fetch_online(cfg: dict, game: dict, igdb: art_sources.Igdb | None = None,
                  tgdb: bool = False) -> dict:
     """Opis z IGDB i Wikipedii (sieć). TheGamesDB tylko na żądanie (`tgdb`) —
     ma miesięczny limit zapytań, a podgląd pobiera opisy przy samym przeglądaniu.
     Zapisuje i zwraca scalone metadane."""
     ensure_local(cfg, game)
+    fill_launchbox(cfg, game)
     title = art_sources.plain_title(game["name"])
     plat = systems.info(game["es"])["plat"]
     if igdb is None:

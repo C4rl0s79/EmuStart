@@ -242,3 +242,29 @@ def test_prepare_system_uses_rdb_and_keeps_edits(env, monkeypatch):
     assert f[1]["genre"] == "Action" and f[1]["year"] == "1993"
     assert f[2]["genre"] == "Puzzle"                        # ręczna zmiana zostaje
     assert metadata.prepare_system(cfg, "snes") == 0         # drugi raz nic do zrobienia
+
+
+def test_launchbox_build_and_match(env, tmp_path, monkeypatch):
+    import zipfile
+    from emustart import launchbox
+    xml = """<?xml version="1.0"?><LaunchBox>
+      <Game><Name>The Legend of Zelda: A Link to the Past</Name><DatabaseID>7</DatabaseID>
+        <Platform>Super Nintendo Entertainment System</Platform><ReleaseYear>1991</ReleaseYear>
+        <Overview>Link saves Hyrule.</Overview><Developer>Nintendo</Developer>
+        <Publisher>Nintendo</Publisher><Genres>Action; Adventure</Genres><MaxPlayers>1</MaxPlayers></Game>
+      <GameImage><DatabaseID>7</DatabaseID><FileName>a.png</FileName><Type>Clear Logo</Type><Region></Region></GameImage>
+      <GameImage><DatabaseID>7</DatabaseID><FileName>b.jpg</FileName><Type>Box - Front</Type><Region>North America</Region></GameImage>
+    </LaunchBox>"""
+    mame = """<?xml version="1.0"?><LaunchBox><MameFile><FileName>sf2</FileName><Name>Street Fighter II</Name></MameFile></LaunchBox>"""
+    zp = tmp_path / "Metadata.zip"
+    with zipfile.ZipFile(zp, "w") as z:
+        z.writestr("Metadata.xml", xml)
+        z.writestr("Mame.xml", mame)
+    launchbox.build(zp, launchbox.db_path())
+    assert launchbox.ready()
+    g = launchbox.find_game("snes", "Legend of Zelda, The - A Link to the Past (USA)")
+    assert g and g["id"] == 7
+    m = launchbox.metadata_of(g)
+    assert m["description"] == "Link saves Hyrule." and m["genre"] == "Action, Adventure" and m["year"] == "1991"
+    assert launchbox.images(7, "logo")[0]["url"].endswith("/a.png")
+    assert launchbox.images(7, "box")[0]["type"] == "Box - Front"

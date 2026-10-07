@@ -115,6 +115,9 @@ def db() -> sqlite3.Connection:
         if "src" not in cols:      # baza sprzed obsługi kilku folderów z grami
             con.execute("ALTER TABLE games ADD COLUMN src TEXT NOT NULL DEFAULT ''")
             con.commit()
+        if "art_logo" not in cols:  # logo gry (Clear Logo) — od 0.9.0
+            con.execute("ALTER TABLE games ADD COLUMN art_logo INTEGER NOT NULL DEFAULT 0")
+            con.commit()
         if not con.execute("SELECT 1 FROM profiles").fetchone():
             con.execute("INSERT INTO profiles(name) VALUES('Gracz')")
             con.commit()
@@ -182,7 +185,7 @@ def systems_summary() -> list:
 def list_games(es: str, profile_id: int, hide_clones: bool) -> list:
     q = """
         SELECT g.id, g.name, g.title, g.tags, g.size, g.is_dir, g.parent,
-               g.art_box, g.art_snap,
+               g.art_box, g.art_snap, g.art_logo,
                COALESCE(c.complete,0) AS cached, COALESCE(c.pinned,0) AS pinned,
                COALESCE(p.last,0) AS last, COALESCE(p.seconds,0) AS seconds,
                COALESCE(p.favorite,0) AS favorite
@@ -196,7 +199,7 @@ def list_games(es: str, profile_id: int, hide_clones: bool) -> list:
 
 
 def set_art(game_id: int, kind: str, state: int) -> None:
-    col = "art_box" if kind == "box" else "art_snap"
+    col = {"box": "art_box", "snap": "art_snap", "logo": "art_logo"}[kind]
     with db() as c:
         c.execute(f"UPDATE games SET {col}=? WHERE id=?", (state, game_id))
 

@@ -4,6 +4,31 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 [Keep a Changelog](https://keepachangelog.com/pl/1.1.0/), wersje według
 [SemVer](https://semver.org/lang/pl/).
 
+## [0.9.0] — 2026-10-07
+
+### Dodane
+- **Baza LaunchBox** (Start → Grafiki i metadane → „Pobierz/Aktualizuj bazę
+  LaunchBox”, 108 MB): 189 tys. gier z opisem, rokiem, producentem, wydawcą,
+  gatunkami i liczbą graczy oraz 1,3 mln grafik w kategoriach. Zamieniana na
+  lokalną bazę `data/launchbox.db` — potem wszystko działa offline. Sety arcade
+  dopasowywane po nazwie setu (Mame.xml). Dopasowanie na Twojej kolekcji:
+  94–99% gier (próbki po 300), 0,4 ms na grę.
+- **„Pobierz brakujące metadane i opisy”** (wszystkie systemy) oraz wariant
+  „… oraz Wikipedia dla gier bez opisu”; dla pojedynczego systemu A pobiera
+  grafiki i metadane naraz. Liczniki opisów przy każdym systemie.
+- Metadane z LaunchBoksa wchodzą też przy wejściu do systemu (razem z bazą
+  RetroArcha) — filtry gatunku/graczy działają także tam, gdzie RetroArch nie
+  ma danych. Dane z RetroArcha (No-Intro/Redump) mają pierwszeństwo.
+- **LaunchBox jako źródło grafik** — w automacie (zaraz po libretro) i w ręcznym
+  wyborze (kategorie: Box - Front, Screenshot - Gameplay, Clear Logo…).
+- **Tytuły gier jako logo** (Ustawienia → Wygląd → „Tytuły gier jako logo”):
+  lista gier i podgląd pokazują Clear Logo zamiast tekstu, gdy jest. Logo
+  dociągają się w tle dla widocznych gier i w narzędziu „Grafiki i metadane”;
+  ręczny wybór w opcjach gry („Logo gry”) — LaunchBox i SteamGridDB.
+
+### Zmienione
+- Narzędzie „Grafiki” nazywa się teraz „Grafiki i metadane”.
+
 ## [0.8.0] — 2026-10-07
 
 ### Dodane

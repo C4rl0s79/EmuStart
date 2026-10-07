@@ -90,6 +90,13 @@ Wróć do gry · Zapisz stan · Wczytaj stan · Quicksave i wyjdź · Wyjdź z g
 Po „Quicksave i wyjdź” następne uruchomienie tej gry wczyta zapisany stan.
 Pełne zapisywanie stanów obsługują RetroArch, DuckStation, PCSX2, Dolphin i PPSSPP.
 
+## Metadane i LaunchBox
+
+Start → **Grafiki i metadane**: pobranie bazy LaunchBox (108 MB, potem offline),
+„Pobierz brakujące metadane i opisy” (opcjonalnie z Wikipedią) i grafiki.
+LaunchBox daje opisy, daty, producentów, gatunki, liczbę graczy oraz grafiki
+w kategoriach, w tym Clear Logo — z nich korzysta opcja „Tytuły gier jako logo”.
+
 ## Grafiki
 
 Start → **Grafiki: pobierz brakujące**. Narzędzie pobiera okładki i zrzuty dla
