@@ -4,6 +4,20 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 [Keep a Changelog](https://keepachangelog.com/pl/1.1.0/), wersje według
 [SemVer](https://semver.org/lang/pl/).
 
+## [0.16.1] — 2026-10-08
+
+### Naprawione
+- **Nieczytelne ustawienia po powiększeniu listy gier**: wysokość wiersza listy
+  gier zmieniała też odstępy w Ustawieniach, „Grafikach i metadanych” i „Kolejności
+  padów”. Teraz te ekrany mają własną wysokość wiersza (edytor wyglądu →
+  „Wysokość wiersza w ustawieniach”, domyślnie jak dawniej).
+- Nagłówki sekcji w ustawieniach zajmują całą szerokość zamiast łamać się
+  w wąskiej kolumnie.
+
+### Zmienione
+- Suwak „Menu i okna” → „Menu, okna i ustawienia”: skaluje też czcionkę ekranów
+  ustawień, grafik, padów i profili (niezależnie od listy gier).
+
 ## [0.16.0] — 2026-10-08
 
 ### Dodane

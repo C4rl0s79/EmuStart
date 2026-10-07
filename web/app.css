@@ -13,6 +13,7 @@
   --err: #ef5f5f;
   /* wartości z edytora wyglądu (web/look.js) */
   --row: max(28px, 4.6vh);
+  --setrow: max(28px, 4.6vh);     /* wiersze ustawień — niezależne od listy gier */
   --fs-all: 1;
   --fs: calc(clamp(14px, 1.55vh, 20px) * var(--fs-all));
   --tlogo-h: .92; --tlogo-w: 75%; --pvlogo-h: 16vh; --car-h: 34%; --car-w: 26vw; --listlogo-h: 6.5vh;
@@ -129,6 +130,7 @@ img { display: block; }
 
 /* ── ustawienia ── */
 #settings, #art { padding: 0 8vw; overflow: hidden; display: flex; flex-direction: column; }
+#settings, #art, #pads, #profiles { font-size: calc(1em * var(--fs-menu)); }
 #settings h1, #art h1 { margin: 1vh 0; font-weight: 600; }
 .artjob { margin: 0 0 1.5vh; }
 .ajline { margin: .7em 0 .2em; font-variant-numeric: tabular-nums; }
@@ -139,10 +141,10 @@ img { display: block; }
 .setlist { flex: 1; overflow: hidden; position: relative; }
 .setrow {
   display: grid; grid-template-columns: 30% 1fr auto; align-items: center; gap: 1em;
-  min-height: var(--row); padding: .3em 1em; border-radius: 8px;
+  min-height: var(--setrow); padding: .3em 1em; border-radius: 8px;
 }
 .setrow.head { color: var(--accent2); font-size: .85em; text-transform: uppercase;
-  letter-spacing: .12em; margin-top: 1em; min-height: auto; }
+  letter-spacing: .12em; margin-top: 1em; min-height: auto; display: block; }
 .setrow .v { color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .setrow.off .k, .setrow.off .v { opacity: .45; }
 .setrow.sel { background: linear-gradient(90deg, var(--accent), var(--accent-soft)); }
