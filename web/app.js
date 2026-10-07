@@ -108,6 +108,23 @@ const KEYS = {
   Enter: "a", " ": "a", Escape: "b", Backspace: "b", x: "x", y: "y", p: "y",
   PageUp: "lb", PageDown: "rb", Home: "lt", End: "rt", F2: "start", Tab: "start",
 };
+// Windows wysyła do okna klawisze pada Xbox (VK_GAMEPAD_*, kody 195–218), a
+// WebView2 robi z nich nawigację fokusem po stronie — na krawędzi potrafi
+// wyrzucić fokus z okna. Pad obsługujemy sami, więc te klawisze blokujemy.
+function isPadKey(e) {
+  return (e.keyCode >= 195 && e.keyCode <= 218) || /^Gamepad/i.test(e.key || "") || /^Gamepad/i.test(e.code || "");
+}
+let padKeyLogged = 0;
+for (const type of ["keydown", "keyup", "keypress"]) {
+  window.addEventListener(type, (e) => {
+    if (!isPadKey(e)) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    if (type === "keydown" && padKeyLogged++ < 5 && window.pywebview) api().ui_log(`klawisz pada zablokowany: key=${e.key} code=${e.code} keyCode=${e.keyCode}`);
+  }, true);
+}
+window.addEventListener("blur", () => { if (window.pywebview && !S.modal?.startsWith?.("launch")) api().ui_log(`okno straciło fokus (ekran ${S.screen}, okno ${S.modal || "-"})`); });
+
 document.addEventListener("keyup", (e) => { const a = KEYS[e.key]; if (a && e.target.tagName !== "INPUT" && e.target.tagName !== "TEXTAREA") release(a); });
 document.addEventListener("keydown", (e) => {
   if (S.modal === "osk" && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA")) {

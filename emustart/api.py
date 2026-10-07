@@ -46,7 +46,17 @@ class Api:
         if s and s.phase == "running":
             return False                  # w grze pad czyta menu w grze (hotkey)
         hwnd = self._hwnd()
-        return bool(hwnd) and winutil.foreground() == hwnd
+        fg = winutil.foreground()
+        active = bool(hwnd) and fg == hwnd
+        if not active and getattr(self, "_fg_was_ours", False) and fg:
+            # fokus uciekł z okna EmuStart bez uruchomionej gry — zapisz dokąd
+            log.warning("fokus przejęło okno: %s", winutil.window_info(fg))
+        self._fg_was_ours = active
+        return active
+
+    def ui_log(self, msg: str) -> None:
+        """Wpis do logu z interfejsu (diagnostyka)."""
+        log.info("UI: %s", str(msg)[:300])
 
     def ui_pad_poll(self) -> list:
         """Zdarzenia padów XInput dla UI: [{a, up}]."""

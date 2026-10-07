@@ -4,6 +4,19 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 [Keep a Changelog](https://keepachangelog.com/pl/1.1.0/), wersje według
 [SemVer](https://semver.org/lang/pl/).
 
+## [0.7.1] — 2026-10-07
+
+### Naprawione
+- Krzyżak pada w menu systemu mógł „wyrzucić” fokus z okna (interfejs przestawał
+  reagować). Windows przekazuje do okna klawisze pada Xbox (`VK_GAMEPAD_*`),
+  a WebView2 robi z nich nawigację fokusem po stronie. Te klawisze są teraz
+  blokowane — pad obsługuje wyłącznie EmuStart.
+
+### Dodane
+- Diagnostyka fokusu w logu: gdy okno EmuStart straci fokus bez uruchomionej
+  gry, w `logs/emustart.log` zapisuje się, które okno go przejęło; zapisują
+  się też zablokowane klawisze pada.
+
 ## [0.7.0] — 2026-10-07
 
 ### Dodane

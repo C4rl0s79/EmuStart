@@ -157,3 +157,27 @@ def drive_kind(root: str) -> str:
         return ""
     t = ctypes.windll.kernel32.GetDriveTypeW(root)
     return {2: "wymienny", 3: "dysk", 4: "sieć", 5: "CD/DVD", 6: "RAM"}.get(t, "")
+
+
+def window_info(hwnd: int) -> str:
+    """„tytuł [klasa] proces.exe” — do diagnostyki fokusu."""
+    if not IS_WIN or not hwnd:
+        return "(brak)"
+    title = ctypes.create_unicode_buffer(256)
+    cls = ctypes.create_unicode_buffer(256)
+    _u32.GetWindowTextW(hwnd, title, 256)
+    _u32.GetClassNameW(hwnd, cls, 256)
+    pid = wintypes.DWORD()
+    _u32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+    exe = ""
+    try:
+        h = _k32.OpenProcess(0x1000, False, pid.value)      # QUERY_LIMITED_INFORMATION
+        if h:
+            buf = ctypes.create_unicode_buffer(520)
+            size = wintypes.DWORD(520)
+            if _k32.QueryFullProcessImageNameW(h, 0, buf, ctypes.byref(size)):
+                exe = buf.value.rsplit("\\", 1)[-1]
+            _k32.CloseHandle(h)
+    except Exception:
+        pass
+    return f"„{title.value}” [{cls.value}] {exe} pid {pid.value}"
