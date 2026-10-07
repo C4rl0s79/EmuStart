@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from pathlib import Path
 import threading
 import time
 
@@ -110,6 +111,10 @@ def db() -> sqlite3.Connection:
         con.execute("PRAGMA journal_mode=WAL")
         con.execute("PRAGMA synchronous=NORMAL")
         con.executescript(_SCHEMA)
+        cols = {r[1] for r in con.execute("PRAGMA table_info(games)")}
+        if "src" not in cols:      # baza sprzed obsługi kilku folderów z grami
+            con.execute("ALTER TABLE games ADD COLUMN src TEXT NOT NULL DEFAULT ''")
+            con.commit()
         if not con.execute("SELECT 1 FROM profiles").fetchone():
             con.execute("INSERT INTO profiles(name) VALUES('Gracz')")
             con.commit()
@@ -136,6 +141,27 @@ def game(game_id: int) -> dict | None:
     g = dict(r)
     g["files"] = json.loads(g["files"])
     return g
+
+
+def system_dirs(es: str) -> list:
+    """Foldery systemu (z kilku folderów z grami), w kolejności pierwszeństwa."""
+    r = system_row(es)
+    if not r:
+        return []
+    raw = r["rom_dir"]
+    try:
+        dirs = json.loads(raw) if raw.startswith("[") else [raw]
+    except ValueError:
+        dirs = [raw]
+    return [Path(d) for d in dirs if d]
+
+
+def game_dir(g: dict) -> Path:
+    """Folder, względem którego liczy się `rel` gry."""
+    if g.get("src"):
+        return Path(g["src"])
+    dirs = system_dirs(g["es"])
+    return dirs[0] if dirs else Path(".")
 
 
 def system_row(es: str) -> dict | None:

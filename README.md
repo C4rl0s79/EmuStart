@@ -42,6 +42,13 @@ Przy pierwszym starcie otwierają się ustawienia: sprawdź foldery i wybierz
 | LT / RT | Home / End | poprzednia / następna litera |
 | Start | F2 / Tab | menu |
 
+## Foldery z grami
+
+W ustawieniach można podać kilka folderów (np. `Z:\ROMS\REDUMP`,
+`Z:\ROMS\No-Intro`, `Z:\ROMS\ROMS`). Podfoldery są rozpoznawane po nazwach
+EmulationStation (`psx`), No-Intro/Redump (`Sony - PlayStation`) i libretro.
+Duplikaty pokazują się raz — z folderu wyżej na liście.
+
 ## Opcje gry (przytrzymaj A)
 
 Krótkie **A** uruchamia grę, **przytrzymane A** (0,6 s) otwiera opcje:

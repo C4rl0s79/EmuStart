@@ -156,3 +156,21 @@ def test_build_command_placeholders():
     assert cmd == ["mame.exe", "-rompath", r"D:\c\fbneo", "-skip_gameinfo", "10yard"]
     cmd = emulators.build_command("ra.exe", r'-L "C:\x y\c.dll" -f', r"Z:\a b\g.zip")
     assert cmd == ["ra.exe", "-L", r"C:\x y\c.dll", "-f", r"Z:\a b\g.zip"]
+
+
+def test_multiple_roots_dedupe_and_names(env):
+    cfg, roms, tmp = env
+    redump, nointro = tmp / "REDUMP", tmp / "No-Intro"
+    _write(redump / "Sony - PlayStation" / "A (USA).chd")
+    _write(nointro / "Sony - PlayStation" / "A (USA).chd")          # ta sama gra drugi raz
+    _write(nointro / "Sony - PlayStation" / "B (USA).chd")
+    _write(nointro / "Atari - Atari 7800 (BIN)" / "C (USA).zip")
+    _write(nointro / "Apple - II (WOZ)" / "D.woz")                  # archiwalne — pomijane
+    cfg["rom_roots"] = [str(redump), str(nointro)]
+    res = scanner.scan_all(cfg)
+    assert res["ok"] and res["games"] == 3
+    rows = {r["name"]: dict(r) for r in library.db().execute("SELECT * FROM games")}
+    assert rows["A (USA)"]["src"] == str(redump / "Sony - PlayStation")   # pierwszy folder wygrywa
+    assert rows["B (USA)"]["src"] == str(nointro / "Sony - PlayStation")
+    assert rows["C (USA)"]["es"] == "atari7800"
+    assert library.game_dir(library.game(rows["B (USA)"]["id"])) == nointro / "Sony - PlayStation"

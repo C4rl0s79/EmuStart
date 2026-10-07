@@ -4,6 +4,34 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 [Keep a Changelog](https://keepachangelog.com/pl/1.1.0/), wersje według
 [SemVer](https://semver.org/lang/pl/).
 
+## [0.5.0] — 2026-10-07
+
+### Dodane
+- **Kilka folderów z grami** (Ustawienia → Foldery z grami): dodawanie (ścieżka
+  z klawiatury ekranowej albo wybór folderu), usuwanie (Y), zmiana kolejności
+  (◀ ▶). Ta sama gra w kilku folderach jest pokazywana raz — wygrywa folder
+  wyżej na liście; foldery tego samego systemu z różnych miejsc łączą się
+  w jeden system. Niedostępny folder (np. wyłączony NAS) nie usuwa gier
+  z biblioteki.
+- **Nazwy folderów No-Intro / Redump**: „Sony - PlayStation”, „Atari - Atari
+  7800 (BIN)”, „Nintendo - Wii - NKit RVZ [zstd-19-128k]”, „… (PSN) (Decrypted)”
+  itd. są rozpoznawane jako systemy (obok nazw EmulationStation). Foldery
+  archiwalne (Flux, KryoFlux, WOZ, Waveform, Updates, Encrypted…) są pomijane;
+  nierozpoznany folder można włączyć ręcznie w ustawieniach.
+- Nowe systemy: Atari 8-bit, Atari ST, ColecoVision, Intellivision, Vectrex,
+  Virtual Boy, Pokémon Mini, Channel F, Supervision, Mega Duck, Sega Pico,
+  Arcadia 2001, Super Cassette Vision, Game.com, VIC-20, Plus/4, Game Pocket
+  Computer.
+- **Logo systemów**: brakujące (poza 40 wbudowanymi) pobierane z motywu Carbon
+  dla EmulationStation (SVG), a gdy go nie ma — ikona systemu z RetroArcha.
+  Pobrane logo dostają jasną poświatę, żeby ciemne elementy były widoczne.
+
+### Naprawione
+- Pad wyłączony i włączony ponownie w trakcie działania programu nie sterował
+  interfejsem (Gamepad API w WebView2 nie zauważa ponownie podłączonego pada).
+  Pady XInput są teraz czytane w Pythonie (jak w menu w grze) i działają od razu
+  po ponownym podłączeniu; Gamepad API zostaje dla pozostałych padów.
+
 ## [0.4.0] — 2026-10-07
 
 ### Dodane

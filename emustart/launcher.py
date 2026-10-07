@@ -119,17 +119,23 @@ class Session:
         if not exe or not Path(exe).is_file():
             raise LaunchError(f"Brak emulatora dla systemu {info['display']}. "
                               "Wybierz go w ustawieniach (Start → Ustawienia).")
-        sysrow = library.system_row(es) or {}
-        rom_dir = Path(sysrow.get("rom_dir") or Path(self.cfg["rom_root"]) / es)
+        rom_dir = library.game_dir(g)
         cache_dir = cache.root(self.cfg) / es
 
         extra = []
         if info["kind"] == "arcade":
+            # rodzic/BIOS najpierw obok gry, potem w innych folderach tego systemu
+            search = [rom_dir] + [d for d in library.system_dirs(es) if d != rom_dir]
             for dep in arcade.dependencies(Path(g["rel"]).stem):
-                src = rom_dir / f"{dep}.zip"
-                try:
-                    st = src.stat()
-                except OSError:
+                st = None
+                for d in search:
+                    src = d / f"{dep}.zip"
+                    try:
+                        st = src.stat()
+                        break
+                    except OSError:
+                        continue
+                if st is None:
                     continue
                 extra.append((src, cache_dir / f"{dep}.zip", st.st_size, st.st_mtime))
 

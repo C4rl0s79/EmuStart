@@ -17,7 +17,7 @@ import re
 import time
 from pathlib import Path
 
-from emustart import arcade, library, systems
+from emustart import arcade, config, library, systems
 
 _DISC_RE = re.compile(r"\s*\((?:disc|disk|cd)\s*\d+[^)]*\)", re.I)
 _TAG_SPLIT = re.compile(r"\s+(?=[(\[])")
@@ -152,17 +152,33 @@ def _folder_games(base: Path, exts: set) -> list:
     return games
 
 
-def scan_system(es: str, rom_dir: Path, progress=None) -> int:
-    info = systems.info(es)
-    exts = systems.ext_set(info)
+def _scan_dir(rom_dir: Path, exts: set) -> list:
     if not exts:   # nieznany system: wszystko poza oczywistymi śmieciami
         exts = {Path(f[0]).suffix.lower().lstrip(".") for f in _walk(rom_dir, 1)}
         exts -= systems.JUNK_EXTS
         exts.discard("")
     if "folder" in exts:
-        found = _folder_games(rom_dir, exts - {"folder"})
-    else:
-        found = _group_files(rom_dir, _walk(rom_dir), exts)
+        return _folder_games(rom_dir, exts - {"folder"})
+    return _group_files(rom_dir, _walk(rom_dir), exts)
+
+
+def scan_system(es: str, rom_dirs, progress=None) -> int:
+    """Skan systemu z jednego lub kilku folderów. Ta sama gra (ta sama ścieżka
+    względna) w kilku folderach liczy się raz — wygrywa folder wcześniejszy."""
+    if isinstance(rom_dirs, (str, Path)):
+        rom_dirs = [rom_dirs]
+    rom_dirs = [Path(d) for d in rom_dirs]
+    info = systems.info(es)
+    exts = systems.ext_set(info)
+    found, seen = [], set()
+    for d in rom_dirs:
+        for g in _scan_dir(d, exts):
+            key = g["rel"].lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            g["src"] = str(d)
+            found.append(g)
 
     arc = {}
     if info["kind"] == "arcade":
@@ -185,18 +201,18 @@ def scan_system(es: str, rom_dir: Path, progress=None) -> int:
         rows.append((es, g["rel"], name, title or name, tags,
                      json.dumps(g["files"]), sum(f[1] for f in g["files"]),
                      1 if g.get("is_dir") else 0, 1 if g["multidisc"] else 0,
-                     parent, hidden, now))
+                     parent, hidden, now, g["src"]))
 
     with library.db() as c:
         c.executemany("""
             INSERT INTO games(es, rel, name, title, tags, files, size, is_dir,
-                              multidisc, parent, hidden, seen)
-            VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+                              multidisc, parent, hidden, seen, src)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(es, rel) DO UPDATE SET
               name=excluded.name, title=excluded.title, tags=excluded.tags,
               files=excluded.files, size=excluded.size, is_dir=excluded.is_dir,
               multidisc=excluded.multidisc, parent=excluded.parent,
-              hidden=excluded.hidden, seen=excluded.seen""", rows)
+              hidden=excluded.hidden, seen=excluded.seen, src=excluded.src""", rows)
         gone = [r["id"] for r in c.execute(
             "SELECT id FROM games WHERE es=? AND seen<?", (es, now))]
         for i in range(0, len(gone), 500):
@@ -205,27 +221,60 @@ def scan_system(es: str, rom_dir: Path, progress=None) -> int:
             c.execute(f"DELETE FROM games WHERE id IN ({marks})", chunk)
             c.execute(f"DELETE FROM cache WHERE game_id IN ({marks})", chunk)
         c.execute("""INSERT OR REPLACE INTO systems(es, display, rom_dir, games, scanned)
-                     VALUES(?,?,?,?,?)""", (es, info["display"], str(rom_dir), len(rows), now))
+                     VALUES(?,?,?,?,?)""", (es, info["display"],
+                                            json.dumps([str(d) for d in rom_dirs]), len(rows), now))
     return len(rows)
+
+
+def collect_systems(cfg: dict) -> tuple:
+    """({system: [foldery]}, [nieznane foldery]) ze wszystkich folderów z grami.
+
+    Foldery rozpoznawane po nazwie ES, No-Intro/Redump albo libretro. Nieznane
+    (np. zrzuty archiwalne „(Flux)”) są pomijane, chyba że włączono je ręcznie
+    w ustawieniach — wtedy są osobnym systemem o nazwie folderu."""
+    syscfg = cfg.get("systems") or {}
+    found, unknown = {}, []
+    for root in config.rom_roots(cfg):
+        try:
+            subdirs = sorted((d for d in Path(root).iterdir() if d.is_dir()),
+                             key=lambda p: p.name.lower())
+        except OSError:
+            continue
+        for d in subdirs:
+            es = systems.match_folder(d.name)
+            if not es:
+                unknown.append(d)
+                if (syscfg.get(d.name) or {}).get("enabled") is not True:
+                    continue
+                es = d.name
+            found.setdefault(es, []).append(d)
+    return found, unknown
 
 
 def scan_all(cfg: dict, progress=None) -> dict:
     """Skan wszystkich włączonych systemów. progress(text, done, total)."""
-    root = Path(cfg.get("rom_root") or "")
-    if not root.is_dir():
-        return {"ok": False, "reason": f"Folder z grami niedostępny: {root}"}
+    roots = config.rom_roots(cfg)
+    online = [r for r in roots if Path(r).is_dir()]
+    if not online:
+        return {"ok": False, "reason": "Żaden folder z grami nie jest dostępny: " + ", ".join(roots)}
     syscfg = cfg.get("systems") or {}
-    targets = [d for d in sorted(root.iterdir(), key=lambda p: p.name.lower())
-               if d.is_dir() and (syscfg.get(d.name) or {}).get("enabled", True)]
-    if any(systems.info(d.name)["kind"] == "arcade" for d in targets):
+    found, _unknown = collect_systems(cfg)
+    targets = sorted(((es, dirs) for es, dirs in found.items()
+                      if (syscfg.get(es) or {}).get("enabled", True)),
+                     key=lambda t: systems.info(t[0])["display"].lower())
+    if any(systems.info(es)["kind"] == "arcade" for es, _d in targets):
         arcade.refresh(cfg, (lambda t: progress(t, 0, len(targets))) if progress else None)
     total = 0
-    for i, d in enumerate(targets):
+    for i, (es, dirs) in enumerate(targets):
         if progress:
-            progress(f"Skanuję {systems.info(d.name)['display']}…", i, len(targets))
-        total += scan_system(d.name, d)
+            progress(f"Skanuję {systems.info(es)['display']}…", i, len(targets))
+        total += scan_system(es, dirs)
+    if len(online) < len(roots):
+        # część folderów niedostępna — nie usuwamy ich systemów z biblioteki
+        return {"ok": True, "systems": len(targets), "games": total,
+                "offline": [r for r in roots if r not in online]}
     with library.db() as c:   # systemy usunięte z NAS-a albo wyłączone
-        keep = [d.name for d in targets]
+        keep = [es for es, _d in targets]
         marks = ",".join("?" * len(keep)) or "''"
         c.execute(f"DELETE FROM systems WHERE es NOT IN ({marks})", keep)
     if progress:

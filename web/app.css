@@ -249,3 +249,6 @@ img { display: block; }
 .pname { font-size: 1.15em; }
 .preview { overflow: hidden; }
 .pvbody, .meta { min-height: 0; overflow: hidden; }
+
+/* pobrane logo (Carbon/RetroArch) bywają ciemne — jasna poświata na ciemnym tle */
+img.glow { filter: drop-shadow(0 0 1px rgba(255,255,255,.9)) drop-shadow(0 0 6px rgba(255,255,255,.35)) !important; }

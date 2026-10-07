@@ -13,20 +13,10 @@ import threading
 import time
 from pathlib import Path
 
-from emustart import (__version__, art, art_sources, cache, ingame, metadata, pads, profiles, config, emulators, launcher, library,
+from emustart import (__version__, art, art_sources, cache, ingame, logos, metadata, pads, profiles, uipad, config, emulators, launcher, library,
                       paths, scanner, systems, winutil)
 
 log = logging.getLogger("emustart.api")
-
-_LOGO_ALIAS = {"FBNEO": "ARCADE", "SUPERGRAFX": "PCENGINE", "SNESMSU1": "SNES"}
-
-
-def _logo(plat: str) -> str:
-    for key in (plat, _LOGO_ALIAS.get(plat, "")):
-        if key and (paths.ASSETS / "systems" / f"{key}.png").is_file():
-            return f"/assets/systems/{key}.png"
-    return ""
-
 
 class Api:
     def __init__(self):
@@ -38,6 +28,7 @@ class Api:
         self._pin_jobs: dict = {}            # game_id → Session-like (kopiowanie przypiętych)
         self._scan = {"running": False, "text": "", "done": 0, "total": 0, "result": None}
         ingame.restore_pending()          # ustawienia padów po ewentualnej awarii
+        self._uipad = uipad.UiPad(self._uipad_active)
         self._profile = self._initial_profile()
         threading.Thread(target=lambda: profiles.sync_pending(self._cfg), daemon=True,
                          name="sync-pending").start()
@@ -47,6 +38,19 @@ class Api:
         self._menu = {"open": False, "items": [], "message": "", "title": "", "seq": 0}
         self._menu_inputs: collections.deque = collections.deque()
         self._menu_lock = threading.Lock()
+
+    def _uipad_active(self) -> bool:
+        if not self._window:
+            return False                  # tryb --browser: pady obsługuje przeglądarka
+        s = self._session
+        if s and s.phase == "running":
+            return False                  # w grze pad czyta menu w grze (hotkey)
+        hwnd = self._hwnd()
+        return bool(hwnd) and winutil.foreground() == hwnd
+
+    def ui_pad_poll(self) -> list:
+        """Zdarzenia padów XInput dla UI: [{a, up}]."""
+        return self._uipad.poll()
 
     def _initial_profile(self) -> int:
         ids = [p["id"] for p in profiles.all_profiles()]
@@ -62,29 +66,32 @@ class Api:
     # ── stan ogólny ──
     def get_state(self) -> dict:
         cfg = self._cfg
-        rom_ok = Path(cfg.get("rom_root") or "").is_dir()
+        rom_ok = any(Path(r).is_dir() for r in config.rom_roots(cfg))
         return {
             "version": __version__,
             "configured": config.is_configured(cfg),
-            "rom_root": cfg.get("rom_root"), "rom_online": rom_ok,
+            "rom_roots": config.rom_roots(cfg), "rom_online": rom_ok,
             "network_mode": cfg.get("network_mode", "auto"),
             "systems": self.list_systems(),
             "scan": dict(self._scan),
             "cache": cache.usage(cfg),
             "copying": self._copying(),
+            "py_pad": bool(self._window) and uipad.xinput.available(),
             "profile": profiles.get(self._profile),
             "profiles": len(profiles.all_profiles()),
         }
 
     def list_systems(self) -> list:
         out = []
+        logos.fetch_missing(self._cfg, [s["es"] for s in library.systems_summary()])
         for s in library.systems_summary():
             info = systems.info(s["es"])
             emu = (self._cfg.get("systems") or {}).get(s["es"]) or {}
             if not emu.get("enabled", True) or not s["games"]:
                 continue
+            lg = logos.url_for(s["es"])
             out.append({"es": s["es"], "display": s["display"], "games": s["games"],
-                        "cached": s["cached"], "logo": _logo(info["plat"]),
+                        "cached": s["cached"], "logo": lg["url"], "logo_glow": lg["glow"],
                         "emulator": emu.get("label", ""), "kind": info["kind"]})
         return out
 
@@ -281,8 +288,7 @@ class Api:
         return {"ok": True, "pinned": pinned}
 
     def _start_pin_copy(self, g: dict) -> None:
-        sysrow = library.system_row(g["es"]) or {}
-        rom_dir = Path(sysrow.get("rom_dir") or "")
+        rom_dir = library.game_dir(g)
         if not (rom_dir / g["rel"]).exists():
             return    # offline — dociągniemy przy następnym uruchomieniu gry
         prog = cache.Progress(cache.missing_bytes(self._cfg, g), len(g["files"]))
@@ -497,19 +503,23 @@ class Api:
     # ── ustawienia ──
     def get_settings(self) -> dict:
         cfg = self._cfg
-        root = Path(cfg.get("rom_root") or "")
-        folders = sorted((d.name for d in root.iterdir() if d.is_dir()),
-                         key=str.lower) if root.is_dir() else list(cfg.get("systems", {}))
+        found, unknown = scanner.collect_systems(cfg)
         rows = []
-        for es in folders:
+        for es in sorted(found, key=lambda e: systems.info(e)["display"].lower()):
             info = systems.info(es)
             sc = (cfg.get("systems") or {}).get(es) or {}
-            rows.append({"es": es, "display": info["display"], "known": es in systems.SYSTEMS
-                         or es.lower() in systems.SYSTEMS,
-                         "enabled": sc.get("enabled", True),
+            known = es in systems.SYSTEMS
+            rows.append({"es": es, "display": info["display"], "known": known,
+                         "enabled": sc.get("enabled", True if known else False),
+                         "folders": len(found[es]),
                          "label": sc.get("label", ""), "exe": sc.get("exe", ""),
                          "args": sc.get("args", "")})
-        return {"rom_root": cfg.get("rom_root", ""), "emu_root": cfg.get("emu_root", ""),
+        for d in unknown:
+            if d.name in found:
+                continue
+            rows.append({"es": d.name, "display": d.name, "known": False, "enabled": False,
+                         "folders": 1, "label": "", "exe": "", "args": ""})
+        return {"rom_roots": config.rom_roots(cfg), "emu_root": cfg.get("emu_root", ""),
                 "cache_dir": str(config.cache_dir(cfg)),
                 "cache_recent": cfg.get("cache_recent", 10),
                 "network_mode": cfg.get("network_mode", "auto"),
@@ -523,9 +533,12 @@ class Api:
 
     def save_settings(self, data: dict) -> dict:
         cfg = self._cfg
-        for k in ("rom_root", "emu_root", "network_mode"):
+        for k in ("emu_root", "network_mode"):
             if k in data:
                 cfg[k] = str(data[k]).strip()
+        if "rom_roots" in data:
+            cfg["rom_roots"] = [str(r).strip() for r in data["rom_roots"] if str(r).strip()]
+            cfg["rom_root"] = cfg["rom_roots"][0] if cfg["rom_roots"] else ""
         if "cache_dir" in data:
             cd = str(data["cache_dir"]).strip()
             cfg["cache_dir"] = "" if Path(cd) == paths.DEFAULT_CACHE else cd
@@ -551,19 +564,18 @@ class Api:
     def autodetect(self) -> dict:
         """Domyślny emulator dla każdego folderu, który jeszcze go nie ma."""
         cfg = self._cfg
-        root = Path(cfg.get("rom_root") or "")
-        if not root.is_dir():
-            return {"ok": False, "reason": f"Folder z grami niedostępny: {root}"}
+        found_sys, _unknown = scanner.collect_systems(cfg)
+        if not found_sys:
+            return {"ok": False, "reason": "Brak dostępnych folderów z grami: "
+                    + ", ".join(config.rom_roots(cfg))}
         cfg.setdefault("systems", {})
         emulators.forget_scan()
         found = 0
-        for d in sorted(root.iterdir()):
-            if not d.is_dir():
-                continue
-            cur = cfg["systems"].setdefault(d.name, {"enabled": True})
+        for es in sorted(found_sys):
+            cur = cfg["systems"].setdefault(es, {"enabled": True})
             if cur.get("exe") and Path(cur["exe"]).is_file():
                 continue
-            opt = emulators.default_option(systems.info(d.name), cfg.get("emu_root", ""))
+            opt = emulators.default_option(systems.info(es), cfg.get("emu_root", ""))
             if opt:
                 cur.update(label=opt["label"], exe=opt["exe"], args=opt["args"])
                 found += 1

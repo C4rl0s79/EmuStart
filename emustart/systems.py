@@ -87,6 +87,23 @@ SYSTEMS: dict = {
     "zxspectrum": _s("ZX Spectrum", "ZX", "Sinclair - ZX Spectrum", "tzx,tap,z80,dsk," + _CART),
     "x360": _s("Xbox 360", "X360", "Microsoft - Xbox 360", "iso,xex,zar,folder", "disc"),
     "xbox360": _s("Xbox 360", "X360", "Microsoft - Xbox 360", "iso,xex,zar,folder", "disc"),
+    "atari800": _s("Atari 8-bit", "ATARI800", "Atari - 8-bit", "atr,xex,xfd,car,bin," + _CART),
+    "atarist": _s("Atari ST", "ATARIST", "Atari - ST", "st,msa,stx,dim," + _CART),
+    "colecovision": _s("ColecoVision", "COLECO", "Coleco - ColecoVision", "col,rom," + _CART),
+    "intellivision": _s("Intellivision", "INTV", "Mattel - Intellivision", "int,bin,rom," + _CART),
+    "vectrex": _s("Vectrex", "VECTREX", "GCE - Vectrex", "vec,gam,bin," + _CART),
+    "virtualboy": _s("Virtual Boy", "VB", "Nintendo - Virtual Boy", "vb,vboy," + _CART),
+    "pokemini": _s("Pokémon Mini", "POKEMINI", "Nintendo - Pokemon Mini", "min," + _CART),
+    "channelf": _s("Channel F", "CHANNELF", "Fairchild - Channel F", "chf,bin," + _CART),
+    "supervision": _s("Supervision", "SUPERVISION", "Watara - Supervision", "sv,bin," + _CART),
+    "megaduck": _s("Mega Duck", "MEGADUCK", "Welback - Mega Duck", "bin," + _CART),
+    "pico": _s("Sega Pico", "PICO", "Sega - PICO", "md,bin," + _CART),
+    "arcadia": _s("Arcadia 2001", "ARCADIA", "Emerson - Arcadia 2001", "bin," + _CART),
+    "scv": _s("Super Cassette Vision", "SCV", "Epoch - Super Cassette Vision", "bin,0," + _CART),
+    "gamecom": _s("Game.com", "GAMECOM", "Tiger - Game.com", "tgc,bin," + _CART),
+    "vic20": _s("Commodore VIC-20", "VIC20", "Commodore - VIC-20", "prg,crt,d64,tap," + _CART),
+    "plus4": _s("Commodore Plus/4", "PLUS4", "Commodore - Plus-4", "prg,d64,tap," + _CART),
+    "gamepock": _s("Game Pocket Computer", "GAMEPOCK", "Epoch - Game Pocket Computer", "bin," + _CART),
     # ── arcade ──
     "fbneo": _s("FinalBurn Neo", "FBNEO", "FBNeo - Arcade Games", "zip,7z", "arcade"),
     "mame": _s("MAME", "MAME", "MAME", "zip,7z", "arcade"),
@@ -125,3 +142,68 @@ _THUMB_BAD = re.compile(r'[&*/:`<>?\\|"]')
 def thumb_name(title: str) -> str:
     """Nazwa pliku miniatury wg reguł libretro (znaki specjalne → '_')."""
     return _THUMB_BAD.sub("_", title)
+
+
+# ── nazwy folderów No-Intro / Redump ──
+# Kolekcje DAT-owe nazywają foldery pełną nazwą systemu, często z dopiskiem
+# formatu: „Atari - Atari 7800 (BIN)”, „Nintendo - Wii - NKit RVZ [zstd-19-128k]”.
+# Klucz: nazwa po zdjęciu dopisku w [] i „ - NKit …”; wartość: folder ES.
+FOLDER_ALIASES = {
+    "3DO Interactive Multiplayer": "3do", "Panasonic - 3DO Interactive Multiplayer": "3do",
+    "Microsoft - Xbox 360": "x360", "Nintendo - GameCube": "gamecube", "Nintendo - Wii": "wii",
+    "Sega - Dreamcast": "dreamcast", "Sega - Mega CD & Sega CD": "segacd", "Sega - Saturn": "saturn",
+    "Sony - PlayStation": "psx", "Sony - PlayStation 2": "ps2", "Sony - PlayStation 3": "ps3",
+    "Sony - PlayStation Portable": "psp", "Sony - PlayStation Portable (PSN) (Decrypted)": "psp",
+    "Sony - PlayStation Portable (PSN) (Minis) (Decrypted)": "psp",
+    "Atari - Atari 2600": "atari2600", "Atari - Atari 5200": "atari5200",
+    "Atari - Atari 7800 (BIN)": "atari7800", "Atari - Atari Jaguar (J64)": "atarijaguar",
+    "Atari - Atari Lynx (LYX)": "lynx", "Atari - 8-bit Family": "atari800", "Atari - Atari ST": "atarist",
+    "Bandai - WonderSwan": "wswan", "Bandai - WonderSwan Color": "wswanc",
+    "Coleco - ColecoVision": "colecovision", "Commodore - Amiga": "amiga",
+    "Commodore - Commodore 64": "c64", "Commodore - VIC-20": "vic20", "Commodore - Plus-4": "plus4",
+    "Emerson - Arcadia 2001": "arcadia", "Epoch - Super Cassette Vision": "scv",
+    "Epoch - Game Pocket Computer": "gamepock", "Fairchild - Channel F": "channelf",
+    "FinalBurn Neo - Arcade Games": "fbneo", "GCE - Vectrex": "vectrex",
+    "Magnavox - Odyssey 2": "odyssey2", "Mattel - Intellivision": "intellivision",
+    "Microsoft - MSX": "msx", "Microsoft - MSX2": "msx2",
+    "NEC - PC Engine - TurboGrafx-16": "pcengine", "NEC - PC Engine SuperGrafx": "supergrafx",
+    "NEC - PC-98": "pc98", "Nintendo - Family Computer Disk System (FDS)": "fds",
+    "Nintendo - Game & Watch": "gameandwatch", "Nintendo - Game Boy": "gb",
+    "Nintendo - Game Boy Advance": "gba", "Nintendo - Game Boy Color": "gbc",
+    "Nintendo - Nintendo 64 (BigEndian)": "n64", "Nintendo - Nintendo 64DD": "n64dd",
+    "Nintendo - Nintendo DS (Decrypted)": "nds",
+    "Nintendo - Nintendo Entertainment System (Headered)": "nes",
+    "Nintendo - Pokemon Mini": "pokemini", "Nintendo - Satellaview": "satellaview",
+    "Nintendo - Sufami Turbo": "sufami", "Nintendo - Super Nintendo Entertainment System": "snes",
+    "Nintendo - Virtual Boy": "virtualboy", "SNESMSU1": "SNESMSU1",
+    "SNK - NeoGeo Pocket": "ngp", "SNK - NeoGeo Pocket Color": "ngpc",
+    "Sega - 32X": "sega32x", "Sega - Game Gear": "gamegear",
+    "Sega - Master System - Mark III": "mastersystem", "Sega - Mega Drive - Genesis": "megadrive",
+    "Sega - PICO": "pico", "Sinclair - ZX Spectrum +3": "zxspectrum",
+    "Tiger - Game.com": "gamecom", "Watara - Supervision": "supervision",
+    "Welback - Mega Duck": "megaduck",
+}
+_ALIAS_NORM = {}
+
+
+def _fold(name: str) -> str:
+    n = re.sub(r"\s*\[[^\]]*\]", "", name)               # [zstd-19-128k]
+    n = re.sub(r"\s+-\s+NKit.*$", "", n, flags=re.I)       # - NKit RVZ
+    n = re.sub(r"\s*\((Retool|1G1R)\)", "", n, flags=re.I)
+    return re.sub(r"[^a-z0-9+&]+", "", n.lower())
+
+
+def match_folder(name: str) -> str | None:
+    """Folder kolekcji → klucz systemu (folder ES) albo None (nieznany/archiwalny).
+
+    Kolejno: nazwa ES („psx”), alias No-Intro/Redump, nazwa systemu libretro."""
+    if name in SYSTEMS:
+        return name
+    if name.lower() in SYSTEMS:
+        return name.lower()
+    if not _ALIAS_NORM:
+        for k, v in FOLDER_ALIASES.items():
+            _ALIAS_NORM[_fold(k)] = v
+        for es, info_ in SYSTEMS.items():
+            _ALIAS_NORM.setdefault(_fold(info_["libretro"]), es)
+    return _ALIAS_NORM.get(_fold(name))

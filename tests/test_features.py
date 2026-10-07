@@ -163,3 +163,15 @@ def test_moved_app_adopts_old_profile_store(prof_env, monkeypatch):
     profiles.attach(pid, "duckstation", emu)
     assert (emu / "a.mcd").read_bytes() == b"A"
     assert (tmp / "nowy" / "profiles" / str(pid) / "duckstation" / "memcards" / "a.mcd").exists()
+
+
+def test_uipad_events_repeat_and_release(monkeypatch):
+    from emustart import uipad
+    seq = [{"down"}, {"down"}, {"down"}, set(), {"a"}, set()]
+    monkeypatch.setattr(uipad, "_actions", lambda: seq.pop(0))
+    monkeypatch.setattr(uipad.xinput, "available", lambda: False)   # bez wątku
+    p = uipad.UiPad(lambda: True)
+    for t in (0.0, 0.1, 0.5, 0.6, 0.7, 0.8):
+        p._tick(t)
+    assert p.poll() == [{"a": "down", "up": False}, {"a": "down", "up": False},
+                        {"a": "down", "up": True}, {"a": "a", "up": False}, {"a": "a", "up": True}]

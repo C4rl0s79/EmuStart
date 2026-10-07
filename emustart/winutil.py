@@ -137,3 +137,7 @@ def send_keys(combo: str, hold: float = 0.08) -> None:
     up = (_INPUT * len(vks))(*[_key(v, True) for v in reversed(vks)])
     _u32.SendInput(len(vks), up, ctypes.sizeof(_INPUT))
 
+
+
+def foreground() -> int:
+    return (_u32.GetForegroundWindow() or 0) if IS_WIN else 0

@@ -74,6 +74,8 @@ function pollPads(now) {
   const active = new Set();
   for (const p of pads) {
     if (!p) continue;
+    // pady XInput czyta Python (uipad) — Gamepad API gubi je po ponownym podłączeniu
+    if (S.pyPad && /xinput/i.test(p.id)) continue;
     p.buttons.forEach((b, i) => { if (PAD[i] && (b.pressed || b.value > 0.5)) active.add(PAD[i]); });
     const [x, y] = [p.axes[0] || 0, p.axes[1] || 0];
     if (y < -0.55) active.add("up");
@@ -187,7 +189,7 @@ function renderSystems() {
   const car = $("carousel");
   if (car.childElementCount !== n) {
     car.innerHTML = S.systems.map((s, i) =>
-      `<div class="syscard" data-i="${i}">${s.logo ? `<img src="${s.logo}" alt="">` : `<div class="txt">${esc(s.display)}</div>`}</div>`).join("");
+      `<div class="syscard" data-i="${i}">${s.logo ? `<img src="${s.logo}" alt=""${s.logo_glow ? ' class="glow"' : ""}>` : `<div class="txt">${esc(s.display)}</div>`}</div>`).join("");
     car.querySelectorAll(".syscard").forEach((el) => el.addEventListener("click", () => {
       const i = +el.dataset.i;
       if (i === S.sysIdx) openSystem(); else { S.sysIdx = i; renderSystems(); }
@@ -230,6 +232,7 @@ async function openSystem(keepIdx) {
   S.games = await api().list_games(s.es);
   S.gameIdx = prevId ? Math.max(0, S.games.findIndex((g) => g.id === prevId)) : 0;
   $("listLogo").src = s.logo || "";
+  $("listLogo").classList.toggle("glow", !!s.logo_glow);
   $("listLogo").classList.toggle("hidden", !s.logo);
   $("listTitle").textContent = s.display;
   $("listCount").textContent = `${S.games.length} ${plural(S.games.length, "gra", "gry", "gier")}`;
@@ -590,8 +593,10 @@ async function openSettings(first) {
 function buildSetRows() {
   const c = S.settings;
   const rows = [];
-  rows.push({ head: "Foldery" });
-  rows.push({ k: "Gry (NAS)", key: "rom_root", type: "path" });
+  rows.push({ head: "Foldery z grami  ·  kolejność = pierwszeństwo przy duplikatach" });
+  (c.rom_roots || []).forEach((path, i) => rows.push({ k: `Folder ${i + 1}`, type: "root", idx: i, path }));
+  rows.push({ k: "Dodaj folder z grami", type: "addroot" });
+  rows.push({ head: "Inne foldery" });
   rows.push({ k: "Emulatory", key: "emu_root", type: "path" });
   rows.push({ k: "Pamięć podręczna", key: "cache_dir", type: "path" });
   rows.push({ head: "Pamięć podręczna i sieć" });
@@ -613,7 +618,9 @@ function buildSetRows() {
 
 function setValue(r) {
   const c = S.settings;
-  if (r.type === "system") return r.sys.enabled ? (r.sys.label || "brak emulatora") : "wyłączony";
+  if (r.type === "system") return r.sys.enabled ? (r.sys.label || "brak emulatora") : (r.sys.known ? "wyłączony" : "nierozpoznany folder — wyłączony");
+  if (r.type === "root") return r.path;
+  if (r.type === "addroot") return "A wpisz ścieżkę · X wybierz folder";
   if (r.type === "action") return "";
   const v = c[r.key];
   return r.fmt ? r.fmt(v) : v;
@@ -626,10 +633,13 @@ function renderSettings() {
     const sel = i === S.setIdx ? " sel" : "";
     if (r.type === "system") {
       const s = r.sys;
-      return `<div class="setrow${sel}${s.enabled ? "" : " off"}" data-i="${i}"><span class="k">${esc(s.display)} <small style="opacity:.6">(${esc(s.es)})</small></span>` +
+      const where = s.folders > 1 ? `, ${s.folders} foldery` : "";
+      return `<div class="setrow${sel}${s.enabled ? "" : " off"}" data-i="${i}"><span class="k">${esc(s.display)} <small style="opacity:.6">(${esc(s.es)}${where})</small></span>` +
         `<span class="v">${esc(setValue(r))}</span><span class="arrows">${sel ? "◀ ▶" : ""}</span></div>`;
     }
-    const arrows = sel && ["num", "enum", "bool"].includes(r.type) ? "◀ ▶" : sel && r.type === "path" ? "A edytuj · X wybierz" : "";
+    const arrows = sel && ["num", "enum", "bool"].includes(r.type) ? "◀ ▶"
+      : sel && r.type === "path" ? "A edytuj · X wybierz"
+      : sel && r.type === "root" ? "◀ ▶ kolejność · Y usuń" : "";
     return `<div class="setrow${sel}${r.type === "action" ? " action" : ""}" data-i="${i}"><span class="k">${esc(r.k)}</span>` +
       `<span class="v" id="sv${i}">${esc(setValue(r))}</span><span class="arrows">${arrows}</span></div>`;
   }).join("");
@@ -639,10 +649,19 @@ function renderSettings() {
   const sel = list.querySelector(".setrow.sel");
   if (sel) sel.scrollIntoView({ block: "nearest" });
   const r = S.setRows[S.setIdx] || {};
-  const h = [["dpad", "Zmień"], ["a", r.type === "action" ? "Wykonaj" : r.type === "path" ? "Edytuj" : "Przełącz"]];
-  if (r.type === "path") h.push(["x", "Wybierz folder"]);
+  const h = [["dpad", "Zmień"], ["a", r.type === "action" ? "Wykonaj" : ["path", "root", "addroot"].includes(r.type) ? "Edytuj" : "Przełącz"]];
+  if (["path", "root", "addroot"].includes(r.type)) h.push(["x", "Wybierz folder"]);
+  if (r.type === "root") h.push(["y", "Usuń"]);
   h.push(["b", "Wstecz"]);
   setHints(h);
+}
+
+async function saveRoots(roots) {
+  await api().save_settings({ rom_roots: roots });
+  S.settings = await api().get_settings();
+  buildSetRows();
+  renderSettings();
+  toast("Foldery zapisane. Wybierz „Skanuj kolekcję”, żeby wczytać gry.", 3500);
 }
 
 async function saveSetting(key, value) {
@@ -694,7 +713,25 @@ async function settingsInput(a) {
   else if (a === "rb") { for (let k = 0; k < 8; k++) move(1); }
   else if (a === "b") { await refreshState(); return show("systems"); }
   else if (a === "start") return openMenu();
-  else if (r.type === "path") {
+  else if (r.type === "root" || r.type === "addroot") {
+    const roots = [...(S.settings.rom_roots || [])];
+    const at = r.type === "root" ? r.idx : roots.length;
+    const put = async (path) => {
+      if (!path) return;
+      roots[at] = path.trim();
+      await saveRoots(roots);
+    };
+    if (a === "a") return oskOpen(r.type === "root" ? "Folder z grami" : "Nowy folder z grami", r.path || "", put);
+    if (a === "x") return put(await api().pick_folder(r.path || ""));
+    if (r.type === "root" && a === "y") { roots.splice(r.idx, 1); return saveRoots(roots); }
+    if (r.type === "root" && (a === "left" || a === "right")) {
+      const j = r.idx + (a === "left" ? -1 : 1);
+      if (j < 0 || j >= roots.length) return;
+      [roots[r.idx], roots[j]] = [roots[j], roots[r.idx]];
+      S.setIdx += a === "left" ? -1 : 1;
+      return saveRoots(roots);
+    }
+  } else if (r.type === "path") {
     if (a === "a") return startEdit(S.setIdx);
     if (a === "x") {
       const p = await api().pick_folder(S.settings[r.key]);
@@ -844,9 +881,25 @@ function tick() {
   $("clock").textContent = new Date().toLocaleTimeString("pl-PL", { hour: "2-digit", minute: "2-digit" });
 }
 
+// zdarzenia padów XInput z Pythona (patrz emustart/uipad.py)
+let pyPadBusy = false;
+async function pollPyPad() {
+  if (pyPadBusy) return;
+  pyPadBusy = true;
+  try {
+    for (const ev of await api().ui_pad_poll()) {
+      if (ev.up) release(ev.a);
+      else press(ev.a, true);
+    }
+  } catch (e) { /* most chwilowo niedostępny */ }
+  finally { pyPadBusy = false; }
+}
+
 window.addEventListener("pywebviewready", async () => {
   tick(); setInterval(tick, 10000);
   const st = await refreshState();
+  S.pyPad = !!st.py_pad;
+  if (S.pyPad) setInterval(pollPyPad, 33);
   setInterval(pollCopies, 1500);
   setInterval(() => { if (!S.modal) refreshState().then(() => S.screen === "systems" && renderSystems()); }, 15000);
   requestAnimationFrame(pollPads);

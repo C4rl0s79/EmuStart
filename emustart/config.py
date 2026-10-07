@@ -13,7 +13,8 @@ from pathlib import Path
 from emustart import paths
 
 DEFAULTS: dict = {
-    "rom_root": r"Z:\ROMS\ROMS",
+    "rom_root": r"Z:\ROMS\ROMS",   # stary klucz (jeden folder) — patrz rom_roots()
+    "rom_roots": [],                # foldery z grami, kolejność = pierwszeństwo przy duplikatach
     "emu_root": r"D:\emu\emulatory",
     "cache_dir": "",                # "" → <program>\cache
     "cache_recent": 10,             # ile ostatnio uruchomionych gier trzymać
@@ -54,6 +55,14 @@ def save(cfg: dict) -> None:
         tmp = paths.CONFIG_PATH.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
         tmp.replace(paths.CONFIG_PATH)
+
+
+def rom_roots(cfg: dict) -> list:
+    """Foldery z grami. Starsze configi mają jeden `rom_root`."""
+    roots = [r for r in (cfg.get("rom_roots") or []) if str(r).strip()]
+    if not roots and cfg.get("rom_root"):
+        roots = [cfg["rom_root"]]
+    return [str(r) for r in roots]
 
 
 def cache_dir(cfg: dict) -> Path:
