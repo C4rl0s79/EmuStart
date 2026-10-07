@@ -377,6 +377,8 @@ class Api:
             (g["id"], self._profile)).fetchone()
         meta = metadata.ensure_local(self._cfg, g)
         meta = {k: v for k, v in meta.items() if not k.startswith("_")}
+        if meta.get("genre"):
+            meta["genre"] = metadata.norm_genres(meta["genre"])
         return {"id": g["id"], "title": meta.get("title") or g["title"], "tags": g["tags"],
                 "name": g["name"], "meta": meta,
                 "meta_online": bool(metadata.get(g["id"]).get("_online")),

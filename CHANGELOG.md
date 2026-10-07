@@ -4,6 +4,17 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 [Keep a Changelog](https://keepachangelog.com/pl/1.1.0/), wersje według
 [SemVer](https://semver.org/lang/pl/).
 
+## [0.14.1] — 2026-10-08
+
+### Naprawione
+- **Te same gatunki pod różnymi nazwami** w filtrach i podglądzie (źródła
+  metadanych nazywają je różnie): „RPG”, „Role-Playing” i „Role playing games”
+  to teraz jeden gatunek RPG; podobnie Fighting (Fight, Fighter), Racing (Race,
+  Driving), Beat 'em Up (trzy pisownie), Puzzle (Puzzle-Game, Thinking), Board
+  Game, Cards, Casino, Music, Sports (dyscypliny), Breakout, Horror i inne.
+  Wpisy złożone („Racing / Driving”) dzielone na części, „N/A” pomijane.
+  Metadane w bazie zostają bez zmian — ujednolicenie przy wyświetlaniu.
+
 ## [0.14.0] — 2026-10-08
 
 Kilka komputerów, jeden NAS.

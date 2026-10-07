@@ -350,6 +350,69 @@ def prepare_system(cfg: dict, es: str) -> int:
 FIELDS_FILTER = ("genre", "year", "players", "developer", "publisher", "title")
 
 
+# Gatunki z różnych źródeł (baza RetroArcha, LaunchBox, IGDB, catver.ini MAME)
+# nazywają to samo różnie — „RPG”, „Role-Playing”, „Role playing games”…
+# Klucz: nazwa po uproszczeniu (_gkey), wartość: nazwa wspólna. Dane w bazie
+# zostają bez zmian; ujednolicenie dzieje się przy filtrowaniu i wyświetlaniu.
+_GENRE_ALIASES = {
+    "RPG": ("rpg", "role playing", "role playing games", "role playing game", "roleplaying", "action rpg",
+            "jrpg"),
+    "Beat 'em Up": ("beat em up", "beatem up", "brawler"),
+    "Fighting": ("fight", "fighter", "fighting", "versus fighting"),
+    "Racing": ("race", "racing", "driving", "motocross", "racing driving"),
+    "Shoot 'em Up": ("shoot em up", "shootem up", "shmup", "bullet hell"),
+    "Lightgun Shooter": ("gun", "lightgun", "lightgun shooter", "light gun shooter"),
+    "Platform": ("platform", "platformer", "plataformer"),
+    "Puzzle": ("puzzle", "puzzle game", "thinking", "jigsaw puzzle", "jigsaw"),
+    "Board Game": ("board", "board game", "asiatic board game", "chess", "backgammon", "tabletop"),
+    "Cards": ("cards", "card", "card game", "card games", "card battle", "playing cards"),
+    "Casino": ("casino", "gambling", "slot machine"),
+    "Education": ("education", "educational", "edutainment"),
+    "Music": ("music", "music game", "music and dance", "dancing", "dance", "sing", "rhythm"),
+    "Breakout": ("breakout", "break out", "ball paddle", "ball and paddle"),
+    "Party": ("party", "mini games", "minigames"),
+    "Horror": ("horror", "survival horror"),
+    "Hunting and Fishing": ("hunting", "fishing", "hunting and fishing"),
+    "Sports": ("sports", "sport", "basketball", "football", "soccer", "tennis", "boxing", "wrestling",
+               "skateboard", "skateboarding", "snowboard", "snowboarding", "skiing", "bowling", "billiard",
+               "pool", "golf", "rugby", "squash", "baseball", "hockey", "volleyball", "horse ride",
+               "sports with animals"),
+    "Miscellaneous": ("misc", "miscellaneous", "various", "other"),
+    "Quiz": ("quiz", "trivia"),
+    "Strategy": ("strategy", "tactics", "turn based strategy", "real time strategy"),
+    "Simulation": ("simulation", "simulator", "digital simulator"),
+    "Flight Simulator": ("flight simulator", "flight simulation"),
+    "Compilation": ("compilation", "multigame"),
+}
+_GENRE_MAP = {alias: name for name, aliases in _GENRE_ALIASES.items() for alias in aliases}
+_GENRE_DROP = {"n a", "na", "none", "unknown", ""}
+
+
+def _gkey(s: str) -> str:
+    s = s.lower().replace("&", " and ").replace("-", " ")
+    s = re.sub(r"[^a-z0-9 ]+", "", s)
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def norm_genre(part: str) -> str:
+    part = re.sub(r"^TTL \* ", "", part.strip()).strip(" .")
+    k = _gkey(part)
+    if k in _GENRE_DROP:
+        return ""
+    return _GENRE_MAP.get(k, part[:1].upper() + part[1:])
+
+
+def norm_genres(value: str) -> str:
+    """„Role-Playing, Action” → „RPG, Action”; „Racing / Driving” → „Racing”."""
+    out = []
+    value = re.sub(r"(?<![A-Za-z])N/A(?![A-Za-z])", "", value or "", flags=re.I)
+    for part in re.split(r"[,;/]", value):
+        g = norm_genre(part)
+        if g and g not in out:
+            out.append(g)
+    return ", ".join(out)
+
+
 def system_fields(es: str) -> dict:
     """{game_id: {genre, year, players, developer, publisher}} — ręczne zmiany wygrywają.
     Arcade: podstawą są dane z MAME (rok, producent, gracze) i catver.ini (gatunek)."""
@@ -370,6 +433,8 @@ def system_fields(es: str) -> dict:
         d = {**base, **{k: v for k, v in json.loads(r["data"] or "{}").items() if v},
              **{k: v for k, v in json.loads(r["edits"] or "{}").items() if v}}
         out[r["game_id"]] = {k: d.get(k, "") for k in FIELDS_FILTER}
+    for v in out.values():
+        v["genre"] = norm_genres(v.get("genre") or "")
     return out
 
 

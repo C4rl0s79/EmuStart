@@ -275,3 +275,15 @@ def test_resume_moves_between_computers(prof_env, monkeypatch):
     library.set_resume(pid, 7, "pcsx2", str(state), 1000.0)                # PC1 ma starą kopię
     launcher.resume_from_nas(cfg, pid, g1)
     assert library.get_resume(pid, 7) is None
+
+
+def test_genres_are_unified():
+    from emustart import metadata
+    for raw in ("RPG", "Role-Playing", "Role playing games", "role-playing."):
+        assert metadata.norm_genres(raw) == "RPG"
+    assert metadata.norm_genres("Beat'em Up, Beat 'em Up / Fighting.") == "Beat 'em Up, Fighting"
+    assert metadata.norm_genres("Racing / Driving") == "Racing"
+    assert metadata.norm_genres("Puzzle-Game") == "Puzzle"
+    assert metadata.norm_genres("TTL * Ball & Paddle") == "Breakout"
+    assert metadata.norm_genres("N/A") == ""
+    assert metadata.norm_genres("Visual Novel") == "Visual Novel"
