@@ -1,0 +1,14 @@
+# dane użytkownika — powstają obok programu (config.json może zawierać klucze API)
+config.json
+config.json.*
+data/
+cache/
+logs/
+
+# budowa
+build/
+dist/
+*.spec.bak
+__pycache__/
+*.pyc
+.pytest_cache/

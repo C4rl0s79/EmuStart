@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EmuStart</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">Emu<b>Start</b></div>
+  <div class="status">
+    <span id="copyInfo" class="pill hidden"></span>
+    <span id="netInfo" class="pill"></span>
+    <span id="clock"></span>
+  </div>
+</header>
+
+<!-- ekran systemów -->
+<section id="systems" class="screen">
+  <div class="carousel" id="carousel"></div>
+  <div class="sysinfo">
+    <h1 id="sysName"></h1>
+    <p id="sysMeta"></p>
+  </div>
+  <div id="emptyState" class="empty hidden">
+    <h2>Brak gier w bibliotece</h2>
+    <p>Wciśnij <span class="btn start">Start</span> i wybierz „Ustawienia”, żeby wskazać foldery i zeskanować kolekcję.</p>
+  </div>
+</section>
+
+<!-- ekran gier -->
+<section id="games" class="screen hidden">
+  <div class="gamelist">
+    <div class="listhead">
+      <img id="listLogo" alt="">
+      <div>
+        <h2 id="listTitle"></h2>
+        <p id="listCount"></p>
+      </div>
+    </div>
+    <div class="rows" id="rows"></div>
+  </div>
+  <div class="preview">
+    <div class="snap"><img id="pvSnap" alt=""></div>
+    <div class="pvbody">
+      <div class="box"><img id="pvBox" alt=""><div id="pvBoxEmpty" class="noart">brak okładki</div></div>
+      <div class="meta">
+        <h1 id="pvTitle"></h1>
+        <p id="pvTags" class="tags"></p>
+        <dl id="pvMeta"></dl>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ustawienia -->
+<section id="settings" class="screen hidden">
+  <h1 id="setTitle">Ustawienia</h1>
+  <p id="setIntro" class="intro hidden">Pierwsze uruchomienie. Sprawdź foldery, potem wybierz „Wykryj emulatory i skanuj”.</p>
+  <div class="setlist" id="setList"></div>
+</section>
+
+<!-- narzędzie: grafiki -->
+<section id="art" class="screen hidden">
+  <h1>Grafiki</h1>
+  <div id="artJob" class="artjob hidden">
+    <div class="bar"><div id="ajBar"></div><span id="ajPct"></span></div>
+    <p id="ajLine" class="ajline"></p>
+    <p id="ajCur" class="ajcur"></p>
+  </div>
+  <div class="setlist" id="artList"></div>
+</section>
+
+<!-- menu Start -->
+<div id="menu" class="modal hidden">
+  <div class="panel">
+    <h2>Menu</h2>
+    <ul id="menuItems"></ul>
+  </div>
+</div>
+
+<!-- uruchamianie / pobieranie -->
+<div id="launch" class="modal hidden">
+  <div class="panel wide">
+    <p class="lsys" id="lSystem"></p>
+    <h1 id="lTitle"></h1>
+    <h2 id="lHead"></h2>
+    <div id="lProgress" class="hidden">
+      <div class="bar"><div id="lBar"></div><span id="lPct"></span></div>
+      <div class="lstats">
+        <div><small>Pobrano</small><b id="lDone"></b></div>
+        <div><small>Zostało</small><b id="lLeft"></b></div>
+        <div><small>Prędkość</small><b id="lSpeed"></b></div>
+        <div><small>Pozostały czas</small><b id="lEta"></b></div>
+      </div>
+      <p id="lFiles" class="lfiles"></p>
+    </div>
+    <p id="lMsg" class="lmsg"></p>
+    <div class="hints" id="lHints"></div>
+  </div>
+</div>
+
+<!-- menu w grze (A+Y przez 2 s) -->
+<div id="ingame" class="modal hidden">
+  <div class="panel">
+    <p class="lsys">Menu gry</p>
+    <h2 id="igTitle"></h2>
+    <ul id="igItems" class="menulist"></ul>
+    <p id="igMsg" class="lmsg err"></p>
+    <div class="hints" id="igHints"></div>
+  </div>
+</div>
+
+<!-- okno skanowania -->
+<div id="scan" class="modal hidden">
+  <div class="panel">
+    <h2>Skanowanie kolekcji</h2>
+    <p id="scanText"></p>
+    <div class="bar"><div id="scanBar"></div></div>
+  </div>
+</div>
+
+<footer class="hintbar" id="hintbar"></footer>
+<div id="toast" class="toast hidden"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
