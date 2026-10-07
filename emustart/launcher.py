@@ -271,6 +271,8 @@ class Session:
             resume = None
             extra = adapter.start_state_args(self.run_dir, Path(self.start_state), order)
         else:
+            if self.profiles_on:
+                resume_from_nas(self.cfg, self.profile_id, g)
             resume = library.get_resume(self.profile_id, g["id"])
             if resume and resume["family"] != adapter.family:
                 resume = None              # stan zapisał inny emulator — nie wczytamy go
@@ -297,6 +299,8 @@ class Session:
                     restore_pads()
                 except Exception:
                     log.exception("przywracanie padów")
+            if save_names:
+                self._resume_to_nas(g, started_at)
             self._profile_finish(adapter, save_names)
             self._learn_states(g, adapter, started_at)
         self.phase = "finished"
@@ -334,6 +338,17 @@ class Session:
         except Exception:
             log.exception("podpinanie save'ów profilu")
         return names or ["-"]
+
+    def _resume_to_nas(self, g: dict, started_at: float) -> None:
+        """Nowy stan wznowienia → NAS (drugi komputer go zobaczy); zużyty → usunięty."""
+        try:
+            res = library.get_resume(self.profile_id, g["id"])
+            if res and res["created"] >= started_at - 1:
+                profiles.resume_put(self.cfg, self.profile_id, g, res["family"], res["path"], res["created"])
+            elif self.resumed and not res:
+                profiles.resume_drop(self.cfg, self.profile_id, g)
+        except Exception:
+            log.exception("wznowienie na NAS")
 
     def _profile_finish(self, adapter, names: list) -> None:
         if not names:
@@ -404,3 +419,22 @@ class Session:
     def kill(self) -> None:
         if self.proc and self.proc.poll() is None:
             self.proc.terminate()
+
+
+def resume_from_nas(cfg: dict, pid: int, g: dict) -> None:
+    """Stan wznowienia zapisany na innym komputerze → lokalnie (nowszy wygrywa);
+    zużyty gdzie indziej → usunięty też tutaj."""
+    try:
+        e = profiles.resume_pull(cfg, pid, g)
+    except Exception:
+        log.exception("wznowienie z NAS")
+        return
+    if not e:
+        return
+    local = library.get_resume(pid, g["id"])
+    if "dropped" in e:
+        if local and local["created"] <= e["dropped"] + 1:
+            library.clear_resume(pid, g["id"])
+        return
+    if not local or e["created"] > local["created"] + 1:
+        library.set_resume(pid, g["id"], e["family"], e["path"], e["created"])

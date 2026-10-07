@@ -4,6 +4,36 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 [Keep a Changelog](https://keepachangelog.com/pl/1.1.0/), wersje według
 [SemVer](https://semver.org/lang/pl/).
 
+## [0.14.0] — 2026-10-08
+
+Kilka komputerów, jeden NAS.
+
+### Dodane
+- **„Kto gra na tym komputerze?”** przy pierwszym uruchomieniu (nowa instalacja):
+  wybór profilu z NAS albo nowego. Do niego — a nie do pierwszego z listy —
+  trafiają save'y i konto RetroAchievements zastane w emulatorach na tym
+  komputerze. Aktualizacja ze starszej wersji nie pyta (właścicielem zostaje
+  ostatnio grający profil). Zmiana: Ustawienia → Profile albo Start na profilu →
+  „Ustaw jako profil tego komputera”.
+- **Pytanie „Kto gra?” przy starcie** do wyłączenia (Ustawienia → Profile) — wtedy
+  od razu startuje profil tego komputera.
+- **Kopie zapasowe na NAS**: plik save'a albo ustawień nadpisywany na NAS trafia
+  najpierw do `Profiles\<profil>\_backup\<czas>-<komputer>\` (10 ostatnich).
+- **Wykrywanie konfliktów**: gdy ten sam save zmienił się na dwóch komputerach
+  (gra bez dostępu do NAS), zostaje nowsza wersja, druga ląduje w kopii
+  zapasowej (`konflikt`), a EmuStart pokazuje komunikat.
+- **Wznawianie na innym komputerze**: „quicksave i wyjdź” zapisuje stan także
+  w profilu na NAS (`resume\`); drugi komputer go wczyta, a stan zużyty na jednym
+  komputerze znika też na pozostałych.
+- Edytor wyglądu → „Wygląd zapisywany”: **dla profilu** (ten sam na każdym
+  komputerze) albo **dla tego komputera**.
+
+### Zmienione
+- Zmiana nazwy profilu, który nic jeszcze nie wysłał na NAS, zmienia też jego
+  folder na NAS (o ile nazwa nie jest zajęta). Profilom z danymi folder zostaje.
+- Konto RA zastane w emulatorach jest przypisywane dopiero, gdy wiadomo, czyj
+  jest komputer.
+
 ## [0.13.0] — 2026-10-08
 
 ### Dodane

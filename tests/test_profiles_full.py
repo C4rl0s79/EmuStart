@@ -118,7 +118,10 @@ def test_retroachievements_per_profile(prof_env):
     first = profiles.first_id()
     ola = profiles.create("Ola")["id"]
     duck, ps2 = _duck(tmp), _pcsx2(tmp)
-    # konto zalogowane wcześniej w DuckStation → przejmuje je pierwszy profil
+    ingame.ini_set(duck._ini(), {("Cheevos", "Username"): "caros", ("Cheevos", "Token"): "TOK1"})
+    assert profiles.ra_for_launch(cfg, first, duck)["user"] == ""     # komputer jeszcze bez właściciela
+    profiles.finish_setup(first, ask=False)
+    # konto zalogowane wcześniej w DuckStation → przejmuje je profil tego komputera
     ingame.ini_set(duck._ini(), {("Cheevos", "Username"): "caros", ("Cheevos", "Token"): "TOK1"})
     assert profiles.ra_for_launch(cfg, first, duck)["user"] == "caros"
     profiles.ra_set(cfg, ola, {"user": "ola", "token": "TOK2", "hardcore": True})
@@ -190,3 +193,85 @@ def test_art_shrinks_and_stops_when_disk_full(tmp_path, monkeypatch):
     with pytest.raises(art.DiskFull):
         art.save("snes", "Gra", "box", buf.getvalue())
     assert not list((tmp_path / "media").rglob("*.tmp"))
+
+
+# ── dwa komputery, jeden NAS ──
+
+def test_second_pc_saves_go_to_chosen_profile(prof_env):
+    """Na drugim komputerze save'y zastane w emulatorze trafiają do profilu
+    wybranego przy pierwszym uruchomieniu, a nie do „Gracz” z NAS."""
+    cfg, tmp = prof_env
+    (Path(cfg["profiles_nas"]) / "Gracz" / "save").mkdir(parents=True)     # profil z PC1
+    assert profiles.setup_needed()
+    ola = profiles.create("Ola")["id"]
+    profiles.finish_setup(ola, ask=False)
+    emu = tmp / "emu" / "memcards"
+    _write(emu / "ola.mcd", b"OLA")
+    profiles.attach(profiles.first_id(), "duckstation", emu)              # gra „Gracz”
+    assert (profiles.local_dir(ola, "duckstation", "memcards") / "ola.mcd").read_bytes() == b"OLA"
+    assert not (profiles.local_dir(profiles.first_id(), "duckstation", "memcards") / "ola.mcd").exists()
+    assert not profiles.ask_at_start()
+
+
+def test_rename_moves_nas_folder_only_when_unused(prof_env):
+    cfg, tmp = prof_env
+    pid = profiles.create("Nowy")["id"]
+    profiles.rename(pid, "Ola", cfg)
+    assert profiles.get(pid)["nas_name"] == "Ola"
+    (Path(cfg["profiles_nas"]) / "Ola").mkdir(parents=True)
+    profiles.rename(pid, "Ola2", cfg)
+    assert profiles.get(pid)["nas_name"] == "Ola"                         # folder już używany
+
+
+def test_nas_backup_and_conflict_when_both_sides_changed(prof_env):
+    cfg, tmp = prof_env
+    pid = profiles.first_id()
+    local = profiles.local_dir(pid, "pcsx2", "memcards") / "Mcd001.ps2"
+    nas = Path(cfg["profiles_nas"]) / "Gracz" / "save" / "pcsx2" / "memcards" / "Mcd001.ps2"
+    _write(local, b"V1")
+    profiles.sync_up(cfg, pid, "pcsx2", ["memcards"])
+    # drugi komputer zmienia save na NAS, ten komputer gra offline i też zmienia
+    _write(nas, b"PC2")
+    os.utime(nas, (2000000000, 2000000000))
+    _write(local, b"PC1-OFFLINE")
+    os.utime(local, (2000000100, 2000000100))
+    profiles.sync_up(cfg, pid, "pcsx2", ["memcards"])
+    assert nas.read_bytes() == b"PC1-OFFLINE"                              # nowszy wygrywa
+    bak = Path(cfg["profiles_nas"]) / "Gracz" / "_backup"
+    assert b"PC2" in [f.read_bytes() for f in bak.rglob("Mcd001.ps2")]     # przegrany na NAS
+    c = profiles.pop_conflicts()
+    assert len(c) == 1 and c[0]["file"].endswith("Mcd001.ps2")
+    assert profiles.pop_conflicts() == []
+
+
+def test_nas_backups_are_pruned(prof_env, monkeypatch):
+    cfg, tmp = prof_env
+    pid = profiles.first_id()
+    local = profiles.local_dir(pid, "pcsx2", "memcards") / "a.ps2"
+    real = profiles.time.strftime
+    for i in range(14):
+        _write(local, f"v{i}".encode())
+        os.utime(local, (1900000000 + i * 100, 1900000000 + i * 100))
+        monkeypatch.setattr(profiles.time, "strftime", lambda f, i=i: f"2026-{i:02d}")
+        profiles.sync_up(cfg, pid, "pcsx2", ["memcards"])
+    monkeypatch.setattr(profiles.time, "strftime", real)
+    assert len(list((Path(cfg["profiles_nas"]) / "Gracz" / "_backup").iterdir())) == profiles.NAS_BACKUPS
+
+
+def test_resume_moves_between_computers(prof_env, monkeypatch):
+    from emustart import library
+    cfg, tmp = prof_env
+    monkeypatch.setattr(paths, "DATA", tmp / "data")
+    pid = profiles.first_id()
+    state = tmp / "state.p2s"
+    _write(state, b"STAN")
+    g1 = {"id": 7, "es": "ps2", "name": "Gra (Europe)"}
+    assert profiles.resume_put(cfg, pid, g1, "pcsx2", str(state), 1000.0)
+    g2 = {"id": 42, "es": "ps2", "name": "Gra (Europe)"}                   # inny id na PC2
+    launcher.resume_from_nas(cfg, pid, g2)
+    r = library.get_resume(pid, 42)
+    assert r["family"] == "pcsx2" and Path(r["path"]).read_bytes() == b"STAN"
+    profiles.resume_drop(cfg, pid, g2)                                     # zużyty na PC2
+    library.set_resume(pid, 7, "pcsx2", str(state), 1000.0)                # PC1 ma starą kopię
+    launcher.resume_from_nas(cfg, pid, g1)
+    assert library.get_resume(pid, 7) is None

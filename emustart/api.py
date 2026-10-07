@@ -54,6 +54,7 @@ class Api:
         self._pin_jobs: dict = {}            # game_id → Session-like (kopiowanie przypiętych)
         self._scan = {"running": False, "text": "", "done": 0, "total": 0, "result": None}
         ingame.restore_pending()          # ustawienia padów po ewentualnej awarii
+        profiles.adopt_existing_install()  # aktualizacja: komputer już ma swój profil
         self._uipad = uipad.UiPad(self._uipad_active) if self.pad_backend() == "python" else None
         self._profile = self._initial_profile()
         threading.Thread(target=lambda: profiles.sync_pending(self._cfg), daemon=True,
@@ -132,6 +133,8 @@ class Api:
 
     def _initial_profile(self) -> int:
         ids = [p["id"] for p in profiles.all_profiles()]
+        if not profiles.setup_needed() and not profiles.ask_at_start():
+            return profiles.machine_owner()   # bez pytania: profil tego komputera
         try:
             last = int(library.meta_get("last_profile", "0"))
         except ValueError:
@@ -146,18 +149,37 @@ class Api:
 
     def _profiles_bootstrap(self) -> None:
         """W tle przy starcie: profile z NAS (czysta instalacja), konto RA
-        zalogowane w emulatorach → pierwszy profil, ustawienia EmuStart profilu."""
+        zalogowane w emulatorach → profil tego komputera, ustawienia EmuStart profilu."""
         try:
             profiles.import_from_nas(self._cfg)
-            fid = profiles.first_id()
-            if profiles.ra_get(self._cfg, fid) is None:
-                for fam, acc in self._ra_found().items():
-                    profiles.ra_set(self._cfg, fid, {**acc, "hardcore": False})
-                    log.info("RetroAchievements: konto %s z %s → pierwszy profil", acc["user"], fam)
-                    break
+            self._ra_adopt()
             self._user_load(self._profile)
         except Exception:
             log.exception("profile przy starcie")
+
+    def _ra_adopt(self) -> None:
+        """Konto RA zalogowane w emulatorach należy do właściciela komputera —
+        dopiero gdy wiadomo, kto nim jest (po pierwszym uruchomieniu)."""
+        if profiles.setup_needed():
+            return
+        owner = profiles.machine_owner()
+        if profiles.ra_get(self._cfg, owner) is None:
+            for fam, acc in self._ra_found().items():
+                profiles.ra_set(self._cfg, owner, {**acc, "hardcore": False})
+                log.info("RetroAchievements: konto %s z %s → profil komputera", acc["user"], fam)
+                break
+
+    def profile_setup(self, pid: int, ask: bool) -> dict:
+        """Pierwsze uruchomienie na tym komputerze: kto tu gra."""
+        if not profiles.get(int(pid)):
+            return {"ok": False, "reason": "Nie ma takiego profilu."}
+        profiles.finish_setup(int(pid), bool(ask))
+        self.profile_select(int(pid))
+        threading.Thread(target=self._ra_adopt, daemon=True).start()
+        return {"ok": True}
+
+    def _look_shared(self) -> bool:
+        return self._cfg.get("look_scope", "profile") != "machine"
 
     def _user_load(self, pid: int) -> None:
         """Ustawienia EmuStart profilu (wygląd itp.); profil bez nich dziedziczy bieżące."""
@@ -166,6 +188,8 @@ class Api:
             return
         changed = False
         for k in self.USER_KEYS:
+            if k == "look" and not self._look_shared():
+                continue                      # wygląd tego komputera
             if k in data and self._cfg.get(k) != data[k]:
                 self._cfg[k] = clean_look(data[k]) if k == "look" else bool(data[k])
                 changed = True
@@ -174,8 +198,11 @@ class Api:
 
     def _user_save(self) -> None:
         try:
-            profiles.json_set(self._cfg, self._profile, "emustart.json",
-                              {k: self._cfg[k] for k in self.USER_KEYS if k in self._cfg})
+            data = profiles.json_get(self._cfg, self._profile, "emustart.json") or {}
+            for k in self.USER_KEYS:
+                if k in self._cfg and (k != "look" or self._look_shared()):
+                    data[k] = self._cfg[k]
+            profiles.json_set(self._cfg, self._profile, "emustart.json", data)
         except Exception:
             log.exception("zapis ustawień profilu")
 
@@ -268,6 +295,10 @@ class Api:
             "pad_backend": self.pad_backend() if self._window else "browser",
             "games_logo": bool(self._cfg.get("games_logo")),
             "look": self._cfg.get("look", {}),
+            "look_scope": self._cfg.get("look_scope", "profile"),
+            "setup_needed": profiles.setup_needed(),
+            "ask_profile": profiles.ask_at_start(),
+            "conflicts": profiles.pop_conflicts(),
             "profile": profiles.get(self._profile),
             "profiles": len(profiles.all_profiles()),
         }
@@ -549,6 +580,7 @@ class Api:
             learned = [r["prefix"] for r in library.db().execute(
                 "SELECT prefix FROM states WHERE game_id=? AND family=?", (g["id"], ad.family))]
             states = ingame.list_states(ad, g, meta, learned)
+            launcher.resume_from_nas(self._cfg, self._profile, g)
             res = library.get_resume(self._profile, g["id"])
             if res and res["path"] and Path(res["path"]).is_file() and res["family"] == ad.family:
                 states.insert(0, {"path": res["path"], "name": "Quicksave EmuStart",
@@ -739,7 +771,7 @@ class Api:
 
     def profile_rename(self, pid: int, name: str) -> dict:
         try:
-            profiles.rename(int(pid), name)
+            profiles.rename(int(pid), name, self._cfg)
         except ValueError as ex:
             return {"ok": False, "reason": str(ex)}
         return {"ok": True}
@@ -878,6 +910,9 @@ class Api:
                 "games_logo": cfg.get("games_logo", False),
                 "pad_backend": cfg.get("pad_backend", "python"),
                 "profile_settings": cfg.get("profile_settings", True),
+                "ask_profile": profiles.ask_at_start(),
+                "machine_profile": profiles.machine_owner(),
+                "profile_names": {str(p["id"]): p["name"] for p in profiles.all_profiles()},
                 "systems": rows}
 
     def emulator_options(self, es: str) -> list:
@@ -907,7 +942,13 @@ class Api:
                 cfg[k] = bool(data[k])
         if "profile_settings" in data:
             cfg["profile_settings"] = bool(data["profile_settings"])
-        if any(k in data for k in self.USER_KEYS):
+        if data.get("look_scope") in ("profile", "machine"):
+            cfg["look_scope"] = data["look_scope"]
+        if "ask_profile" in data:
+            library.meta_set("ask_profile", "1" if data["ask_profile"] else "0")
+        if "machine_profile" in data and profiles.get(int(data["machine_profile"])):
+            profiles.set_machine_owner(int(data["machine_profile"]))
+        if any(k in data for k in self.USER_KEYS) or "look_scope" in data:
             self._user_save()
         if "systems" in data:
             cfg.setdefault("systems", {})

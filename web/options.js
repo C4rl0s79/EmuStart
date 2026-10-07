@@ -325,7 +325,7 @@ async function finishPadAssign() {
 }
 
 /* ───────────── profile ───────────── */
-const PR = { list: [], current: 0, idx: 0, delArmed: null, startup: false };
+const PR = { list: [], current: 0, idx: 0, delArmed: null, startup: false, ask: false };
 
 async function openProfiles(startup = false) {
   const r = await api().profiles_list();
@@ -334,7 +334,12 @@ async function openProfiles(startup = false) {
   show("profiles");
 }
 function renderProfiles() {
-  $("profTitle").textContent = PR.startup ? "Kto gra?" : "Profile";
+  const setup = PR.startup === "setup";
+  $("profTitle").textContent = setup ? "Kto gra na tym komputerze?" : PR.startup ? "Kto gra?" : "Profile";
+  $("profIntro").classList.toggle("hidden", !setup);
+  $("profIntro").textContent = setup
+    ? "Wybierz swój profil (profile z NAS są już na liście) albo utwórz nowy. Do niego trafią save'y i konto " +
+      "RetroAchievements zastane w emulatorach na tym komputerze. Później zmienisz to w Ustawieniach → Profile." : "";
   const cards = PR.list.map((p, i) =>
     `<div class="pcard${i === PR.idx ? " sel" : ""}${p.id === PR.current ? " cur" : ""}" data-i="${i}">` +
     `<div class="pav">${esc((p.name[0] || "?").toUpperCase())}</div><div class="pname">${esc(p.name)}</div></div>`).join("") +
@@ -342,13 +347,23 @@ function renderProfiles() {
   $("profCards").innerHTML = cards;
   $("profCards").querySelectorAll(".pcard").forEach((el) => el.addEventListener("click", () => { PR.idx = +el.dataset.i; profilesInput("a"); }));
   const onProfile = PR.idx < PR.list.length;
+  if (setup) return setHints([["a", onProfile ? "To mój profil" : "Utwórz"], ["y", `Pytaj przy starcie: ${PR.ask ? "tak" : "nie"}`]]);
   setHints(onProfile ? [["a", "Graj jako"], ["start", "Opcje profilu"], ["y", "Zmień nazwę"], ["x", "Usuń"], ["b", "Wstecz"]] : [["a", "Utwórz"], ["b", "Wstecz"]]);
 }
 async function profilesInput(a) {
   const n = PR.list.length + 1;
   const p = PR.list[PR.idx];
+  const setup = PR.startup === "setup";
   if (a === "left" || a === "up") PR.idx = (PR.idx - 1 + n) % n;
   else if (a === "right" || a === "down") PR.idx = (PR.idx + 1) % n;
+  else if (setup && a === "y") PR.ask = !PR.ask;
+  else if (setup && a === "a" && p) {
+    await api().profile_setup(p.id, PR.ask);
+    const st = await refreshState();
+    applyLook(st.look || {}, true);
+    toast(`Ten komputer: ${p.name}`);
+    return show("systems");
+  } else if (setup && !["a"].includes(a)) return;   // wybór jest wymagany
   else if (a === "b") { await refreshState(); return show("systems"); }
   else if (a === "a" && !p) {
     return oskOpen("Nazwa nowego profilu", "", async (name) => {
@@ -402,6 +417,10 @@ async function profileMenu(p) {
       toast(r.ok ? `Profil „${p.name}” używa konta ${r.user}.` : r.reason);
     }]);
   }
+  items.push(["Ustaw jako profil tego komputera", async () => {
+    await api().save_settings({ machine_profile: p.id });
+    toast(`Profil tego komputera: ${p.name}`);
+  }]);
   items.push(["Zmień nazwę", () => profilesInput("y")]);
   S.menu = items; S.menuIdx = 0; S.modal = "menu";
   $("menu").classList.remove("hidden");

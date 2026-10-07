@@ -227,10 +227,10 @@ def get_resume(profile_id: int, game_id: int) -> dict | None:
     return dict(r) if r else None
 
 
-def set_resume(profile_id: int, game_id: int, family: str, path: str) -> None:
+def set_resume(profile_id: int, game_id: int, family: str, path: str, created: float | None = None) -> None:
     with db() as c:
         c.execute("INSERT OR REPLACE INTO resume VALUES(?,?,?,?,?)",
-                  (profile_id, game_id, family, path, time.time()))
+                  (profile_id, game_id, family, path, created or time.time()))
 
 
 def clear_resume(profile_id: int, game_id: int) -> None:

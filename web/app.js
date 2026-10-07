@@ -703,13 +703,17 @@ function buildSetRows() {
   rows.push({ k: "Tytuły gier jako logo", key: "games_logo", type: "bool", fmt: (v) => (v ? "tak (Clear Logo z LaunchBox, gdy jest)" : "nie") });
   rows.push({ k: "Edytor wyglądu", type: "action", run: () => openLook() });
   rows.push({ head: "Profile" });
+  rows.push({ k: "Profil tego komputera", key: "machine_profile", type: "enum", opts: Object.keys(c.profile_names || {}).map(Number),
+              fmt: (v) => `${(c.profile_names || {})[v] || "?"} — dostaje save'y i konto RA zastane w emulatorach` });
+  rows.push({ k: "Pytaj, kto gra, przy starcie", key: "ask_profile", type: "bool",
+              fmt: (v) => (v ? "tak" : "nie (od razu profil tego komputera)") });
   rows.push({ k: "Ustawienia emulatorów osobno dla profilu", key: "profile_settings", type: "bool",
               fmt: (v) => (v ? "tak (RetroArch, DuckStation, PCSX2 — kopia w profilu i na NAS)" : "nie (wspólne)") });
   rows.push({ head: "Akcje" });
   rows.push({ k: "Wykryj emulatory i skanuj", type: "action", run: async () => { toast("Wykrywam emulatory…", 60000); const r = await api().autodetect(); if (!r.ok) return toast(r.reason, 4000); toast(`Przypisano emulatory: ${r.assigned}`); startScan(async () => { await openSettings(); }); } });
   rows.push({ k: "Pobierz brakujące emulatory", type: "action", run: () => askInstallMissing() });
   rows.push({ k: "Skanuj kolekcję", type: "action", run: () => startScan(async () => { await openSettings(); }) });
-  rows.push({ k: "Gotowe, przejdź do gier", type: "action", run: async () => { await refreshState(); show("systems"); } });
+  rows.push({ k: "Gotowe, przejdź do gier", type: "action", run: async () => { const st = await refreshState(); if (st.setup_needed) openProfiles("setup"); else show("systems"); } });
   rows.push({ head: "Systemy  ·  ←/→ emulator  ·  A włącz/wyłącz" });
   for (const s of c.systems) rows.push({ type: "system", sys: s });
   S.setRows = rows;
@@ -998,6 +1002,11 @@ async function refreshState() {
   net.className = "pill " + (st.rom_online ? "ok" : "warn");
   S.copying = new Set(st.copying);
   $("profInfo").textContent = st.profile ? "👤 " + st.profile.name : "";
+  if (st.conflicts?.length) {
+    const c = st.conflicts[0];
+    toast(`Konflikt save'ów (${c.profile}): ${c.file}${st.conflicts.length > 1 ? ` i ${st.conflicts.length - 1} innych` : ""} — ` +
+          "grano na dwóch komputerach bez NAS-a. Została nowsza wersja, druga jest w kopii zapasowej profilu.", 10000);
+  }
   return st;
 }
 
@@ -1048,7 +1057,8 @@ window.addEventListener("pywebviewready", async () => {
   requestAnimationFrame(pollPads);
   window.addEventListener("resize", () => show(S.screen));
   if (!st.configured) openSettings(true);
-  else if (st.profiles > 1) openProfiles(true);
+  else if (st.setup_needed) openProfiles("setup");      // nowy komputer: kto tu gra
+  else if (st.ask_profile) openProfiles(true);
   else show("systems");
 });
 

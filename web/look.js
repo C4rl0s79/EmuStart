@@ -53,6 +53,8 @@ const LOOK_SPEC = [
     css: (v) => { const b = BACKS[v] || BACKS.granat; return [["--bg", b[0]], ["--bg-grad", b[1]]]; } },
   { head: "Inne" },
   { k: "games_logo", t: "Tytuły gier jako logo", cfg: true, opts: [true, false], fmt: (v) => (v ? "tak" : "nie") },
+  { k: "look_scope", t: "Wygląd zapisywany", cfg: true, opts: ["profile", "machine"], def0: "profile",
+    fmt: (v) => (v === "machine" ? "dla tego komputera" : "dla profilu (na każdym komputerze)") },
 ];
 const LOOK_ITEMS = LOOK_SPEC.filter((r) => r.k);
 const LV = {};   // bieżące wartości (bez games_logo — to zwykłe ustawienie)
@@ -89,7 +91,10 @@ function openLook() {
   renderLook();
 }
 
-function lookGet(it) { return it.cfg ? !!S.state?.[it.k] : lookVal(it.k); }
+function lookGet(it) {
+  if (!it.cfg) return lookVal(it.k);
+  return typeof it.opts[0] === "boolean" ? !!S.state?.[it.k] : (S.state?.[it.k] ?? it.def0);
+}
 
 function renderLook() {
   const html = LOOK_SPEC.map((r, i) => {
@@ -131,7 +136,8 @@ function lookStep(dir) {
   const it = LOOK_SPEC[LK.idx];
   if (!it?.k) return;
   if (it.cfg) {
-    const v = !lookGet(it);
+    const n = it.opts.length, i = Math.max(0, it.opts.indexOf(lookGet(it)));
+    const v = it.opts[(i + dir + n) % n];
     S.state[it.k] = v;
     api().save_settings({ [it.k]: v });
     if (S.screen === "games") renderGames();
