@@ -175,3 +175,29 @@ def test_uipad_events_repeat_and_release(monkeypatch):
         p._tick(t)
     assert p.poll() == [{"a": "down", "up": False}, {"a": "down", "up": False},
                         {"a": "down", "up": True}, {"a": "a", "up": False}, {"a": "a", "up": True}]
+
+
+def test_installer_plan_and_core_install_offline(env, tmp_path, monkeypatch):
+    import zipfile
+    from emustart import installer
+    root = tmp_path / "emu"
+    assert installer.plan_for("psx", str(root))[0]["key"] == "duckstation"
+    steps = installer.plan_for("lynx", str(root))
+    assert [s["kind"] for s in steps] == ["retroarch", "core"]
+    (root / "RetroArch").mkdir(parents=True)
+    (root / "RetroArch" / "retroarch.exe").write_bytes(b"")
+    (root / "RetroArch" / "info").mkdir()
+    (root / "RetroArch" / "info" / "handy_libretro.info").write_text(
+        'corename = "Handy"\ndatabase = "Atari - Lynx"\n')
+
+    def fake_download(url, dest, progress, cancel):
+        with zipfile.ZipFile(dest, "w") as z:
+            z.writestr("handy_libretro.dll", b"DLL")
+    monkeypatch.setattr(installer, "_download", fake_download)
+    cfg = {"emu_root": str(root), "systems": {}}
+    job = installer.Job(cfg, [("lynx", installer.plan_for("lynx", str(root)))])
+    job.start()
+    job.thread.join(10)
+    assert job.status()["errors"] == []
+    assert (root / "RetroArch" / "cores" / "handy_libretro.dll").read_bytes() == b"DLL"
+    assert cfg["systems"]["lynx"]["label"] == "RetroArch: Handy"

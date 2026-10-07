@@ -13,7 +13,7 @@ import threading
 import time
 from pathlib import Path
 
-from emustart import (__version__, art, art_sources, cache, ingame, logos, metadata, pads, profiles, uipad, config, emulators, launcher, library,
+from emustart import (__version__, art, art_sources, cache, ingame, installer, logos, metadata, pads, profiles, uipad, config, emulators, launcher, library,
                       paths, scanner, systems, winutil)
 
 log = logging.getLogger("emustart.api")
@@ -154,6 +154,18 @@ class Api:
         if self._session and self._session.phase in ("preparing", "downloading",
                                                      "extracting", "running"):
             return {"ok": False, "reason": "Inna gra jest właśnie uruchamiana."}
+        g = library.game(int(game_id))
+        if g:
+            emu = self._effective_emu(g)
+            if not emu["exe"] or not Path(emu["exe"]).is_file():
+                steps = installer.plan_for(g["es"], self._cfg.get("emu_root", ""))
+                info = systems.info(g["es"])
+                if not steps:
+                    return {"ok": False, "reason": f"Brak emulatora dla {info['display']} "
+                            "i nie umiem go pobrać. Wybierz go w ustawieniach."}
+                return {"ok": False, "need_install": {
+                    "es": g["es"], "system": info["display"],
+                    "steps": installer.describe(steps)}}
         bg = next((s for s in self._background if s.game_id == int(game_id)), None)
         if bg:   # kopia tej gry trwa w tle — przejmujemy ją (wznowienie z .part)
             bg.cancel.set()
@@ -384,6 +396,44 @@ class Api:
             art.media_path(g["es"], g["name"], kind).unlink(missing_ok=True)
             library.set_art(g["id"], kind, art.MISSING)
         return {"ok": True}
+
+    # ── pobieranie emulatorów ──
+    def install_missing(self) -> list:
+        """Systemy w bibliotece bez emulatora i co dla nich pobrać."""
+        out = []
+        for s in library.systems_summary():
+            sc = (self._cfg.get("systems") or {}).get(s["es"]) or {}
+            if not sc.get("enabled", True) or (sc.get("exe") and Path(sc["exe"]).is_file()):
+                continue
+            steps = installer.plan_for(s["es"], self._cfg.get("emu_root", ""))
+            out.append({"es": s["es"], "system": s["display"], "games": s["games"],
+                        "steps": steps})
+        return out
+
+    def install_start(self, es_list: list) -> dict:
+        job = getattr(self, "_install_job", None)
+        if job and not job.finished:
+            return {"ok": False, "reason": "Pobieranie emulatorów już trwa."}
+        root = self._cfg.get("emu_root", "")
+        items = [(es, installer.plan_for(es, root)) for es in es_list]
+        items = [(es, st) for es, st in items if st]
+        if not items:
+            return {"ok": False, "reason": "Nie ma czego pobrać."}
+
+        def done(job):
+            config.save(self._cfg)
+        self._install_job = installer.Job(self._cfg, items, on_done=done)
+        self._install_job.start()
+        return {"ok": True}
+
+    def install_status(self) -> dict | None:
+        job = getattr(self, "_install_job", None)
+        return job.status() if job else None
+
+    def install_cancel(self) -> None:
+        job = getattr(self, "_install_job", None)
+        if job:
+            job.cancel.set()
 
     # ── pady ──
     def pads_state(self) -> dict:

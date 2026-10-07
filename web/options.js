@@ -359,3 +359,97 @@ async function profilesInput(a) {
   PR.delArmed = null;
   renderProfiles();
 }
+
+
+/* ───────────── pobieranie emulatorów ───────────── */
+const INST = { mode: null, es: [], after: null, timer: null };
+
+function instOpen(title, bodyHtml, hints) {
+  S.modal = "inst";
+  $("inst").classList.remove("hidden");
+  $("inTitle").textContent = title;
+  $("inBody").innerHTML = bodyHtml;
+  $("inProg").classList.add("hidden");
+  $("inMsg").textContent = "";
+  $("inMsg").className = "lmsg";
+  setHints(hints, $("inHints"));
+}
+function instClose() {
+  clearInterval(INST.timer);
+  INST.mode = null;
+  S.modal = null;
+  $("inst").classList.add("hidden");
+  show(S.screen);
+}
+function stepList(steps) {
+  return `<ul class="menulist">` + steps.map((s) =>
+    `<li>${esc(s.label)}<small>${s.version ? esc(s.version) + " · " : ""}${s.size ? fmtBytes(s.size) : (s.error ? "błąd: " + esc(s.error) : "")}</small></li>`).join("") + `</ul>`;
+}
+
+// gra bez emulatora: pytanie przed pobraniem, potem start gry
+function askInstallForGame(info) {
+  INST.mode = "confirm";
+  INST.es = [info.es];
+  INST.after = () => launch();
+  const total = info.steps.reduce((a, s) => a + (s.size || 0), 0);
+  instOpen(`Brak emulatora: ${info.system}`,
+    `<p>Pobrać i zainstalować w folderze emulatorów?</p>` + stepList(info.steps) +
+    (total ? `<p class="lfiles">Razem około ${fmtBytes(total)}.</p>` : ""),
+    [["a", "Pobierz i graj"], ["b", "Anuluj"]]);
+}
+
+// ustawienia: wszystkie systemy bez emulatora
+async function askInstallMissing() {
+  const list = await api().install_missing();
+  const can = list.filter((x) => x.steps.length);
+  if (!can.length) return toast(list.length ? "Brakujących emulatorów nie umiem pobrać automatycznie." : "Wszystkie systemy mają emulator.");
+  INST.mode = "confirm";
+  INST.es = can.map((x) => x.es);
+  INST.after = async () => { await openSettings(); };
+  const rows = can.map((x) => `<li>${esc(x.system)}<small>${esc(x.steps.map((s) => s.label).join(" + "))}</small></li>`).join("");
+  const no = list.length - can.length;
+  instOpen(`Pobierz brakujące emulatory (${can.length})`,
+    `<ul class="menulist golist">${rows}</ul>` + (no ? `<p class="lfiles">Bez automatycznego źródła: ${no}.</p>` : ""),
+    [["a", "Pobierz wszystko"], ["b", "Anuluj"]]);
+}
+
+async function instStart() {
+  const r = await api().install_start(INST.es);
+  if (!r.ok) { $("inMsg").textContent = r.reason; return; }
+  INST.mode = "progress";
+  $("inBody").innerHTML = "";
+  $("inProg").classList.remove("hidden");
+  setHints([["b", "Przerwij"]], $("inHints"));
+  INST.timer = setInterval(instTick, 300);
+}
+async function instTick() {
+  const st = await api().install_status();
+  if (!st) return;
+  $("inStep").textContent = `Krok ${st.step} z ${st.steps}: ${st.current}`;
+  const pct = st.total ? (100 * st.done) / st.total : 0;
+  $("inBar").style.width = pct.toFixed(1) + "%";
+  $("inPct").textContent = st.total ? Math.floor(pct) + "%" : "";
+  $("inBytes").textContent = st.total ? `${fmtBytes(st.done)} / ${fmtBytes(st.total)}` : (st.done ? fmtBytes(st.done) : "");
+  if (st.running) return;
+  clearInterval(INST.timer);
+  INST.mode = "done";
+  if (st.errors.length) {
+    $("inMsg").className = "lmsg err";
+    $("inMsg").textContent = "Błędy: " + st.errors.join("; ");
+    setHints([["a", "Zamknij"]], $("inHints"));
+    return;
+  }
+  const after = INST.after;
+  instClose();
+  await refreshState();
+  toast(st.cancelled ? "Przerwano." : `Zainstalowano: ${st.installed.join(", ") || "nic nowego"}`, 4000);
+  if (!st.cancelled && after) after();
+}
+function instInput(a) {
+  if (INST.mode === "confirm") {
+    if (a === "a") return instStart();
+    if (a === "b") return instClose();
+  } else if (INST.mode === "progress") {
+    if (a === "b") { api().install_cancel(); toast("Przerywam po bieżącym pliku…"); }
+  } else if (INST.mode === "done" && (a === "a" || a === "b")) instClose();
+}

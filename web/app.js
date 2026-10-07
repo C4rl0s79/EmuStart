@@ -149,6 +149,7 @@ function press(a, fromPad) {
   if (S.modal === "menu") return menuInput(a);
   if (S.modal === "scan") return;
   if (S.modal === "osk") return oskInput(a);
+  if (S.modal === "inst") return instInput(a);
   if (S.modal === "gopt") return goptInput(a);
   if (S.screen === "pads") return padsInput(a);
   if (S.screen === "profiles") return profilesInput(a);
@@ -396,6 +397,7 @@ let launchPoll;
 async function launch(state = "") {
   const g = S.games[S.gameIdx];
   const r = await api().launch(g.id, state);
+  if (r.need_install) return askInstallForGame(r.need_install);
   if (!r.ok) return toast(r.reason);
   S.modal = "launch";
   $("launch").classList.remove("hidden");
@@ -608,6 +610,7 @@ function buildSetRows() {
   rows.push({ k: "Ukryj klony arcade", key: "hide_arcade_clones", type: "bool", fmt: (v) => (v ? "tak" : "nie") });
   rows.push({ head: "Akcje" });
   rows.push({ k: "Wykryj emulatory i skanuj", type: "action", run: async () => { toast("Wykrywam emulatory…", 60000); const r = await api().autodetect(); if (!r.ok) return toast(r.reason, 4000); toast(`Przypisano emulatory: ${r.assigned}`); startScan(async () => { await openSettings(); }); } });
+  rows.push({ k: "Pobierz brakujące emulatory", type: "action", run: () => askInstallMissing() });
   rows.push({ k: "Skanuj kolekcję", type: "action", run: () => startScan(async () => { await openSettings(); }) });
   rows.push({ k: "Gotowe, przejdź do gier", type: "action", run: async () => { await refreshState(); show("systems"); } });
   rows.push({ head: "Systemy  ·  ←/→ emulator  ·  A włącz/wyłącz" });

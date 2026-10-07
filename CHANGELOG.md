@@ -4,6 +4,27 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 [Keep a Changelog](https://keepachangelog.com/pl/1.1.0/), wersje według
 [SemVer](https://semver.org/lang/pl/).
 
+## [0.6.0] — 2026-10-07
+
+### Dodane
+- **Pobieranie emulatorów i rdzeni RetroArcha.**
+  - Uruchomienie gry z systemu bez emulatora pyta: „Brak emulatora: Atari Lynx.
+    Pobrać i zainstalować?” z listą plików, wersjami i rozmiarem. A = pobierz
+    i od razu graj, B = anuluj. Postęp w bajtach, B przerywa.
+  - Ustawienia → **Pobierz brakujące emulatory**: lista wszystkich systemów
+    z biblioteki bez emulatora i jednorazowe pobranie wszystkiego.
+  - Wybór jak dotychczas: samodzielny emulator tam, gdzie EmuStart go preferuje
+    (DuckStation, PCSX2, RPCS3, PPSSPP, Dolphin, Cemu, Eden, Azahar, melonDS,
+    ares, Snes9x, mGBA, Flycast, Xenia, xemu, shadPS4, Vita3K, MAME), w reszcie
+    rdzeń RetroArcha (Stella, Handy, VICE, Gambatte, Genesis Plus GX, FBNeo…);
+    brak RetroArcha → najpierw sam RetroArch (buildbot, wersja stabilna).
+  - Źródła z aktualizatora ROM Helpera: GitHub Releases, dolphin-emu.org,
+    strona wydań Edena, buildbot.libretro.com. Instalacja do folderu
+    emulatorów, DuckStation/PCSX2/Dolphin w trybie przenośnym (jak Twoje).
+    Wersje zapisywane w `data/emu_versions.json` (format ROM Helpera).
+  - Po instalacji system od razu dostaje emulator w ustawieniach.
+  - Archiwa .7z: 7-Zip z systemu, a gdy go brak — `7zr.exe` z 7-zip.org.
+
 ## [0.5.0] — 2026-10-07
 
 ### Dodane

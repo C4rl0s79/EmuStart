@@ -49,6 +49,13 @@ W ustawieniach można podać kilka folderów (np. `Z:\ROMS\REDUMP`,
 EmulationStation (`psx`), No-Intro/Redump (`Sony - PlayStation`) i libretro.
 Duplikaty pokazują się raz — z folderu wyżej na liście.
 
+## Emulatory
+
+Uruchomienie gry z systemu bez emulatora proponuje jego pobranie (samodzielny
+emulator albo RetroArch + rdzeń). Wszystkie brakujące naraz: Ustawienia →
+**Pobierz brakujące emulatory**. Instalacja trafia do folderu emulatorów
+z ustawień (np. `D:\emu\emulatory\<Emulator>`).
+
 ## Opcje gry (przytrzymaj A)
 
 Krótkie **A** uruchamia grę, **przytrzymane A** (0,6 s) otwiera opcje:
