@@ -13,3 +13,7 @@ __pycache__/
 *.pyc
 .pytest_cache/
 profiles/
+
+# binarka skopiowana do katalogu programu (build.ps1 -Deploy)
+/EmuStart.exe
+/_internal/
