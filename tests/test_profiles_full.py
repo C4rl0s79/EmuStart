@@ -287,3 +287,16 @@ def test_genres_are_unified():
     assert metadata.norm_genres("TTL * Ball & Paddle") == "Breakout"
     assert metadata.norm_genres("N/A") == ""
     assert metadata.norm_genres("Visual Novel") == "Visual Novel"
+
+
+def test_hide_tag_groups():
+    from emustart import library
+    g = library.tag_groups
+    assert g("Sonic (USA) (Beta 2)") == {"beta"}
+    assert g("Gra (Japan) (Possible Proto)") == {"beta"}
+    assert g("Q (USA) (Demo) (Kiosk)") == {"demo"}
+    assert g("K (Japan) (Joystick hack bootleg)") == {"pirate"}
+    assert g("[BIOS] Super NES CD-ROM (Japan)") == {"program"}
+    assert g("Z (USA) (Unl)") == {"unl"}
+    assert g("Betrayal at Krondor (USA)") == set() and g("X (USA) (Rev 1)") == set()
+    assert library.is_hidden("Sonic (USA) (Beta 2)", ["beta"]) and not library.is_hidden("Sonic (USA) (Beta 2)", ["demo"])

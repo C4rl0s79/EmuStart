@@ -4,6 +4,23 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 [Keep a Changelog](https://keepachangelog.com/pl/1.1.0/), wersje według
 [SemVer](https://semver.org/lang/pl/).
 
+## [0.15.0] — 2026-10-08
+
+### Dodane
+- Ustawienia → **Ukrywanie gier** (wg oznaczeń w nazwach No-Intro/Redump/MAME),
+  każda grupa osobno:
+  - wersje rozwojowe — Beta, Proto/Prototype, Possible Proto, Alpha, Debug,
+    location test,
+  - dema i wersje promocyjne — Demo, Kiosk, Promo, Sample, Trial, Preview,
+  - pirackie i przeróbki — Pirate, hack, bootleg,
+  - nielicencjonowane — Unl, Aftermarket, Homebrew,
+  - programy i BIOS-y.
+  Liczba gier w karuzeli uwzględnia ukryte (system bez widocznych gier znika).
+  Rewizje (Rev, Alt) zostają — to pełne wersje gier.
+
+### Zmienione
+- „Ukryj klony arcade” przeniesione do sekcji Ukrywanie gier („Klony arcade”).
+
 ## [0.14.1] — 2026-10-08
 
 ### Naprawione

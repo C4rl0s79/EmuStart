@@ -697,11 +697,18 @@ function buildSetRows() {
   rows.push({ k: "Próg LAN", key: "lan_threshold_mbps", type: "num", step: 50, min: 50, max: 2000, fmt: (v) => `${v} Mb/s` });
   rows.push({ head: "Wygląd" });
   rows.push({ k: "Pełny ekran", key: "fullscreen", type: "bool", fmt: (v) => (v ? "tak" : "nie") + " (po restarcie)" });
-  rows.push({ k: "Ukryj klony arcade", key: "hide_arcade_clones", type: "bool", fmt: (v) => (v ? "tak" : "nie") });
   rows.push({ k: "Obsługa padów w menu", key: "pad_backend", type: "enum", opts: ["python", "browser", "none"],
               fmt: (v) => ({ python: "EmuStart / XInput (zalecane)", browser: "przeglądarka (Gamepad API)", none: "wyłączona (tylko klawiatura)" }[v] + " — po restarcie") });
   rows.push({ k: "Tytuły gier jako logo", key: "games_logo", type: "bool", fmt: (v) => (v ? "tak (Clear Logo z LaunchBox, gdy jest)" : "nie") });
   rows.push({ k: "Edytor wyglądu", type: "action", run: () => openLook() });
+  rows.push({ head: "Ukrywanie gier  ·  wg oznaczeń w nazwie" });
+  const yn = (v) => (v ? "ukryte" : "widoczne");
+  rows.push({ k: "Wersje rozwojowe", key: "hide_beta", type: "bool", fmt: (v) => `${yn(v)} — Beta, Proto, Alpha, Debug` });
+  rows.push({ k: "Dema i wersje promocyjne", key: "hide_demo", type: "bool", fmt: (v) => `${yn(v)} — Demo, Kiosk, Promo, Sample, Trial` });
+  rows.push({ k: "Pirackie i przeróbki", key: "hide_pirate", type: "bool", fmt: (v) => `${yn(v)} — Pirate, hack, bootleg` });
+  rows.push({ k: "Nielicencjonowane", key: "hide_unl", type: "bool", fmt: (v) => `${yn(v)} — Unl, Aftermarket, Homebrew` });
+  rows.push({ k: "Programy i BIOS-y", key: "hide_program", type: "bool", fmt: (v) => `${yn(v)} — Program, BIOS` });
+  rows.push({ k: "Klony arcade", key: "hide_arcade_clones", type: "bool", fmt: (v) => `${yn(v)} — tylko wersja główna gry` });
   rows.push({ head: "Profile" });
   rows.push({ k: "Profil tego komputera", key: "machine_profile", type: "enum", opts: Object.keys(c.profile_names || {}).map(Number),
               fmt: (v) => `${(c.profile_names || {})[v] || "?"} — dostaje save'y i konto RA zastane w emulatorach` });

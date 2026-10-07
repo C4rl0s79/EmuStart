@@ -312,10 +312,23 @@ class Api:
             return {"pending": True}
         return {k: v for k, v in d.items() if not k.startswith("_") and k != "lb_notes"}
 
+    HIDE_KEYS = {"hide_beta": "beta", "hide_demo": "demo", "hide_pirate": "pirate",
+                 "hide_unl": "unl", "hide_program": "program"}
+
+    def _hide_groups(self) -> list:
+        return [g for k, g in self.HIDE_KEYS.items() if self._cfg.get(k)]
+
     def list_systems(self) -> list:
         out = []
-        logos.fetch_missing(self._cfg, [s["es"] for s in library.systems_summary()])
-        for s in library.systems_summary():
+        summary = library.systems_summary()
+        logos.fetch_missing(self._cfg, [s["es"] for s in summary])
+        groups = self._hide_groups()
+        clones = [s["es"] for s in summary if systems.info(s["es"])["kind"] == "arcade"] \
+            if self._cfg.get("hide_arcade_clones", True) else []
+        counts = library.visible_counts(groups, clones) if groups or clones else None
+        for s in summary:
+            if counts is not None:
+                s["games"] = counts.get(s["es"], 0)
             info = systems.info(s["es"])
             emu = (self._cfg.get("systems") or {}).get(s["es"]) or {}
             if not emu.get("enabled", True) or not s["games"]:
@@ -329,6 +342,9 @@ class Api:
     def list_games(self, es: str) -> list:
         hide = self._cfg.get("hide_arcade_clones", True) and systems.info(es)["kind"] == "arcade"
         rows = library.list_games(es, self._profile, hide)
+        groups = self._hide_groups()
+        if groups:
+            rows = [r for r in rows if not library.is_hidden(r["name"], groups)]
         try:
             metadata.prepare_system(self._cfg, es)     # dane do filtrów (rdb, offline)
         except Exception:
@@ -912,6 +928,7 @@ class Api:
                 "games_logo": cfg.get("games_logo", False),
                 "pad_backend": cfg.get("pad_backend", "python"),
                 "profile_settings": cfg.get("profile_settings", True),
+                **{k: bool(cfg.get(k)) for k in self.HIDE_KEYS},
                 "ask_profile": profiles.ask_at_start(),
                 "machine_profile": profiles.machine_owner(),
                 "profile_names": {str(p["id"]): p["name"] for p in profiles.all_profiles()},
@@ -939,7 +956,7 @@ class Api:
                     pass
         if data.get("pad_backend") in ("python", "browser", "none"):
             cfg["pad_backend"] = data["pad_backend"]
-        for k in ("fullscreen", "hide_arcade_clones", "games_logo"):
+        for k in ("fullscreen", "hide_arcade_clones", "games_logo", *self.HIDE_KEYS):
             if k in data:
                 cfg[k] = bool(data[k])
         if "profile_settings" in data:

@@ -7,6 +7,7 @@ w trakcie skanu albo kopiowania.
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from pathlib import Path
 import threading
@@ -196,6 +197,60 @@ def list_games(es: str, profile_id: int, hide_clones: bool) -> list:
         ORDER BY g.title COLLATE NOCASE, g.name COLLATE NOCASE"""
     q = q.format(clones="AND g.parent=''" if hide_clones else "")
     return [dict(r) for r in db().execute(q, (profile_id, es)).fetchall()]
+
+
+# ── ukrywanie wersji wg oznaczeń w nazwie (No-Intro / Redump / MAME) ──
+# Grupa pasuje, gdy któraś część nawiasu „(Beta 2, Proto)” / „[BIOS]” zaczyna się
+# od wzorca (pirate/hack/bootleg — także w środku, np. „Joystick hack bootleg”).
+HIDE_GROUPS = {
+    "beta": re.compile(r"^(beta|alpha|proto(type)?|possible proto|pre-?production|pre-?release|debug|"
+                       r"location test|test version|work in progress|wip)\b", re.I),
+    "demo": re.compile(r"^(demo|auto demo|tech demo|rolling demo|playable demo|kiosk|promo|sample|trial|"
+                       r"preview|taikenban|not for resale)\b", re.I),
+    "pirate": re.compile(r"^pirate\b|\b(hack|bootleg)\b", re.I),
+    "unl": re.compile(r"^(unl|unlicensed|aftermarket|homebrew)\b", re.I),
+    "program": re.compile(r"^(program|test program|bios|utility|enhancement chip)\b", re.I),
+}
+_BRACKETS = re.compile(r"[\(\[]([^\)\]]+)[\)\]]")
+
+
+def tag_groups(name: str) -> set:
+    out = set()
+    for inner in _BRACKETS.findall(name or ""):
+        for part in inner.split(","):
+            part = part.strip()
+            for grp, rx in HIDE_GROUPS.items():
+                if rx.search(part):
+                    out.add(grp)
+    return out
+
+
+def is_hidden(name: str, groups) -> bool:
+    return bool(groups) and bool(tag_groups(name) & set(groups))
+
+
+_count_cache: dict = {}
+
+
+def visible_counts(groups, clone_systems) -> dict:
+    """{es: liczba gier} po ukryciu grup oznaczeń (i klonów w systemach arcade).
+    Liczone w Pythonie, pamiętane do zmiany biblioteki albo ustawień."""
+    groups, clone_systems = tuple(sorted(groups)), tuple(sorted(clone_systems))
+    con = db()
+    stamp = tuple(con.execute("SELECT COUNT(*), COALESCE(MAX(id),0), COALESCE(SUM(hidden),0) FROM games").fetchone())
+    key = (groups, clone_systems, stamp)
+    if key in _count_cache:
+        return _count_cache[key]
+    out: dict = {}
+    for r in con.execute("SELECT es, name, parent FROM games WHERE hidden=0"):
+        if r["parent"] and r["es"] in clone_systems:
+            continue
+        if groups and is_hidden(r["name"], groups):
+            continue
+        out[r["es"]] = out.get(r["es"], 0) + 1
+    _count_cache.clear()
+    _count_cache[key] = out
+    return out
 
 
 def set_art(game_id: int, kind: str, state: int) -> None:
