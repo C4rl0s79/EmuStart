@@ -175,6 +175,7 @@ function press(a, fromPad) {
   if (S.modal === "sopt") return soInput(a);
   if (S.modal === "flt") return flInput(a);
   if (S.modal === "gopt") return goptInput(a);
+  if (S.modal === "look") return lookInput(a);
   if (S.screen === "pads") return padsInput(a);
   if (S.screen === "profiles") return profilesInput(a);
   if (S.screen === "systems") return systemsInput(a);
@@ -226,7 +227,7 @@ function renderSystems() {
     if (d > n / 2) d -= n;          // zawijanie: karuzela jest pętlą
     if (d < -n / 2) d += n;
     const ad = Math.abs(d);
-    el.style.transform = `translate(calc(-50% + ${d * 25}vw), -50%) scale(${ad === 0 ? 1 : 0.55})`;
+    el.style.transform = `translate(calc(-50% + ${d * lookVal("car_gap")}vw), -50%) scale(${ad === 0 ? 1 : 0.55})`;
     el.style.opacity = ad === 0 ? 1 : ad <= 2 ? 0.45 : 0;
     el.style.filter = ad === 0 ? "none" : "grayscale(.6)";
     el.style.zIndex = 10 - ad;
@@ -620,6 +621,7 @@ setInterval(async () => {
 function openMenu() {
   const items = [
     ["Ustawienia", () => openSettings()],
+    ["Wygląd (logo, czcionki, kolory)", () => openLook()],
     ["Grafiki i metadane", () => openArt()],
     ["Zmień profil", () => openProfiles()],
     ["Kolejność padów", () => openPads()],
@@ -699,6 +701,7 @@ function buildSetRows() {
   rows.push({ k: "Obsługa padów w menu", key: "pad_backend", type: "enum", opts: ["python", "browser", "none"],
               fmt: (v) => ({ python: "EmuStart / XInput (zalecane)", browser: "przeglądarka (Gamepad API)", none: "wyłączona (tylko klawiatura)" }[v] + " — po restarcie") });
   rows.push({ k: "Tytuły gier jako logo", key: "games_logo", type: "bool", fmt: (v) => (v ? "tak (Clear Logo z LaunchBox, gdy jest)" : "nie") });
+  rows.push({ k: "Edytor wyglądu", type: "action", run: () => openLook() });
   rows.push({ head: "Akcje" });
   rows.push({ k: "Wykryj emulatory i skanuj", type: "action", run: async () => { toast("Wykrywam emulatory…", 60000); const r = await api().autodetect(); if (!r.ok) return toast(r.reason, 4000); toast(`Przypisano emulatory: ${r.assigned}`); startScan(async () => { await openSettings(); }); } });
   rows.push({ k: "Pobierz brakujące emulatory", type: "action", run: () => askInstallMissing() });
@@ -1025,6 +1028,7 @@ async function pollPyPad() {
 window.addEventListener("pywebviewready", async () => {
   tick(); setInterval(tick, 10000);
   const st = await refreshState();
+  applyLook(st.look || {});
   S.pyPad = !!st.py_pad;
   S.padBackend = st.pad_backend || "browser";
   if (S.pyPad) setInterval(pollPyPad, 33);

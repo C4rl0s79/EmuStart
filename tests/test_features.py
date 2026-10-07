@@ -280,3 +280,11 @@ def test_uipad_does_not_poll_when_inactive(monkeypatch):
     for t in range(5):
         assert p._tick(float(t)) is False
     assert calls == []                      # okno w tle: zero odczytów pada
+
+
+def test_clean_look_keeps_only_simple_values():
+    from emustart.api import clean_look
+    out = clean_look({"fs_list": 125, "pvlogo": 18.5, "accent": "#1fb5c4", "bg": "grafit",
+                      "bad key": 1, "x": True, "y": float("inf"), "z": "<script>", "w": [1]})
+    assert out == {"fs_list": 125, "pvlogo": 18.5, "accent": "#1fb5c4", "bg": "grafit"}
+    assert clean_look(None) == {}

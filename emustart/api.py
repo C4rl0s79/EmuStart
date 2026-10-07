@@ -9,6 +9,7 @@ from __future__ import annotations
 import collections
 import json
 import logging
+import math
 import re
 import threading
 import time
@@ -154,6 +155,7 @@ class Api:
             "py_pad": bool(self._window) and uipad.xinput.available() and self.pad_backend() == "python",
             "pad_backend": self.pad_backend() if self._window else "browser",
             "games_logo": bool(self._cfg.get("games_logo")),
+            "look": self._cfg.get("look", {}),
             "profile": profiles.get(self._profile),
             "profiles": len(profiles.all_profiles()),
         }
@@ -792,6 +794,12 @@ class Api:
         config.save(cfg)
         return {"ok": True}
 
+    def look_save(self, data: dict) -> dict:
+        """Ustawienia wyglądu z edytora (web/look.js) — liczby i proste napisy."""
+        self._cfg["look"] = clean_look(data)
+        config.save(self._cfg)
+        return {"ok": True}
+
     def autodetect(self) -> dict:
         """Domyślny emulator dla każdego folderu, który jeszcze go nie ma."""
         cfg = self._cfg
@@ -876,3 +884,24 @@ class Api:
 
     def now(self) -> float:
         return time.time()
+
+
+_LOOK_KEY = re.compile(r"^[a-z0-9_]{1,24}$")
+_LOOK_STR = re.compile(r"^(#[0-9a-fA-F]{6}|[a-z0-9_-]{1,20})$")
+
+
+def clean_look(data) -> dict:
+    """Odrzuca wszystko poza {klucz: liczba | kolor #rrggbb | słowo}."""
+    out = {}
+    if not isinstance(data, dict):
+        return out
+    for k, v in list(data.items())[:64]:
+        if not isinstance(k, str) or not _LOOK_KEY.match(k):
+            continue
+        if isinstance(v, bool):
+            continue
+        if isinstance(v, (int, float)) and math.isfinite(v) and abs(v) < 10000:
+            out[k] = v
+        elif isinstance(v, str) and _LOOK_STR.match(v):
+            out[k] = v
+    return out

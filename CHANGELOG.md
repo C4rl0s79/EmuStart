@@ -4,6 +4,27 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 [Keep a Changelog](https://keepachangelog.com/pl/1.1.0/), wersje według
 [SemVer](https://semver.org/lang/pl/).
 
+## [0.12.0] — 2026-10-07
+
+### Dodane
+- **Edytor wyglądu** (menu Start → „Wygląd”, także w Ustawieniach): panel
+  z boku ekranu, zmiany widoczne od razu na karuzeli systemów albo liście gier
+  (A przełącza ekran pod spodem, Y przesuwa panel na drugą stronę).
+  ←/→ zmienia wartość, LB/RB po 5 kroków, X przywraca domyślną, Start dwa razy
+  przywraca wszystko, B zapisuje (config.json → `look`).
+  - **Logo:** wysokość i szerokość logo tytułu na liście, logo w podglądzie,
+    wielkość logo systemów w karuzeli i odstęp między nimi, logo nad listą gier.
+  - **Lista i podgląd:** wysokość wiersza, szerokość listy, wysokość okładki
+    i zrzutu, szerokość kolumny okładki, liczba linii opisu.
+  - **Czcionki osobno:** cały interfejs, lista gier, tytuł gry, metadane, opis
+    gry, nazwa systemu, informacje o systemie, menu i okna, paski górny i dolny.
+  - **Kolory:** kolor akcentu (8 do wyboru) i tło (6 wariantów).
+  - Przełącznik „Tytuły gier jako logo”.
+
+### Zmienione
+- Logo tytułów gier domyślnie większe: na liście 92% wysokości wiersza (było
+  ok. 75%) i do 75% szerokości, w podglądzie do 16% wysokości ekranu (było 10%).
+
 ## [0.11.0] — 2026-10-07
 
 ### Naprawione
