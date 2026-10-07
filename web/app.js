@@ -151,6 +151,7 @@ function press(a, fromPad) {
   if (S.modal === "osk") return oskInput(a);
   if (S.modal === "inst") return instInput(a);
   if (S.modal === "fbrowse") return fbInput(a);
+  if (S.modal === "sopt") return soInput(a);
   if (S.modal === "gopt") return goptInput(a);
   if (S.screen === "pads") return padsInput(a);
   if (S.screen === "profiles") return profilesInput(a);
@@ -169,6 +170,7 @@ function release(a) {
     const fired = aHold.fired;
     aHold = null;
     if (!fired && S.screen === "games" && !S.modal) launch();
+    if (!fired && S.screen === "systems" && !S.modal) openSystem();
   }
 }
 
@@ -214,14 +216,17 @@ function renderSystems() {
       (s.cached ? ` · ${s.cached} w pamięci podręcznej` : "") +
       (s.emulator ? ` · ${s.emulator}` : " · brak emulatora")
     : "";
-  setHints(n ? [["dpad", "System"], ["a", "Wybierz"], ["start", "Menu"]] : [["start", "Menu"]]);
+  setHints(n ? [["dpad", "System"], ["a", "Wybierz (przytrzymaj: opcje)"], ["start", "Menu"]] : [["start", "Menu"]]);
 }
 
 function systemsInput(a) {
   const n = S.systems.length;
   if (a === "left" && n) { S.sysIdx = (S.sysIdx - 1 + n) % n; renderSystems(); }
   else if (a === "right" && n) { S.sysIdx = (S.sysIdx + 1) % n; renderSystems(); }
-  else if (a === "a" && n) openSystem();
+  else if (a === "a" && n) {
+    // krótko = wejdź do systemu, przytrzymane = opcje systemu (logo, nazwa, emulator…)
+    aHold = { fired: false, timer: setTimeout(() => { if (aHold) { aHold.fired = true; openSystemOptions(); } }, LONG_PRESS) };
+  }
   else if (a === "start") openMenu();
 }
 

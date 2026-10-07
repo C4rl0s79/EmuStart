@@ -18,6 +18,18 @@ from emustart import paths
 
 ROUTES = {"/media/": paths.MEDIA, "/assets/": paths.ASSETS}
 
+# dodatkowe foldery tylko do odczytu (np. paczka logo, ikony RetroArcha) —
+# udostępniane jako /local/<n>/<ścieżka>, wyłącznie zarejestrowane
+LOCAL_ROOTS: list = []
+
+
+def local_url(root: Path, file: Path) -> str:
+    root = Path(root).resolve()
+    if root not in LOCAL_ROOTS:
+        LOCAL_ROOTS.append(root)
+    n = LOCAL_ROOTS.index(root)
+    return f"/local/{n}/" + urllib.parse.quote(str(Path(file).resolve().relative_to(root)).replace("\\", "/"))
+
 # tryb deweloperski (main.py --browser): UI w zwykłej przeglądarce woła API przez
 # POST /api/<metoda> zamiast mostu pywebview. Domyślnie wyłączony.
 DEV_API = None
@@ -48,6 +60,11 @@ class _Handler(BaseHTTPRequestHandler):
             if path.startswith(prefix):
                 base, rel = root, path[len(prefix):]
                 break
+        if path.startswith("/local/"):
+            n, _, rel = path[len("/local/"):].partition("/")
+            if not n.isdigit() or int(n) >= len(LOCAL_ROOTS):
+                return self.send_error(404)
+            base = LOCAL_ROOTS[int(n)]
         target = (base / rel).resolve()
         try:
             target.relative_to(base.resolve())

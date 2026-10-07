@@ -4,6 +4,23 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 [Keep a Changelog](https://keepachangelog.com/pl/1.1.0/), wersje według
 [SemVer](https://semver.org/lang/pl/).
 
+## [0.7.0] — 2026-10-07
+
+### Dodane
+- **Opcje systemu pod przytrzymanym A na logo w karuzeli** (krótkie A nadal
+  wchodzi do systemu):
+  - **Logo** — wybór padem z siatki propozycji: wbudowane, pobrane wcześniej,
+    motywy Art Book Next (ES-DE) i Carbon, paczka logo PyLinks
+    (`platform_logos\_variants`: białe / kolorowe / czarne, dopasowanie po
+    nazwach w stylu LaunchBox) oraz ikony z 9 motywów RetroArcha; także „bez
+    logo” (sama nazwa). Wybrane logo jest kopiowane do `data/media/_systems`.
+  - **Poświata logo** (włącz/wyłącz), **Nazwa** systemu (klawiatura ekranowa,
+    „Przywróć nazwę”), **Emulator** systemu, **Pobierz emulator** (gdy brak),
+    **Grafiki: pobierz brakujące** dla tego systemu, **Skanuj ponownie** tylko
+    ten system, **Ukryj system**.
+- Ustawienie `logo_pack_dir` — własny folder z paczką logo (domyślnie
+  `D:\py\PyLinks\platform_logos`).
+
 ## [0.6.1] — 2026-10-07
 
 ### Zmienione

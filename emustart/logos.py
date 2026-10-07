@@ -13,6 +13,7 @@ Pobrane trafiają do data/media/_systems/. Brak logo zapamiętujemy (plik .none)
 from __future__ import annotations
 
 import logging
+import re
 import shutil
 import threading
 from pathlib import Path
@@ -45,13 +46,165 @@ def downloaded(es: str) -> str:
     return ""
 
 
-def url_for(es: str) -> dict:
-    """{'url', 'glow'} — glow: pobrane logo bywają ciemne, UI dodaje im poświatę."""
+def custom(es: str) -> str:
+    for ext in ("svg", "png", "jpg", "webp"):
+        f = _dir() / f"{es}.custom.{ext}"
+        if f.is_file():
+            return f"/media/_systems/{es}.custom.{ext}?v={int(f.stat().st_mtime)}"
+    return ""
+
+
+def url_for(es: str, cfg: dict | None = None) -> dict:
+    """{'url', 'glow'}. Kolejność: wybrane ręcznie, wbudowane, pobrane.
+    glow: pobrane logo bywają ciemne, UI dodaje im poświatę (dla wybranych
+    ręcznie decyduje ustawienie systemu)."""
+    sc = ((cfg or {}).get("systems") or {}).get(es) or {}
+    choice = sc.get("logo", "")
+    if choice == "none":
+        return {"url": "", "glow": False}
+    if choice == "custom":
+        u = custom(es)
+        if u:
+            return {"url": u, "glow": bool(sc.get("logo_glow", False))}
     u = bundled(systems.info(es)["plat"])
     if u:
-        return {"url": u, "glow": False}
+        return {"url": u, "glow": bool(sc.get("logo_glow", False))}
     u = downloaded(es)
-    return {"url": u, "glow": bool(u)}
+    return {"url": u, "glow": bool(sc.get("logo_glow", bool(u)))}
+
+
+# ── ręczny wybór logo ──
+
+ARTBOOK = ("https://raw.githubusercontent.com/anthonycaccese/art-book-next-es-de/main/"
+           "_inc/systems/logos/{es}.svg")
+PACK_DEFAULT = Path(r"D:\py\PyLinks\platform_logos")
+PACK_LABELS = {"Light_Just_White": "białe", "Light_Color": "kolorowe", "Dark_Just_Black": "czarne"}
+RA_THEMES = ("systematic", "flatui", "flatux", "retrosystem", "pixel", "dot-art",
+             "monochrome", "daite", "automatic")
+_IMG = {".png", ".svg", ".jpg", ".jpeg", ".webp"}
+
+# nazwy platform w stylu LaunchBox (tak nazwane są pliki w paczkach logo)
+LB_NAMES = {
+    "psx": "Sony Playstation", "ps2": "Sony Playstation 2", "ps3": "Sony Playstation 3",
+    "psp": "Sony PSP", "psvita": "Sony Playstation Vita", "snes": "Super Nintendo Entertainment System",
+    "megadrive": "Sega Genesis", "mastersystem": "Sega Master System", "fbneo": "Final Burn Neo",
+    "tg16": "NEC TurboGrafx", "pcengine": "NEC PC Engine", "supergrafx": "NEC PC Engine SuperGrafx",
+    "gameandwatch": "Nintendo Game & Watch", "x360": "Microsoft Xbox 360",
+    "xbox360": "Microsoft Xbox 360", "3do": "3DO Interactive Multiplayer", "segacd": "Sega CD",
+    "ngp": "SNK Neo Geo Pocket", "ngpc": "SNK Neo Geo Pocket Color", "neogeo": "SNK Neo Geo AES",
+    "zxspectrum": "Sinclair ZX Spectrum", "msx": "Microsoft MSX", "msx2": "Microsoft MSX2",
+    "fds": "Nintendo Famicom Disk System", "wii": "Nintendo Wii", "gamecube": "Nintendo GameCube",
+    "dreamcast": "Sega Dreamcast", "saturn": "Sega Saturn", "atarijaguar": "Atari Jaguar",
+}
+
+
+def _clean(stem: str) -> str:
+    """'Atari 2600-01-05' → 'Atari 2600'; 'Sony Playstation 3-,07' → 'Sony Playstation 3'."""
+    s = re.sub(r"(?:[\s,;._']*-+[\s,;._']*\d{1,2}(?:\s*\(\d\))?)+$", "", stem)
+    return s.strip(" -_.,;'")
+
+
+def pack_dirs(cfg: dict) -> list:
+    """[(folder, etykieta)] paczek logo: ustawienie `logo_pack_dir` albo paczka PyLinks."""
+    root = Path(cfg.get("logo_pack_dir") or PACK_DEFAULT)
+    out = []
+    if (root / "_variants").is_dir():
+        root = root / "_variants"
+    if root.is_dir():
+        subs = [d for d in sorted(root.iterdir()) if d.is_dir() and not d.name.startswith("_")]
+        out += [(d, PACK_LABELS.get(d.name, d.name)) for d in subs]
+        if any(f.suffix.lower() in _IMG for f in root.iterdir() if f.is_file()):
+            out.append((root, "paczka"))
+    return out
+
+
+def candidates(cfg: dict, es: str) -> list:
+    """Propozycje logo: [{id, url, source, label}]. `id` przekazuje się do choose()."""
+    from emustart import art_sources, server
+    info = systems.info(es)
+    out = []
+    b = bundled(info["plat"])
+    if b:
+        out.append({"id": "bundled", "url": b, "source": "wbudowane", "label": info["plat"]})
+    d = downloaded(es)
+    if d:
+        out.append({"id": "downloaded", "url": d, "source": "pobrane wcześniej", "label": es})
+    for tpl, src in ((ARTBOOK, "Art Book Next"), (CARBON, "Carbon")):
+        u = tpl.format(es=es)
+        if _exists(u):                       # pustych ramek (404) nie pokazujemy
+            out.append({"id": "url:" + u, "url": u, "source": src, "label": es})
+    targets = [t for t in {info["display"], info["libretro"].replace(" - ", " "),
+                           LB_NAMES.get(es, "")} if t]
+    scored = []
+    for folder, label in pack_dirs(cfg):
+        for f in folder.iterdir():
+            if f.suffix.lower() not in _IMG:
+                continue
+            name = _clean(f.stem)
+            sc = max(art_sources.similarity(name, t) for t in targets)
+            if sc >= 0.72:
+                scored.append((sc, f, folder, label, name))
+    scored.sort(key=lambda x: (-x[0], x[3], x[1].name.lower()))
+    for sc, f, folder, label, name in scored[:60]:
+        out.append({"id": "file:" + str(f), "url": server.local_url(folder, f),
+                    "source": f"paczka ({label})", "label": name})
+    ra = Path(cfg.get("emu_root") or "") / "RetroArch" / "assets" / "xmb"
+    for theme in RA_THEMES:
+        f = ra / theme / "png" / f"{info['libretro']}.png"
+        if f.is_file():
+            out.append({"id": "file:" + str(f), "url": server.local_url(ra, f),
+                        "source": f"RetroArch ({theme})", "label": info["libretro"]})
+    return out
+
+
+def _exists(url: str) -> bool:
+    import urllib.request
+    try:
+        req = urllib.request.Request(url, method="HEAD", headers=art_sources.UA)
+        with urllib.request.urlopen(req, timeout=8) as r:
+            return r.status == 200
+    except Exception:
+        return False
+
+
+def choose(cfg: dict, es: str, cid: str) -> bool:
+    """Zapisuje wybrane logo jako <es>.custom.<ext> i ustawia je dla systemu."""
+    sc = cfg.setdefault("systems", {}).setdefault(es, {})
+    if cid in ("bundled", "downloaded", "default"):
+        sc["logo"] = ""
+        if cid == "downloaded":
+            # pobrane wygrywa z wbudowanym tylko jako kopia ręcznie wybrana
+            for ext in ("svg", "png"):
+                f = _dir() / f"{es}.{ext}"
+                if f.is_file():
+                    _store_custom(es, f.read_bytes(), ext)
+                    sc["logo"] = "custom"
+        return True
+    if cid == "none":
+        sc["logo"] = "none"
+        return True
+    if cid.startswith("url:"):
+        data = art_sources.fetch(cid[4:], timeout=20)
+        if not data or (b"<svg" not in data[:3000] and not art_sources.is_image(data)):
+            return False
+        _store_custom(es, data, "svg" if b"<svg" in data[:3000] else "png")
+    elif cid.startswith("file:"):
+        f = Path(cid[5:])
+        if not f.is_file() or f.suffix.lower() not in _IMG:
+            return False
+        _store_custom(es, f.read_bytes(), f.suffix.lower().lstrip("."))
+    else:
+        return False
+    sc["logo"] = "custom"
+    return True
+
+
+def _store_custom(es: str, data: bytes, ext: str) -> None:
+    d = _dir()
+    d.mkdir(parents=True, exist_ok=True)
+    for old in d.glob(f"{es}.custom.*"):
+        old.unlink(missing_ok=True)
+    (d / f"{es}.custom.{ext}").write_bytes(data)
 
 
 def fetch_missing(cfg: dict, es_list) -> None:

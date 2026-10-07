@@ -514,3 +514,126 @@ async function fbInput(a) {
   else if (a === "start") return fbClose(null);
   renderFb();
 }
+
+
+/* ───────────── opcje systemu (przytrzymane A na logo) ───────────── */
+const SO = { es: "", d: null, page: "main", idx: 0, items: [], logos: null };
+
+async function openSystemOptions() {
+  const s = S.systems[S.sysIdx];
+  if (!s) return;
+  SO.es = s.es;
+  SO.d = await api().system_options(s.es);
+  SO.page = "main"; SO.idx = 0;
+  S.modal = "sopt";
+  $("sopt").classList.remove("hidden");
+  renderSo();
+}
+async function reloadSo(page = SO.page) {
+  SO.d = await api().system_options(SO.es);
+  SO.page = page;
+  await refreshState();
+  renderSo();
+}
+function closeSo() {
+  S.modal = null;
+  $("sopt").classList.add("hidden");
+  show("systems");
+}
+function soItems() {
+  const d = SO.d;
+  if (SO.page === "main") {
+    const items = [
+      { label: "Logo", value: d.logo_choice === "custom" ? "wybrane ręcznie" : d.logo_choice === "none" ? "bez logo (nazwa)" : d.logo ? "domyślne" : "brak", act: openLogoPicker },
+      { label: "Poświata logo", value: d.glow ? "tak" : "nie", act: async () => { await api().system_set(SO.es, { glow: !d.glow }); await reloadSo(); } },
+      { label: "Nazwa", value: d.display, act: () => oskOpen("Nazwa systemu", d.display, async (v) => { await api().system_set(SO.es, { name: v }); await reloadSo(); }) },
+    ];
+    if (d.display !== d.default_name) items.push({ label: "Przywróć nazwę", value: d.default_name, act: async () => { await api().system_set(SO.es, { name: "" }); await reloadSo(); } });
+    items.push({ label: "Emulator", value: d.emulator || "brak", act: () => d.options.length ? soPage("emus") : toast("Brak zainstalowanych emulatorów dla tego systemu.") });
+    if (d.install.length) items.push({ label: "Pobierz emulator", value: d.install.map((s) => s.label).join(" + "), act: () => {
+      closeSo();
+      INST.mode = "confirm"; INST.es = [SO.es]; INST.after = null;
+      instOpen(`Pobierz emulator: ${d.display}`, stepList(d.install), [["a", "Pobierz"], ["b", "Anuluj"]]);
+    } });
+    items.push({ label: "Grafiki: pobierz brakujące", value: "okładki i zrzuty tego systemu", act: async () => {
+      const r = await api().art_start(SO.es); closeSo(); if (!r.ok) return toast(r.reason); openArt(); } });
+    items.push({ label: "Skanuj ponownie", value: "tylko ten system", act: async () => {
+      const r = await api().system_rescan(SO.es); toast(r.ok ? "Skanuję… lista odświeży się za chwilę." : r.reason);
+      setTimeout(async () => { await refreshState(); if (S.screen === "systems" && !S.modal) renderSystems(); }, 4000); } });
+    items.push({ label: "Ukryj system", value: "przywrócisz w Ustawieniach", act: async () => {
+      await api().system_set(SO.es, { enabled: false }); closeSo(); await refreshState(); show("systems"); toast(`Ukryto: ${d.display}`); } });
+    return items;
+  }
+  if (SO.page === "emus") return d.options.map((o) => ({
+    label: o.label, value: o.label === d.emulator ? "✓" : "",
+    act: async () => { await api().system_set(SO.es, { emulator: o }); await reloadSo("main"); toast(`${d.display}: ${o.label}`); },
+  }));
+  return [];
+}
+function soPage(p) { SO.page = p; SO.idx = 0; renderSo(); }
+function renderSo() {
+  const d = SO.d;
+  $("soTitle").textContent = d.display;
+  $("soPage").textContent = { main: "Opcje systemu", emus: "Emulator systemu", logo: "Logo systemu" }[SO.page];
+  const isLogo = SO.page === "logo";
+  $("soItems").classList.toggle("hidden", isLogo);
+  $("soLogo").classList.toggle("hidden", !isLogo);
+  if (isLogo) return renderLogoPicker();
+  SO.items = soItems();
+  SO.idx = Math.min(SO.idx, SO.items.length - 1);
+  $("soItems").innerHTML = SO.items.map((it, i) =>
+    `<li class="${i === SO.idx ? "sel" : ""}" data-i="${i}"><span>${esc(it.label)}</span><span class="gv">${esc(it.value || "")}</span></li>`).join("");
+  $("soItems").querySelectorAll("li").forEach((li) => li.addEventListener("click", () => { SO.idx = +li.dataset.i; soInput("a"); }));
+  $("soItems").querySelector("li.sel")?.scrollIntoView({ block: "nearest" });
+  setHints([["a", "Wybierz"], ["b", SO.page === "main" ? "Zamknij" : "Wstecz"]], $("soHints"));
+}
+async function openLogoPicker() {
+  SO.page = "logo";
+  SO.logos = { list: null, idx: 0 };
+  renderSo();
+  const list = await api().system_logo_candidates(SO.es);
+  if (SO.page !== "logo") return;
+  SO.logos.list = [{ id: "none", url: "", source: "bez logo", label: "pokaż nazwę" }, ...list];
+  const cur = SO.logos.list.findIndex((c) => c.url && SO.d.logo && SO.d.logo.split("?")[0].endsWith(c.url.split("/").pop()));
+  SO.logos.idx = cur > 0 ? cur : 1;
+  renderSo();
+}
+function renderLogoPicker() {
+  const L = SO.logos, grid = $("soLogoGrid");
+  $("soLogoInfo").textContent = L.list === null ? "Szukam logo…" : `${L.list.length - 1} propozycji`;
+  grid.innerHTML = (L.list || []).map((c, i) =>
+    `<figure class="${i === L.idx ? "sel" : ""}${c.id === "none" ? " none" : ""}" data-i="${i}">` +
+    `<img src="${esc(c.url)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.closest('figure').classList.add('broken')">` +
+    `<figcaption>${esc(c.source)}<br><small>${esc(c.label)}</small></figcaption></figure>`).join("");
+  grid.querySelectorAll("figure").forEach((f) => f.addEventListener("click", () => { L.idx = +f.dataset.i; soInput("a"); }));
+  grid.querySelector("figure.sel")?.scrollIntoView({ block: "nearest" });
+  setHints([["a", "Ustaw"], ["b", "Wstecz"]], $("soHints"));
+}
+async function soInput(a) {
+  if (SO.page === "logo") {
+    const L = SO.logos, n = (L.list || []).length;
+    const f = $("soLogoGrid").querySelector("figure");
+    const cols = f ? Math.max(1, Math.round($("soLogoGrid").clientWidth / f.getBoundingClientRect().width)) : 4;
+    if (a === "b") return soPage("main");
+    if (!n) return;
+    if (a === "left") L.idx = Math.max(0, L.idx - 1);
+    else if (a === "right") L.idx = Math.min(n - 1, L.idx + 1);
+    else if (a === "up") L.idx = Math.max(0, L.idx - cols);
+    else if (a === "down") L.idx = Math.min(n - 1, L.idx + cols);
+    else if (a === "a") {
+      const c = L.list[L.idx];
+      const r = await api().system_logo_choose(SO.es, c.id);
+      if (!r.ok) return toast(r.reason || "Nie udało się ustawić logo.");
+      toast("Logo zmienione.");
+      $("carousel").innerHTML = "";            // karuzela narysuje się od nowa z nowym logo
+      return reloadSo("main");
+    }
+    return renderLogoPicker();
+  }
+  const n = SO.items.length;
+  if (a === "up") SO.idx = (SO.idx - 1 + n) % n;
+  else if (a === "down") SO.idx = (SO.idx + 1) % n;
+  else if (a === "b") return SO.page === "main" ? closeSo() : soPage("main");
+  else if (a === "a") return SO.items[SO.idx]?.act();
+  renderSo();
+}

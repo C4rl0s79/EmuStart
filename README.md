@@ -56,6 +56,13 @@ emulator albo RetroArch + rdzeń). Wszystkie brakujące naraz: Ustawienia →
 **Pobierz brakujące emulatory**. Instalacja trafia do folderu emulatorów
 z ustawień (np. `D:\emu\emulatory\<Emulator>`).
 
+## Opcje systemu (przytrzymaj A na logo)
+
+Na karuzeli systemów **przytrzymane A** otwiera opcje systemu: wybór logo
+(wbudowane, Art Book Next, Carbon, paczka logo PyLinks, ikony RetroArcha albo
+sama nazwa), poświata logo, nazwa, emulator, pobranie emulatora, grafiki,
+ponowny skan i ukrycie systemu.
+
 ## Opcje gry (przytrzymaj A)
 
 Krótkie **A** uruchamia grę, **przytrzymane A** (0,6 s) otwiera opcje:

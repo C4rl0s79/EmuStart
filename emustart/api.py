@@ -89,8 +89,8 @@ class Api:
             emu = (self._cfg.get("systems") or {}).get(s["es"]) or {}
             if not emu.get("enabled", True) or not s["games"]:
                 continue
-            lg = logos.url_for(s["es"])
-            out.append({"es": s["es"], "display": s["display"], "games": s["games"],
+            lg = logos.url_for(s["es"], self._cfg)
+            out.append({"es": s["es"], "display": emu.get("name") or s["display"], "games": s["games"],
                         "cached": s["cached"], "logo": lg["url"], "logo_glow": lg["glow"],
                         "emulator": emu.get("label", ""), "kind": info["kind"]})
         return out
@@ -395,6 +395,62 @@ class Api:
         if g:
             art.media_path(g["es"], g["name"], kind).unlink(missing_ok=True)
             library.set_art(g["id"], kind, art.MISSING)
+        return {"ok": True}
+
+    # ── opcje systemu (przytrzymane A na logo) ──
+    def system_options(self, es: str) -> dict:
+        info = systems.info(es)
+        sc = (self._cfg.get("systems") or {}).get(es) or {}
+        lg = logos.url_for(es, self._cfg)
+        has_emu = bool(sc.get("exe") and Path(sc["exe"]).is_file())
+        return {"es": es, "display": sc.get("name") or info["display"],
+                "default_name": info["display"], "logo": lg["url"], "glow": lg["glow"],
+                "logo_choice": sc.get("logo", ""), "emulator": sc.get("label", "") if has_emu else "",
+                "options": emulators.options_for(info, self._cfg.get("emu_root", "")),
+                "install": installer.plan_for(es, self._cfg.get("emu_root", "")) if not has_emu else []}
+
+    def system_set(self, es: str, data: dict) -> dict:
+        sc = self._cfg.setdefault("systems", {}).setdefault(es, {})
+        if "name" in data:
+            name = str(data["name"] or "").strip()
+            if name and name != systems.info(es)["display"]:
+                sc["name"] = name
+            else:
+                sc.pop("name", None)
+        if "glow" in data:
+            sc["logo_glow"] = bool(data["glow"])
+        if "enabled" in data:
+            sc["enabled"] = bool(data["enabled"])
+        if data.get("emulator"):
+            o = data["emulator"]
+            sc.update(label=o["label"], exe=o["exe"], args=o.get("args", ""), enabled=True)
+        config.save(self._cfg)
+        return {"ok": True}
+
+    def system_logo_candidates(self, es: str) -> list:
+        return logos.candidates(self._cfg, es)
+
+    def system_logo_choose(self, es: str, cid: str) -> dict:
+        ok = logos.choose(self._cfg, es, cid)
+        if ok:
+            sc = self._cfg["systems"][es]
+            sc.setdefault("logo_glow", False)
+            config.save(self._cfg)
+        return {"ok": ok, **logos.url_for(es, self._cfg)} if ok else             {"ok": False, "reason": "Nie udało się pobrać tego logo."}
+
+    def system_rescan(self, es: str) -> dict:
+        """Ponowny skan jednego systemu (w tle)."""
+        found, _u = scanner.collect_systems(self._cfg)
+        dirs = found.get(es)
+        if not dirs:
+            return {"ok": False, "reason": "Folder systemu jest niedostępny."}
+
+        def run():
+            try:
+                scanner.scan_system(es, dirs)
+            except Exception:
+                log.exception("skan %s", es)
+        threading.Thread(target=run, daemon=True, name="scan-one").start()
         return {"ok": True}
 
     # ── pobieranie emulatorów ──

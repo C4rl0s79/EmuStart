@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from emustart import ingame, library, metadata, pads, profiles
+from emustart import ingame, library, metadata, pads, paths, profiles
 
 from test_core import _write, env  # noqa: F401  (fixture)
 
@@ -201,3 +201,20 @@ def test_installer_plan_and_core_install_offline(env, tmp_path, monkeypatch):
     assert job.status()["errors"] == []
     assert (root / "RetroArch" / "cores" / "handy_libretro.dll").read_bytes() == b"DLL"
     assert cfg["systems"]["lynx"]["label"] == "RetroArch: Handy"
+
+
+def test_system_logo_choice(env, tmp_path, monkeypatch):
+    from emustart import logos
+    monkeypatch.setattr(paths, "MEDIA", tmp_path / "media")
+    monkeypatch.setattr(logos, "_exists", lambda url: False)          # bez sieci
+    pack = tmp_path / "pack" / "_variants" / "Light_Just_White"
+    _write(pack / "Sony Playstation-03.png", b"\x89PNG\r\n\x1a\nWHITE")
+    _write(pack / "Sega Saturn-01.png", b"\x89PNG\r\n\x1a\nX")
+    cfg = {"logo_pack_dir": str(tmp_path / "pack"), "emu_root": str(tmp_path / "emu"), "systems": {}}
+    c = [x for x in logos.candidates(cfg, "psx") if x["source"].startswith("paczka")]
+    assert [x["label"] for x in c] == ["Sony Playstation"] and c[0]["source"] == "paczka (białe)"
+    assert logos.choose(cfg, "psx", c[0]["id"])
+    u = logos.url_for("psx", cfg)
+    assert "/media/_systems/psx.custom.png" in u["url"]
+    assert logos.choose(cfg, "psx", "none") and logos.url_for("psx", cfg)["url"] == ""
+    assert not logos.choose(cfg, "psx", "file:" + str(tmp_path / "x.exe"))   # tylko obrazy

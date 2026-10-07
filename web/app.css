@@ -252,3 +252,10 @@ img { display: block; }
 
 /* pobrane logo (Carbon/RetroArch) bywają ciemne — jasna poświata na ciemnym tle */
 img.glow { filter: drop-shadow(0 0 1px rgba(255,255,255,.9)) drop-shadow(0 0 6px rgba(255,255,255,.35)) !important; }
+
+/* ── wybór logo systemu ── */
+.logogrid { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
+.logogrid img { aspect-ratio: 16 / 9; background: #0b0d12; padding: 10px; }
+.logogrid figure.none img { visibility: hidden; }
+.logogrid figure.none figcaption { position: relative; top: -3.5em; text-align: center; color: var(--text); }
+.logogrid figure.broken { display: none; }
