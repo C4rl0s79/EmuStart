@@ -11,6 +11,7 @@
   <div class="brand">Emu<b>Start</b></div>
   <div class="status">
     <span id="copyInfo" class="pill hidden"></span>
+    <span id="profInfo" class="pill"></span>
     <span id="netInfo" class="pill"></span>
     <span id="clock"></span>
   </div>
@@ -49,6 +50,7 @@
         <h1 id="pvTitle"></h1>
         <p id="pvTags" class="tags"></p>
         <dl id="pvMeta"></dl>
+        <div id="pvDesc" class="desc"></div>
       </div>
     </div>
   </div>
@@ -71,6 +73,44 @@
   </div>
   <div class="setlist" id="artList"></div>
 </section>
+
+<!-- kolejność padów -->
+<section id="pads" class="screen hidden">
+  <h1>Kolejność padów</h1>
+  <p id="padPrompt" class="padprompt hidden"></p>
+  <div class="setlist" id="padList"></div>
+</section>
+
+<!-- profile -->
+<section id="profiles" class="screen hidden">
+  <h1 id="profTitle">Kto gra?</h1>
+  <div class="pcards" id="profCards"></div>
+</section>
+
+<!-- opcje gry (przytrzymane A) -->
+<div id="gopt" class="modal hidden">
+  <div class="panel wide gopanel">
+    <p class="lsys" id="goPage"></p>
+    <h2 id="goTitle"></h2>
+    <ul id="goItems" class="menulist golist"></ul>
+    <div id="goArt" class="hidden">
+      <p id="goArtInfo" class="lmsg"></p>
+      <div id="goArtGrid" class="artgrid"></div>
+    </div>
+    <div class="hints" id="goHints"></div>
+  </div>
+</div>
+
+<!-- klawiatura ekranowa -->
+<div id="osk" class="modal hidden">
+  <div class="panel wide">
+    <h2 id="oskTitle"></h2>
+    <input id="oskInput" class="oskfield" autocomplete="off" spellcheck="false">
+    <textarea id="oskArea" class="oskfield hidden" rows="6"></textarea>
+    <div id="oskKeys" class="oskkeys"></div>
+    <div class="hints" id="oskHints"></div>
+  </div>
+</div>
 
 <!-- menu Start -->
 <div id="menu" class="modal hidden">
@@ -125,5 +165,6 @@
 <div id="toast" class="toast hidden"></div>
 
 <script src="app.js"></script>
+<script src="options.js"></script>
 </body>
 </html>

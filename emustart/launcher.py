@@ -23,7 +23,8 @@ import time
 import zipfile
 from pathlib import Path
 
-from emustart import arcade, cache, emulators, hotkey, ingame, library, paths, systems, winutil
+from emustart import (arcade, cache, emulators, hotkey, ingame, library, pads,
+                      paths, profiles, systems, winutil)
 
 log = logging.getLogger("emustart.launcher")
 
@@ -39,7 +40,7 @@ class Session:
     """Jedno uruchomienie gry. UI odpytuje `status()`."""
 
     def __init__(self, cfg: dict, game_id: int, profile_id: int,
-                 on_running=None, on_finished=None, ui=None):
+                 on_running=None, on_finished=None, ui=None, start_state: str = ""):
         self.cfg = cfg
         self.game_id = game_id
         self.profile_id = profile_id
@@ -57,6 +58,8 @@ class Session:
         self.ui = ui                    # menu w grze (api.Api); None = bez menu
         self.menu: hotkey.GameMenu | None = None
         self.resumed = False
+        self.start_state = start_state  # stan wybrany ręcznie w opcjach gry
+        self.profiles_on = True         # wyłączane w testach
         self.game = library.game(game_id) or {}
         self.run_dir = paths.RUN_TMP / f"{game_id}_{int(time.time())}"
         self.thread = threading.Thread(target=self._run, daemon=True, name="launch")
@@ -109,6 +112,9 @@ class Session:
         es = g["es"]
         info = systems.info(es)
         emu = (self.cfg.get("systems") or {}).get(es) or {}
+        own = library.db().execute("SELECT * FROM game_emu WHERE game_id=?", (g["id"],)).fetchone()
+        if own and Path(own["exe"]).is_file():
+            emu = {"exe": own["exe"], "args": own["args"], "label": own["label"]}
         exe = emu.get("exe") or ""
         if not exe or not Path(exe).is_file():
             raise LaunchError(f"Brak emulatora dla systemu {info['display']}. "
@@ -248,16 +254,95 @@ class Session:
     def _play(self, g: dict, exe: str, args: str, rom: Path) -> None:
         cmd = emulators.build_command(exe, args, str(rom))
         adapter = ingame.adapter_for(exe)
-        resume = library.get_resume(self.profile_id, g["id"])
-        if resume and resume["family"] != adapter.family:
-            resume = None              # stan zapisał inny emulator — nie wczytamy go
-        if resume and resume["path"] and not Path(resume["path"]).is_file():
+        order = pads.order(self.cfg)
+        if self.start_state and Path(self.start_state).is_file():
+            # stan wybrany ręcznie ma pierwszeństwo przed stanem wznowienia
             resume = None
-        extra = adapter.launch_args(self.run_dir, bool(resume))
-        if resume and resume["path"]:
-            extra += adapter.resume_args(Path(resume["path"]))
+            extra = adapter.start_state_args(self.run_dir, Path(self.start_state), order)
+        else:
+            resume = library.get_resume(self.profile_id, g["id"])
+            if resume and resume["family"] != adapter.family:
+                resume = None              # stan zapisał inny emulator — nie wczytamy go
+            if resume and resume["path"] and not Path(resume["path"]).is_file():
+                resume = None
+            extra = adapter.launch_args(self.run_dir, bool(resume), order)
+            if resume and resume["path"]:
+                extra += adapter.resume_args(Path(resume["path"]))
         cmd[1:1] = extra
         self.resumed = bool(resume)
+
+        save_names = self._profile_prepare(adapter)
+        restore_pads = None
+        if not pads.is_identity(order):
+            try:
+                restore_pads = adapter.remap_pads(order)
+            except Exception:
+                log.exception("przepinanie padów")
+        started_at = time.time()
+        try:
+            self._run_process(g, exe, cmd, adapter)
+        finally:
+            if restore_pads:
+                try:
+                    restore_pads()
+                except Exception:
+                    log.exception("przywracanie padów")
+            self._profile_finish(adapter, save_names)
+            self._learn_states(g, adapter, started_at)
+        self.phase = "finished"
+        cache.enforce_limit(self.cfg, keep_ids=(g["id"],))
+
+    # ── profile: save'y emulatora na czas gry należą do profilu ──
+    def _profile_prepare(self, adapter) -> list:
+        dirs = adapter.save_dirs() if self.profiles_on else []
+        if not dirs:
+            return []
+        host = profiles.lock(self.cfg, self.profile_id)
+        if host:
+            prof = profiles.get(self.profile_id) or {}
+            raise LaunchError(f"Profil „{prof.get('name', '?')}” gra teraz na komputerze {host}. "
+                              "Wybierz inny profil albo zakończ tamtą grę.")
+        names = [d.name for d in dirs]
+        try:
+            n = profiles.sync_down(self.cfg, self.profile_id, adapter.family, names)
+            if n:
+                log.info("pobrano z NAS %d plików save'ów", n)
+            for d in dirs:
+                profiles.attach(self.profile_id, adapter.family, d)
+        except Exception:
+            log.exception("podpinanie save'ów profilu")
+        return names
+
+    def _profile_finish(self, adapter, names: list) -> None:
+        if not names:
+            return
+        try:
+            n = profiles.sync_up(self.cfg, self.profile_id, adapter.family, names)
+            if n:
+                log.info("wysłano na NAS %d plików save'ów", n)
+        except Exception:
+            log.exception("synchronizacja save'ów")
+        profiles.unlock(self.cfg, self.profile_id)
+
+    def _learn_states(self, g: dict, adapter, since: float) -> None:
+        """Zapamiętuje, jak nazywają się pliki stanów tej gry (np. GALE01.s01 →
+        „GALE01.”), żeby opcje gry mogły je potem wylistować."""
+        try:
+            for d in adapter.state_dirs():
+                if not d.is_dir():
+                    continue
+                for f in d.rglob("*"):
+                    if f.is_file() and f.stat().st_mtime >= since - 1:
+                        prefix = adapter.prefix_of(f.name)
+                        if prefix:
+                            with library.db() as c:
+                                c.execute("INSERT OR REPLACE INTO states VALUES(?,?,?,?)",
+                                          (self.profile_id, g["id"], adapter.family, prefix))
+                            return
+        except Exception:
+            log.exception("stany")
+
+    def _run_process(self, g: dict, exe: str, cmd: list, adapter) -> None:
         log.info("start: %s", cmd)
         self.phase, self.message = "running", ""
         t0 = time.monotonic()
@@ -285,8 +370,6 @@ class Session:
         if seconds < 3 and self.proc.returncode not in (0, None):
             raise LaunchError(f"Emulator zakończył się od razu (kod {self.proc.returncode}). "
                               "Sprawdź emulator i argumenty w ustawieniach.")
-        self.phase = "finished"
-        cache.enforce_limit(self.cfg, keep_ids=(g["id"],))
 
     def kill(self) -> None:
         if self.proc and self.proc.poll() is None:

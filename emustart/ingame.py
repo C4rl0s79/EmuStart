@@ -47,6 +47,111 @@ def _qt_key(binding: str) -> str:
     return "+".join(k for k in keys if k in winutil.VK)
 
 
+def _serial(meta: dict) -> str:
+    """Numer seryjny w formie, jakiej używają emulatory: 'SCUS-94228'
+    (baza RetroArcha bywa z sufiksem: 'SCUS-94228CE', '51131-0')."""
+    m = re.search(r"[A-Z]{4}-\d{3,5}", meta.get("serial") or "")
+    return m.group(0) if m else ""
+
+
+def ini_edit(path: Path, changes: dict) -> dict:
+    """Zmienia wartości {(sekcja, klucz): wartość} w pliku ini, zachowując resztę
+    pliku bez zmian. Zwraca poprzednie wartości (do przywrócenia)."""
+    try:
+        lines = path.read_text(encoding="utf-8-sig").splitlines(keepends=True)
+    except OSError:
+        return {}
+    section, old = None, {}
+    for i, line in enumerate(lines):
+        m = re.match(r"^\s*\[(.+?)\]\s*$", line)
+        if m:
+            section = m.group(1)
+            continue
+        m = re.match(r"^(\s*)([^=;#]+?)(\s*=\s*)(.*?)(\r?\n?)$", line)
+        if m and (section, m.group(2)) in changes:
+            key = (section, m.group(2))
+            new = changes[key]
+            if new != m.group(4):
+                old[key] = m.group(4)
+                lines[i] = f"{m.group(1)}{m.group(2)}{m.group(3)}{new}{m.group(5)}"
+    if old:
+        tmp = path.with_name(path.name + ".emustart-tmp")
+        tmp.write_text("".join(lines), encoding="utf-8")
+        os.replace(tmp, path)
+    return old
+
+
+def ini_section(path: Path, section: str) -> dict:
+    out, cur = {}, None
+    try:
+        text = path.read_text(encoding="utf-8-sig")
+    except OSError:
+        return out
+    for line in text.splitlines():
+        m = re.match(r"^\s*\[(.+?)\]\s*$", line)
+        if m:
+            cur = m.group(1)
+        elif cur == section:
+            m = re.match(r"^\s*([^=;#]+?)\s*=\s*(.*?)\s*$", line)
+            if m:
+                out[m.group(1)] = m.group(2)
+    return out
+
+
+def _restore_file() -> Path:
+    return paths.DATA / "pad_restore.json"
+
+
+def _remember_restore(path: Path, old: dict) -> None:
+    """Zapis oryginałów na dysku — gdyby EmuStart padł w trakcie gry, przy
+    następnym starcie przywrócimy ustawienia padów (restore_pending)."""
+    import json
+    try:
+        data = json.loads(_restore_file().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        data = {}
+    data.setdefault(str(path), []).extend([k[0], k[1], v] for k, v in old.items())
+    _restore_file().parent.mkdir(parents=True, exist_ok=True)
+    _restore_file().write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+
+
+def restore_pending() -> None:
+    import json
+    try:
+        data = json.loads(_restore_file().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return
+    for path, items in data.items():
+        changes = {}
+        for sec, key, val in reversed(items):        # najstarsza wartość wygrywa
+            changes[(sec, key)] = val
+        ini_edit(Path(path), changes)
+        log.info("przywrócono ustawienia padów: %s", path)
+    _restore_file().unlink(missing_ok=True)
+
+
+def _remap_sdl_ini(path: Path, section_fmt: str, order: list, players: int = 4):
+    """[Pad1]… DuckStation/PCSX2: SDL-n / XInput-n → slot gracza z `order`."""
+    changes = {}
+    for p, slot in enumerate(order[:players]):
+        sec = section_fmt.format(p + 1)
+        for k, v in ini_section(path, sec).items():
+            nv = re.sub(r"\b(SDL|XInput)-\d+/", lambda m: f"{m.group(1)}-{slot}/", v)
+            if nv != v:
+                changes[(sec, k)] = nv
+    if not changes:
+        return None
+    old = ini_edit(path, changes)
+    if not old:
+        return None
+    _remember_restore(path, old)
+
+    def restore():
+        ini_edit(path, old)
+        _restore_file().unlink(missing_ok=True)
+    return restore
+
+
 def _newest(dirs, pattern: str, since: float) -> Path | None:
     best = None
     for d in dirs:
@@ -91,8 +196,28 @@ class Adapter:
     def resume_args(self, state: Path) -> list:
         return []
 
-    def launch_args(self, run_dir: Path, resume: bool) -> list:
+    def launch_args(self, run_dir: Path, resume: bool, pad_order: list | None = None) -> list:
         return []
+
+    def save_dirs(self) -> list:
+        """Foldery save'ów i stanów, które profil podpina jako własne."""
+        return []
+
+    def state_patterns(self, game: dict, meta: dict) -> list:
+        """Wzorce nazw plików stanów tej gry (glob, w state_dirs)."""
+        return []
+
+    def prefix_of(self, filename: str) -> str:
+        """Wspólny początek nazw stanów gry, wyliczony z nazwy jednego pliku."""
+        return ""
+
+    def start_state_args(self, run_dir: Path, state: Path, pad_order: list | None = None) -> list:
+        """Parametry startu z wybranym plikiem stanu (zastępują launch_args)."""
+        return self.launch_args(run_dir, False, pad_order) + self.resume_args(state)
+
+    def remap_pads(self, order: list):
+        """Przepina pady wg `order`; zwraca funkcję przywracającą albo None."""
+        return None
 
     # akcje (emulator ma fokus)
     def pause(self) -> None:
@@ -150,23 +275,47 @@ class RetroArch(Adapter):
         self._cmd("LOAD_STATE")
 
     def state_dirs(self) -> list:
-        d = _ini_value(self.home / "retroarch.cfg", "savestate_directory")
-        d = d.replace(":\\", str(self.home) + "\\", 1) if d.startswith(":") else d
-        return [Path(d)] if d else [self.home / "states"]
+        return [self._cfg_dir("savestate_directory", "states")]
 
-    def launch_args(self, run_dir: Path, resume: bool) -> list:
+    def launch_args(self, run_dir: Path, resume: bool, pad_order: list | None = None) -> list:
         run_dir.mkdir(parents=True, exist_ok=True)
         cfg = run_dir / "emustart_ra.cfg"
         # config_save_on_exit=false: RetroArch nie zapisze tych ustawień sesji
         # do Twojego retroarch.cfg
-        cfg.write_text("\n".join([
+        lines = [
             'network_cmd_enable = "true"',
             f'network_cmd_port = "{RA_PORT}"',
             'config_save_on_exit = "false"',
             'savestate_auto_save = "true"',
             f'savestate_auto_load = "{"true" if resume else "false"}"',
-        ]) + "\n", encoding="utf-8")
+        ]
+        # sterownik xinput: indeks pada = slot XInput
+        for p, slot in enumerate((pad_order or [])[:4]):
+            lines.append(f'input_player{p + 1}_joypad_index = "{slot}"')
+        cfg.write_text("\n".join(lines) + "\n", encoding="utf-8")
         return ["--appendconfig", str(cfg)]
+
+    def _cfg_dir(self, key: str, default: str) -> Path:
+        d = _ini_value(self.home / "retroarch.cfg", key)
+        if d.startswith(":"):
+            d = str(self.home) + d[1:]
+        return Path(d) if d and d != "default" else self.home / default
+
+    def save_dirs(self) -> list:
+        return [self._cfg_dir("savefile_directory", "saves"),
+                self._cfg_dir("savestate_directory", "states")]
+
+    def state_patterns(self, game: dict, meta: dict) -> list:
+        stems = {Path(game["rel"]).stem, game["name"]}
+        return [f"{s}.state*" for s in stems]
+
+    def start_state_args(self, run_dir: Path, state: Path, pad_order: list | None = None) -> list:
+        name = state.name
+        if name.endswith(".auto"):
+            return self.launch_args(run_dir, True, pad_order)
+        m = re.search(r"\.state(\d*)$", name)
+        slot = int(m.group(1)) if m and m.group(1) else 0
+        return self.launch_args(run_dir, False, pad_order) + [f"--entryslot={slot}"]
 
     def quit(self, proc) -> None:
         self._cmd("QUIT")
@@ -198,6 +347,19 @@ class DuckStation(Adapter):
     def pause(self) -> None:
         winutil.send_keys(_qt_key(_ini_value(self._ini(), "TogglePause")) or "SPACE")
 
+    def save_dirs(self) -> list:
+        return [self._ini().parent / "memcards", self._ini().parent / "savestates"]
+
+    def state_patterns(self, game: dict, meta: dict) -> list:
+        serial = _serial(meta)
+        return [f"{serial}_*.sav"] if serial else []
+
+    def prefix_of(self, filename: str) -> str:
+        return filename.rsplit("_", 1)[0] + "_" if "_" in filename else ""
+
+    def remap_pads(self, order: list):
+        return _remap_sdl_ini(self._ini(), "Pad{}", order)
+
 
 class PCSX2(Adapter):
     family = "pcsx2"
@@ -222,6 +384,21 @@ class PCSX2(Adapter):
 
     def pause(self) -> None:
         winutil.send_keys(_qt_key(_ini_value(self._ini(), "TogglePause")) or "SPACE")
+
+    def save_dirs(self) -> list:
+        base = self._ini().parent.parent
+        return [base / "memcards", base / "sstates"]
+
+    def state_patterns(self, game: dict, meta: dict) -> list:
+        serial = _serial(meta)
+        return [f"{serial} (*).*.p2s"] if serial else []
+
+    def prefix_of(self, filename: str) -> str:
+        parts = filename.rsplit(".", 2)
+        return parts[0] + "." if len(parts) == 3 else ""
+
+    def remap_pads(self, order: list):
+        return _remap_sdl_ini(self._ini(), "Pad{}", order)
 
 
 class Dolphin(Adapter):
@@ -258,6 +435,34 @@ class Dolphin(Adapter):
     def pause(self) -> None:
         winutil.send_keys(self._hotkey("General/Toggle Pause", "F10"))
 
+    def save_dirs(self) -> list:
+        u = self._user()
+        return [u / "GC", u / "Wii", u / "StateSaves"]
+
+    def prefix_of(self, filename: str) -> str:
+        return filename.rsplit(".", 1)[0] + "." if "." in filename else ""
+
+    def remap_pads(self, order: list):
+        path = self._user() / "Config" / "GCPadNew.ini"
+        changes = {}
+        for p, slot in enumerate(order[:4]):
+            sec = f"GCPad{p + 1}"
+            dev = ini_section(path, sec).get("Device", "")
+            nd = re.sub(r"^(XInput|SDL)/\d+/", lambda m: f"{m.group(1)}/{slot}/", dev)
+            if nd != dev:
+                changes[(sec, "Device")] = nd
+        if not changes:
+            return None
+        old = ini_edit(path, changes)
+        if not old:
+            return None
+        _remember_restore(path, old)
+
+        def restore():
+            ini_edit(path, old)
+            _restore_file().unlink(missing_ok=True)
+        return restore
+
 
 class PPSSPP(Adapter):
     family = "ppsspp"
@@ -288,8 +493,48 @@ class PPSSPP(Adapter):
     def pause(self) -> None:
         pass                  # PPSSPP pauzuje się sam po utracie fokusu
 
+    def save_dirs(self) -> list:
+        psp = self.home / "memstick" / "PSP"
+        return [psp / "SAVEDATA", psp / "PPSSPP_STATE"]
 
-_ADAPTERS = {a.family: a for a in (RetroArch, DuckStation, PCSX2, Dolphin, PPSSPP)}
+    def state_patterns(self, game: dict, meta: dict) -> list:
+        serial = _serial(meta).replace("-", "")
+        return [f"{serial}_*.ppst"] if serial else []
+
+    def prefix_of(self, filename: str) -> str:
+        return filename.rsplit("_", 1)[0] + "_" if "_" in filename else ""
+
+
+class RPCS3(Adapter):
+    """Tylko save'y (do profili) — RPCS3 nie ma stanów ani skrótów do sterowania."""
+    family = "rpcs3"
+
+    def save_dirs(self) -> list:
+        return [self.home / "dev_hdd0" / "home" / "00000001" / "savedata"]
+
+
+_ADAPTERS = {a.family: a for a in (RetroArch, DuckStation, PCSX2, Dolphin, PPSSPP, RPCS3)}
+
+
+def list_states(adapter: Adapter, game: dict, meta: dict, learned: list) -> list:
+    """Pliki stanów tej gry, najnowsze pierwsze: [{path, name, time}]."""
+    pats = adapter.state_patterns(game, meta) + [f"{glob_escape(p)}*" for p in learned]
+    seen, out = set(), []
+    for d in adapter.state_dirs():
+        if not d.is_dir():
+            continue
+        for pat in pats:
+            for f in d.rglob(pat):
+                if f in seen or not f.is_file() or f.suffix.lower() in (".png", ".jpg", ".bak"):
+                    continue
+                seen.add(f)
+                out.append({"path": str(f), "name": f.name, "time": f.stat().st_mtime})
+    out.sort(key=lambda x: x["time"], reverse=True)
+    return out
+
+
+def glob_escape(s: str) -> str:
+    return re.sub(r"([\[\]*?])", r"[\1]", s)
 
 
 def adapter_for(exe: str) -> Adapter:

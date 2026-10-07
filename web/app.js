@@ -92,7 +92,7 @@ function pollPads(now) {
       press(a, true);
     }
   }
-  for (const a of Object.keys(held)) if (!active.has(a)) delete held[a];
+  for (const a of Object.keys(held)) if (!active.has(a)) { delete held[a]; release(a); }
   if (S.modal === "ingame") {
     if (active.size) IG.quietSince = 0;
     else if (!IG.quietSince) IG.quietSince = now;
@@ -106,7 +106,14 @@ const KEYS = {
   Enter: "a", " ": "a", Escape: "b", Backspace: "b", x: "x", y: "y", p: "y",
   PageUp: "lb", PageDown: "rb", Home: "lt", End: "rt", F2: "start", Tab: "start",
 };
+document.addEventListener("keyup", (e) => { const a = KEYS[e.key]; if (a && e.target.tagName !== "INPUT" && e.target.tagName !== "TEXTAREA") release(a); });
 document.addEventListener("keydown", (e) => {
+  if (S.modal === "osk" && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA")) {
+    if (e.key === "Escape") { e.preventDefault(); oskClose(false); }
+    else if (e.key === "Enter" && (!OSK.multiline || e.ctrlKey)) { e.preventDefault(); oskClose(true); }
+    return;
+  }
+  if (e.repeat && KEYS[e.key] === "a") return;      // przytrzymany Enter = opcje gry, nie powtórka
   if (e.target.tagName === "INPUT") {
     if (e.key === "Enter") { e.preventDefault(); commitEdit(true); }
     else if (e.key === "Escape") { e.preventDefault(); commitEdit(false); }
@@ -139,20 +146,38 @@ function press(a, fromPad) {
   if (S.modal === "launch") return launchInput(a);
   if (S.modal === "menu") return menuInput(a);
   if (S.modal === "scan") return;
+  if (S.modal === "osk") return oskInput(a);
+  if (S.modal === "gopt") return goptInput(a);
+  if (S.screen === "pads") return padsInput(a);
+  if (S.screen === "profiles") return profilesInput(a);
   if (S.screen === "systems") return systemsInput(a);
   if (S.screen === "games") return gamesInput(a);
   if (S.screen === "settings") return settingsInput(a);
   if (S.screen === "art") return artInput(a);
 }
 
+// Przytrzymanie A na grze: krótko = graj, ≥ 0,6 s = opcje gry.
+const LONG_PRESS = 600;
+let aHold = null;
+function release(a) {
+  if (a === "a" && aHold) {
+    clearTimeout(aHold.timer);
+    const fired = aHold.fired;
+    aHold = null;
+    if (!fired && S.screen === "games" && !S.modal) launch();
+  }
+}
+
 /* ───────────── ekrany ───────────── */
 function show(screen) {
   S.screen = screen;
-  for (const id of ["systems", "games", "settings", "art"]) $(id).classList.toggle("hidden", id !== screen);
+  for (const id of ["systems", "games", "settings", "art", "pads", "profiles"]) $(id).classList.toggle("hidden", id !== screen);
   if (screen === "systems") renderSystems();
   if (screen === "games") renderGames();
   if (screen === "settings") renderSettings();
   if (screen === "art") renderArt();
+  if (screen === "pads") renderPads();
+  if (screen === "profiles") renderProfiles();
 }
 
 /* ── systemy ── */
@@ -238,7 +263,7 @@ function renderGames() {
     el.addEventListener("click", () => { S.gameIdx = +el.dataset.i; renderGames(); });
     el.addEventListener("dblclick", () => { S.gameIdx = +el.dataset.i; launch(); });
   });
-  setHints([["a", "Graj"], ["y", S.games[S.gameIdx]?.pinned ? "Odepnij" : "Przypnij"],
+  setHints([["a", "Graj (przytrzymaj: opcje)"], ["y", S.games[S.gameIdx]?.pinned ? "Odepnij" : "Przypnij"],
             ["lb", "Strona"], ["lt", "Litera"], ["b", "Wstecz"], ["start", "Menu"]]);
   schedulePreview();
   // okładki dla widocznej strony — w tle
@@ -269,7 +294,10 @@ function gamesInput(a) {
   else if (a === "rb" || a === "right") S.gameIdx = Math.min(n - 1, S.gameIdx + page);
   else if (a === "lt" && n) jumpLetter(-1);
   else if (a === "rt" && n) jumpLetter(1);
-  else if (a === "a" && n) return launch();
+  else if (a === "a" && n) {
+    aHold = { fired: false, timer: setTimeout(() => { if (aHold) { aHold.fired = true; openGameOptions(); } }, LONG_PRESS) };
+    return;
+  }
   else if (a === "y" && n) return togglePin();
   else if (a === "b") return show("systems");
   else if (a === "start") return openMenu();
@@ -310,9 +338,36 @@ async function updatePreview() {
   $("pvMeta").innerHTML =
     `<dt>Status</dt><dd>${status}</dd>` +
     `<dt>Rozmiar</dt><dd>${fmtBytes(d.size)}${d.files > 1 ? ` · ${d.files} ${plural(d.files, "plik", "pliki", "plików")}` : ""}</dd>` +
+    metaRows(d.meta) +
     `<dt>Ostatnio</dt><dd>${fmtDate(d.last)}</dd>` +
-    `<dt>Czas gry</dt><dd>${fmtPlay(d.seconds)}</dd>` +
-    `<dt>Plik</dt><dd title="${esc(d.file)}">${esc(d.file)}</dd>`;
+    `<dt>Czas gry</dt><dd>${fmtPlay(d.seconds)}</dd>`;
+  $("pvTitle").textContent = d.title;
+  renderDesc(d.meta);
+  // opis z sieci dla gry, przy której użytkownik się zatrzymał (bez TheGamesDB —
+  // ma limit miesięczny; pełne pobranie jest w opcjach gry)
+  clearTimeout(metaTimer);
+  if (!d.meta_online) metaTimer = setTimeout(async () => {
+    if (S.games[S.gameIdx] !== g) return;
+    await api().meta_fetch(g.id, false);
+    for (const wait of [2500, 5000]) {
+      await new Promise((r) => setTimeout(r, wait));
+      if (S.games[S.gameIdx] !== g) return;
+      const d2 = await api().game_detail(g.id);
+      if (d2.meta_online) return updatePreview();
+    }
+  }, 1200);
+}
+let metaTimer;
+function metaRows(m) {
+  const rows = [["Producent", m.developer], ["Wydawca", m.publisher], ["Rok", m.year],
+                ["Gatunek", m.genre], ["Gracze", m.players]];
+  return rows.filter(([, v]) => v).map(([k, v]) => `<dt>${k}</dt><dd title="${esc(v)}">${esc(v)}</dd>`).join("");
+}
+function renderDesc(m) {
+  const parts = [];
+  if (m.description) parts.push(esc(m.description));
+  if (m.wiki) parts.push(`<span class="wl">Wikipedia (${esc(m.wiki_lang || "")})</span><br>${esc(m.wiki)}`);
+  $("pvDesc").innerHTML = parts.join("<br><br>");
 }
 function setArt(g) {
   const box = $("pvBox"), snap = $("pvSnap");
@@ -335,9 +390,9 @@ async function togglePin() {
 
 /* ───────────── uruchamianie ───────────── */
 let launchPoll;
-async function launch() {
+async function launch(state = "") {
   const g = S.games[S.gameIdx];
-  const r = await api().launch(g.id);
+  const r = await api().launch(g.id, state);
   if (!r.ok) return toast(r.reason);
   S.modal = "launch";
   $("launch").classList.remove("hidden");
@@ -473,6 +528,8 @@ function openMenu() {
   const items = [
     ["Ustawienia", () => openSettings()],
     ["Grafiki: pobierz brakujące", () => openArt()],
+    ["Zmień profil", () => openProfiles()],
+    ["Kolejność padów", () => openPads()],
     ["Skanuj kolekcję ponownie", () => startScan()],
     ["Wyjdź z EmuStart", () => api().quit()],
   ];
@@ -762,6 +819,7 @@ async function refreshState() {
   net.textContent = (st.rom_online ? "NAS dostępny" : "NAS offline, tylko gry lokalne") + mode;
   net.className = "pill " + (st.rom_online ? "ok" : "warn");
   S.copying = new Set(st.copying);
+  $("profInfo").textContent = st.profile ? "👤 " + st.profile.name : "";
   return st;
 }
 
@@ -793,7 +851,9 @@ window.addEventListener("pywebviewready", async () => {
   setInterval(() => { if (!S.modal) refreshState().then(() => S.screen === "systems" && renderSystems()); }, 15000);
   requestAnimationFrame(pollPads);
   window.addEventListener("resize", () => show(S.screen));
-  if (!st.configured) openSettings(true); else show("systems");
+  if (!st.configured) openSettings(true);
+  else if (st.profiles > 1) openProfiles(true);
+  else show("systems");
 });
 
 // tryb deweloperski: UI w zwykłej przeglądarce (main.py --browser)

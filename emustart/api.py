@@ -7,12 +7,13 @@ pobieranie przypiętych) działają w wątkach; UI odpytuje ich stan.
 from __future__ import annotations
 
 import collections
+import json
 import logging
 import threading
 import time
 from pathlib import Path
 
-from emustart import (__version__, art, art_sources, cache, config, emulators, launcher, library,
+from emustart import (__version__, art, art_sources, cache, ingame, metadata, pads, profiles, config, emulators, launcher, library,
                       paths, scanner, systems, winutil)
 
 log = logging.getLogger("emustart.api")
@@ -36,13 +37,24 @@ class Api:
         self._background: list = []          # sesje, które jeszcze kopiują w tle
         self._pin_jobs: dict = {}            # game_id → Session-like (kopiowanie przypiętych)
         self._scan = {"running": False, "text": "", "done": 0, "total": 0, "result": None}
-        self._profile = library.default_profile()
+        ingame.restore_pending()          # ustawienia padów po ewentualnej awarii
+        self._profile = self._initial_profile()
+        threading.Thread(target=lambda: profiles.sync_pending(self._cfg), daemon=True,
+                         name="sync-pending").start()
         # Menu w grze: stan czyta UI (ingame_poll), Python niczego nie wywołuje
         # w oknie. evaluate_js przy grze na pełnym ekranie potrafiło czekać 20 s
         # i blokowało w tym czasie wszystkie wywołania z UI.
         self._menu = {"open": False, "items": [], "message": "", "title": "", "seq": 0}
         self._menu_inputs: collections.deque = collections.deque()
         self._menu_lock = threading.Lock()
+
+    def _initial_profile(self) -> int:
+        ids = [p["id"] for p in profiles.all_profiles()]
+        try:
+            last = int(library.meta_get("last_profile", "0"))
+        except ValueError:
+            last = 0
+        return last if last in ids else ids[0]
 
     def attach(self, window) -> None:
         self._window = window
@@ -60,6 +72,8 @@ class Api:
             "scan": dict(self._scan),
             "cache": cache.usage(cfg),
             "copying": self._copying(),
+            "profile": profiles.get(self._profile),
+            "profiles": len(profiles.all_profiles()),
         }
 
     def list_systems(self) -> list:
@@ -77,7 +91,12 @@ class Api:
     def list_games(self, es: str) -> list:
         hide = self._cfg.get("hide_arcade_clones", True) and systems.info(es)["kind"] == "arcade"
         rows = library.list_games(es, self._profile, hide)
+        titles = {r["game_id"]: json.loads(r["edits"]).get("title")
+                  for r in library.db().execute(
+                      "SELECT game_id, edits FROM game_meta WHERE edits LIKE '%\"title\"%'")}
         for r in rows:
+            if titles.get(r["id"]):
+                r["title"] = titles[r["id"]]
             r["box"] = art.media_url(es, r["name"], "box") if r["art_box"] == art.HAS else ""
             r["snap"] = art.media_url(es, r["name"], "snap") if r["art_snap"] == art.HAS else ""
         return rows
@@ -109,7 +128,12 @@ class Api:
         play = library.db().execute(
             "SELECT * FROM play WHERE game_id=? AND profile_id=?",
             (g["id"], self._profile)).fetchone()
-        return {"id": g["id"], "title": g["title"], "tags": g["tags"], "name": g["name"],
+        meta = metadata.ensure_local(self._cfg, g)
+        meta = {k: v for k, v in meta.items() if not k.startswith("_")}
+        return {"id": g["id"], "title": meta.get("title") or g["title"], "tags": g["tags"],
+                "name": g["name"], "meta": meta,
+                "meta_online": bool(metadata.get(g["id"]).get("_online")),
+                "meta_edits": metadata.get(g["id"]).get("_edits", {}),
                 "system": info["display"], "size": g["size"], "files": len(g["files"]),
                 "file": g["rel"], "cached": bool(row and row["complete"]),
                 "pinned": bool(row and row["pinned"]),
@@ -119,7 +143,7 @@ class Api:
                 "copying": g["id"] in self._copying()}
 
     # ── uruchamianie ──
-    def launch(self, game_id: int) -> dict:
+    def launch(self, game_id: int, state: str = "") -> dict:
         if self._session and self._session.phase in ("preparing", "downloading",
                                                      "extracting", "running"):
             return {"ok": False, "reason": "Inna gra jest właśnie uruchamiana."}
@@ -134,7 +158,8 @@ class Api:
         self._session = launcher.Session(self._cfg, int(game_id), self._profile,
                                          on_running=self._on_running,
                                          on_finished=self._on_finished,
-                                         ui=self if self._window else None)
+                                         ui=self if self._window else None,
+                                         start_state=state or "")
         self._session.start()
         return {"ok": True}
 
@@ -274,6 +299,135 @@ class Api:
         self._pin_jobs[g["id"]] = {"thread": t, "prog": prog, "cancel": cancel,
                                    "title": g["title"]}
         t.start()
+
+    # ── opcje gry (przytrzymane A) ──
+    def _effective_emu(self, g: dict) -> dict:
+        own = library.db().execute("SELECT * FROM game_emu WHERE game_id=?", (g["id"],)).fetchone()
+        if own:
+            return {"label": own["label"], "exe": own["exe"], "args": own["args"], "own": True}
+        sc = (self._cfg.get("systems") or {}).get(g["es"]) or {}
+        return {"label": sc.get("label", ""), "exe": sc.get("exe", ""), "args": sc.get("args", ""),
+                "own": False}
+
+    def game_options(self, game_id: int) -> dict:
+        g = library.game(int(game_id))
+        if not g:
+            return {}
+        emu = self._effective_emu(g)
+        opts = emulators.options_for(systems.info(g["es"]), self._cfg.get("emu_root", ""))
+        states = []
+        if emu["exe"]:
+            ad = ingame.adapter_for(emu["exe"])
+            meta = metadata.ensure_local(self._cfg, g)
+            learned = [r["prefix"] for r in library.db().execute(
+                "SELECT prefix FROM states WHERE game_id=? AND family=?", (g["id"], ad.family))]
+            states = ingame.list_states(ad, g, meta, learned)
+            res = library.get_resume(self._profile, g["id"])
+            if res and res["path"] and Path(res["path"]).is_file() and res["family"] == ad.family:
+                states.insert(0, {"path": res["path"], "name": "Quicksave EmuStart",
+                                  "time": res["created"], "resume": True})
+        return {"id": g["id"], "title": g["title"], "emulator": emu, "options": opts,
+                "states": states[:30]}
+
+    def set_game_emulator(self, game_id: int, opt: dict | None) -> dict:
+        with library.db() as c:
+            if not opt:
+                c.execute("DELETE FROM game_emu WHERE game_id=?", (int(game_id),))
+            else:
+                c.execute("INSERT OR REPLACE INTO game_emu VALUES(?,?,?,?)",
+                          (int(game_id), opt["label"], opt["exe"], opt.get("args", "")))
+        return {"ok": True}
+
+    def meta_fetch(self, game_id: int, full: bool = False) -> dict:
+        """Opisy z sieci w tle; UI odpytuje game_detail. `full` = także TheGamesDB
+        (limit miesięczny — tylko na wyraźne żądanie z opcji gry)."""
+        g = library.game(int(game_id))
+        if not g:
+            return {"ok": False}
+
+        def run():
+            try:
+                metadata.fetch_online(self._cfg, g, tgdb=bool(full))
+            except Exception:
+                log.exception("metadane %s", g["name"])
+        threading.Thread(target=run, daemon=True, name="meta").start()
+        return {"ok": True}
+
+    def meta_save(self, game_id: int, edits: dict) -> dict:
+        metadata.set_edits(int(game_id), edits or {})
+        return {"ok": True}
+
+    def art_candidates(self, game_id: int, kind: str, query: str = "") -> list:
+        g = library.game(int(game_id))
+        if not g or kind not in ("box", "snap"):
+            return []
+        return art_sources.candidates(self._cfg, g["es"], g["name"], kind, query or "")
+
+    def art_choose(self, game_id: int, kind: str, url: str) -> dict:
+        g = library.game(int(game_id))
+        data = art_sources.fetch(url) if g else None
+        if not art_sources.is_image(data):
+            return {"ok": False, "reason": "Nie udało się pobrać tej grafiki."}
+        art.save(g["es"], g["name"], kind, data)
+        library.set_art(g["id"], kind, art.HAS)
+        return {"ok": True, "url": art.media_url(g["es"], g["name"], kind) + f"?t={int(time.time())}"}
+
+    def art_clear(self, game_id: int, kind: str) -> dict:
+        g = library.game(int(game_id))
+        if g:
+            art.media_path(g["es"], g["name"], kind).unlink(missing_ok=True)
+            library.set_art(g["id"], kind, art.MISSING)
+        return {"ok": True}
+
+    # ── pady ──
+    def pads_state(self) -> dict:
+        from emustart import xinput
+        lst = pads.connected()
+        for p in lst:
+            p["buttons"] = xinput.buttons(p["slot"]) or 0
+        po = self._cfg.get("pad_order") or {}
+        return {"pads": lst, "order": pads.order(self._cfg, lst),
+                "mode": po.get("mode", "windows"), "manual": po.get("manual", [])}
+
+    def pads_set(self, mode: str, manual: list | None = None) -> dict:
+        self._cfg["pad_order"] = {"mode": mode if mode in ("windows", "wireless_first", "manual")
+                                  else "windows", "manual": [int(x) for x in (manual or [])]}
+        config.save(self._cfg)
+        return self.pads_state()
+
+    # ── profile ──
+    def profiles_list(self) -> dict:
+        return {"profiles": profiles.all_profiles(), "current": self._profile}
+
+    def profile_select(self, pid: int) -> dict:
+        if not profiles.get(int(pid)):
+            return {"ok": False}
+        self._profile = int(pid)
+        library.meta_set("last_profile", str(self._profile))
+        return {"ok": True}
+
+    def profile_create(self, name: str) -> dict:
+        try:
+            p = profiles.create(name)
+        except ValueError as ex:
+            return {"ok": False, "reason": str(ex)}
+        return {"ok": True, "profile": p}
+
+    def profile_rename(self, pid: int, name: str) -> dict:
+        try:
+            profiles.rename(int(pid), name)
+        except ValueError as ex:
+            return {"ok": False, "reason": str(ex)}
+        return {"ok": True}
+
+    def profile_delete(self, pid: int) -> dict:
+        if int(pid) == self._profile:
+            return {"ok": False, "reason": "Nie można usunąć profilu, który właśnie gra."}
+        try:
+            profiles.delete(int(pid))
+        except ValueError as ex:
+            return {"ok": False, "reason": str(ex)}
+        return {"ok": True}
 
     # ── narzędzie „Grafiki” ──
     def art_overview(self) -> dict:

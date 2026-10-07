@@ -169,5 +169,6 @@ D:\emustart\
    **Stan: zrobione (2026-10-07), do sprawdzenia z prawdziwymi emulatorami.**
 3. Ulubione, ostatnio grane, czas gry, wyszukiwarka, opcjonalne wideo.
    Narzędzie „Grafiki” (libretro + SGDB/IGDB/TGDB z kluczami z PyLinks) — **zrobione**.
-4. Profile i synchronizacja save'ów.
+4. Profile i synchronizacja save'ów — **zrobione w 0.4.0** (wraz z opcjami gry
+   pod przytrzymanym A, metadanymi i kolejnością padów).
 5. Strumieniowanie CHD (WinFsp).

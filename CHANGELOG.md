@@ -4,6 +4,52 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 [Keep a Changelog](https://keepachangelog.com/pl/1.1.0/), wersje według
 [SemVer](https://semver.org/lang/pl/).
 
+## [0.4.0] — 2026-10-07
+
+### Dodane
+- **Opcje gry pod przytrzymanym A** (≥ 0,6 s; krótkie A nadal uruchamia grę):
+  - **Emulator dla tej gry** — nadpisuje emulator systemu tylko dla jednej gry,
+  - **Wczytaj zapis** — lista stanów tej gry (Quicksave EmuStart, sloty
+    i „resume” DuckStation/PCSX2 rozpoznawane po numerze seryjnym, stany
+    RetroArcha po nazwie gry, Dolphin/PPSSPP po nazwach poznanych w grze);
+    gra startuje od razu z wybranego stanu,
+  - **Metadane i opis** — edycja tytułu, producenta, wydawcy, roku, gatunku,
+    liczby graczy i opisu; ręczne zmiany mają pierwszeństwo przed pobranymi
+    i nie są nadpisywane, „Przywróć dane pobrane” je usuwa,
+  - **Okładka / Zrzut ekranu** — ręczny wybór z propozycji (libretro, SteamGridDB,
+    TheGamesDB, IGDB), wyszukiwanie pod inną nazwą, usunięcie grafiki,
+  - pobranie opisu z sieci, przypinanie.
+- **Metadane gier**: producent, wydawca, rok, gatunek, gracze z baz RetroArcha
+  (`database/rdb`, offline, dopasowanie po nazwie No-Intro/Redump), opis
+  z IGDB/TheGamesDB i streszczenie z Wikipedii (pl, potem en). W podglądzie gry
+  opis dociąga się sam po chwili zatrzymania na grze (bez TheGamesDB — limit).
+- **Klawiatura ekranowa** obsługiwana padem (polskie znaki) — nazwy profili,
+  edycja metadanych, wyszukiwanie grafik. Fizyczna klawiatura też działa.
+- **Kolejność padów** (Start → Kolejność padów): jak w Windows, bezprzewodowe
+  przed przewodowymi, albo ręcznie („Gracz 1: naciśnij A na swoim padzie”).
+  Przed startem gry EmuStart przepina numery urządzeń w RetroArchu
+  (`input_playerN_joypad_index`), DuckStation i PCSX2 (`SDL-n` w [PadN])
+  oraz Dolphinie (`XInput/n` w [GCPadN]), a po grze przywraca tylko te wpisy
+  (także po awarii programu, przy następnym starcie).
+- **Profile graczy**: ekran „Kto gra?” przy starcie (gdy profili jest więcej
+  niż jeden), tworzenie / zmiana nazwy / usuwanie, profil w pasku górnym.
+  - Save'y i stany emulatorów osobno dla każdego profilu: folder save'ów
+    emulatora staje się dowiązaniem (junction) do folderu profilu. Dotychczasowe
+    save'y trafiają do pierwszego profilu. Obsługiwane: RetroArch, DuckStation,
+    PCSX2, Dolphin, PPSSPP, RPCS3.
+  - Synchronizacja z `Z:\emustart\Profiles\<profil>\save` przed i po grze
+    (nowszy plik wygrywa, nadpisywany lokalny trafia do kopii `_backup`);
+    nieudane wysłanie (NAS offline) jest ponawiane przy starcie.
+  - Blokada: ten sam profil nie wystartuje gry na dwóch komputerach naraz.
+  - Przeniesienie EmuStart do innego folderu przenosi magazyn profili.
+
+### Naprawione
+- Klucze SteamGridDB / IGDB / TheGamesDB importowane z PyLinksWeb były
+  zaszyfrowane (TPM) i nie działały — teraz są odszyfrowywane i zapisywane
+  w EmuStart także zaszyfrowane (TPM/DPAPI, moduł z PyLinksWeb).
+- TheGamesDB jest oszczędzany: poniżej 100 zapytań miesięcznego limitu
+  przestaje być używany automatycznie.
+
 ## [0.3.0] — 2026-10-07
 
 ### Dodane

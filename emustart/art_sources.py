@@ -29,7 +29,7 @@ from emustart import paths, systems
 log = logging.getLogger("emustart.art_sources")
 
 MATCH_MIN = 0.8
-UA = {"User-Agent": "EmuStart/0.3"}
+UA = {"User-Agent": "EmuStart/0.4"}
 INDEX_TTL = 30 * 86400
 
 # platformy IGDB / TheGamesDB dla kodów z systems.py
@@ -285,30 +285,43 @@ class Igdb:
 # ── 5. TheGamesDB ──
 
 class Tgdb:
+    """TheGamesDB ma miesięczny limit zapytań na klucz (u Ciebie ~1000) —
+    poniżej RESERVE przestajemy go używać, żeby zostało na ręczne wyszukiwania."""
     API = "https://api.thegamesdb.net/v1"
+    RESERVE = 100
+    remaining: int | None = None
 
     def __init__(self, key: str):
         self.key = (key or "").strip()
 
-    def images(self, title: str, plat: str) -> dict:
-        if not self.key:
+    def usable(self) -> bool:
+        return bool(self.key) and (Tgdb.remaining is None or Tgdb.remaining > self.RESERVE)
+
+    def _get(self, url: str) -> dict:
+        try:
+            obj = json.loads(fetch(url) or b"{}")
+        except ValueError:
             return {}
+        if isinstance(obj.get("remaining_monthly_allowance"), int):
+            Tgdb.remaining = obj["remaining_monthly_allowance"]
+        return obj
+
+    def game(self, title: str, plat: str, fields: str = "") -> dict | None:
+        if not self.usable():
+            return None
         pid = TGDB_PLATFORMS.get(plat)
         url = (f"{self.API}/Games/ByGameName?apikey={self.key}&name={urllib.parse.quote(title)}"
-               + (f"&filter[platform]={pid}" if pid else ""))
-        try:
-            games = json.loads(fetch(url) or b"{}").get("data", {}).get("games", [])
-        except ValueError:
-            return {}
+               + (f"&filter[platform]={pid}" if pid else "") + (f"&fields={fields}" if fields else ""))
+        games = self._get(url).get("data", {}).get("games", [])
         games = [g for g in games if similarity(title, g.get("game_title", "")) >= MATCH_MIN]
-        if not games:
+        return max(games, key=lambda g: similarity(title, g.get("game_title", ""))) if games else None
+
+    def images(self, title: str, plat: str) -> dict:
+        g = self.game(title, plat)
+        if not g:
             return {}
-        gid = str(max(games, key=lambda g: similarity(title, g.get("game_title", "")))["id"])
-        try:
-            obj = json.loads(fetch(f"{self.API}/Games/Images?apikey={self.key}&games_id={gid}") or b"{}")
-        except ValueError:
-            return {}
-        data = obj.get("data", {})
+        gid = str(g["id"])
+        data = self._get(f"{self.API}/Games/Images?apikey={self.key}&games_id={gid}").get("data", {})
         base = data.get("base_url", {}).get("original", "https://cdn.thegamesdb.net/images/original/")
         out = {}
         for img in data.get("images", {}).get(gid, []):
@@ -323,35 +336,54 @@ class Tgdb:
 # ── klucze z PyLinksWeb ──
 
 PYLINKS_CONFIGS = (r"D:\py\PyLinksWeb\config.json",)
+KEY_NAMES = ("sgdb_key", "igdb_client_id", "igdb_client_secret", "tgdb_key")
 
 
 def import_pylinks_keys(path: str = "") -> dict:
-    """Klucze SGDB / IGDB / TGDB z config.json PyLinksWeb."""
+    """Klucze SGDB / IGDB / TGDB z config.json PyLinksWeb.
+
+    PyLinks trzyma je zaszyfrowane (TPM/DPAPI) — odszyfrowujemy kluczem PyLinks
+    i szyfrujemy ponownie kluczem EmuStart, więc w naszym config.json też nie
+    ma ich jawnie."""
+    from emustart import secure
     for p in ([path] if path else []) + list(PYLINKS_CONFIGS):
         try:
             c = json.loads(Path(p).read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue
         e = c.get("extra_sources") or {}
-        return {"sgdb_key": (c.get("api_keys") or {}).get("sgdb_key", ""),
-                "igdb_client_id": e.get("igdb_client_id", ""),
-                "igdb_client_secret": e.get("igdb_client_secret", ""),
-                "tgdb_key": e.get("tgdb_key", ""), "source": p}
+        raw = {"sgdb_key": (c.get("api_keys") or {}).get("sgdb_key", ""),
+               "igdb_client_id": e.get("igdb_client_id", ""),
+               "igdb_client_secret": e.get("igdb_client_secret", ""),
+               "tgdb_key": e.get("tgdb_key", "")}
+        out = {"source": p}
+        for k, v in raw.items():
+            plain = secure.unprotect(v, secure.KEY_PYLINKS)
+            out[k] = secure.protect(plain) if plain else ""
+        return out
     return {}
+
+
+def keys(cfg: dict) -> dict:
+    """Odszyfrowane klucze z config.json EmuStart."""
+    from emustart import secure
+    k = cfg.get("art_keys") or {}
+    return {n: secure.unprotect(k.get(n, "")) for n in KEY_NAMES}
 
 
 class Sources:
     """Łańcuch źródeł skonfigurowany kluczami z config.json EmuStart."""
 
     def __init__(self, cfg: dict):
-        k = cfg.get("art_keys") or {}
+        k = keys(cfg)
         self.sgdb = Sgdb(k.get("sgdb_key", ""))
         self.igdb = Igdb(k.get("igdb_client_id", ""), k.get("igdb_client_secret", ""))
         self.tgdb = Tgdb(k.get("tgdb_key", ""))
 
     def enabled(self) -> dict:
         return {"libretro": True, "sgdb": bool(self.sgdb.key),
-                "igdb": bool(self.igdb.cid and self.igdb.secret), "tgdb": bool(self.tgdb.key)}
+                "igdb": bool(self.igdb.cid and self.igdb.secret), "tgdb": bool(self.tgdb.key),
+                "tgdb_remaining": Tgdb.remaining}
 
     def find(self, es: str, name: str, need: set) -> dict:
         """{kind: (bytes, źródło)} dla rodzajów z `need` ({'box','snap'})."""
@@ -379,3 +411,55 @@ class Sources:
                 if is_image(data):
                     out[kind] = (data, src)
         return out
+
+
+# ── ręczny wybór grafiki (opcje gry) ──
+
+def libretro_ranked(name: str, names: list, limit: int = 8) -> list:
+    """Nazwy z listy libretro najbardziej podobne do `name` (do ręcznego wyboru)."""
+    want = base_key(name)
+    title = plain_title(name)
+    scored = []
+    for c in names:
+        ck = base_key(c)
+        if ck == want:
+            sc = 2.0
+        elif want[:4] and ck[:4] == want[:4]:
+            sc = similarity(title, plain_title(c))
+            if sc < 0.6:
+                continue
+        else:
+            continue
+        sc += 0.05 * len(tags(name) & tags(c))
+        scored.append((sc, c))
+    scored.sort(reverse=True)
+    return [c for _s, c in scored[:limit]]
+
+
+def candidates(cfg: dict, es: str, name: str, kind: str, query: str = "") -> list:
+    """[{url, thumb, source, label}] — propozycje grafiki do wyboru padem."""
+    out = []
+    sysname = systems.info(es)["libretro"]
+    folder = {"box": "Named_Boxarts", "snap": "Named_Snaps"}[kind]
+    for n in libretro_ranked(query or name, _index(sysname, folder)):
+        u = libretro_url(sysname, folder, n)
+        out.append({"url": u, "thumb": u, "source": "libretro", "label": n})
+    title = query or plain_title(name)
+    plat = systems.info(es)["plat"]
+    k = keys(cfg)
+    if kind == "box" and k.get("sgdb_key"):
+        sg = Sgdb(k["sgdb_key"])
+        for game in sg._get("search/autocomplete/" + urllib.parse.quote(title))[:3]:
+            for g in sg._get(f"grids/game/{game['id']}?dimensions=600x900,342x482,660x930&limit=6"):
+                out.append({"url": g.get("url", ""), "thumb": g.get("thumb") or g.get("url", ""),
+                            "source": "SteamGridDB", "label": game.get("name", "")})
+    tg = Tgdb(k.get("tgdb_key", ""))
+    imgs = tg.images(title, plat) if tg.usable() else {}
+    if imgs.get(kind):
+        out.append({"url": imgs[kind], "thumb": imgs[kind], "source": "TheGamesDB", "label": title})
+    ig = Igdb(k.get("igdb_client_id", ""), k.get("igdb_client_secret", ""))
+    if ig.cid and ig.secret:
+        u = ig.images(title, plat).get(kind)
+        if u:
+            out.append({"url": u, "thumb": u, "source": "IGDB", "label": title})
+    return [c for c in out if c["url"]]

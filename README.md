@@ -42,6 +42,25 @@ Przy pierwszym starcie otwierają się ustawienia: sprawdź foldery i wybierz
 | LT / RT | Home / End | poprzednia / następna litera |
 | Start | F2 / Tab | menu |
 
+## Opcje gry (przytrzymaj A)
+
+Krótkie **A** uruchamia grę, **przytrzymane A** (0,6 s) otwiera opcje:
+emulator tylko dla tej gry, wczytanie wybranego zapisu, metadane i opis
+(edycja klawiaturą ekranową), wybór okładki i zrzutu z propozycji,
+pobranie opisu z sieci, przypinanie.
+
+## Profile i pady
+
+- **Profile** (Start → Zmień profil; przy starcie „Kto gra?”): każdy profil ma
+  własne save'y i stany emulatorów (RetroArch, DuckStation, PCSX2, Dolphin,
+  PPSSPP, RPCS3), historię i quicksave. Save'y synchronizują się z
+  `Z:\emustart\Profiles\<profil>\save`; ten sam profil nie gra na dwóch
+  komputerach naraz.
+- **Kolejność padów** (Start → Kolejność padów): Gracz 1/2… niezależnie od tego,
+  w jakiej kolejności Windows wykrył pady (np. Bluetooth przed USB). Działa
+  w RetroArchu, DuckStation, PCSX2 i Dolphinie. Pady PS muszą być widoczne jako
+  XInput (Steam Input / DS4Windows).
+
 ## Menu w grze
 
 W trakcie gry przytrzymaj **A + Y przez 2 sekundy** (pad PS: X + trójkąt):
@@ -85,6 +104,7 @@ Cache trzyma ostatnie gry (domyślnie 10) plus przypięte.
 | `data/library.sqlite` | biblioteka, historia gry, stan cache, nazwy setów arcade |
 | `data/media/<system>/` | okładki i zrzuty (libretro thumbnails) |
 | `cache/<system>/` | lokalne kopie gier |
+| `profiles/<id>/` | save'y i stany emulatorów każdego profilu |
 | `logs/emustart.log` | log |
 
 ## Testy i budowa

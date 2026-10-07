@@ -204,3 +204,48 @@ img { display: block; }
   position: fixed; left: 50%; bottom: 9vh; transform: translateX(-50%); z-index: 30;
   background: var(--panel); border: 1px solid var(--line); padding: .8em 1.6em; border-radius: 10px;
 }
+
+/* ── opis gry w podglądzie ── */
+.desc { margin-top: 1em; color: var(--dim); font-size: .9em; line-height: 1.45;
+  max-height: 9.5em; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical; }
+.desc .wl { color: var(--accent2); font-size: .8em; text-transform: uppercase; letter-spacing: .1em; }
+
+/* ── opcje gry ── */
+.gopanel { max-height: 86vh; display: flex; flex-direction: column; }
+.golist { overflow: hidden auto; max-height: 60vh; }
+.golist li { display: flex; justify-content: space-between; gap: 2em; }
+.golist .gv { color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 55%; }
+.golist li.sel .gv { color: rgba(255,255,255,.85); }
+.artgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 1em;
+  max-height: 60vh; overflow: hidden auto; padding: .3em; }
+.artgrid.snapgrid { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+.artgrid figure { margin: 0; padding: .4em; border-radius: 10px; border: 2px solid transparent; background: rgba(0,0,0,.25); }
+.artgrid figure.sel { border-color: var(--accent); background: rgba(79,140,255,.18); }
+.artgrid img { width: 100%; aspect-ratio: 3/4; object-fit: contain; background: #000; border-radius: 6px; }
+.artgrid.snapgrid img { aspect-ratio: 4/3; }
+.artgrid figcaption { font-size: .75em; margin-top: .3em; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ── klawiatura ekranowa ── */
+.oskfield { width: 100%; font: inherit; font-size: 1.2em; color: var(--text); background: rgba(0,0,0,.35);
+  border: 1px solid var(--line); border-radius: 8px; padding: .4em .7em; margin-bottom: 1em; resize: none; }
+.oskkeys { display: flex; flex-direction: column; gap: .4em; }
+.oskrow { display: flex; gap: .4em; justify-content: center; }
+.oskkey { min-width: 2.6em; padding: .55em .4em; text-align: center; border-radius: 8px; background: rgba(255,255,255,.07); }
+.oskkey.wide { min-width: 7em; }
+.oskkey.sel { background: var(--accent); color: #fff; }
+
+/* ── pady i profile ── */
+#pads, #profiles { padding: 0 8vw; overflow: hidden; display: flex; flex-direction: column; }
+#pads h1, #profiles h1 { margin: 1vh 0; font-weight: 600; }
+.padprompt { font-size: 1.6em; color: var(--warn); margin: .5em 0 1em; }
+.pcards { display: flex; flex-wrap: wrap; gap: 2vw; justify-content: center; margin-top: 8vh; }
+.pcard { width: 11vw; min-width: 130px; text-align: center; padding: 1.2em .5em; border-radius: 16px; border: 2px solid transparent; }
+.pcard.sel { border-color: var(--accent); background: rgba(79,140,255,.15); }
+.pav { width: 7vw; min-width: 90px; aspect-ratio: 1; margin: 0 auto .6em; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center; font-size: 2.6em; font-weight: 700;
+  background: linear-gradient(135deg, #4f8cff, #8a5cff); }
+.pcard.add .pav { background: rgba(255,255,255,.08); color: var(--dim); }
+.pcard.cur .pname::after { content: " ●"; color: var(--ok); }
+.pname { font-size: 1.15em; }
+.preview { overflow: hidden; }
+.pvbody, .meta { min-height: 0; overflow: hidden; }

@@ -69,6 +69,26 @@ CREATE TABLE IF NOT EXISTS resume (
     created    REAL NOT NULL,
     PRIMARY KEY(profile_id, game_id)
 );
+CREATE TABLE IF NOT EXISTS game_meta (
+    game_id INTEGER PRIMARY KEY,
+    data    TEXT NOT NULL DEFAULT '{}',   -- pobrane (rdb / IGDB / Wikipedia)
+    edits   TEXT NOT NULL DEFAULT '{}',   -- ręczne zmiany użytkownika (wygrywają)
+    online  INTEGER NOT NULL DEFAULT 0,   -- 1 = pobrano już opisy z sieci
+    updated REAL NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS game_emu (     -- emulator wybrany dla jednej gry
+    game_id INTEGER PRIMARY KEY,
+    label   TEXT NOT NULL,
+    exe     TEXT NOT NULL,
+    args    TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS states (       -- stany zapisu poznane w sesjach EmuStart
+    profile_id INTEGER NOT NULL,
+    game_id    INTEGER NOT NULL,
+    family     TEXT NOT NULL,
+    prefix     TEXT NOT NULL,             -- wspólny początek nazw plików stanów tej gry
+    PRIMARY KEY(profile_id, game_id, family)
+);
 CREATE TABLE IF NOT EXISTS arcade_sets (
     name     TEXT PRIMARY KEY,
     title    TEXT NOT NULL,
