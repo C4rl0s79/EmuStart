@@ -62,6 +62,7 @@ class UiPad:
         self._q: collections.deque = collections.deque(maxlen=64)
         self._held: dict = {}
         self._lock = threading.Lock()
+        self.last_event = 0.0          # kiedy ostatnio pad coś nacisnął (monotonic)
         if xinput.available():
             threading.Thread(target=self._loop, daemon=True, name="uipad").start()
 
@@ -72,6 +73,7 @@ class UiPad:
         return out
 
     def _emit(self, a: str, up: bool = False) -> None:
+        self.last_event = time.monotonic()
         with self._lock:
             self._q.append({"a": a, "up": up})
 
@@ -85,7 +87,9 @@ class UiPad:
 
     def _tick(self, now: float) -> None:
         if not self._active():
-            self._held.clear()        # po powrocie nie powtarzamy starych przycisków
+            # po powrocie nie powtarzamy starych przycisków — ale pamiętamy, że są
+            # wciśnięte, żeby nie wysłać ich drugi raz jako nowe naciśnięcie
+            self._held = {a: [now, now + 3600] for a in _actions()} if xinput.available() else {}
             return
         active = _actions()
         for a in active:

@@ -4,6 +4,17 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 [Keep a Changelog](https://keepachangelog.com/pl/1.1.0/), wersje według
 [SemVer](https://semver.org/lang/pl/).
 
+## [0.7.2] — 2026-10-07
+
+### Naprawione
+- Pad w wyborze logo (i potencjalnie w innych miejscach) przenosił fokus na
+  **pasek zadań Windows** (`Shell_TrayWnd` — ustalone z diagnostyki 0.7.1;
+  to nawigacja padem w samym Windows, a nie w WebView2). Strażnik fokusu:
+  gdy w ciągu 2 s od naciśnięcia pada fokus trafi na pasek zadań, EmuStart
+  go odzyskuje. Przełączanie do innych programów (Alt+Tab) nie jest blokowane.
+- Po odzyskaniu fokusu przytrzymany przycisk nie jest wysyłany drugi raz jako
+  nowe naciśnięcie.
+
 ## [0.7.1] — 2026-10-07
 
 ### Naprawione

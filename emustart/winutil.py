@@ -181,3 +181,11 @@ def window_info(hwnd: int) -> str:
     except Exception:
         pass
     return f"„{title.value}” [{cls.value}] {exe} pid {pid.value}"
+
+
+def window_class(hwnd: int) -> str:
+    if not IS_WIN or not hwnd:
+        return ""
+    cls = ctypes.create_unicode_buffer(256)
+    _u32.GetClassNameW(hwnd, cls, 256)
+    return cls.value

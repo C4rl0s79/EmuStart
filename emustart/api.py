@@ -51,6 +51,14 @@ class Api:
         if not active and getattr(self, "_fg_was_ours", False) and fg:
             # fokus uciekł z okna EmuStart bez uruchomionej gry — zapisz dokąd
             log.warning("fokus przejęło okno: %s", winutil.window_info(fg))
+            # Strażnik: Windows 11 potrafi przy nawigacji padem przenieść fokus
+            # na pasek zadań. Jeśli stało się to tuż po naciśnięciu pada,
+            # odzyskujemy fokus (Alt+Tab do innych programów nie ruszamy).
+            pad_recent = time.monotonic() - getattr(self._uipad, "last_event", 0) < 2.0
+            if pad_recent and winutil.window_class(fg) in ("Shell_TrayWnd", "Shell_SecondaryTrayWnd"):
+                winutil.bring_to_front(hwnd)
+                log.info("strażnik fokusu: odzyskano fokus z paska zadań")
+                active = winutil.foreground() == hwnd
         self._fg_was_ours = active
         return active
 
