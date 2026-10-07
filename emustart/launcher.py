@@ -260,7 +260,9 @@ class Session:
     def _play(self, g: dict, exe: str, args: str, rom: Path) -> None:
         cmd = emulators.build_command(exe, args, str(rom))
         adapter = ingame.adapter_for(exe)
-        order = pads.order(self.cfg)
+        po = (self.cfg.get("pad_order") or {}).get("mode", "windows")
+        # bateria (rodzaj zasilania) potrzebna tylko w trybie „bezprzewodowe pierwsze”
+        order = pads.order(self.cfg, pads.connected(battery=po == "wireless_first"))
         if self.start_state and Path(self.start_state).is_file():
             # stan wybrany ręcznie ma pierwszeństwo przed stanem wznowienia
             resume = None

@@ -80,17 +80,23 @@ class UiPad:
     def _loop(self) -> None:
         while True:
             try:
-                self._tick(time.monotonic())
+                busy = self._tick(time.monotonic())
             except Exception:
-                pass
-            time.sleep(POLL)
+                busy = False
+            # okno w tle (gra, inny program): nie dotykamy padów wcale, tylko
+            # co 0,25 s sprawdzamy, czy okno wróciło na wierzch
+            time.sleep(POLL if busy else 0.25)
 
-    def _tick(self, now: float) -> None:
+    def _tick(self, now: float) -> bool:
         if not self._active():
-            # po powrocie nie powtarzamy starych przycisków — ale pamiętamy, że są
-            # wciśnięte, żeby nie wysłać ich drugi raz jako nowe naciśnięcie
-            self._held = {a: [now, now + 3600] for a in _actions()} if xinput.available() else {}
-            return
+            self._resync = True
+            return False
+        if getattr(self, "_resync", True):
+            # powrót na wierzch: wciśnięte teraz przyciski uznajemy za „trzymane”,
+            # żeby nie wysłać ich jako nowe naciśnięcie
+            self._resync = False
+            self._held = {a: [now, now + 3600] for a in _actions()}
+            return True
         active = _actions()
         for a in active:
             h = self._held.get(a)
@@ -104,3 +110,4 @@ class UiPad:
             if a not in active:
                 del self._held[a]
                 self._emit(a, up=True)
+        return True

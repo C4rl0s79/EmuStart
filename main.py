@@ -47,6 +47,8 @@ def main() -> None:
         fullscreen=bool(cfg.get("fullscreen", True)) and not windowed,
         width=1600, height=900, min_size=(960, 540), background_color="#0b0d12")
     api.attach(window)
+    logging.getLogger("emustart").info("start %s, obsługa padów w UI: %s",
+                                       __import__("emustart").__version__, api.pad_backend())
     webview.start(debug=debug, private_mode=False)
     # okno zamknięte: przerywamy zadania w tle i kończymy proces od razu — wątki
     # robocze (np. pobieranie grafik) nie mogą trzymać programu przy życiu

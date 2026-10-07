@@ -70,6 +70,10 @@ const REPEATABLE = new Set(["up", "down", "left", "right", "lb", "rb", "lt", "rt
 const held = {};     // akcja → {since, next}
 
 function pollPads(now) {
+  // Gamepad API tylko w trybie „przeglądarka”. W trybie python (domyślnym) nie
+  // wywołujemy go wcale — WebView2 otwiera wtedy pady przez Windows.Gaming.Input,
+  // a podejrzewamy, że to psuje sterownik odbiornika Xbox po zamknięciu programu.
+  if (S.padBackend !== "browser") return;
   const pads = navigator.getGamepads ? navigator.getGamepads() : [];
   const active = new Set();
   for (const p of pads) {
@@ -588,7 +592,7 @@ function renderIngame() {
 window.ingameInput = (a, fromPython) => {
   if (S.modal !== "ingame") return;
   // okno z fokusem widzi pad samo — wtedy to samo naciśnięcie z Pythona pomijamy
-  if (fromPython && document.hasFocus() && [...(navigator.getGamepads?.() || [])].some((p) => p && p.connected)) return;
+  if (fromPython && S.padBackend === "browser" && document.hasFocus() && [...(navigator.getGamepads?.() || [])].some((p) => p && p.connected)) return;
   const n = IG.items.length;
   const step = (d) => { let i = IG.idx; for (let k = 0; k < n; k++) { i = (i + d + n) % n; if (IG.items[i].on) break; } IG.idx = i; };
   if (a === "up") step(-1);
@@ -692,6 +696,8 @@ function buildSetRows() {
   rows.push({ head: "Wygląd" });
   rows.push({ k: "Pełny ekran", key: "fullscreen", type: "bool", fmt: (v) => (v ? "tak" : "nie") + " (po restarcie)" });
   rows.push({ k: "Ukryj klony arcade", key: "hide_arcade_clones", type: "bool", fmt: (v) => (v ? "tak" : "nie") });
+  rows.push({ k: "Obsługa padów w menu", key: "pad_backend", type: "enum", opts: ["python", "browser", "none"],
+              fmt: (v) => ({ python: "EmuStart / XInput (zalecane)", browser: "przeglądarka (Gamepad API)", none: "wyłączona (tylko klawiatura)" }[v] + " — po restarcie") });
   rows.push({ k: "Tytuły gier jako logo", key: "games_logo", type: "bool", fmt: (v) => (v ? "tak (Clear Logo z LaunchBox, gdy jest)" : "nie") });
   rows.push({ head: "Akcje" });
   rows.push({ k: "Wykryj emulatory i skanuj", type: "action", run: async () => { toast("Wykrywam emulatory…", 60000); const r = await api().autodetect(); if (!r.ok) return toast(r.reason, 4000); toast(`Przypisano emulatory: ${r.assigned}`); startScan(async () => { await openSettings(); }); } });
@@ -1020,6 +1026,7 @@ window.addEventListener("pywebviewready", async () => {
   tick(); setInterval(tick, 10000);
   const st = await refreshState();
   S.pyPad = !!st.py_pad;
+  S.padBackend = st.pad_backend || "browser";
   if (S.pyPad) setInterval(pollPyPad, 33);
   setInterval(pollCopies, 1500);
   setInterval(() => { if (!S.modal) refreshState().then(() => S.screen === "systems" && renderSystems()); }, 15000);

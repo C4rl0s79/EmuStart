@@ -52,7 +52,7 @@ class Api:
         self._pin_jobs: dict = {}            # game_id → Session-like (kopiowanie przypiętych)
         self._scan = {"running": False, "text": "", "done": 0, "total": 0, "result": None}
         ingame.restore_pending()          # ustawienia padów po ewentualnej awarii
-        self._uipad = uipad.UiPad(self._uipad_active)
+        self._uipad = uipad.UiPad(self._uipad_active) if self.pad_backend() == "python" else None
         self._profile = self._initial_profile()
         threading.Thread(target=lambda: profiles.sync_pending(self._cfg), daemon=True,
                          name="sync-pending").start()
@@ -94,7 +94,19 @@ class Api:
 
     def ui_pad_poll(self) -> list:
         """Zdarzenia padów XInput dla UI: [{a, up}]."""
-        return self._uipad.poll()
+        return self._uipad.poll() if self._uipad else []
+
+    def pad_backend(self) -> str:
+        """Kto obsługuje pady w interfejsie: python (XInput) | browser (Gamepad API
+        w WebView2) | none. Flaga startowa --pady=… wygrywa z ustawieniem."""
+        import sys
+        for arg in sys.argv:
+            if arg.startswith("--pady="):
+                v = arg.split("=", 1)[1].lower()
+                return {"python": "python", "przegladarka": "browser", "browser": "browser",
+                        "brak": "none", "none": "none"}.get(v, "python")
+        v = self._cfg.get("pad_backend", "python")
+        return v if v in ("python", "browser", "none") else "python"
 
     def _arcade_meta(self) -> None:
         """Rok/producent/gracze/gatunek setów arcade (filtry) — raz, w tle."""
@@ -139,7 +151,8 @@ class Api:
             "scan": dict(self._scan),
             "cache": cache.usage(cfg),
             "copying": self._copying(),
-            "py_pad": bool(self._window) and uipad.xinput.available(),
+            "py_pad": bool(self._window) and uipad.xinput.available() and self.pad_backend() == "python",
+            "pad_backend": self.pad_backend() if self._window else "browser",
             "games_logo": bool(self._cfg.get("games_logo")),
             "profile": profiles.get(self._profile),
             "profiles": len(profiles.all_profiles()),
@@ -575,9 +588,9 @@ class Api:
             job.cancel.set()
 
     # ── pady ──
-    def pads_state(self) -> dict:
+    def pads_state(self, battery: bool = False) -> dict:
         from emustart import xinput
-        lst = pads.connected()
+        lst = pads.connected(battery=bool(battery))
         for p in lst:
             p["buttons"] = xinput.buttons(p["slot"]) or 0
         po = self._cfg.get("pad_order") or {}
@@ -741,6 +754,7 @@ class Api:
                 "fullscreen": cfg.get("fullscreen", True),
                 "hide_arcade_clones": cfg.get("hide_arcade_clones", True),
                 "games_logo": cfg.get("games_logo", False),
+                "pad_backend": cfg.get("pad_backend", "python"),
                 "systems": rows}
 
     def emulator_options(self, es: str) -> list:
@@ -763,6 +777,8 @@ class Api:
                     cfg[k] = max(1, int(data[k]))
                 except (TypeError, ValueError):
                     pass
+        if data.get("pad_backend") in ("python", "browser", "none"):
+            cfg["pad_backend"] = data["pad_backend"]
         for k in ("fullscreen", "hide_arcade_clones", "games_logo"):
             if k in data:
                 cfg[k] = bool(data[k])

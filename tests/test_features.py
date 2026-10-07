@@ -167,11 +167,11 @@ def test_moved_app_adopts_old_profile_store(prof_env, monkeypatch):
 
 def test_uipad_events_repeat_and_release(monkeypatch):
     from emustart import uipad
-    seq = [{"down"}, {"down"}, {"down"}, set(), {"a"}, set()]
+    seq = [set(), {"down"}, {"down"}, {"down"}, set(), {"a"}, set()]
     monkeypatch.setattr(uipad, "_actions", lambda: seq.pop(0))
     monkeypatch.setattr(uipad.xinput, "available", lambda: False)   # bez wątku
     p = uipad.UiPad(lambda: True)
-    for t in (0.0, 0.1, 0.5, 0.6, 0.7, 0.8):
+    for t in (-0.1, 0.0, 0.1, 0.5, 0.6, 0.7, 0.8):   # pierwszy odczyt: tylko synchronizacja
         p._tick(t)
     assert p.poll() == [{"a": "down", "up": False}, {"a": "down", "up": False},
                         {"a": "down", "up": True}, {"a": "a", "up": False}, {"a": "a", "up": True}]
@@ -268,3 +268,15 @@ def test_launchbox_build_and_match(env, tmp_path, monkeypatch):
     assert m["description"] == "Link saves Hyrule." and m["genre"] == "Action, Adventure" and m["year"] == "1991"
     assert launchbox.images(7, "logo")[0]["url"].endswith("/a.png")
     assert launchbox.images(7, "box")[0]["type"] == "Box - Front"
+
+
+
+def test_uipad_does_not_poll_when_inactive(monkeypatch):
+    from emustart import uipad
+    calls = []
+    monkeypatch.setattr(uipad, "_actions", lambda: calls.append(1) or set())
+    monkeypatch.setattr(uipad.xinput, "available", lambda: False)
+    p = uipad.UiPad(lambda: False)
+    for t in range(5):
+        assert p._tick(float(t)) is False
+    assert calls == []                      # okno w tle: zero odczytów pada

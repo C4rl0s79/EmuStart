@@ -46,18 +46,17 @@
     </div>
     <div class="rows" id="rows"></div>
   </div>
-  <div class="preview">
+  <!-- podgląd 2×2: okładka | zrzut (do prawej) / metadane | opis -->
+  <div class="preview pv2">
+    <div class="box"><img id="pvBox" alt=""><div id="pvBoxEmpty" class="noart">brak okładki</div></div>
     <div class="snap"><img id="pvSnap" alt=""></div>
-    <div class="pvbody">
-      <div class="box"><img id="pvBox" alt=""><div id="pvBoxEmpty" class="noart">brak okładki</div></div>
-      <div class="meta">
-        <img id="pvLogo" class="pvlogo hidden" alt="">
-        <h1 id="pvTitle"></h1>
-        <p id="pvTags" class="tags"></p>
-        <dl id="pvMeta"></dl>
-        <div id="pvDesc" class="desc"></div>
-      </div>
+    <div class="meta">
+      <img id="pvLogo" class="pvlogo hidden" alt="">
+      <h1 id="pvTitle"></h1>
+      <p id="pvTags" class="tags"></p>
+      <dl id="pvMeta"></dl>
     </div>
+    <div id="pvDesc" class="desc"></div>
   </div>
 </section>
 

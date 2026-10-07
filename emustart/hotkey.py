@@ -36,6 +36,10 @@ class GameMenu:
         self._thread = threading.Thread(target=self._watch, daemon=True, name="hotkey")
 
     def start(self) -> None:
+        backend = getattr(self.ui, "pad_backend", lambda: "python")()
+        if backend == "none":
+            log.info("obsługa padów wyłączona — menu w grze (A+Y) nieaktywne")
+            return
         if xinput.available():
             self._thread.start()
         else:

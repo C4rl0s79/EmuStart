@@ -41,11 +41,17 @@ def _battery(slot: int) -> tuple:
     return BATTERY_TYPE.get(b.BatteryType, "unknown"), b.BatteryLevel
 
 
-def connected() -> list:
-    """[{slot, wireless, battery}] podłączonych padów XInput."""
+def connected(battery: bool = True) -> list:
+    """[{slot, wireless, battery}] podłączonych padów XInput.
+
+    `battery=False` pomija zapytanie o baterię — przy odbiorniku Xbox to jedyne
+    wywołanie, które idzie radiowo do samego pada, więc nie robimy go w pętli."""
     out = []
     for slot in range(4):
         if xinput.buttons(slot) is None:
+            continue
+        if not battery:
+            out.append({"slot": slot, "wireless": False, "kind": "unknown", "battery": None})
             continue
         kind, level = _battery(slot)
         wireless = kind in ("alkaline", "nimh")

@@ -250,7 +250,7 @@ function padLabel(p) {
   return `Pad #${p.slot + 1}: ` + (p.wireless ? `bezprzewodowy${p.battery ? `, bateria ${p.battery}` : ""}` : "przewodowy");
 }
 async function openPads() {
-  PADS.st = await api().pads_state();
+  PADS.st = await api().pads_state(true);          // bateria raz, przy wejściu
   PADS.idx = 0;
   show("pads");
   clearInterval(PADS.timer);
@@ -259,6 +259,11 @@ async function openPads() {
 async function padsTick() {
   if (S.screen !== "pads") return clearInterval(PADS.timer);
   const st = await api().pads_state();
+  // rodzaj zasilania/bateria z pierwszego odczytu (w pętli nie pytamy o baterię)
+  for (const p of st.pads) {
+    const old = (PADS.st?.pads || []).find((x) => x.slot === p.slot);
+    if (old) Object.assign(p, { wireless: old.wireless, battery: old.battery, kind: old.kind });
+  }
   if (PADS.assign) return padAssignStep(st);
   PADS.st = st;
   renderPads();

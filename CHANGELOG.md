@@ -4,6 +4,31 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 [Keep a Changelog](https://keepachangelog.com/pl/1.1.0/), wersje według
 [SemVer](https://semver.org/lang/pl/).
 
+## [0.11.0] — 2026-10-07
+
+### Naprawione
+- **Pad psuł się po zamknięciu programu** (wyłączał się i nie dało się go
+  włączyć do restartu Windows; przy działającym programie nie działał w innych
+  aplikacjach). Ograniczony do minimum kontakt programu z padami:
+  - interfejs nie używa już Gamepad API w WebView2 (otwierało pady przez
+    Windows.Gaming.Input) — pady obsługuje wyłącznie EmuStart przez XInput,
+  - XInput jest odpytywany tylko, gdy okno EmuStart jest na wierzchu; w tle
+    (gra, inny program) program nie dotyka padów wcale,
+  - zapytanie o baterię (jedyne idące radiowo do pada) tylko raz przy wejściu
+    na ekran „Kolejność padów” i przy starcie gry w trybie „bezprzewodowe
+    pierwsze” — dotąd 5 razy na sekundę na tym ekranie i przy każdej grze.
+
+### Dodane
+- Ustawienie **„Obsługa padów w menu”**: EmuStart/XInput (domyślnie),
+  przeglądarka (Gamepad API) albo wyłączona (tylko klawiatura). Flaga startowa
+  `--pady=python|przegladarka|brak` — do szybkiego sprawdzenia, czy problem
+  z padem wraca w danym trybie. Wybrany tryb zapisuje się w logu przy starcie.
+
+### Zmienione
+- **Podgląd gry 2×2**: okładka po lewej i zrzut ekranu dosunięty do prawej
+  krawędzi (u góry), metadane pod okładką, opis pod zrzutem (więcej miejsca
+  na opis).
+
 ## [0.10.0] — 2026-10-07
 
 ### Dodane

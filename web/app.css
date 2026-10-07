@@ -275,3 +275,16 @@ img.glow { filter: drop-shadow(0 0 1px rgba(255,255,255,.9)) drop-shadow(0 0 6px
 .sysfacts b { color: var(--text); font-weight: 600; }
 .sysdesc { margin: 0; color: var(--dim); line-height: 1.5; font-size: .95em;
   display: -webkit-box; -webkit-line-clamp: 5; -webkit-box-orient: vertical; overflow: hidden; }
+
+/* ── podgląd gry 2×2 (0.11): okładka | zrzut / metadane | opis ── */
+.preview.pv2 { display: grid; grid-template-columns: minmax(15vw, 32%) 1fr; grid-template-rows: auto minmax(0, 1fr);
+  gap: 2.5vh 1.8vw; padding-top: 2vh; overflow: hidden; }
+.pv2 .box { width: auto; max-height: 44vh; align-self: start; }
+.pv2 .box img { max-width: 100%; max-height: 44vh; }
+.pv2 .noart { max-height: 44vh; }
+.pv2 .snap { justify-self: end; align-self: start; width: 100%; max-width: calc(44vh * 4 / 3); max-height: 44vh; }
+.pv2 .meta { min-width: 0; overflow: hidden; }
+.pv2 .meta h1 { font-size: 1.45em; }
+.pv2 .meta dl { grid-template-columns: auto minmax(0, 1fr); font-size: .92em; }
+.pv2 .pvlogo { max-height: 10vh; }
+.pv2 .desc { margin-top: 0; max-height: none; -webkit-line-clamp: 14; font-size: .95em; }
