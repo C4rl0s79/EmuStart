@@ -13,6 +13,7 @@ wszystko działa bez sieci (sieć tylko po wybraną grafikę).
 
 from __future__ import annotations
 
+import io
 import logging
 import re
 import sqlite3
@@ -253,6 +254,8 @@ def build(zip_path: Path, out: Path, progress=None, cancel=None) -> dict:
                                          (el.findtext("CloneOf") or "").lower()))
                         el.clear()
             con.executemany("INSERT OR REPLACE INTO mame VALUES(?,?,?)", rows)
+            if "Platforms.xml" in z.namelist():
+                _store_platforms(con, _platform_rows(z.read("Platforms.xml")))
         con.executescript("""
             CREATE INDEX IF NOT EXISTS ix_names ON names(platform, norm);
             CREATE INDEX IF NOT EXISTS ix_names_n ON names(norm);
@@ -265,6 +268,95 @@ def build(zip_path: Path, out: Path, progress=None, cancel=None) -> dict:
     finally:
         con.close()
     return {"games": n_games, "images": n_img, "alts": n_alt}
+
+
+# ── platformy (Platforms.xml) ──
+
+_PLAT_SQL = """CREATE TABLE IF NOT EXISTS platforms(name TEXT PRIMARY KEY, release TEXT,
+    developer TEXT, manufacturer TEXT, cpu TEXT, memory TEXT, graphics TEXT, sound TEXT,
+    display TEXT, media TEXT, controllers TEXT, notes TEXT, category TEXT)"""
+_PLAT_FIELDS = ("ReleaseDate", "Developer", "Manufacturer", "Cpu", "Memory", "Graphics",
+                "Sound", "Display", "Media", "MaxControllers", "Notes", "Category")
+
+
+def _platform_rows(xml_bytes: bytes) -> list:
+    import xml.etree.ElementTree as ET
+    rows = []
+    for p in ET.fromstring(xml_bytes).findall("Platform"):
+        name = p.findtext("Name")
+        if name:
+            vals = [(p.findtext(f) or "").strip() for f in _PLAT_FIELDS]
+            vals[0] = vals[0][:10]                       # data bez godziny
+            rows.append((name, *vals))
+    return rows
+
+
+def _store_platforms(con, rows: list) -> None:
+    con.execute(_PLAT_SQL)
+    con.executemany("INSERT OR REPLACE INTO platforms VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
+
+
+class _RangeFile(io.RawIOBase):
+    """Plik zdalny czytany fragmentami (HTTP Range) — zipfile odczyta z niego
+    jeden wpis archiwum bez pobierania całości."""
+
+    def __init__(self, url: str):
+        self.url, self.pos = url, 0
+        req = urllib.request.Request(url, method="HEAD", headers={"User-Agent": UA})
+        with urllib.request.urlopen(req, timeout=30) as r:
+            self.size = int(r.headers["Content-Length"])
+
+    def readable(self):
+        return True
+
+    def seekable(self):
+        return True
+
+    def tell(self):
+        return self.pos
+
+    def seek(self, off, whence=0):
+        self.pos = off if whence == 0 else self.pos + off if whence == 1 else self.size + off
+        return self.pos
+
+    def readinto(self, b):
+        n = min(len(b), self.size - self.pos)
+        if n <= 0:
+            return 0
+        req = urllib.request.Request(self.url, headers={
+            "User-Agent": UA, "Range": f"bytes={self.pos}-{self.pos + n - 1}"})
+        with urllib.request.urlopen(req, timeout=60) as r:
+            data = r.read()
+        b[:len(data)] = data
+        self.pos += len(data)
+        return len(data)
+
+
+def fetch_platforms() -> int:
+    """Pobiera z serwera tylko Platforms.xml (~75 KB z archiwum 108 MB) i zapisuje
+    do bazy LaunchBox. Zwraca liczbę platform."""
+    with zipfile.ZipFile(io.BufferedReader(_RangeFile(METADATA_URL), 1 << 16)) as z:
+        rows = _platform_rows(z.read("Platforms.xml"))
+    con = sqlite3.connect(str(db_path()))
+    try:
+        _store_platforms(con, rows)
+        con.commit()
+    finally:
+        con.close()
+    _local.con = None                       # połączenie tylko-do-odczytu otwórz na nowo
+    return len(rows)
+
+
+def platform(es: str) -> dict | None:
+    """Dane platformy LaunchBoksa dla systemu (producent, premiera, nośnik, opis…)."""
+    name = PLATFORMS.get(es) or PLATFORMS.get(es.lower(), "")
+    if not name or not db_path().is_file():
+        return None
+    try:
+        r = _con().execute("SELECT * FROM platforms WHERE name=?", (name,)).fetchone()
+    except sqlite3.Error:
+        return None                         # baza bez tabeli platform (sprzed 0.10)
+    return dict(r) if r else None
 
 
 # ── zapytania ──

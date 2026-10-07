@@ -4,6 +4,25 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 [Keep a Changelog](https://keepachangelog.com/pl/1.1.0/), wersje według
 [SemVer](https://semver.org/lang/pl/).
 
+## [0.10.0] — 2026-10-07
+
+### Dodane
+- **Opis platformy w karuzeli systemów** — wyśrodkowany blok (~55% szerokości)
+  pod nazwą systemu: producent, lata produkcji (np. 1994–2006) albo rok
+  premiery, nośnik, liczba padów i opis.
+  - Dane platform z LaunchBoksa (`Platforms.xml`: producent, premiera, nośnik,
+    procesor, pamięć, pady, opis) — pobierane fragmentem archiwum (~75 KB
+    zamiast 108 MB), także do istniejących baz.
+  - Lata produkcji i producent z Wikidaty, opis po polsku z Wikipedii (gdy brak
+    — angielski, a na końcu opis z LaunchBoksa). Wybierany jest najbardziej
+    pasujący artykuł (dokładna zgodność nazwy wygrywa — SNES ≠ NES,
+    Atari 2600 ≠ Atari 2600+). Systemy arcade opisane jako automaty.
+  - Pobierane raz, w tle; oglądany system ma pierwszeństwo przed kolejką.
+
+### Zmienione
+- Zapytania do Wikipedii z opisowym nagłówkiem User-Agent (adres projektu) —
+  ogólny nagłówek Wikipedia odrzucała przy serii zapytań (HTTP 429).
+
 ## [0.9.0] — 2026-10-07
 
 ### Dodane

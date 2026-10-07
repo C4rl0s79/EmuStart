@@ -268,3 +268,10 @@ img.glow { filter: drop-shadow(0 0 1px rgba(255,255,255,.9)) drop-shadow(0 0 6px
 .pvlogo { max-width: 100%; max-height: 14vh; object-fit: contain; object-position: left center; margin-bottom: .4em;
   filter: drop-shadow(0 2px 6px rgba(0,0,0,.8)); }
 .artgrid.logopick img { aspect-ratio: 16 / 9; background: #0b0d12; padding: 8px; }
+
+/* ── opis platformy w karuzeli: wyśrodkowany blok ~55% szerokości ── */
+.sysabout { width: 55%; margin: 1.6em auto 0; text-align: center; }
+.sysfacts { margin: 0 0 .7em; color: var(--accent2); font-size: .95em; }
+.sysfacts b { color: var(--text); font-weight: 600; }
+.sysdesc { margin: 0; color: var(--dim); line-height: 1.5; font-size: .95em;
+  display: -webkit-box; -webkit-line-clamp: 5; -webkit-box-orient: vertical; overflow: hidden; }

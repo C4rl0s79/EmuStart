@@ -235,6 +235,35 @@ function renderSystems() {
       (s.emulator ? ` · ${s.emulator}` : " · brak emulatora")
     : "";
   setHints(n ? [["dpad", "System"], ["a", "Wybierz (przytrzymaj: opcje)"], ["start", "Menu"]] : [["start", "Menu"]]);
+  scheduleSysInfo(s);
+}
+
+// opis platformy pod nazwą systemu — z pamięci, pobierany w tle przy pierwszym razie
+const SYSINFO = {};
+let sysInfoTimer;
+function scheduleSysInfo(s) {
+  clearTimeout(sysInfoTimer);
+  if (!s) return $("sysAbout").classList.add("hidden");
+  if (SYSINFO[s.es]) return renderSysInfo(SYSINFO[s.es]);
+  $("sysAbout").classList.add("hidden");
+  let tries = 0;
+  const load = async () => {
+    const d = await api().system_info(s.es);
+    if (d.pending) { if (++tries < 40) sysInfoTimer = setTimeout(load, 1500); return; }
+    SYSINFO[s.es] = d;
+    if (S.systems[S.sysIdx]?.es === s.es && S.screen === "systems") renderSysInfo(d);
+  };
+  sysInfoTimer = setTimeout(load, 250);
+}
+function renderSysInfo(d) {
+  const facts = [];
+  if (d.manufacturer) facts.push(`<b>${esc(d.manufacturer)}</b>`);
+  if (d.release) facts.push(d.end ? `${esc(d.release)}–${esc(d.end)}` : `premiera ${esc(d.release)}`);
+  if (d.media) facts.push(esc(d.media));
+  if (d.controllers) facts.push(`pady: ${esc(d.controllers)}`);
+  $("sysFacts").innerHTML = facts.join("  ·  ");
+  $("sysDesc").textContent = d.description || "";
+  $("sysAbout").classList.toggle("hidden", !facts.length && !d.description);
 }
 
 function systemsInput(a) {

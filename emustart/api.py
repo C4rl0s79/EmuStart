@@ -14,7 +14,7 @@ import threading
 import time
 from pathlib import Path
 
-from emustart import (__version__, art, art_sources, cache, ingame, installer, launchbox, logos, metadata, pads, profiles, uipad, config, emulators, launcher, library,
+from emustart import (__version__, art, art_sources, cache, ingame, installer, launchbox, logos, sysinfo, metadata, pads, profiles, uipad, config, emulators, launcher, library,
                       paths, scanner, systems, winutil)
 
 log = logging.getLogger("emustart.api")
@@ -57,6 +57,7 @@ class Api:
         threading.Thread(target=lambda: profiles.sync_pending(self._cfg), daemon=True,
                          name="sync-pending").start()
         threading.Thread(target=self._arcade_meta, daemon=True, name="arcade-meta").start()
+        threading.Thread(target=self._platforms_meta, daemon=True, name="platforms").start()
         # Menu w grze: stan czyta UI (ingame_poll), Python niczego nie wywołuje
         # w oknie. evaluate_js przy grze na pełnym ekranie potrafiło czekać 20 s
         # i blokowało w tym czasie wszystkie wywołania z UI.
@@ -104,6 +105,16 @@ class Api:
         except Exception:
             log.exception("arcade meta")
 
+    def _platforms_meta(self) -> None:
+        """Dane platform LaunchBoksa (Platforms.xml, ~75 KB) — dla baz zbudowanych
+        przed 0.10, które ich nie mają; potem opisy platform dla karuzeli."""
+        try:
+            if launchbox.ready() and launchbox.platform("psx") is None:
+                log.info("platformy LaunchBox: %s", launchbox.fetch_platforms())
+            sysinfo.ensure([s["es"] for s in library.systems_summary()])
+        except Exception:
+            log.exception("platformy")
+
     def _initial_profile(self) -> int:
         ids = [p["id"] for p in profiles.all_profiles()]
         try:
@@ -133,6 +144,15 @@ class Api:
             "profile": profiles.get(self._profile),
             "profiles": len(profiles.all_profiles()),
         }
+
+    def system_info(self, es: str) -> dict:
+        """Opis platformy do karuzeli (producent, lata, nośnik, opis). Brak danych
+        = pobranie w tle; UI zapyta ponownie."""
+        d = sysinfo.get(es)
+        if d is None:
+            sysinfo.ensure_now(es)
+            return {"pending": True}
+        return {k: v for k, v in d.items() if not k.startswith("_") and k != "lb_notes"}
 
     def list_systems(self) -> list:
         out = []
