@@ -441,6 +441,8 @@ def _pending(pid: int, family: str, names: list, add: bool) -> None:
 
 def sync_pending(cfg: dict) -> int:
     """Wysyła save'y, których nie udało się wysłać (NAS był niedostępny)."""
+    if nas_online(cfg):
+        resolve_moves(cfg)
     data = json.loads(library.meta_get("sync_pending", "{}"))
     n = 0
     for k, names in data.items():
@@ -485,6 +487,7 @@ def unlock(cfg: dict, pid: int) -> None:
 
 def import_from_nas(cfg: dict) -> list:
     """Zakłada profile dla folderów na NAS, których nie ma w bazie. Zwraca nazwy."""
+    resolve_moves(cfg)
     root = nas_root(cfg)
     try:
         if not root.is_dir():
@@ -767,3 +770,82 @@ def resume_pull(cfg: dict, pid: int, g: dict) -> dict | None:
         shutil.copy2(src, dst)
         path = str(dst)
     return {"family": e.get("family", ""), "path": path, "created": e.get("created", 0)}
+
+
+# ── zmiana folderu profilu na NAS (np. po zmianie nazwy) ──
+# Stary folder zostaje z plikiem moved.json {"to": nowa nazwa}; inne komputery
+# przy następnej synchronizacji same przepinają się na nowy folder.
+
+MOVED = "moved.json"
+
+
+def nas_wanted(prof: dict) -> str:
+    return _safe_name(prof["name"])
+
+
+def resolve_moves(cfg: dict) -> int:
+    """Profile, których folder na NAS przeniesiono z innego komputera → nowy folder."""
+    root = nas_root(cfg)
+    n = 0
+    try:
+        if not root.is_dir():
+            return 0
+    except OSError:
+        return 0
+    for prof in all_profiles():
+        name, seen = prof["nas_name"], set()
+        while name not in seen and len(seen) < 5:
+            seen.add(name)
+            try:
+                data = json.loads((root / name / MOVED).read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                break
+            to = str(data.get("to") or "")
+            if not to or _safe_name(to) != to:
+                break
+            name = to
+        if name != prof["nas_name"]:
+            with library.db() as c:
+                c.execute("UPDATE profiles SET nas_name=? WHERE id=?", (name, prof["id"]))
+            log.info("profil %s: folder na NAS przeniesiony %s → %s", prof["name"], prof["nas_name"], name)
+            n += 1
+    return n
+
+
+def nas_rename(cfg: dict, pid: int) -> str:
+    """Przenosi folder profilu na NAS pod nazwę zgodną z nazwą profilu. '' = OK,
+    inaczej powód odmowy."""
+    prof = get(pid)
+    if not prof:
+        return "Nie ma takiego profilu."
+    new = nas_wanted(prof)
+    if new == prof["nas_name"]:
+        return ""
+    if not nas_online(cfg):
+        return "NAS jest niedostępny."
+    root = nas_root(cfg)
+    old_dir, new_dir = root / prof["nas_name"], root / new
+    if new_dir.exists():
+        return f"Na NAS jest już folder „{new}”."
+    if library.db().execute("SELECT 1 FROM profiles WHERE nas_name=? AND id!=?", (new, pid)).fetchone():
+        return f"Folder „{new}” należy do innego profilu."
+    try:
+        cur = json.loads((old_dir / "lock").read_text(encoding="utf-8"))
+        if cur.get("host") != socket.gethostname() and time.time() - cur.get("time", 0) < LOCK_MAX_AGE:
+            return f"Profil właśnie gra na komputerze {cur.get('host', '?')}."
+    except (OSError, ValueError):
+        pass
+    try:
+        if old_dir.exists():
+            os.rename(old_dir, new_dir)
+            old_dir.mkdir()
+            (old_dir / MOVED).write_text(json.dumps({"to": new, "time": time.time(),
+                                                     "host": socket.gethostname()}), encoding="utf-8")
+        else:
+            new_dir.mkdir(parents=True)
+    except OSError as ex:
+        return f"Nie udało się przenieść folderu: {ex}"
+    with library.db() as c:
+        c.execute("UPDATE profiles SET nas_name=? WHERE id=?", (new, pid))
+    log.info("profil %s: folder na NAS %s → %s", prof["name"], old_dir.name, new)
+    return ""

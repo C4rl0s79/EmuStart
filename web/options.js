@@ -417,6 +417,13 @@ async function profileMenu(p) {
       toast(r.ok ? `Profil „${p.name}” używa konta ${r.user}.` : r.reason);
     }]);
   }
+  if (p.nas_wanted && p.nas_name !== p.nas_wanted) {
+    items.push([`Folder na NAS: „${p.nas_name}” → zmień na „${p.nas_wanted}”`, async () => {
+      const r = await api().profile_nas_rename(p.id);
+      toast(r.ok ? `Folder profilu na NAS: ${r.nas_name}. Inne komputery przełączą się same.` : r.reason, 5000);
+      if (r.ok) openProfiles(PR.startup);
+    }]);
+  }
   items.push(["Ustaw jako profil tego komputera", async () => {
     await api().save_settings({ machine_profile: p.id });
     toast(`Profil tego komputera: ${p.name}`);

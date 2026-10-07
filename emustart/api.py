@@ -774,7 +774,14 @@ class Api:
     # ── profile ──
     def profiles_list(self) -> dict:
         profiles.import_from_nas(self._cfg)
-        return {"profiles": profiles.all_profiles(), "current": self._profile}
+        lst = profiles.all_profiles()
+        for p in lst:
+            p["nas_wanted"] = profiles.nas_wanted(p)
+        return {"profiles": lst, "current": self._profile}
+
+    def profile_nas_rename(self, pid: int) -> dict:
+        reason = profiles.nas_rename(self._cfg, int(pid))
+        return {"ok": not reason, "reason": reason, "nas_name": (profiles.get(int(pid)) or {}).get("nas_name", "")}
 
     def profile_select(self, pid: int) -> dict:
         if not profiles.get(int(pid)):

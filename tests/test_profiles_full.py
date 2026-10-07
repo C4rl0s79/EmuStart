@@ -319,3 +319,26 @@ def test_hide_settings_are_per_profile(prof_env, monkeypatch):
     assert cfg["hide_beta"] is False and cfg["hide_arcade_clones"] is True
     a._user_load(first)
     assert cfg["hide_beta"] is True
+
+
+def test_nas_folder_rename_and_other_pc_follows(prof_env):
+    from emustart import library
+    cfg, tmp = prof_env
+    pid = profiles.first_id()
+    profiles.rename(pid, "Jezus")                                          # stara wersja: folder został
+    assert profiles.get(pid)["nas_name"] == "Gracz"
+    root = Path(cfg["profiles_nas"])
+    _write(root / "Gracz" / "save" / "pcsx2" / "memcards" / "Mcd001.ps2", b"SAVE")
+    _write(root / "Gracz" / "lock", b'{"host": "INNY-PC", "time": %d}' % int(profiles.time.time()))
+    assert "INNY-PC" in profiles.nas_rename(cfg, pid)                     # gra na innym komputerze
+    (root / "Gracz" / "lock").unlink()
+    assert profiles.nas_rename(cfg, pid) == ""
+    assert profiles.get(pid)["nas_name"] == "Jezus"
+    assert (root / "Jezus" / "save" / "pcsx2" / "memcards" / "Mcd001.ps2").read_bytes() == b"SAVE"
+    assert (root / "Gracz" / profiles.MOVED).is_file()
+
+    # drugi komputer: ma ten profil jeszcze pod starym folderem
+    with library.db() as c:
+        c.execute("UPDATE profiles SET nas_name='Gracz' WHERE id=?", (pid,))
+    assert profiles.import_from_nas(cfg) == []                              # nie powstaje duplikat
+    assert profiles.get(pid)["nas_name"] == "Jezus"

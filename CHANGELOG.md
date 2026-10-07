@@ -4,6 +4,17 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 [Keep a Changelog](https://keepachangelog.com/pl/1.1.0/), wersje według
 [SemVer](https://semver.org/lang/pl/).
 
+## [0.16.0] — 2026-10-08
+
+### Dodane
+- Opcje profilu (Start na karcie) → **„Folder na NAS: … → zmień na …”**, gdy
+  folder profilu na NAS ma inną nazwę niż profil (np. profil przemianowany
+  z „Gracz”). Folder jest przenoszony, a w starym miejscu zostaje `moved.json`
+  ze wskazaniem nowego — inne komputery przepinają się same przy następnej
+  synchronizacji, bez duplikatów i rozjechanych save'ów. Odmawia, gdy profil
+  właśnie gra na innym komputerze, NAS jest niedostępny albo folder o nowej
+  nazwie już istnieje.
+
 ## [0.15.1] — 2026-10-08
 
 ### Zmienione

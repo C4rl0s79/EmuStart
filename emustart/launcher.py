@@ -310,6 +310,11 @@ class Session:
     def _profile_prepare(self, adapter) -> list:
         if not self.profiles_on or not (adapter.save_dirs() or adapter.settings_files()):
             return []
+        try:
+            if profiles.nas_online(self.cfg):
+                profiles.resolve_moves(self.cfg)   # folder przeniesiony z innego komputera
+        except Exception:
+            log.exception("przeniesione profile")
         host = profiles.lock(self.cfg, self.profile_id)
         if host:
             prof = profiles.get(self.profile_id) or {}
