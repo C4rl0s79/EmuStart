@@ -190,9 +190,18 @@ function renderArtPicker() {
     "Nic nie znaleziono. X: szukaj pod inną nazwą.";
   grid.classList.toggle("snapgrid", A_.kind === "snap");
   grid.innerHTML = (A_.list || []).map((c, i) =>
-    `<figure class="${i === A_.idx ? "sel" : ""}" data-i="${i}"><img src="${esc(c.thumb)}" alt="" loading="lazy" referrerpolicy="no-referrer">` +
+    `<figure class="${i === A_.idx ? "sel" : ""}" data-i="${i}"><img src="${esc(c.thumb)}" alt="" referrerpolicy="no-referrer" data-i="${i}">` +
     `<figcaption>${esc(c.source)}<br><small>${esc(c.label)}</small></figcaption></figure>`).join("");
   grid.querySelectorAll("figure").forEach((f) => f.addEventListener("click", () => { A_.idx = +f.dataset.i; artPickInput("a"); }));
+  // miniatura, która się nie wczytała, znika z listy (pusty kafelek mylił nawigację)
+  grid.querySelectorAll("img[data-i]").forEach((img) => img.addEventListener("error", () => {
+    const c = A_.list[+img.dataset.i];
+    if (!c) return;
+    const cur = A_.list[A_.idx];
+    A_.list = A_.list.filter((x) => x !== c);
+    A_.idx = Math.max(0, cur === c ? Math.min(A_.idx, A_.list.length - 1) : A_.list.indexOf(cur));
+    renderArtPicker();
+  }, { once: true }));
   grid.querySelector("figure.sel")?.scrollIntoView({ block: "nearest" });
   setHints([["a", "Wybierz"], ["x", "Szukaj inną nazwą"], ["y", "Usuń grafikę"], ["b", "Wstecz"]], $("goHints"));
 }
@@ -652,4 +661,177 @@ async function soInput(a) {
   else if (a === "b") return SO.page === "main" ? closeSo() : soPage("main");
   else if (a === "a") return SO.items[SO.idx]?.act();
   renderSo();
+}
+
+
+/* ───────────── filtry listy gier (X) ───────────── */
+const FL_DEFAULT = { q: "", genre: "", decade: "", players: 0, region: "", dev: "", show: "all", sort: "title" };
+const FL = { es: "", f: { ...FL_DEFAULT }, page: "main", idx: 0, items: [] };
+const SHOW = { all: "wszystkie", local: "tylko lokalne (w cache)", pinned: "tylko przypięte", played: "grane", unplayed: "niegrane" };
+const SORT = { title: "tytuł", year: "rok premiery", last: "ostatnio grane", time: "czas gry", size: "rozmiar" };
+const PLAYERS = { 0: "dowolna", 1: "1 gracz", 2: "2 i więcej", 3: "3 i więcej", 4: "4 i więcej" };
+
+function flLoad(es) {
+  FL.es = es;
+  try { FL.f = { ...FL_DEFAULT, ...JSON.parse(localStorage.getItem("emustart.filter." + es) || "{}") }; }
+  catch (e) { FL.f = { ...FL_DEFAULT }; }
+}
+function flSave() {
+  try { localStorage.setItem("emustart.filter." + FL.es, JSON.stringify(FL.f)); } catch (e) { /* bez pamięci przeglądarki */ }
+}
+const decadeOf = (y) => (/^\d{4}/.test(y || "") ? y.slice(0, 3) + "0" : "");
+const devOf = (g) => (g.developer || "").split(/,\s*/)[0];
+
+function flMatch(g, f, skip) {
+  if (skip !== "q" && f.q && !(g.title + " " + g.tags).toLowerCase().includes(f.q.toLowerCase())) return false;
+  if (skip !== "genre" && f.genre && !(g.genre || "").split(/,\s*/).includes(f.genre)) return false;
+  if (skip !== "decade" && f.decade && decadeOf(g.year) !== f.decade) return false;
+  if (skip !== "players" && f.players && (g.players || 0) < f.players) return false;
+  if (skip !== "region" && f.region && !(g.regions || []).includes(f.region)) return false;
+  if (skip !== "dev" && f.dev && devOf(g) !== f.dev) return false;
+  if (skip !== "show") {
+    if (f.show === "local" && !g.cached) return false;
+    if (f.show === "pinned" && !g.pinned) return false;
+    if (f.show === "played" && !g.last) return false;
+    if (f.show === "unplayed" && g.last) return false;
+  }
+  return true;
+}
+function flApply(all) {
+  const f = FL.f;
+  const out = all.filter((g) => flMatch(g, f));
+  const by = {
+    title: null,
+    year: (a, b) => (a.year || "9999").localeCompare(b.year || "9999") || a.title.localeCompare(b.title),
+    last: (a, b) => (b.last || 0) - (a.last || 0),
+    time: (a, b) => (b.seconds || 0) - (a.seconds || 0),
+    size: (a, b) => (b.size || 0) - (a.size || 0),
+  }[f.sort];
+  if (by) out.sort(by);
+  return out;
+}
+function flActive() {
+  const f = FL.f, parts = [];
+  if (f.q) parts.push(`„${f.q}”`);
+  if (f.genre) parts.push(f.genre);
+  if (f.decade) parts.push(f.decade + "s");
+  if (f.players) parts.push(PLAYERS[f.players]);
+  if (f.region) parts.push(f.region);
+  if (f.dev) parts.push(f.dev);
+  if (f.show !== "all") parts.push(SHOW[f.show]);
+  return parts;
+}
+function flCount(all, key, val) {
+  // ile gier zostanie, jeśli ustawimy ten filtr (z uwzględnieniem pozostałych)
+  const f = { ...FL.f, [key]: val };
+  return all.filter((g) => flMatch(g, f)).length;
+}
+function flValues(all, key) {
+  const counts = new Map();
+  for (const g of all) {
+    if (!flMatch(g, FL.f, key)) continue;
+    let vals = [];
+    if (key === "genre") vals = (g.genre || "").split(/,\s*/).filter(Boolean);
+    else if (key === "decade") vals = [decadeOf(g.year)].filter(Boolean);
+    else if (key === "region") vals = g.regions || [];
+    else if (key === "dev") vals = [devOf(g)].filter(Boolean);
+    for (const v of new Set(vals)) counts.set(v, (counts.get(v) || 0) + 1);
+  }
+  const arr = [...counts.entries()];
+  arr.sort(key === "decade" ? (a, b) => a[0].localeCompare(b[0]) : (a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  return arr;
+}
+
+function openFilter() {
+  FL.page = "main"; FL.idx = 0;
+  S.modal = "flt";
+  $("flt").classList.remove("hidden");
+  renderFl();
+}
+function closeFl() {
+  S.modal = null;
+  $("flt").classList.add("hidden");
+  applyGameFilter();
+}
+const FL_ROW = { q: 0, genre: 1, decade: 2, players: 3, region: 4, dev: 5, show: 6, sort: 7 };
+function flSet(key, val) {
+  FL.f[key] = val;
+  flSave();
+  FL.page = "main";
+  FL.idx = FL_ROW[key] ?? 0;            // zaznaczenie wraca na edytowany filtr
+  renderFl();
+}
+function flItems() {
+  const all = S.allGames || [], f = FL.f;
+  if (FL.page === "main") {
+    const total = all.length, shown = all.filter((g) => flMatch(g, f)).length;
+    $("flInfo").textContent = `${shown} z ${total} ${plural(total, "gry", "gier", "gier")}` +
+      (all.some((g) => g.genre) ? "" : " · brak metadanych dla tego systemu");
+    const items = [
+      { label: "Szukaj w tytule", value: f.q || "—", act: () => oskOpen("Szukaj w tytule", f.q, (v) => flSet("q", v.trim())) },
+      { label: "Gatunek", value: f.genre || "wszystkie", act: () => flPage("genre") },
+      { label: "Dekada", value: f.decade ? f.decade + "s" : "wszystkie", act: () => flPage("decade") },
+      { label: "Gracze", value: PLAYERS[f.players], act: () => flPage("players") },
+      { label: "Region", value: f.region || "wszystkie", act: () => flPage("region") },
+      { label: "Producent", value: f.dev || "wszyscy", act: () => flPage("dev") },
+      { label: "Pokaż", value: SHOW[f.show], act: () => flPage("show") },
+      { label: "Sortuj", value: SORT[f.sort], act: () => flPage("sort") },
+    ];
+    if (flActive().length || f.sort !== "title") items.push({ label: "Wyczyść filtry", value: "", act: () => { FL.f = { ...FL_DEFAULT }; flSave(); renderFl(); } });
+    items.push({ label: "Pokaż gry", value: `${shown}`, act: closeFl });
+    return items;
+  }
+  const key = FL.page;
+  $("flInfo").textContent = "";
+  if (key === "players") return Object.entries(PLAYERS).map(([v, label]) => ({
+    label, value: `${flCount(all, "players", +v)}` + (f.players === +v ? "  ✓" : ""), act: () => flSet("players", +v) }));
+  if (key === "show") return Object.entries(SHOW).map(([v, label]) => ({
+    label, value: `${flCount(all, "show", v)}` + (f.show === v ? "  ✓" : ""), act: () => flSet("show", v) }));
+  if (key === "sort") return Object.entries(SORT).map(([v, label]) => ({
+    label, value: f.sort === v ? "✓" : "", act: () => flSet("sort", v) }));
+  const anyLabel = { genre: "wszystkie gatunki", decade: "wszystkie dekady", region: "wszystkie regiony", dev: "wszyscy producenci" }[key];
+  return [{ label: anyLabel, value: `${flCount(all, key, "")}` + (f[key] ? "" : "  ✓"), act: () => flSet(key, "") },
+    ...flValues(all, key).map(([v, n]) => ({
+      label: key === "decade" ? v + "s" : v, value: `${n}` + (f[key] === v ? "  ✓" : ""), act: () => flSet(key, v) }))];
+}
+function flPage(p) {
+  const back = p === "main" ? (FL_ROW[FL.page] ?? 0) : 0;
+  FL.page = p;
+  FL.idx = back;
+  renderFl();
+}
+function renderFl() {
+  const titles = { main: "Filtry", genre: "Gatunek", decade: "Dekada", players: "Gracze", region: "Region", dev: "Producent", show: "Pokaż", sort: "Sortuj" };
+  $("flPage").textContent = titles[FL.page];
+  $("flTitle").textContent = (S.systems[S.sysIdx] || {}).display || "";
+  FL.items = flItems();
+  FL.idx = Math.min(FL.idx, FL.items.length - 1);
+  $("flItems").innerHTML = FL.items.map((it, i) =>
+    `<li class="${i === FL.idx ? "sel" : ""}" data-i="${i}"><span>${esc(it.label)}</span><span class="gv">${esc(it.value || "")}</span></li>`).join("");
+  $("flItems").querySelectorAll("li").forEach((li) => li.addEventListener("click", () => { FL.idx = +li.dataset.i; flInput("a"); }));
+  $("flItems").querySelector("li.sel")?.scrollIntoView({ block: "nearest" });
+  setHints(FL.page === "main" ? [["a", "Wybierz"], ["x", "Pokaż gry"], ["b", "Zamknij"]] : [["a", "Wybierz"], ["b", "Wstecz"]], $("flHints"));
+}
+function flInput(a) {
+  const n = FL.items.length;
+  if (a === "up") FL.idx = (FL.idx - 1 + n) % n;
+  else if (a === "down") FL.idx = (FL.idx + 1) % n;
+  else if (a === "lb") FL.idx = Math.max(0, FL.idx - 10);
+  else if (a === "rb") FL.idx = Math.min(n - 1, FL.idx + 10);
+  else if (a === "b") return FL.page === "main" ? closeFl() : flPage("main");
+  else if (a === "x" && FL.page === "main") return closeFl();
+  else if (a === "a") return FL.items[FL.idx]?.act();
+  renderFl();
+}
+// Lista gier po filtrach; zaznaczenie zostaje na tej samej grze, jeśli przeszła filtr.
+function applyGameFilter() {
+  const keep = S.games[S.gameIdx]?.id;
+  S.games = flApply(S.allGames || []);
+  const i = S.games.findIndex((g) => g.id === keep);
+  S.gameIdx = i >= 0 ? i : 0;
+  const total = (S.allGames || []).length, act = flActive();
+  $("listCount").textContent = act.length
+    ? `${S.games.length} z ${total} · ${act.join(", ")}`
+    : `${total} ${plural(total, "gra", "gry", "gier")}` + (FL.f.sort !== "title" ? ` · sortuj: ${SORT[FL.f.sort]}` : "");
+  if (S.screen === "games") renderGames();
 }

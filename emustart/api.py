@@ -9,6 +9,7 @@ from __future__ import annotations
 import collections
 import json
 import logging
+import re
 import threading
 import time
 from pathlib import Path
@@ -17,6 +18,29 @@ from emustart import (__version__, art, art_sources, cache, ingame, installer, l
                       paths, scanner, systems, winutil)
 
 log = logging.getLogger("emustart.api")
+
+_REGIONS = {"USA": "USA", "Europe": "Europa", "Japan": "Japonia", "World": "Świat",
+            "Germany": "Niemcy", "France": "Francja", "Spain": "Hiszpania", "Italy": "Włochy",
+            "UK": "Wielka Brytania", "Australia": "Australia", "Korea": "Korea", "Brazil": "Brazylia",
+            "Canada": "Kanada", "Asia": "Azja", "China": "Chiny", "Taiwan": "Tajwan",
+            "Netherlands": "Holandia", "Sweden": "Szwecja", "Poland": "Polska"}
+
+
+def _regions(tags: str) -> list:
+    """'(USA, Europe) (Rev 1)' → ['USA', 'Europa'] (tylko znane nazwy regionów)."""
+    out = []
+    for group in re.findall(r"\(([^)]*)\)", tags or ""):
+        parts = [p.strip() for p in group.split(",")]
+        if parts and all(p in _REGIONS for p in parts):
+            out += [_REGIONS[p] for p in parts]
+    return out
+
+
+def _players(v) -> int:
+    """'2', '1-4', '4' → największa liczba graczy (0 = brak danych)."""
+    nums = [int(n) for n in re.findall(r"\d+", str(v or ""))]
+    return max(nums) if nums else 0
+
 
 class Api:
     def __init__(self):
@@ -32,6 +56,7 @@ class Api:
         self._profile = self._initial_profile()
         threading.Thread(target=lambda: profiles.sync_pending(self._cfg), daemon=True,
                          name="sync-pending").start()
+        threading.Thread(target=self._arcade_meta, daemon=True, name="arcade-meta").start()
         # Menu w grze: stan czyta UI (ingame_poll), Python niczego nie wywołuje
         # w oknie. evaluate_js przy grze na pełnym ekranie potrafiło czekać 20 s
         # i blokowało w tym czasie wszystkie wywołania z UI.
@@ -69,6 +94,15 @@ class Api:
     def ui_pad_poll(self) -> list:
         """Zdarzenia padów XInput dla UI: [{a, up}]."""
         return self._uipad.poll()
+
+    def _arcade_meta(self) -> None:
+        """Rok/producent/gracze/gatunek setów arcade (filtry) — raz, w tle."""
+        from emustart import arcade
+        try:
+            if arcade.needs_refresh() and arcade.find_mame(self._cfg):
+                log.info("arcade: %s", arcade.refresh(self._cfg))
+        except Exception:
+            log.exception("arcade meta")
 
     def _initial_profile(self) -> int:
         ids = [p["id"] for p in profiles.all_profiles()]
@@ -116,12 +150,19 @@ class Api:
     def list_games(self, es: str) -> list:
         hide = self._cfg.get("hide_arcade_clones", True) and systems.info(es)["kind"] == "arcade"
         rows = library.list_games(es, self._profile, hide)
-        titles = {r["game_id"]: json.loads(r["edits"]).get("title")
-                  for r in library.db().execute(
-                      "SELECT game_id, edits FROM game_meta WHERE edits LIKE '%\"title\"%'")}
+        try:
+            metadata.prepare_system(self._cfg, es)     # dane do filtrów (rdb, offline)
+        except Exception:
+            log.exception("metadane systemu %s", es)
+        fields = metadata.system_fields(es)
         for r in rows:
-            if titles.get(r["id"]):
-                r["title"] = titles[r["id"]]
+            f = fields.get(r["id"], {})
+            if f.get("title"):
+                r["title"] = f["title"]
+            r["genre"], r["year"] = f.get("genre", ""), str(f.get("year", ""))[:4]
+            r["players"] = _players(f.get("players", ""))
+            r["developer"], r["publisher"] = f.get("developer", ""), f.get("publisher", "")
+            r["regions"] = _regions(r["tags"])
             r["box"] = art.media_url(es, r["name"], "box") if r["art_box"] == art.HAS else ""
             r["snap"] = art.media_url(es, r["name"], "snap") if r["art_snap"] == art.HAS else ""
         return rows

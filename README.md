@@ -38,6 +38,7 @@ Przy pierwszym starcie otwierają się ustawienia: sprawdź foldery i wybierz
 | B | Esc | wstecz / anuluj pobieranie |
 | X | X | „Graj teraz (z sieci)” na ekranie pobierania; wybór folderu w ustawieniach |
 | Y | Y / P | przypnij / odepnij grę (zostaje w cache na stałe) |
+| X (lista gier) | X | filtry: szukaj, gatunek, dekada, gracze, region, producent, sortowanie |
 | LB / RB | PgUp / PgDn | strona w górę / w dół |
 | LT / RT | Home / End | poprzednia / następna litera |
 | Start | F2 / Tab | menu |

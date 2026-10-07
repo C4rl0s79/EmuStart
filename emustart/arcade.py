@@ -48,8 +48,56 @@ def _category(el) -> str:
     return "arcade"
 
 
+SUPPORT_DEFAULT = r"D:\emu\dat\Support Files"
+
+
+def _ensure_columns() -> None:
+    """Rok, producent, gracze, gatunek (do filtrowania) — dodane w 0.8.0."""
+    con = library.db()
+    cols = {r[1] for r in con.execute("PRAGMA table_info(arcade_sets)")}
+    if "genre" not in cols:
+        with con:
+            for col in ("year", "maker", "players", "genre"):
+                con.execute(f"ALTER TABLE arcade_sets ADD COLUMN {col} TEXT NOT NULL DEFAULT ''")
+        library.meta_set("mame_version", "")       # wymusza ponowne wczytanie z MAME
+
+
+def needs_refresh() -> bool:
+    _ensure_columns()
+    return not library.meta_get("mame_version")
+
+
+def parse_catver(cfg: dict) -> dict:
+    """{set: 'Shooter / Flying Vertical'} z catver.ini (sekcja [Category])."""
+    cands = [Path(cfg.get("mame_support_dir") or SUPPORT_DEFAULT) / "catver.ini"]
+    mame = find_mame(cfg)
+    if mame:
+        cands += [Path(mame).parent / "catver.ini", Path(mame).parent / "folders" / "catver.ini"]
+    for f in cands:
+        if not f.is_file():
+            continue
+        out, on = {}, False
+        for line in f.read_text(encoding="utf-8", errors="replace").splitlines():
+            line = line.strip()
+            if line.startswith("["):
+                on = line.lower() == "[category]"
+                continue
+            if on and "=" in line:
+                k, v = line.split("=", 1)
+                out[k.strip()] = v.strip()
+        return out
+    return {}
+
+
+def genre_of(category: str) -> str:
+    """'Shooter / Flying Vertical' → 'Shooter'; '* Mature *' pomijamy."""
+    c = category.replace("* Mature *", "").strip()
+    return c.split(" / ")[0].strip() if c else ""
+
+
 def refresh(cfg: dict, progress=None) -> dict:
     """Odświeża tabelę arcade_sets, jeśli zmieniła się wersja MAME."""
+    _ensure_columns()
     exe = find_mame(cfg)
     if not exe:
         return {"ok": False, "reason": "nie znaleziono mame.exe"}
@@ -65,13 +113,18 @@ def refresh(cfg: dict, progress=None) -> dict:
         with open(tmp, "wb") as fh:
             subprocess.run([exe, "-listxml"], stdout=fh, stderr=subprocess.DEVNULL,
                            timeout=900, creationflags=_NO_WINDOW)
+        catver = parse_catver(cfg)
         rows = []
         for _ev, el in ET.iterparse(str(tmp), events=("end",)):
             if el.tag != "machine":
                 continue
             nm = el.get("name") or ""
+            inp = el.find("input")
             rows.append((nm, el.findtext("description") or nm, el.get("cloneof") or "",
-                         el.get("romof") or "", _category(el)))
+                         el.get("romof") or "", _category(el),
+                         (el.findtext("year") or "").strip("?"), el.findtext("manufacturer") or "",
+                         (inp.get("players") or "") if inp is not None else "",
+                         genre_of(catver.get(nm, ""))))
             el.clear()
     except Exception as ex:
         return {"ok": False, "reason": str(ex)}
@@ -82,7 +135,8 @@ def refresh(cfg: dict, progress=None) -> dict:
             pass
     with library.db() as c:
         c.execute("DELETE FROM arcade_sets")
-        c.executemany("INSERT OR REPLACE INTO arcade_sets VALUES(?,?,?,?,?)", rows)
+        c.executemany("INSERT OR REPLACE INTO arcade_sets(name, title, parent, romof, category, "
+                      "year, maker, players, genre) VALUES(?,?,?,?,?,?,?,?,?)", rows)
     library.meta_set("mame_version", ver)
     return {"ok": True, "version": ver, "sets": len(rows)}
 

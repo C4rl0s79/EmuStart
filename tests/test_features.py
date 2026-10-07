@@ -218,3 +218,27 @@ def test_system_logo_choice(env, tmp_path, monkeypatch):
     assert "/media/_systems/psx.custom.png" in u["url"]
     assert logos.choose(cfg, "psx", "none") and logos.url_for("psx", cfg)["url"] == ""
     assert not logos.choose(cfg, "psx", "file:" + str(tmp_path / "x.exe"))   # tylko obrazy
+
+
+def test_filter_fields_regions_players():
+    from emustart.api import _players, _regions
+    assert _regions("(USA, Europe) (Rev 1)") == ["USA", "Europa"]
+    assert _regions("(World, set 1)") == []                  # wariant arcade, nie region
+    assert _players("1-4") == 4 and _players("") == 0
+
+
+def test_prepare_system_uses_rdb_and_keeps_edits(env, monkeypatch):
+    cfg, roms, tmp = env
+    from emustart import scanner
+    _write(roms / "snes" / "Game (USA).zip")
+    _write(roms / "snes" / "Other (Japan).zip")
+    scanner.scan_system("snes", roms / "snes")
+    idx = {"by_name": {"Game (USA)": {"name": "Game (USA)", "genre": "Action", "releaseyear": 1993}},
+           "by_rom": {}, "names": ["Game (USA)"], "by_key": {}, "by_pre": {}}
+    monkeypatch.setattr(metadata, "rdb_index", lambda c, es: idx)
+    metadata.set_edits(2, {"genre": "Puzzle"})
+    assert metadata.prepare_system(cfg, "snes") == 2
+    f = metadata.system_fields("snes")
+    assert f[1]["genre"] == "Action" and f[1]["year"] == "1993"
+    assert f[2]["genre"] == "Puzzle"                        # ręczna zmiana zostaje
+    assert metadata.prepare_system(cfg, "snes") == 0         # drugi raz nic do zrobienia

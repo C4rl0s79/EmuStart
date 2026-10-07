@@ -155,6 +155,15 @@ def rdb_index(cfg: dict, es: str) -> dict:
             if r.get("rom_name"):
                 idx["by_rom"].setdefault(r["rom_name"].lower(), r)
         idx["names"] = list(idx["by_name"])
+        # indeks po kluczu tytułu (bez tagów) i jego początku — dopasowanie przybliżone
+        # przegląda tylko kilka nazw zamiast całej bazy (FBNeo/PSX: ~10 tys.)
+        by_key: dict = {}
+        for n in idx["names"]:
+            by_key.setdefault(art_sources.base_key(n), []).append(n)
+        by_pre: dict = {}
+        for k, names in by_key.items():
+            by_pre.setdefault(k[:6], []).extend(names)
+        idx["by_key"], idx["by_pre"] = by_key, by_pre
         _rdb_mem[sysname] = idx
         return idx
 
@@ -167,7 +176,9 @@ def rdb_lookup(cfg: dict, game: dict) -> dict | None:
     hit = idx["by_rom"].get(rel) or idx["by_name"].get(game["name"]) \
         or idx["by_name"].get(game["name"] + " (Disc 1)")
     if not hit:
-        best = art_sources.libretro_match(game["name"], idx["names"])
+        key = art_sources.base_key(game["name"])
+        pool = idx["by_key"].get(key) or idx["by_pre"].get(key[:6], [])
+        best = art_sources.libretro_match(game["name"], pool) if pool else None
         hit = idx["by_name"].get(best) if best else None
     return hit
 
@@ -295,6 +306,60 @@ def ensure_local(cfg: dict, game: dict) -> dict:
     rec = rdb_lookup(cfg, game)
     _store(game["id"], {**(from_rdb(rec) if rec else {}), "_rdb_checked": 1})
     return get(game["id"])
+
+
+def prepare_system(cfg: dict, es: str) -> int:
+    """Dane z rdb dla wszystkich gier systemu, które ich jeszcze nie mają —
+    jedna transakcja (filtrowanie listy gier potrzebuje metadanych od razu).
+    Zwraca liczbę uzupełnionych gier."""
+    con = library.db()
+    rows = con.execute("""SELECT g.id, g.es, g.name, g.rel, m.data, m.edits, m.online
+                          FROM games g LEFT JOIN game_meta m ON m.game_id=g.id
+                          WHERE g.es=? AND g.hidden=0""", (es,)).fetchall()
+    todo = []
+    now = time.time()
+    for r in rows:
+        data = json.loads(r["data"] or "{}") if r["data"] else {}
+        if data.get("_rdb_checked"):
+            continue
+        rec = rdb_lookup(cfg, {"es": r["es"], "name": r["name"], "rel": r["rel"]})
+        if rec:
+            for k, v in from_rdb(rec).items():
+                data.setdefault(k, v)
+        data["_rdb_checked"] = 1
+        todo.append((r["id"], json.dumps(data, ensure_ascii=False), r["edits"] or "{}",
+                     r["online"] or 0, now))
+    if todo:
+        with con:
+            con.executemany("INSERT OR REPLACE INTO game_meta(game_id, data, edits, online, updated) "
+                            "VALUES(?,?,?,?,?)", todo)
+    return len(todo)
+
+
+FIELDS_FILTER = ("genre", "year", "players", "developer", "publisher", "title")
+
+
+def system_fields(es: str) -> dict:
+    """{game_id: {genre, year, players, developer, publisher}} — ręczne zmiany wygrywają.
+    Arcade: podstawą są dane z MAME (rok, producent, gracze) i catver.ini (gatunek)."""
+    con = library.db()
+    out = {}
+    if systems.info(es)["kind"] == "arcade":
+        from emustart import arcade
+        arcade._ensure_columns()
+        for r in con.execute("""SELECT g.id, a.year, a.maker, a.players, a.genre
+                                FROM games g JOIN arcade_sets a
+                                  ON a.name = substr(g.rel, 1, length(g.rel) - 4)
+                                WHERE g.es=?""", (es,)):
+            out[r["id"]] = {"genre": r["genre"], "year": r["year"], "players": r["players"],
+                            "developer": r["maker"], "publisher": r["maker"], "title": ""}
+    for r in con.execute("""SELECT m.game_id, m.data, m.edits FROM game_meta m
+                            JOIN games g ON g.id=m.game_id WHERE g.es=?""", (es,)):
+        base = out.get(r["game_id"], {})
+        d = {**base, **{k: v for k, v in json.loads(r["data"] or "{}").items() if v},
+             **{k: v for k, v in json.loads(r["edits"] or "{}").items() if v}}
+        out[r["game_id"]] = {k: d.get(k, "") for k in FIELDS_FILTER}
+    return out
 
 
 def fetch_online(cfg: dict, game: dict, igdb: art_sources.Igdb | None = None,

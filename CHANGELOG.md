@@ -4,6 +4,28 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 [Keep a Changelog](https://keepachangelog.com/pl/1.1.0/), wersje według
 [SemVer](https://semver.org/lang/pl/).
 
+## [0.8.0] — 2026-10-07
+
+### Dodane
+- **Filtry listy gier (X)**: szukanie w tytule (klawiatura ekranowa), gatunek,
+  dekada, liczba graczy, region (z tagów nazwy: USA, Europa, Japonia…),
+  producent, „pokaż: lokalne / przypięte / grane / niegrane” i sortowanie
+  (tytuł, rok, ostatnio grane, czas gry, rozmiar). Przy każdej wartości liczba
+  gier, które zostaną przy pozostałych filtrach. Nagłówek listy pokazuje
+  „9 z 3883 · Role playing games, 1990s, Europa”. Filtry są zapamiętywane
+  osobno dla każdego systemu.
+- **Metadane całego systemu przy wejściu do niego** (baza RetroArcha, offline,
+  jedna transakcja; SNES 3883 gry ≈ 0,1 s) — dotąd liczone tylko dla
+  oglądanej gry. Szybsze dopasowanie nazw (indeks po kluczu tytułu).
+- **Arcade**: rok, producent i liczba graczy z `mame -listxml`, gatunek
+  z `catver.ini` (`D:\emu\dat\Support Files`; ustawienie `mame_support_dir`).
+  Uzupełniane raz, w tle, po aktualizacji programu. FBNeo: gatunek dla
+  6564 z 6595 setów.
+
+### Zmienione
+- Wybór okładki/zrzutu: miniatury, które się nie wczytały, znikają z listy
+  (jak w wyborze logo) — zamiast pustych kafelków.
+
 ## [0.7.3] — 2026-10-07
 
 ### Naprawione

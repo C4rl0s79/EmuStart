@@ -169,6 +169,7 @@ function press(a, fromPad) {
   if (S.modal === "inst") return instInput(a);
   if (S.modal === "fbrowse") return fbInput(a);
   if (S.modal === "sopt") return soInput(a);
+  if (S.modal === "flt") return flInput(a);
   if (S.modal === "gopt") return goptInput(a);
   if (S.screen === "pads") return padsInput(a);
   if (S.screen === "profiles") return profilesInput(a);
@@ -253,14 +254,16 @@ async function openSystem(keepIdx) {
   if (!s) return;
   const prevId = keepIdx && S.games[S.gameIdx] ? S.games[S.gameIdx].id : null;
   S.es = s.es;
-  S.games = await api().list_games(s.es);
+  S.allGames = await api().list_games(s.es);
+  if (FL.es !== s.es) flLoad(s.es);
+  S.games = flApply(S.allGames);
   S.gameIdx = prevId ? Math.max(0, S.games.findIndex((g) => g.id === prevId)) : 0;
   $("listLogo").src = s.logo || "";
   $("listLogo").classList.toggle("glow", !!s.logo_glow);
   $("listLogo").classList.toggle("hidden", !s.logo);
   $("listTitle").textContent = s.display;
-  $("listCount").textContent = `${S.games.length} ${plural(S.games.length, "gra", "gry", "gier")}`;
   show("games");
+  applyGameFilter();
 }
 
 function renderGames() {
@@ -290,7 +293,7 @@ function renderGames() {
     el.addEventListener("click", () => { S.gameIdx = +el.dataset.i; renderGames(); });
     el.addEventListener("dblclick", () => { S.gameIdx = +el.dataset.i; launch(); });
   });
-  setHints([["a", "Graj (przytrzymaj: opcje)"], ["y", S.games[S.gameIdx]?.pinned ? "Odepnij" : "Przypnij"],
+  setHints([["a", "Graj (przytrzymaj: opcje)"], ["x", "Filtry"], ["y", S.games[S.gameIdx]?.pinned ? "Odepnij" : "Przypnij"],
             ["lb", "Strona"], ["lt", "Litera"], ["b", "Wstecz"], ["start", "Menu"]]);
   schedulePreview();
   // okładki dla widocznej strony — w tle
@@ -326,6 +329,7 @@ function gamesInput(a) {
     return;
   }
   else if (a === "y" && n) return togglePin();
+  else if (a === "x") return openFilter();
   else if (a === "b") return show("systems");
   else if (a === "start") return openMenu();
   else return;
