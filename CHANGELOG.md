@@ -4,6 +4,16 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 [Keep a Changelog](https://keepachangelog.com/pl/1.1.0/), wersje według
 [SemVer](https://semver.org/lang/pl/).
 
+## [0.7.3] — 2026-10-07
+
+### Naprawione
+- **Wybór logo padem nie działał**: kafelek „bez logo” (bez obrazka) był
+  ukrywany jak uszkodzony obrazek, przez co liczba kolumn siatki wychodziła
+  nieskończona — strzałki skakały na początek/koniec listy, a zaznaczenie
+  trafiało na niewidoczne kafelki. „Bez logo” jest teraz kafelkiem z nazwą,
+  logo, które się nie wczytają, znikają z listy, a kolumny liczone są
+  z widocznych kafelków (to samo w wyborze okładek gry).
+
 ## [0.7.2] — 2026-10-07
 
 ### Naprawione

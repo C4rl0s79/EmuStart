@@ -197,8 +197,7 @@ function renderArtPicker() {
   setHints([["a", "Wybierz"], ["x", "Szukaj inną nazwą"], ["y", "Usuń grafikę"], ["b", "Wstecz"]], $("goHints"));
 }
 function artCols() {
-  const f = $("goArtGrid").querySelector("figure");
-  return f ? Math.max(1, Math.round($("goArtGrid").clientWidth / f.getBoundingClientRect().width)) : 4;
+  return gridCols($("goArtGrid"));
 }
 async function artPickInput(a) {
   const A_ = GO.art, n = (A_.list || []).length, cols = artCols();
@@ -603,17 +602,34 @@ function renderLogoPicker() {
   $("soLogoInfo").textContent = L.list === null ? "Szukam logo…" : `${L.list.length - 1} propozycji`;
   grid.innerHTML = (L.list || []).map((c, i) =>
     `<figure class="${i === L.idx ? "sel" : ""}${c.id === "none" ? " none" : ""}" data-i="${i}">` +
-    `<img src="${esc(c.url)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.closest('figure').classList.add('broken')">` +
+    (c.id === "none" ? `<div class="nologo">${esc(SO.d.display)}</div>`
+      : `<img src="${esc(c.url)}" alt="" referrerpolicy="no-referrer" data-i="${i}">`) +
     `<figcaption>${esc(c.source)}<br><small>${esc(c.label)}</small></figcaption></figure>`).join("");
   grid.querySelectorAll("figure").forEach((f) => f.addEventListener("click", () => { L.idx = +f.dataset.i; soInput("a"); }));
+  // logo, które się nie wczytało, usuwamy z listy (ukryty kafelek psuł nawigację:
+  // zerowa szerokość = nieskończona liczba kolumn, zaznaczenie na niewidocznym)
+  grid.querySelectorAll("img[data-i]").forEach((img) => img.addEventListener("error", () => {
+    const c = L.list[+img.dataset.i];
+    if (!c) return;
+    const cur = L.list[L.idx];
+    L.list = L.list.filter((x) => x !== c);
+    L.idx = Math.max(0, cur === c ? Math.min(L.idx, L.list.length - 1) : L.list.indexOf(cur));
+    renderLogoPicker();
+  }, { once: true }));
   grid.querySelector("figure.sel")?.scrollIntoView({ block: "nearest" });
   setHints([["a", "Ustaw"], ["b", "Wstecz"]], $("soHints"));
+}
+function gridCols(grid) {
+  const figs = [...grid.querySelectorAll("figure")].filter((f) => f.offsetWidth > 0);
+  if (figs.length < 2) return 1;
+  const top = figs[0].offsetTop;
+  const n = figs.findIndex((f) => f.offsetTop !== top);
+  return n > 0 ? n : figs.length;               // kafelki w pierwszym rzędzie
 }
 async function soInput(a) {
   if (SO.page === "logo") {
     const L = SO.logos, n = (L.list || []).length;
-    const f = $("soLogoGrid").querySelector("figure");
-    const cols = f ? Math.max(1, Math.round($("soLogoGrid").clientWidth / f.getBoundingClientRect().width)) : 4;
+    const cols = gridCols($("soLogoGrid"));
     if (a === "b") return soPage("main");
     if (!n) return;
     if (a === "left") L.idx = Math.max(0, L.idx - 1);
