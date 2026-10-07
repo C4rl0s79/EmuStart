@@ -728,6 +728,20 @@ class Api:
                                               directory=start or "")
         return res[0] if res else ""
 
+    def _shutdown(self) -> None:
+        """Przerywa zadania w tle przed wyjściem z programu (grafiki, pobieranie
+        emulatorów, kopiowanie do cache). Część z nich (pula wątków grafik)
+        zatrzymywałaby zamknięcie procesu aż do końca pracy — nawet godzinami."""
+        for job in (getattr(self, "_art_job", None), getattr(self, "_install_job", None)):
+            if job:
+                job.cancel.set()
+        for j in self._pin_jobs.values():
+            j["cancel"].set()
+        for s in self._background:
+            s.cancel.set()
+        if self._session:
+            self._session.cancel.set()
+
     def quit(self) -> None:
         if self._session:
             self._session.kill()

@@ -21,6 +21,11 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 - Ustawienie `logo_pack_dir` — własny folder z paczką logo (domyślnie
   `D:\py\PyLinks\platform_logos`).
 
+### Naprawione
+- Zamknięcie okna nie kończyło programu, gdy w tle trwało pobieranie grafik —
+  proces zostawał w pamięci (bez okna) aż do końca pracy. Teraz zamknięcie okna
+  przerywa zadania w tle i kończy program od razu.
+
 ## [0.6.1] — 2026-10-07
 
 ### Zmienione

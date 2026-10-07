@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import sys
 from logging.handlers import RotatingFileHandler
 
@@ -47,6 +48,14 @@ def main() -> None:
         width=1600, height=900, min_size=(960, 540), background_color="#0b0d12")
     api.attach(window)
     webview.start(debug=debug, private_mode=False)
+    # okno zamknięte: przerywamy zadania w tle i kończymy proces od razu — wątki
+    # robocze (np. pobieranie grafik) nie mogą trzymać programu przy życiu
+    logging.getLogger("emustart").info("zamknięcie okna — koniec programu")
+    try:
+        api._shutdown()
+    finally:
+        logging.shutdown()
+        os._exit(0)
 
 
 if __name__ == "__main__":
