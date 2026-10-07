@@ -98,6 +98,68 @@ def ini_section(path: Path, section: str) -> dict:
     return out
 
 
+def ini_set(path: Path, changes: dict) -> None:
+    """Jak ini_edit, ale brakujące klucze (i sekcje) dopisuje; tworzy plik."""
+    try:
+        lines = path.read_text(encoding="utf-8-sig").splitlines(keepends=True)
+    except OSError:
+        lines = []
+    if lines and not lines[-1].endswith("\n"):
+        lines[-1] += "\n"
+    todo = dict(changes)
+    section, last_in = None, {}
+    for i, line in enumerate(lines):
+        m = re.match(r"^\s*\[(.+?)\]\s*$", line)
+        if m:
+            section = m.group(1)
+            last_in.setdefault(section, i)
+            continue
+        if section is not None and line.strip():
+            last_in[section] = i
+        m = re.match(r"^(\s*)([^=;#]+?)(\s*=\s*)(.*?)(\r?\n?)$", line)
+        if m and (section, m.group(2)) in todo:
+            new = todo.pop((section, m.group(2)))
+            lines[i] = f"{m.group(1)}{m.group(2)}{m.group(3)}{new}{m.group(5) or chr(10)}"
+    # brakujące klucze: na końcu istniejącej sekcji albo w nowej sekcji
+    inserts: dict = {}
+    for (sec, key), val in todo.items():
+        k = -1 if sec is None else last_in[sec] if sec in last_in else ("new", sec)
+        inserts.setdefault(k, []).append(f"{key} = {val}\n")
+    # klucze bez sekcji (retroarch.cfg): na początek pliku (indeks -1 + 1 = 0)
+    for idx in sorted((k for k in inserts if isinstance(k, int)), reverse=True):
+        lines[idx + 1:idx + 1] = inserts[idx]
+    for k, add in inserts.items():
+        if not isinstance(k, int):
+            lines += (["\n"] if lines else []) + [f"[{k[1]}]\n"] + add
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".emustart-tmp")
+    tmp.write_text("".join(lines), encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def ini_pick(path: Path, rules: list) -> dict:
+    """Wartości {(sekcja, klucz): wartość} pasujące do reguł [(regex sekcji, regex klucza)];
+    plik bez sekcji (retroarch.cfg) = sekcja ''."""
+    out, cur = {}, None
+    try:
+        text = path.read_text(encoding="utf-8-sig", errors="replace")
+    except OSError:
+        return out
+    for line in text.splitlines():
+        m = re.match(r"^\s*\[(.+?)\]\s*$", line)
+        if m:
+            cur = m.group(1)
+            continue
+        m = re.match(r"^\s*([^=;#\[]+?)\s*=\s*(.*?)\s*$", line)
+        if not m:
+            continue
+        for sr, kr in rules:
+            if re.fullmatch(sr, cur or "") and re.fullmatch(kr, m.group(1)):
+                out[(cur, m.group(1))] = m.group(2)
+                break
+    return out
+
+
 def _restore_file() -> Path:
     return paths.DATA / "pad_restore.json"
 
@@ -219,6 +281,29 @@ class Adapter:
         """Przepina pady wg `order`; zwraca funkcję przywracającą albo None."""
         return None
 
+    # ustawienia profilu (profiles.settings_load / settings_save)
+    def settings_base(self) -> Path:
+        return self.home
+
+    def settings_files(self) -> list:
+        """Pliki/foldery ustawień (względem settings_base), które należą do profilu."""
+        return []
+
+    def machine_keys(self) -> dict:
+        """{plik: [(regex sekcji, regex klucza)]} — wartości zależne od komputera
+        (ścieżki, karta grafiki, urządzenie audio), których profil nie nadpisuje."""
+        return {}
+
+    # RetroAchievements: konto profilu na tę sesję ({"user", "token", "hardcore"})
+    cheevos: dict | None = None
+
+    def read_cheevos(self) -> dict:
+        """Konto zalogowane w samym emulatorze: {"user", "token"} albo {}."""
+        return {}
+
+    def apply_cheevos(self, ra: dict | None) -> None:
+        """Ustawia konto profilu w konfiguracji emulatora (puste = wyłącz)."""
+
     # akcje (emulator ma fokus)
     def pause(self) -> None:
         if self.pause_key:
@@ -288,7 +373,19 @@ class RetroArch(Adapter):
             'config_save_on_exit = "false"',
             'savestate_auto_save = "true"',
             f'savestate_auto_load = "{"true" if resume else "false"}"',
+            # save'y zawsze w podpiętym folderze — także gdy retroarch.cfg każe
+            # trzymać je obok gry (gra bywa w RAM-ie albo w pamięci podręcznej)
+            f'savefile_directory = "{self._cfg_dir("savefile_directory", "saves")}"',
+            f'savestate_directory = "{self._cfg_dir("savestate_directory", "states")}"',
         ]
+        ra = self.cheevos
+        if ra is not None:
+            on = bool(ra.get("user") and ra.get("token"))
+            lines += [f'cheevos_enable = "{"true" if on else "false"}"',
+                      f'cheevos_username = "{ra["user"] if on else ""}"',
+                      f'cheevos_token = "{ra["token"] if on else ""}"',
+                      'cheevos_password = ""',
+                      f'cheevos_hardcore_mode_enable = "{"true" if on and ra.get("hardcore") else "false"}"']
         # sterownik xinput: indeks pada = slot XInput
         for p, slot in enumerate((pad_order or [])[:4]):
             lines.append(f'input_player{p + 1}_joypad_index = "{slot}"')
@@ -300,6 +397,18 @@ class RetroArch(Adapter):
         if d.startswith(":"):
             d = str(self.home) + d[1:]
         return Path(d) if d and d != "default" else self.home / default
+
+    def settings_files(self) -> list:
+        return ["retroarch.cfg", "config"]
+
+    def machine_keys(self) -> dict:
+        return {"retroarch.cfg": [("", r".*(_directory|_path|_dir)|video_driver|video_adapter_index|"
+                                       r"audio_driver|audio_device|video_monitor_index|cheevos_.*")]}
+
+    def read_cheevos(self) -> dict:
+        cfg = self.home / "retroarch.cfg"
+        user, token = _ini_value(cfg, "cheevos_username"), _ini_value(cfg, "cheevos_token")
+        return {"user": user, "token": token} if user and token else {}
 
     def save_dirs(self) -> list:
         return [self._cfg_dir("savefile_directory", "saves"),
@@ -338,8 +447,36 @@ class DuckStation(Adapter):
     def load_key(self) -> str:
         return _qt_key(_ini_value(self._ini(), "LoadSelectedSaveState")) or "F1"
 
+    def _dir(self, section: str, key: str, default: str) -> Path:
+        p = Path(ini_section(self._ini(), section).get(key, "") or default)
+        return p if p.is_absolute() else self._ini().parent / p
+
     def state_dirs(self) -> list:
-        return [self._ini().parent / "savestates"]
+        return [self._dir("Folders", "SaveStates", "savestates")]
+
+    def settings_base(self) -> Path:
+        return self._ini().parent
+
+    def settings_files(self) -> list:
+        return ["settings.ini", "gamesettings", "inputprofiles"]
+
+    def machine_keys(self) -> dict:
+        return {"settings.ini": [("Folders|BIOS|GameList|UI|GameListTableView|AutoUpdater", ".*"),
+                                 ("MemoryCards", "Directory"), ("GPU", "Adapter"),
+                                 ("Audio", "Backend|Driver|OutputDevice"), ("Main", "SettingsVersion"),
+                                 ("Cheevos", "Enabled|Username|Token|LoginTimestamp|ChallengeMode")]}
+
+    def read_cheevos(self) -> dict:
+        c = ini_section(self._ini(), "Cheevos")
+        return {"user": c["Username"], "token": c["Token"]} if c.get("Username") and c.get("Token") else {}
+
+    def apply_cheevos(self, ra: dict | None) -> None:
+        on = bool(ra and ra.get("user") and ra.get("token"))
+        ini_set(self._ini(), {("Cheevos", "Enabled"): "true" if on else "false",
+                              ("Cheevos", "Username"): ra["user"] if on else "",
+                              ("Cheevos", "Token"): ra["token"] if on else "",
+                              ("Cheevos", "LoginTimestamp"): str(int(time.time())) if on else "0",
+                              ("Cheevos", "ChallengeMode"): "true" if on and ra.get("hardcore") else "false"})
 
     def resume_args(self, state: Path) -> list:
         return ["-statefile", str(state)]
@@ -348,7 +485,7 @@ class DuckStation(Adapter):
         winutil.send_keys(_qt_key(_ini_value(self._ini(), "TogglePause")) or "SPACE")
 
     def save_dirs(self) -> list:
-        return [self._ini().parent / "memcards", self._ini().parent / "savestates"]
+        return [self._dir("MemoryCards", "Directory", "memcards"), self._dir("Folders", "SaveStates", "savestates")]
 
     def state_patterns(self, game: dict, meta: dict) -> list:
         serial = _serial(meta)
@@ -376,8 +513,40 @@ class PCSX2(Adapter):
     def load_key(self) -> str:
         return _qt_key(_ini_value(self._ini(), "LoadStateFromSlot")) or "F3"
 
+    def _dir(self, key: str, default: str) -> Path:
+        p = Path(ini_section(self._ini(), "Folders").get(key, "") or default)
+        return p if p.is_absolute() else self._ini().parent.parent / p
+
     def state_dirs(self) -> list:
-        return [self._ini().parent.parent / "sstates"]
+        return [self._dir("Savestates", "sstates")]
+
+    def settings_base(self) -> Path:
+        return self._ini().parent.parent
+
+    def settings_files(self) -> list:
+        return ["inis/PCSX2.ini", "gamesettings", "inputprofiles"]
+
+    def machine_keys(self) -> dict:
+        return {"inis/PCSX2.ini": [("Folders|Filenames|GameList|UI|GameListTableView|AutoUpdater", ".*"),
+                                   ("EmuCore/GS", "Adapter"), ("SPU2/Output", "Backend|Driver|DeviceName|OutputModule"),
+                                   ("Achievements", ".*SoundName|Enabled|Username|LoginTimestamp|ChallengeMode")]}
+
+    def _secrets(self) -> Path:
+        return self._ini().parent / "secrets.ini"
+
+    def read_cheevos(self) -> dict:
+        user = ini_section(self._ini(), "Achievements").get("Username", "")
+        token = (ini_section(self._secrets(), "Achievements").get("Token", "")
+                 or ini_section(self._ini(), "Achievements").get("Token", ""))
+        return {"user": user, "token": token} if user and token else {}
+
+    def apply_cheevos(self, ra: dict | None) -> None:
+        on = bool(ra and ra.get("user") and ra.get("token"))
+        ini_set(self._ini(), {("Achievements", "Enabled"): "true" if on else "false",
+                              ("Achievements", "Username"): ra["user"] if on else "",
+                              ("Achievements", "LoginTimestamp"): str(int(time.time())) if on else "0",
+                              ("Achievements", "ChallengeMode"): "true" if on and ra.get("hardcore") else "false"})
+        ini_set(self._secrets(), {("Achievements", "Token"): ra["token"] if on else ""})
 
     def resume_args(self, state: Path) -> list:
         return ["-statefile", str(state)]
@@ -386,8 +555,7 @@ class PCSX2(Adapter):
         winutil.send_keys(_qt_key(_ini_value(self._ini(), "TogglePause")) or "SPACE")
 
     def save_dirs(self) -> list:
-        base = self._ini().parent.parent
-        return [base / "memcards", base / "sstates"]
+        return [self._dir("MemoryCards", "memcards"), self._dir("Savestates", "sstates")]
 
     def state_patterns(self, game: dict, meta: dict) -> list:
         serial = _serial(meta)

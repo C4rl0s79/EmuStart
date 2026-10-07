@@ -29,7 +29,7 @@ from emustart import paths, systems
 log = logging.getLogger("emustart.art_sources")
 
 MATCH_MIN = 0.8
-UA = {"User-Agent": "EmuStart/0.10 (+https://github.com/C4rl0s79/EmuStart)"}
+UA = {"User-Agent": "EmuStart/0.13 (+https://github.com/C4rl0s79/EmuStart)"}
 INDEX_TTL = 30 * 86400
 
 # platformy IGDB / TheGamesDB dla kodów z systems.py

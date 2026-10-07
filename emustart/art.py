@@ -11,8 +11,11 @@ najpierw to, o co UI pyta teraz (zaznaczona gra), potem reszta kolejki.
 from __future__ import annotations
 
 import heapq
+import io
 import itertools
 import logging
+import os
+import shutil
 import threading
 import time
 import urllib.parse
@@ -36,17 +39,75 @@ def media_url(es: str, name: str, kind: str) -> str:
     return "/media/" + urllib.parse.quote(rel)
 
 
+MIN_FREE = 2 * 1024 ** 3          # zapas wolnego miejsca, poniżej którego nie zapisujemy
+# największy sensowny rozmiar na ekranie (okładka w podglądzie, logo w wierszu/podglądzie)
+LIMITS = {"box": (900, 900), "snap": (960, 720), "logo": (1000, 400)}
+
+
+class DiskFull(OSError):
+    pass
+
+
+def check_space() -> None:
+    try:
+        paths.MEDIA.mkdir(parents=True, exist_ok=True)
+        free = shutil.disk_usage(paths.MEDIA).free
+    except OSError:
+        return
+    if free < MIN_FREE:
+        raise DiskFull(f"Na dysku z grafikami zostało {free / 1024 ** 3:.1f} GB — "
+                       f"pobieranie zatrzymane (zapas {MIN_FREE // 1024 ** 3} GB).")
+
+
+def shrink(kind: str, data: bytes) -> bytes:
+    """Zmniejsza grafikę do rozmiaru ekranowego i zapisuje jako WebP (przeglądarka
+    rozpoznaje format po zawartości, nazwa pliku zostaje .png). Zwykle ~8× mniej."""
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP" and len(data) < 400_000:
+        return data
+    try:
+        from PIL import Image
+        im = Image.open(io.BytesIO(data))
+        im.load()
+        im.thumbnail(LIMITS.get(kind, (1000, 1000)))
+        if im.mode not in ("RGB", "RGBA"):
+            im = im.convert("RGBA" if "A" in im.mode or "transparency" in im.info else "RGB")
+        out = io.BytesIO()
+        im.save(out, "WEBP", quality=85, method=4)
+        small = out.getvalue()
+        return small if len(small) < len(data) else data
+    except Exception:
+        return data
+
+
 def save(es: str, name: str, kind: str, data: bytes) -> None:
+    check_space()
+    data = shrink(kind, data)
     out = media_path(es, name, kind)
     out.parent.mkdir(parents=True, exist_ok=True)
     # dwa wątki mogą pobierać tę samą grafikę — każdy pisze do własnego pliku
     # tymczasowego, a przegrany wyścig nie jest błędem
     tmp = out.with_name(f"{out.name}.{threading.get_ident()}.tmp")
-    tmp.write_bytes(data)
     try:
+        tmp.write_bytes(data)
         tmp.replace(out)
     except PermissionError:
         tmp.unlink(missing_ok=True)
+    except OSError:
+        tmp.unlink(missing_ok=True)       # nie zostawiamy pustych .tmp
+        raise
+
+
+def cleanup_tmp() -> int:
+    """Pozostałości po przerwanych zapisach (np. pełny dysk)."""
+    n = 0
+    if paths.MEDIA.is_dir():
+        for f in paths.MEDIA.glob("*/*.tmp"):
+            try:
+                f.unlink()
+                n += 1
+            except OSError:
+                pass
+    return n
 
 
 def _download(es: str, name: str, kind: str) -> int | None:
@@ -148,8 +209,11 @@ class Job:
     """
 
     def __init__(self, cfg: dict, es: str | None = None, workers: int = 4,
-                 art: bool = True, meta: bool = False, wiki: bool = False):
+                 art: bool = True, meta: bool = False, wiki: bool = False, shrink: bool = False):
         self.es = es
+        self.do_shrink = shrink
+        self.error = ""
+        self.saved = 0                   # bajty odzyskane przez zmniejszanie
         self.cfg = cfg
         self.do_art, self.do_meta, self.do_wiki = art, meta, wiki
         self.kinds = ("box", "snap") + (("logo",) if cfg.get("games_logo") else ())
@@ -177,11 +241,14 @@ class Job:
                 "done": self.done, "found": dict(self.found), "missing": self.missing,
                 "by_source": dict(self.by_source), "current": self.current,
                 "meta": dict(self.meta_found), "mode": {"art": self.do_art, "meta": self.do_meta,
-                                                        "wiki": self.do_wiki},
+                                                        "wiki": self.do_wiki, "shrink": self.do_shrink},
+                "error": self.error, "saved": self.saved,
                 "eta": (self.total - self.done) / rate if rate else None,
                 "cancelled": self.cancel.is_set()}
 
     def _run(self) -> None:
+        if self.do_shrink:
+            return self._run_shrink()
         try:
             cond = []
             if self.do_art:
@@ -197,10 +264,63 @@ class Job:
             rows = [dict(r) for r in library.db().execute(q + " ORDER BY es, title", args)]
             self.total = len(rows)
             with ThreadPoolExecutor(self._workers) as pool:
-                for _ in pool.map(self._one, rows):
+                for _ in pool.map(self._one_safe, rows):
                     pass
         except Exception:
             log.exception("art job")
+        finally:
+            self.finished = True
+
+    def _one_safe(self, g: dict) -> None:
+        try:
+            self._one(g)
+        except DiskFull as ex:
+            if not self.error:
+                self.error = str(ex)
+                log.warning("%s", ex)
+            self.cancel.set()
+        except OSError as ex:
+            if getattr(ex, "errno", 0) == 28 or getattr(ex, "winerror", 0) == 112:
+                self.error = "Brak miejsca na dysku — pobieranie zatrzymane."
+                self.cancel.set()
+            else:
+                log.warning("grafika %s: %s", g.get("name"), ex)
+                with self._lock:
+                    self.done += 1
+
+    def _run_shrink(self) -> None:
+        """Zmniejsza już zapisane grafiki (WebP, rozmiar ekranowy)."""
+        try:
+            cleanup_tmp()
+            files = [f for f in paths.MEDIA.glob("*/*.png")] if paths.MEDIA.is_dir() else []
+            self.total = len(files)
+
+            def one(f: Path) -> None:
+                if self.cancel.is_set():
+                    return
+                self.current = f"{f.parent.name}/{f.name}"
+                try:
+                    data = f.read_bytes()
+                    kind = f.name.rsplit(".", 2)[-2] if f.name.count(".") >= 2 else ""
+                    small = shrink(kind, data)
+                    if len(small) < len(data):
+                        tmp = f.with_name(f.name + ".shrink.tmp")
+                        tmp.write_bytes(small)
+                        os.replace(tmp, f)
+                        with self._lock:
+                            self.saved += len(data) - len(small)
+                            self.found["box"] += 1
+                except OSError as ex:
+                    log.warning("zmniejszanie %s: %s", f, ex)
+                with self._lock:
+                    self.done += 1
+
+            with ThreadPoolExecutor(self._workers) as pool:
+                for _ in pool.map(one, files):
+                    pass
+            log.info("zmniejszono %d grafik, odzyskano %.1f GB", self.found["box"], self.saved / 1024 ** 3)
+        except Exception:
+            log.exception("zmniejszanie grafik")
         finally:
             self.finished = True
 

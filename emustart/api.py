@@ -12,6 +12,7 @@ import logging
 import math
 import re
 import threading
+import urllib.error
 import time
 from pathlib import Path
 
@@ -57,6 +58,7 @@ class Api:
         self._profile = self._initial_profile()
         threading.Thread(target=lambda: profiles.sync_pending(self._cfg), daemon=True,
                          name="sync-pending").start()
+        threading.Thread(target=self._profiles_bootstrap, daemon=True, name="profiles").start()
         threading.Thread(target=self._arcade_meta, daemon=True, name="arcade-meta").start()
         threading.Thread(target=self._platforms_meta, daemon=True, name="platforms").start()
         # Menu w grze: stan czyta UI (ingame_poll), Python niczego nie wywołuje
@@ -138,6 +140,116 @@ class Api:
 
     def attach(self, window) -> None:
         self._window = window
+
+    # ── profile: rzeczy per gracz (EmuStart, RetroAchievements) ──
+    USER_KEYS = ("look", "games_logo", "hide_arcade_clones")
+
+    def _profiles_bootstrap(self) -> None:
+        """W tle przy starcie: profile z NAS (czysta instalacja), konto RA
+        zalogowane w emulatorach → pierwszy profil, ustawienia EmuStart profilu."""
+        try:
+            profiles.import_from_nas(self._cfg)
+            fid = profiles.first_id()
+            if profiles.ra_get(self._cfg, fid) is None:
+                for fam, acc in self._ra_found().items():
+                    profiles.ra_set(self._cfg, fid, {**acc, "hardcore": False})
+                    log.info("RetroAchievements: konto %s z %s → pierwszy profil", acc["user"], fam)
+                    break
+            self._user_load(self._profile)
+        except Exception:
+            log.exception("profile przy starcie")
+
+    def _user_load(self, pid: int) -> None:
+        """Ustawienia EmuStart profilu (wygląd itp.); profil bez nich dziedziczy bieżące."""
+        data = profiles.json_get(self._cfg, pid, "emustart.json")
+        if not data:
+            return
+        changed = False
+        for k in self.USER_KEYS:
+            if k in data and self._cfg.get(k) != data[k]:
+                self._cfg[k] = clean_look(data[k]) if k == "look" else bool(data[k])
+                changed = True
+        if changed:
+            config.save(self._cfg)
+
+    def _user_save(self) -> None:
+        try:
+            profiles.json_set(self._cfg, self._profile, "emustart.json",
+                              {k: self._cfg[k] for k in self.USER_KEYS if k in self._cfg})
+        except Exception:
+            log.exception("zapis ustawień profilu")
+
+    def _ra_found(self) -> dict:
+        """Konta RA zalogowane w emulatorach z konfiguracji: {rodzina: {user, token}}."""
+        out = {}
+        for sc in (self._cfg.get("systems") or {}).values():
+            exe = sc.get("exe") or ""
+            if not exe or not Path(exe).is_file():
+                continue
+            ad = ingame.adapter_for(exe)
+            if ad.family in out:
+                continue
+            try:
+                acc = ad.read_cheevos()
+            except Exception:
+                acc = {}
+            if acc:
+                out[ad.family] = acc
+        return out
+
+    def ra_status(self, pid: int) -> dict:
+        rec = profiles.ra_get(self._cfg, int(pid)) or {}
+        found = [{"family": f, "user": a["user"]} for f, a in self._ra_found().items()]
+        return {"user": rec.get("user", ""), "hardcore": bool(rec.get("hardcore")), "found": found}
+
+    def ra_login(self, pid: int, user: str, password: str) -> dict:
+        """Logowanie do RetroAchievements: hasło idzie tylko do retroachievements.org
+        (POST), zapisujemy nazwę i token — jak robią to same emulatory."""
+        import urllib.parse
+        import urllib.request
+        user = (user or "").strip()
+        if not user or not password:
+            return {"ok": False, "reason": "Podaj nazwę użytkownika i hasło."}
+        body = urllib.parse.urlencode({"r": "login2", "u": user, "p": password}).encode()
+        req = urllib.request.Request("https://retroachievements.org/dorequest.php", data=body,
+                                     headers={"User-Agent": f"EmuStart/{__version__} (+https://github.com/C4rl0s79/EmuStart)",
+                                              "Content-Type": "application/x-www-form-urlencoded"})
+        try:
+            with urllib.request.urlopen(req, timeout=20) as r:
+                data = json.loads(r.read().decode("utf-8", "replace"))
+        except urllib.error.HTTPError as ex:
+            try:
+                data = json.loads(ex.read().decode("utf-8", "replace"))
+            except ValueError:
+                return {"ok": False, "reason": f"Serwer RetroAchievements: błąd {ex.code}."}
+        except (OSError, ValueError) as ex:
+            return {"ok": False, "reason": f"Brak połączenia z RetroAchievements: {ex}"}
+        if not data.get("Success") or not data.get("Token"):
+            return {"ok": False, "reason": data.get("Error") or "Nieprawidłowa nazwa lub hasło."}
+        rec = profiles.ra_get(self._cfg, int(pid)) or {}
+        profiles.ra_set(self._cfg, int(pid), {"user": data.get("User") or user, "token": data["Token"],
+                                              "hardcore": rec.get("hardcore", False)})
+        log.info("RetroAchievements: zalogowano %s (profil %s)", data.get("User") or user, pid)
+        return {"ok": True, "user": data.get("User") or user}
+
+    def ra_import(self, pid: int, family: str) -> dict:
+        acc = self._ra_found().get(family)
+        if not acc:
+            return {"ok": False, "reason": "W tym emulatorze nie ma zalogowanego konta."}
+        rec = profiles.ra_get(self._cfg, int(pid)) or {}
+        profiles.ra_set(self._cfg, int(pid), {**acc, "hardcore": rec.get("hardcore", False)})
+        return {"ok": True, "user": acc["user"]}
+
+    def ra_logout(self, pid: int) -> dict:
+        profiles.ra_set(self._cfg, int(pid), {"user": "", "token": ""})
+        return {"ok": True}
+
+    def ra_hardcore(self, pid: int, on: bool) -> dict:
+        rec = profiles.ra_get(self._cfg, int(pid)) or {}
+        if not rec.get("user"):
+            return {"ok": False, "reason": "Najpierw zaloguj profil do RetroAchievements."}
+        profiles.ra_set(self._cfg, int(pid), {**rec, "hardcore": bool(on)})
+        return {"ok": True}
 
     # ── stan ogólny ──
     def get_state(self) -> dict:
@@ -607,6 +719,7 @@ class Api:
 
     # ── profile ──
     def profiles_list(self) -> dict:
+        profiles.import_from_nas(self._cfg)
         return {"profiles": profiles.all_profiles(), "current": self._profile}
 
     def profile_select(self, pid: int) -> dict:
@@ -614,6 +727,7 @@ class Api:
             return {"ok": False}
         self._profile = int(pid)
         library.meta_set("last_profile", str(self._profile))
+        self._user_load(self._profile)
         return {"ok": True}
 
     def profile_create(self, name: str) -> dict:
@@ -667,12 +781,18 @@ class Api:
                 "job": self._art_job.status() if getattr(self, "_art_job", None) else None}
 
     def art_start(self, es: str = "", mode: str = "art") -> dict:
-        """mode: art | meta | meta_wiki | all (grafiki + metadane)."""
+        """mode: art | meta | meta_wiki | all (grafiki + metadane) | shrink (zmniejsz zapisane)."""
         job = getattr(self, "_art_job", None)
         if job and not job.finished:
             return {"ok": False, "reason": "Pobieranie już trwa."}
+        if mode != "shrink":
+            try:
+                art.check_space()
+            except art.DiskFull as ex:
+                return {"ok": False, "reason": str(ex)}
         self._art_job = art.Job(self._cfg, es or None, art=mode in ("art", "all"),
-                                meta=mode in ("meta", "meta_wiki", "all"), wiki=mode == "meta_wiki")
+                                meta=mode in ("meta", "meta_wiki", "all"), wiki=mode == "meta_wiki",
+                                shrink=mode == "shrink")
         self._art_job.start()
         return {"ok": True}
 
@@ -757,6 +877,7 @@ class Api:
                 "hide_arcade_clones": cfg.get("hide_arcade_clones", True),
                 "games_logo": cfg.get("games_logo", False),
                 "pad_backend": cfg.get("pad_backend", "python"),
+                "profile_settings": cfg.get("profile_settings", True),
                 "systems": rows}
 
     def emulator_options(self, es: str) -> list:
@@ -784,6 +905,10 @@ class Api:
         for k in ("fullscreen", "hide_arcade_clones", "games_logo"):
             if k in data:
                 cfg[k] = bool(data[k])
+        if "profile_settings" in data:
+            cfg["profile_settings"] = bool(data["profile_settings"])
+        if any(k in data for k in self.USER_KEYS):
+            self._user_save()
         if "systems" in data:
             cfg.setdefault("systems", {})
             for es, sc in data["systems"].items():
@@ -798,6 +923,7 @@ class Api:
         """Ustawienia wyglądu z edytora (web/look.js) — liczby i proste napisy."""
         self._cfg["look"] = clean_look(data)
         config.save(self._cfg)
+        self._user_save()
         return {"ok": True}
 
     def autodetect(self) -> dict:

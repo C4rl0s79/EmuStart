@@ -6,11 +6,12 @@
 const OSK = { value: "", onDone: null, r: 1, c: 0, shift: false, multiline: false, prevModal: null };
 const OSK_ROWS = [
   [..."1234567890"], [..."qwertyuiop"], [..."asdfghjkl'"], [..."zxcvbnm,.-"],
-  [..."ąćęłńóśźż:"], ["⇧", "Spacja", "⌫", "OK"],
+  [..."ąćęłńóśźż:"], [..."!@#$%&*()_"], ["⇧", "Spacja", "⌫", "OK"],
 ];
 
-function oskOpen(title, value, onDone, multiline = false) {
+function oskOpen(title, value, onDone, multiline = false, secret = false) {
   Object.assign(OSK, { value: value || "", onDone, r: 1, c: 0, shift: false, multiline, prevModal: S.modal });
+  $("oskInput").type = secret ? "password" : "text";
   S.modal = "osk";
   $("oskTitle").textContent = title;
   $("oskInput").classList.toggle("hidden", multiline);
@@ -24,6 +25,7 @@ function oskOpen(title, value, onDone, multiline = false) {
 function oskField() { return OSK.multiline ? $("oskArea") : $("oskInput"); }
 function oskClose(ok) {
   const val = oskField().value;
+  oskField().value = "";
   $("osk").classList.add("hidden");
   S.modal = OSK.prevModal;
   oskField().blur();
@@ -340,7 +342,7 @@ function renderProfiles() {
   $("profCards").innerHTML = cards;
   $("profCards").querySelectorAll(".pcard").forEach((el) => el.addEventListener("click", () => { PR.idx = +el.dataset.i; profilesInput("a"); }));
   const onProfile = PR.idx < PR.list.length;
-  setHints(onProfile ? [["a", "Graj jako"], ["y", "Zmień nazwę"], ["x", "Usuń"], ["b", "Wstecz"]] : [["a", "Utwórz"], ["b", "Wstecz"]]);
+  setHints(onProfile ? [["a", "Graj jako"], ["start", "Opcje profilu"], ["y", "Zmień nazwę"], ["x", "Usuń"], ["b", "Wstecz"]] : [["a", "Utwórz"], ["b", "Wstecz"]]);
 }
 async function profilesInput(a) {
   const n = PR.list.length + 1;
@@ -357,9 +359,12 @@ async function profilesInput(a) {
     });
   } else if (a === "a") {
     await api().profile_select(p.id);
-    await refreshState();
+    const st = await refreshState();
+    applyLook(st.look || {}, true);         // wygląd zapisany w profilu
     toast(`Gra: ${p.name}`);
     return show("systems");
+  } else if (a === "start" && p) {
+    return profileMenu(p);
   } else if (a === "y" && p) {
     return oskOpen("Nowa nazwa profilu", p.name, async (name) => {
       const r = await api().profile_rename(p.id, name);
@@ -375,6 +380,42 @@ async function profilesInput(a) {
   }
   PR.delArmed = null;
   renderProfiles();
+}
+
+
+// opcje profilu (Start na karcie): RetroAchievements
+const RA_FAM = { retroarch: "RetroArch", duckstation: "DuckStation", pcsx2: "PCSX2" };
+async function profileMenu(p) {
+  const st = await api().ra_status(p.id);
+  const items = [];
+  if (st.user) {
+    items.push([`RetroAchievements: ${st.user} — wyloguj`, async () => { await api().ra_logout(p.id); toast("Wylogowano z RetroAchievements."); }]);
+    items.push([`Tryb hardcore: ${st.hardcore ? "tak" : "nie"} (bez stanów zapisu)`, async () => {
+      const r = await api().ra_hardcore(p.id, !st.hardcore);
+      toast(r.ok ? `Hardcore: ${!st.hardcore ? "włączony" : "wyłączony"}` : r.reason);
+    }]);
+  }
+  items.push([st.user ? "Zaloguj inne konto RetroAchievements" : "Zaloguj do RetroAchievements", () => raLogin(p)]);
+  for (const f of st.found) {
+    if (f.user !== st.user) items.push([`Użyj konta ${f.user} z ${RA_FAM[f.family] || f.family}`, async () => {
+      const r = await api().ra_import(p.id, f.family);
+      toast(r.ok ? `Profil „${p.name}” używa konta ${r.user}.` : r.reason);
+    }]);
+  }
+  items.push(["Zmień nazwę", () => profilesInput("y")]);
+  S.menu = items; S.menuIdx = 0; S.modal = "menu";
+  $("menu").classList.remove("hidden");
+  renderMenu();
+}
+function raLogin(p) {
+  oskOpen(`RetroAchievements — nazwa użytkownika (${p.name})`, "", (user) => {
+    if (!user.trim()) return;
+    setTimeout(() => oskOpen(`Hasło RetroAchievements dla ${user}`, "", async (pw) => {
+      toast("Loguję…", 20000);
+      const r = await api().ra_login(p.id, user, pw);
+      toast(r.ok ? `Zalogowano: ${r.user}. Konto zadziała w RetroArch, DuckStation i PCSX2.` : r.reason, 5000);
+    }, false, true), 50);
+  });
 }
 
 

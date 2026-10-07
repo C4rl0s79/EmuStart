@@ -62,7 +62,8 @@ function lookVal(k) {
   return LV[k] ?? it?.def;
 }
 
-function applyLook(values) {
+function applyLook(values, replace = false) {
+  if (replace) for (const k of Object.keys(LV)) delete LV[k];
   if (values) for (const it of LOOK_ITEMS) if (!it.cfg && values[it.k] !== undefined) LV[it.k] = values[it.k];
   const root = document.documentElement.style;
   for (const it of LOOK_ITEMS) {

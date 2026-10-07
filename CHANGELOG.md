@@ -4,6 +4,43 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 [Keep a Changelog](https://keepachangelog.com/pl/1.1.0/), wersje według
 [SemVer](https://semver.org/lang/pl/).
 
+## [0.13.0] — 2026-10-08
+
+### Dodane
+- **Ustawienia emulatorów osobno dla każdego profilu** (RetroArch, DuckStation,
+  PCSX2): przed grą wgrywane są ustawienia profilu, po grze zapisywane z powrotem
+  do profilu i na NAS (`Profiles\<profil>\settings\<emulator>`). Wartości
+  zależne od komputera (ścieżki, BIOS, karta grafiki, urządzenie audio) zostają
+  z danego komputera. Nowy profil zaczyna od bieżących ustawień. Można wyłączyć:
+  Ustawienia → Profile.
+- **Ustawienia EmuStart osobno dla profilu**: wygląd, tytuły jako logo, ukrywanie
+  klonów arcade (`emustart.json` w profilu i na NAS, nowszy wygrywa).
+- **RetroAchievements dla każdego profilu**: Start na karcie profilu → logowanie
+  (hasło idzie tylko do retroachievements.org, zapisywany jest token), wylogowanie,
+  tryb hardcore, „użyj konta z emulatora”. Przed każdą grą konto profilu trafia do
+  RetroArch (konfiguracja sesji), DuckStation i PCSX2 (`secrets.ini`); profil bez
+  konta wyłącza osiągnięcia. Konto zalogowane już w emulatorach przejmuje
+  pierwszy profil.
+- **Czysta instalacja EmuStart**: profile z `Z:\emustart\Profiles` same wracają na
+  listę; save'y, ustawienia i konto RA ściągają się przy pierwszej grze.
+- Grafiki i metadane → **„Zmniejsz zapisane grafiki”**: WebP w rozmiarze ekranowym,
+  zwykle ok. 8× mniej miejsca.
+- Klawiatura ekranowa: wiersz symboli i ukrywanie hasła.
+
+### Zmienione
+- Nowe grafiki zapisywane od razu zmniejszone (okładki do 900 px, logo do
+  1000×400, zrzuty do 960×720, WebP).
+- Foldery save'ów DuckStation i PCSX2 czytane z ich ustawień (było na sztywno).
+- RetroArch dostaje w każdej sesji folder save'ów i stanów wprost — save nie
+  trafi obok gry w RAM-ie / pamięci podręcznej, nawet przy „save obok gry”.
+- Profil wgrywany jest przed wyliczeniem parametrów startu gry.
+
+### Naprawione
+- **Pobieranie grafik zapełniało dysk do zera**: zatrzymuje się z komunikatem,
+  gdy zostaje mniej niż 2 GB; puste pliki `.tmp` po nieudanym zapisie są usuwane.
+- Emulator zainstalowany od nowa: jego świeża (pusta) karta pamięci nie trafia już
+  obok save'a profilu z dopiskiem w nazwie, tylko do kopii zapasowej profilu.
+
 ## [0.12.0] — 2026-10-07
 
 ### Dodane

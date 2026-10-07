@@ -702,6 +702,9 @@ function buildSetRows() {
               fmt: (v) => ({ python: "EmuStart / XInput (zalecane)", browser: "przeglądarka (Gamepad API)", none: "wyłączona (tylko klawiatura)" }[v] + " — po restarcie") });
   rows.push({ k: "Tytuły gier jako logo", key: "games_logo", type: "bool", fmt: (v) => (v ? "tak (Clear Logo z LaunchBox, gdy jest)" : "nie") });
   rows.push({ k: "Edytor wyglądu", type: "action", run: () => openLook() });
+  rows.push({ head: "Profile" });
+  rows.push({ k: "Ustawienia emulatorów osobno dla profilu", key: "profile_settings", type: "bool",
+              fmt: (v) => (v ? "tak (RetroArch, DuckStation, PCSX2 — kopia w profilu i na NAS)" : "nie (wspólne)") });
   rows.push({ head: "Akcje" });
   rows.push({ k: "Wykryj emulatory i skanuj", type: "action", run: async () => { toast("Wykrywam emulatory…", 60000); const r = await api().autodetect(); if (!r.ok) return toast(r.reason, 4000); toast(`Przypisano emulatory: ${r.assigned}`); startScan(async () => { await openSettings(); }); } });
   rows.push({ k: "Pobierz brakujące emulatory", type: "action", run: () => askInstallMissing() });
@@ -884,6 +887,7 @@ function buildArtRows() {
               v: `okładki ${tot.b}/${tot.g} · zrzuty ${tot.s}/${tot.g}` + (d.games_logo ? ` · logo ${tot.l}/${tot.g}` : "") });
   rows.push({ k: "Pobierz brakujące metadane i opisy", act: "all", mode: "meta", v: `opisy ${tot.d}/${tot.g} · LaunchBox + baza RetroArcha` });
   rows.push({ k: "… oraz Wikipedia dla gier bez opisu", act: "all", mode: "meta_wiki", v: "wolniej: ok. 1–2 s na grę" });
+  rows.push({ k: "Zmniejsz zapisane grafiki", act: "all", mode: "shrink", v: "WebP w rozmiarze ekranowym — zwykle ok. 8× mniej miejsca" });
   rows.push({ head: "Systemy  ·  A pobierz brakujące grafiki i metadane" });
   for (const s of d.systems)
     rows.push({ k: s.display, act: "sys", es: s.es, mode: "all",
@@ -924,6 +928,13 @@ function renderArtJob(job) {
   $("ajPct").textContent = Math.floor(pct) + "%";
   const src = Object.entries(job.by_source).map(([k, n]) => `${(SRC[k] || k).split(" ")[0]} ${n}`).join(", ");
   const m = job.mode || { art: true };
+  if (m.shrink) {
+    $("ajLine").textContent = `${job.done} / ${job.total} plików · zmniejszono ${job.found.box} · odzyskano ${fmtBytes(job.saved)}` +
+      (job.running ? ` · zostało ${fmtEta(job.eta)}` : job.cancelled ? " · zatrzymano" : " · gotowe");
+    $("ajCur").textContent = job.running ? job.current : "";
+    return;
+  }
+  if (job.error) { $("ajLine").textContent = job.error; $("ajCur").textContent = ""; return; }
   $("ajLine").textContent = `${job.done} / ${job.total} gier` +
     (m.art ? ` · nowe okładki ${job.found.box} · nowe zrzuty ${job.found.snap}` + (job.found.logo ? ` · logo ${job.found.logo}` : "") + ` · bez grafiki ${job.missing}` : "") +
     (m.meta ? ` · nowe opisy ${job.meta.description}` + (m.wiki ? ` · z Wikipedii ${job.meta.wiki}` : "") : "") +

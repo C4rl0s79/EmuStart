@@ -260,6 +260,9 @@ class Session:
     def _play(self, g: dict, exe: str, args: str, rom: Path) -> None:
         cmd = emulators.build_command(exe, args, str(rom))
         adapter = ingame.adapter_for(exe)
+        # profil najpierw: ustawienia, save'y i konto RA muszą być na miejscu,
+        # zanim policzymy parametry startu (RetroArch czyta z nich foldery)
+        save_names = self._profile_prepare(adapter)
         po = (self.cfg.get("pad_order") or {}).get("mode", "windows")
         # bateria (rodzaj zasilania) potrzebna tylko w trybie „bezprzewodowe pierwsze”
         order = pads.order(self.cfg, pads.connected(battery=po == "wireless_first"))
@@ -279,7 +282,6 @@ class Session:
         cmd[1:1] = extra
         self.resumed = bool(resume)
 
-        save_names = self._profile_prepare(adapter)
         restore_pads = None
         if not pads.is_identity(order):
             try:
@@ -302,14 +304,26 @@ class Session:
 
     # ── profile: save'y emulatora na czas gry należą do profilu ──
     def _profile_prepare(self, adapter) -> list:
-        dirs = adapter.save_dirs() if self.profiles_on else []
-        if not dirs:
+        if not self.profiles_on or not (adapter.save_dirs() or adapter.settings_files()):
             return []
         host = profiles.lock(self.cfg, self.profile_id)
         if host:
             prof = profiles.get(self.profile_id) or {}
             raise LaunchError(f"Profil „{prof.get('name', '?')}” gra teraz na komputerze {host}. "
                               "Wybierz inny profil albo zakończ tamtą grę.")
+        self._settings_on = self.cfg.get("profile_settings", True)
+        if self._settings_on:
+            try:
+                profiles.settings_load(self.cfg, self.profile_id, adapter)
+            except Exception:
+                log.exception("ustawienia profilu")
+        try:
+            ra = profiles.ra_for_launch(self.cfg, self.profile_id, adapter)
+            adapter.cheevos = ra
+            adapter.apply_cheevos(ra)
+        except Exception:
+            log.exception("RetroAchievements profilu")
+        dirs = adapter.save_dirs()               # foldery z (już podmienionych) ustawień
         names = [d.name for d in dirs]
         try:
             n = profiles.sync_down(self.cfg, self.profile_id, adapter.family, names)
@@ -319,11 +333,19 @@ class Session:
                 profiles.attach(self.profile_id, adapter.family, d)
         except Exception:
             log.exception("podpinanie save'ów profilu")
-        return names
+        return names or ["-"]
 
     def _profile_finish(self, adapter, names: list) -> None:
         if not names:
             return
+        names = [n for n in names if n != "-"]
+        if getattr(self, "_settings_on", False):
+            try:
+                n = profiles.settings_save(self.cfg, self.profile_id, adapter)
+                if n:
+                    log.info("ustawienia %s zapisane w profilu: %d plików", adapter.family, n)
+            except Exception:
+                log.exception("zapis ustawień profilu")
         try:
             n = profiles.sync_up(self.cfg, self.profile_id, adapter.family, names)
             if n:
