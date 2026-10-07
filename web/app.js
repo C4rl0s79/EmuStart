@@ -701,7 +701,7 @@ function buildSetRows() {
               fmt: (v) => ({ python: "EmuStart / XInput (zalecane)", browser: "przeglądarka (Gamepad API)", none: "wyłączona (tylko klawiatura)" }[v] + " — po restarcie") });
   rows.push({ k: "Tytuły gier jako logo", key: "games_logo", type: "bool", fmt: (v) => (v ? "tak (Clear Logo z LaunchBox, gdy jest)" : "nie") });
   rows.push({ k: "Edytor wyglądu", type: "action", run: () => openLook() });
-  rows.push({ head: "Ukrywanie gier  ·  wg oznaczeń w nazwie" });
+  rows.push({ head: "Ukrywanie gier  ·  wg oznaczeń w nazwie  ·  osobno dla każdego profilu" });
   const yn = (v) => (v ? "ukryte" : "widoczne");
   rows.push({ k: "Wersje rozwojowe", key: "hide_beta", type: "bool", fmt: (v) => `${yn(v)} — Beta, Proto, Alpha, Debug` });
   rows.push({ k: "Dema i wersje promocyjne", key: "hide_demo", type: "bool", fmt: (v) => `${yn(v)} — Demo, Kiosk, Promo, Sample, Trial` });

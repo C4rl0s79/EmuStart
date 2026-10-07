@@ -300,3 +300,22 @@ def test_hide_tag_groups():
     assert g("Z (USA) (Unl)") == {"unl"}
     assert g("Betrayal at Krondor (USA)") == set() and g("X (USA) (Rev 1)") == set()
     assert library.is_hidden("Sonic (USA) (Beta 2)", ["beta"]) and not library.is_hidden("Sonic (USA) (Beta 2)", ["demo"])
+
+
+def test_hide_settings_are_per_profile(prof_env, monkeypatch):
+    from emustart import api as api_mod, config
+    cfg, tmp = prof_env
+    monkeypatch.setattr(config, "save", lambda c: None)
+    a = api_mod.Api.__new__(api_mod.Api)
+    a._cfg = cfg
+    first = profiles.first_id()
+    ola = profiles.create("Ola")["id"]
+    a._profile = first
+    cfg["hide_beta"] = True
+    a._user_save()
+    a._profile = ola
+    profiles.json_set(cfg, ola, "emustart.json", {"games_logo": True})    # profil sprzed tej wersji
+    a._user_load(ola)
+    assert cfg["hide_beta"] is False and cfg["hide_arcade_clones"] is True
+    a._user_load(first)
+    assert cfg["hide_beta"] is True

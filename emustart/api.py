@@ -145,7 +145,8 @@ class Api:
         self._window = window
 
     # ── profile: rzeczy per gracz (EmuStart, RetroAchievements) ──
-    USER_KEYS = ("look", "games_logo", "hide_arcade_clones")
+    USER_KEYS = ("look", "games_logo", "hide_arcade_clones",
+                 "hide_beta", "hide_demo", "hide_pirate", "hide_unl", "hide_program")
 
     def _profiles_bootstrap(self) -> None:
         """W tle przy starcie: profile z NAS (czysta instalacja), konto RA
@@ -190,6 +191,9 @@ class Api:
         for k in self.USER_KEYS:
             if k == "look" and not self._look_shared():
                 continue                      # wygląd tego komputera
+            if k not in data and k.startswith("hide_"):
+                # profil zapisany przed wersją z ukrywaniem: domyślnie widać wszystko
+                data[k] = k == "hide_arcade_clones"
             if k in data and self._cfg.get(k) != data[k]:
                 self._cfg[k] = clean_look(data[k]) if k == "look" else bool(data[k])
                 changed = True

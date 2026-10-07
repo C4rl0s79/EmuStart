@@ -4,6 +4,14 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 [Keep a Changelog](https://keepachangelog.com/pl/1.1.0/), wersje według
 [SemVer](https://semver.org/lang/pl/).
 
+## [0.15.1] — 2026-10-08
+
+### Zmienione
+- **Ukrywanie gier osobno dla każdego profilu** (Beta/Proto, dema, pirackie,
+  nielicencjonowane, programy/BIOS, klony arcade) — zapisywane w `emustart.json`
+  profilu (lokalnie i na NAS), więc działa tak samo na każdym komputerze.
+  Profil, który jeszcze tych ustawień nie ma, widzi wszystko (klony arcade ukryte).
+
 ## [0.15.0] — 2026-10-08
 
 ### Dodane
