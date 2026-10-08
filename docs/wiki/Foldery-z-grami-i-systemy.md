@@ -76,6 +76,12 @@ w [folderze z BIOS-ami](Emulatory#bios-y), EmuStart sam kopiuje je do RetroArcha
 (razem z `capsimg.dll`). Bez nich rdzeń używa zamiennika AROS, a EmuStart pokazuje
 ostrzeżenie przy starcie gry.
 
+**Klawiatura** — w grach na komputery (Amiga, C64, MSX, Atari ST, ZX…) uruchamianych
+przez RetroArch cała klawiatura trafia do emulowanego komputera (Shift, F1–F10, Esc,
+strzałki działają jak na oryginale); skróty RetroArcha są na ten czas wyłączone.
+Wyjście z gry: menu EmuStart (A + Y na padzie) albo Scroll Lock (przywraca skróty
+RetroArcha) i Esc.
+
 ## Ukrycie systemu
 
 Przytrzymane A na logo systemu → **Ukryj system**, albo w Ustawieniach → Systemy

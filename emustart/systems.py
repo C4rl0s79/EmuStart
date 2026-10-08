@@ -254,3 +254,9 @@ def whd_title(stem: str, demo: bool = False) -> tuple:
         else:
             tags.append(_split_camel(p))
     return title, " ".join(f"({t})" for t in tags)
+
+
+# Komputery: gry sterowane klawiaturą (Shift, F1, Esc, strzałki…) — w RetroArchu
+# klawiatura idzie wtedy w całości do emulowanego komputera (launcher/ingame).
+COMPUTER_PLATS = {"AMIGA", "C64", "VIC20", "PLUS4", "MSX", "MSX2", "ATARIST", "ATARI800",
+                  "ZX", "PC88", "PC98"}

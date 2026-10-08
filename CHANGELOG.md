@@ -4,6 +4,18 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 [Keep a Changelog](https://keepachangelog.com/pl/1.1.0/), wersje według
 [SemVer](https://semver.org/lang/pl/).
 
+## [0.17.2] — 2026-10-08
+
+### Naprawione
+- **Klawiatura w grach na komputery (Amiga, C64, MSX, Atari ST, ZX…) przez
+  RetroArch**: prawy Shift otwierał klawiaturę ekranową PUAE (RetroArch przypisuje
+  go do Select pada), strzałki działały jak joystick, a F1 i Esc przechwytywał
+  RetroArch (menu, wyjście) — np. w Pinball Dreams nie dało się grać. Na czas sesji
+  tych systemów EmuStart włącza „game focus” (cała klawiatura dla emulowanego
+  komputera, skróty RetroArcha wyłączone) i zdejmuje przypisania klawiszy do pada.
+  Pad działa bez zmian; wyjście z gry: menu EmuStart (A + Y), Scroll Lock przełącza
+  game focus. `retroarch.cfg` pozostaje bez zmian.
+
 ## [0.17.1] — 2026-10-08
 
 ### Naprawione

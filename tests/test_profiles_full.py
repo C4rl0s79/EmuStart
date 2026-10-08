@@ -561,3 +561,15 @@ def test_whdload_kickstarts_copied_to_devs(tmp_path):
     assert sorted(got) == ["kick34005.A500", "kick40068.A1200"]
     assert (ks / "kick34005.A500").read_bytes() == b"KS13" and (ks / "kick40068.A1200").read_bytes() == b"KS31"
     assert bios.whdload_kickstarts({}, ra, saves) == []                  # drugi raz nic
+
+
+def test_retroarch_keyboard_for_computer_systems(tmp_path):
+    home = tmp_path / "RetroArch"
+    _write(home / "retroarch.cfg", b'input_player1_select = "rshift"\n')
+    ad = ingame.RetroArch(str(home / "retroarch.exe"))
+    text = Path(ad.launch_args(tmp_path / "run1", False)[1]).read_text(encoding="utf-8")
+    assert "input_auto_game_focus" not in text
+    ad.keyboard_game = True
+    text = Path(ad.launch_args(tmp_path / "run2", False)[1]).read_text(encoding="utf-8")
+    assert 'input_auto_game_focus = "1"' in text
+    assert 'input_player1_select = "nul"' in text and 'input_player1_up = "nul"' in text

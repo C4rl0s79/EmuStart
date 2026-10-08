@@ -318,6 +318,8 @@ class Adapter:
 
     # RetroAchievements: konto profilu na tę sesję ({"user", "token", "hardcore"})
     cheevos: dict | None = None
+    # system komputerowy: klawiatura w całości dla gry (RetroArch: game focus)
+    keyboard_game: bool = False
 
     def read_cheevos(self) -> dict:
         """Konto zalogowane w samym emulatorze: {"user", "token"} albo {}."""
@@ -400,6 +402,18 @@ class RetroArch(Adapter):
             f'savefile_directory = "{self._cfg_dir("savefile_directory", "saves")}"',
             f'savestate_directory = "{self._cfg_dir("savestate_directory", "states")}"',
         ]
+        if self.keyboard_game:
+            # Gry na komputery (Amiga, C64…) używają klawiatury: Shift, F1–F10, Esc,
+            # strzałki. Domyślnie RetroArch zamienia część klawiszy na przyciski pada
+            # (prawy Shift = Select → w PUAE klawiatura ekranowa, strzałki = joystick)
+            # i przechwytuje F1 (menu) oraz Esc (wyjście). Na czas sesji: game focus
+            # (klawiatura dla rdzenia, skróty wyłączone) i bez przypisań klawiszy do pada.
+            # Wyjście z gry: menu EmuStart (A + Y), przełączanie: Scroll Lock.
+            lines.append('input_auto_game_focus = "1"')
+            for p in (1, 2):
+                for b in ("a", "b", "x", "y", "l", "r", "l2", "r2", "l3", "r3", "start", "select",
+                          "up", "down", "left", "right"):
+                    lines.append(f'input_player{p}_{b} = "nul"')
         ra = self.cheevos
         if ra is not None:
             on = bool(ra.get("user") and ra.get("token"))

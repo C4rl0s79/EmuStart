@@ -280,6 +280,7 @@ class Session:
         # profil najpierw: ustawienia, save'y i konto RA muszą być na miejscu,
         # zanim policzymy parametry startu (RetroArch czyta z nich foldery)
         save_names = self._profile_prepare(adapter)
+        adapter.keyboard_game = systems.info(g["es"])["plat"] in systems.COMPUTER_PLATS
         if adapter.family == "retroarch" and g["es"] in systems.WHD_SYSTEMS:
             try:   # po podpięciu profilu — folder saves wskazuje już na właściwego gracza
                 bios.whdload_kickstarts(self.cfg, adapter.home,
