@@ -159,8 +159,9 @@ def drive_kind(root: str) -> str:
     return {2: "wymienny", 3: "dysk", 4: "sieć", 5: "CD/DVD", 6: "RAM"}.get(t, "")
 
 
-def window_info(hwnd: int) -> str:
-    """„tytuł [klasa] proces.exe” — do diagnostyki fokusu."""
+def window_info(hwnd: int, with_title: bool = False) -> str:
+    """„[klasa] proces.exe” — do diagnostyki fokusu. Tytułu cudzych okien nie
+    logujemy (bywa w nim nazwa dokumentu, temat maila…)."""
     if not IS_WIN or not hwnd:
         return "(brak)"
     title = ctypes.create_unicode_buffer(256)
@@ -180,7 +181,8 @@ def window_info(hwnd: int) -> str:
             _k32.CloseHandle(h)
     except Exception:
         pass
-    return f"„{title.value}” [{cls.value}] {exe} pid {pid.value}"
+    name = f"„{title.value}” " if with_title else ""
+    return f"{name}[{cls.value}] {exe} pid {pid.value}"
 
 
 def window_class(hwnd: int) -> str:

@@ -152,6 +152,10 @@ class Api:
         """W tle przy starcie: profile z NAS (czysta instalacja), konto RA
         zalogowane w emulatorach → profil tego komputera, ustawienia EmuStart profilu."""
         try:
+            launcher.cleanup_run_dirs()
+            if library.meta_get("secrets_scrubbed", "") != "1" and profiles.nas_online(self._cfg):
+                profiles.scrub_settings_copies(self._cfg)
+                library.meta_set("secrets_scrubbed", "1")
             profiles.import_from_nas(self._cfg)
             self._ra_adopt()
             self._user_load(self._profile)

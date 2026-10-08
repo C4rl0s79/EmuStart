@@ -253,9 +253,11 @@ class Igdb:
         with self._lock:
             if self._tok and time.time() < self._exp - 60:
                 return self._tok
-            q = urllib.parse.urlencode({"client_id": self.cid, "client_secret": self.secret,
-                                        "grant_type": "client_credentials"})
-            d = fetch(f"https://id.twitch.tv/oauth2/token?{q}", data=b"")
+            # sekret w treści POST (adresy trafiają do logów serwerów pośrednich)
+            body = urllib.parse.urlencode({"client_id": self.cid, "client_secret": self.secret,
+                                           "grant_type": "client_credentials"}).encode()
+            d = fetch("https://id.twitch.tv/oauth2/token", {"Content-Type": "application/x-www-form-urlencoded"},
+                      data=body)
             try:
                 obj = json.loads(d or b"{}")
                 self._tok, self._exp = obj["access_token"], time.time() + obj.get("expires_in", 3600)

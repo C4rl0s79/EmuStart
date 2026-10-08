@@ -378,3 +378,95 @@ def test_post_game_sync_runs_in_background():
     assert not launcher.wait_post(timeout=0.05)
     gate.set()
     assert launcher.wait_post(timeout=5) and launcher.post_busy() == ""
+
+
+# ── zabezpieczenia ──
+
+def test_settings_copy_has_no_secrets_but_machine_keeps_them(prof_env):
+    cfg, tmp = prof_env
+    pid = profiles.first_id()
+    home = tmp / "emu" / "RetroArch"
+    _write(home / "retroarch.cfg", b'video_driver = "vulkan"\ncheevos_token = "SEKRET123"\n'
+                                    b'cheevos_password = "haslo"\nnetplay_show_passworded = "true"\n')
+    ra = ingame.RetroArch(str(home / "retroarch.exe"))
+    s = _session(cfg, pid)
+    s._profile_finish(ra, s._profile_prepare(ra))
+    for f in [profiles.LOCAL / str(pid) / "settings" / "retroarch" / "retroarch.cfg",
+              Path(cfg["profiles_nas"]) / "Gracz" / "settings" / "retroarch" / "retroarch.cfg"]:
+        t = f.read_text(encoding="utf-8")
+        assert "SEKRET123" not in t and "haslo" not in t and 'netplay_show_passworded = "true"' in t
+    # kolejna gra: kopia profilu wgrana, sekrety komputera zostają
+    s = _session(cfg, pid)
+    s._profile_finish(ra, s._profile_prepare(ra))
+    t = (home / "retroarch.cfg").read_text(encoding="utf-8")
+    assert 'cheevos_token = "SEKRET123"' in t and 'cheevos_password = "haslo"' in t
+
+
+def test_scrub_existing_copies(prof_env):
+    cfg, tmp = prof_env
+    f = Path(cfg["profiles_nas"]) / "Gracz" / "_backup" / "x" / "settings" / "duckstation" / "-" / "settings.ini"
+    _write(f, b"[Cheevos]\nUsername = a\nToken = ABCDEF\n")
+    machine = profiles.LOCAL / "_machine" / "duckstation" / "settings.ini"
+    _write(machine, b"[Cheevos]\nToken = ZOSTAJE\n")
+    assert profiles.scrub_settings_copies(cfg) == 1
+    assert "ABCDEF" not in f.read_text(encoding="utf-8") and "Username = a" in f.read_text(encoding="utf-8")
+    assert "ZOSTAJE" in machine.read_text(encoding="utf-8")
+
+
+def test_resume_index_rejects_paths(prof_env, monkeypatch):
+    cfg, tmp = prof_env
+    monkeypatch.setattr(paths, "DATA", tmp / "data")
+    pid = profiles.first_id()
+    d = Path(cfg["profiles_nas"]) / "Gracz" / "resume"
+    _write(tmp / "tajne.txt", b"X")
+    d.mkdir(parents=True)
+    (d / "index.json").write_text(json.dumps({"ps2/Gra": {"family": "pcsx2", "file": "../../../tajne.txt",
+                                                          "created": 1}}), encoding="utf-8")
+    assert profiles.resume_pull(cfg, pid, {"id": 1, "es": "ps2", "name": "Gra"}) is None
+    profiles.resume_drop(cfg, pid, {"id": 1, "es": "ps2", "name": "Gra"})
+    assert (tmp / "tajne.txt").exists()
+
+
+def test_json_written_locally_is_sent_to_nas_later(prof_env, monkeypatch):
+    cfg, tmp = prof_env
+    pid = profiles.first_id()
+    monkeypatch.setattr(profiles, "nas_online", lambda c: False)
+    profiles.ra_set(cfg, pid, {"user": "u", "token": "t"})
+    nas = Path(cfg["profiles_nas"]) / "Gracz" / profiles.RA_FILE
+    assert not nas.exists()
+    monkeypatch.setattr(profiles, "nas_online", lambda c: True)
+    assert profiles.ra_get(cfg, pid)["user"] == "u"
+    assert json.loads(nas.read_text(encoding="utf-8"))["user"] == "u"
+
+
+def test_server_rejects_foreign_host_and_api_without_header(tmp_path):
+    import urllib.request
+    import urllib.error
+    from emustart import server
+
+    class Api:
+        def ping(self):
+            return "pong"
+    base = server.start(0, dev_api=Api())
+    port = base.rsplit(":", 1)[1]
+
+    def call(path, host, data=None, hdr=None):
+        req = urllib.request.Request(base + path, data=data, headers={"Host": host, **(hdr or {})})
+        try:
+            with urllib.request.urlopen(req, timeout=5) as r:
+                return r.status
+        except urllib.error.HTTPError as ex:
+            return ex.code
+    assert call("/index.html", f"127.0.0.1:{port}") == 200
+    assert call("/index.html", f"evil.example:{port}") == 403
+    assert call("/api/ping", f"127.0.0.1:{port}", b"[]") == 403
+    assert call("/api/ping", f"127.0.0.1:{port}", b"[]", {"X-EmuStart": "1"}) == 200
+    server.DEV_API = None
+
+
+def test_cleanup_old_run_dirs(tmp_path, monkeypatch):
+    monkeypatch.setattr(paths, "RUN_TMP", tmp_path)
+    old, new = tmp_path / "1_1", tmp_path / "2_2"
+    old.mkdir(); new.mkdir()
+    os.utime(old, (1, 1))
+    assert launcher.cleanup_run_dirs() == 1 and new.exists() and not old.exists()

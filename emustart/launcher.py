@@ -498,3 +498,21 @@ def wait_post(timeout: float | None = None) -> bool:
     for th in threads:
         th.join(None if end is None else max(0.0, end - time.monotonic()))
     return not post_busy()
+
+
+def cleanup_run_dirs(max_age: float = 3600) -> int:
+    """Foldery sesji po awarii (wypakowane gry, konfiguracja sesji RetroArcha
+    z tokenem RA) — usuwane przy starcie, jeśli starsze niż godzina."""
+    n = 0
+    try:
+        dirs = list(paths.RUN_TMP.iterdir())
+    except OSError:
+        return 0
+    for d in dirs:
+        try:
+            if d.is_dir() and time.time() - d.stat().st_mtime > max_age:
+                shutil.rmtree(d, ignore_errors=True)
+                n += 1
+        except OSError:
+            pass
+    return n

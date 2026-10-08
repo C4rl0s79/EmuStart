@@ -35,11 +35,23 @@ def local_url(root: Path, file: Path) -> str:
 DEV_API = None
 
 
+def _host_ok(handler) -> bool:
+    """Tylko nasz adres w nagłówku Host — strona z internetu przepięta przez DNS
+    na 127.0.0.1 (DNS rebinding) wysyła własną nazwę hosta i dostaje odmowę."""
+    host = (handler.headers.get("Host") or "").lower()
+    port = handler.server.server_address[1]
+    return host in (f"127.0.0.1:{port}", f"localhost:{port}")
+
+
 class _Handler(BaseHTTPRequestHandler):
     def log_message(self, *_a):
         pass
 
     def do_POST(self):
+        # API tylko dla naszego UI: właściwy Host i własny nagłówek (zwykła strona
+        # z internetu nie wyśle go do 127.0.0.1 bez zgody CORS, której nie dajemy)
+        if not _host_ok(self) or self.headers.get("X-EmuStart") != "1":
+            return self.send_error(403)
         name = urllib.parse.urlsplit(self.path).path.removeprefix("/api/")
         fn = getattr(DEV_API, name, None) if DEV_API and not name.startswith("_") else None
         if not callable(fn):
@@ -54,6 +66,8 @@ class _Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self):
+        if not _host_ok(self):
+            return self.send_error(403)
         path = urllib.parse.unquote(urllib.parse.urlsplit(self.path).path)
         base, rel = paths.WEB, path.lstrip("/") or "index.html"
         for prefix, root in ROUTES.items():
@@ -78,6 +92,9 @@ class _Handler(BaseHTTPRequestHandler):
                          or "application/octet-stream")
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-cache" if base == paths.WEB else "max-age=86400")
+        if base == paths.WEB:
+            self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Referrer-Policy", "no-referrer")
         self.end_headers()
         self.wfile.write(data)
 

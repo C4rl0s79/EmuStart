@@ -4,6 +4,37 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 [Keep a Changelog](https://keepachangelog.com/pl/1.1.0/), wersje według
 [SemVer](https://semver.org/lang/pl/).
 
+## [0.16.5] — 2026-10-08
+
+Przegląd bezpieczeństwa i wycieku danych.
+
+### Bezpieczeństwo
+- **Hasła i tokeny nie trafiają już do kopii ustawień profilu** (lokalnie, na
+  NAS i w `_backup`): token RA z DuckStation (w trybie przenośnym możliwy do
+  odszyfrowania), hasło/token RA i hasła netplay z `retroarch.cfg`, token
+  z `PCSX2.ini`. Przy wgrywaniu ustawień zostają wartości z danego komputera.
+  Kopie zapisane wcześniej czyszczone są jednorazowo przy starcie.
+- Lokalny serwer UI sprawdza nagłówek `Host` (ochrona przed DNS rebinding —
+  strona z internetu nie odczyta okładek ani UI przez 127.0.0.1); API trybu
+  deweloperskiego wymaga własnego nagłówka (bez niego zwykła strona mogłaby
+  wywoływać funkcje programu, gdy działa `--browser`).
+- Interfejs z polityką CSP (tylko własne skrypty) — dodatkowa ochrona, gdyby
+  opis gry z internetu zawierał HTML.
+- Nazwy plików z indeksu wznowień na NAS są sprawdzane (wcześniej spreparowany
+  indeks mógł wskazać plik poza folderem `resume`).
+- Sekret IGDB wysyłany w treści zapytania zamiast w adresie URL.
+- Log nie zapisuje tytułów cudzych okien (bywa w nich nazwa dokumentu czy
+  temat maila) — tylko klasę okna i nazwę programu.
+- Foldery sesji po awarii (wypakowane gry, konfiguracja sesji RetroArcha
+  z tokenem RA) usuwane przy starcie.
+
+### Naprawione
+- Konto RA (`retroachievements.json`) nie trafiało na NAS, gdy NAS był w tym
+  momencie niedostępny — drugi komputer nie dostawał konta. Teraz dosyłane przy
+  następnym odczycie.
+- „Permission denied” przy zapisie ustawień profilu (dwa wątki naraz) — zapis
+  atomowy, pod blokadą, z ponowieniem.
+
 ## [0.16.4] — 2026-10-08
 
 ### Naprawione

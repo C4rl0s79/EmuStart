@@ -32,6 +32,7 @@ import os
 import re
 import shutil
 import socket
+import threading
 import time
 from pathlib import Path
 
@@ -522,7 +523,29 @@ def _json_paths(cfg: dict, pid: int, name: str):
     return local, nas
 
 
+_json_lock = threading.Lock()
+
+
+def _write_atomic(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f"{path.name}.{threading.get_ident()}.emustart-tmp")
+    tmp.write_text(text, encoding="utf-8")
+    for i in range(5):                       # plik chwilowo otwarty przez inny wątek
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            time.sleep(0.1 * (i + 1))
+    tmp.unlink(missing_ok=True)
+    raise PermissionError(f"nie można zapisać {path}")
+
+
 def json_get(cfg: dict, pid: int, name: str) -> dict | None:
+    with _json_lock:
+        return _json_get(cfg, pid, name)
+
+
+def _json_get(cfg: dict, pid: int, name: str) -> dict | None:
     local, nas = _json_paths(cfg, pid, name)
     best = None
     for f in (local, nas):
@@ -539,26 +562,34 @@ def json_get(cfg: dict, pid: int, name: str) -> dict | None:
         data = json.loads(best[1].read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
-    if best[1] != local:                     # kopia lokalna na wypadek braku NAS
-        try:
-            local.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(best[1], local)
-        except OSError:
-            pass
-    return data if isinstance(data, dict) else None
+    if not isinstance(data, dict):
+        return None
+    try:
+        if best[1] != local:                 # kopia lokalna na wypadek braku NAS
+            _write_atomic(local, best[1].read_text(encoding="utf-8"))
+            os.utime(local, (best[0], best[0]))
+        elif nas and nas_online(cfg) and (not nas.is_file() or nas.stat().st_mtime < best[0] - 1):
+            # zapis lokalny nie doszedł na NAS (był niedostępny) — dosyłamy
+            _write_atomic(nas, local.read_text(encoding="utf-8"))
+            os.utime(nas, (best[0], best[0]))
+            log.info("dosłano %s profilu %s na NAS", name, pid)
+    except OSError as ex:
+        log.warning("synchronizacja %s: %s", name, ex)
+    return data
 
 
 def json_set(cfg: dict, pid: int, name: str, data: dict) -> None:
-    local, nas = _json_paths(cfg, pid, name)
-    text = json.dumps(data, ensure_ascii=False, indent=1)
-    local.parent.mkdir(parents=True, exist_ok=True)
-    local.write_text(text, encoding="utf-8")
-    if nas and nas_online(cfg):
-        try:
-            nas.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(local, nas)
-        except OSError as ex:
-            log.warning("zapis %s na NAS: %s", name, ex)
+    with _json_lock:
+        local, nas = _json_paths(cfg, pid, name)
+        text = json.dumps(data, ensure_ascii=False, indent=1)
+        _write_atomic(local, text)
+        if nas and nas_online(cfg):
+            try:
+                _write_atomic(nas, text)
+                st = local.stat()
+                os.utime(nas, (st.st_mtime, st.st_mtime))
+            except OSError as ex:
+                log.warning("zapis %s na NAS: %s (dośle się przy następnym odczycie)", name, ex)
 
 
 # ── ustawienia emulatorów per profil ──
@@ -607,8 +638,9 @@ def settings_load(cfg: dict, pid: int, adapter) -> int:
     files = list(_files_under(snap, rels))
     if not files:
         return 0
-    # wartości tego komputera (ścieżki, GPU, audio) zostają
-    keep = {rel: ingame.ini_pick(base / rel, rules) for rel, rules in adapter.machine_keys().items()}
+    # wartości tego komputera (ścieżki, GPU, audio) i sekrety (puste w kopii) zostają
+    rules_by = _merge_rules(adapter.machine_keys(), adapter.secret_keys())
+    keep = {rel: ingame.ini_pick(base / rel, rules) for rel, rules in rules_by.items()}
     machine_bak = LOCAL / "_machine" / family
     n = 0
     for rel, f in files:
@@ -636,9 +668,23 @@ def settings_save(cfg: dict, pid: int, adapter) -> int:
     if not rels:
         return 0
     snap = _settings_local(pid, family)
+    secrets = {Path(k).as_posix(): v for k, v in adapter.secret_keys().items()}
     n = 0
     for rel, f in _files_under(base, rels):
         dst = snap / rel
+        rules = secrets.get(Path(rel).as_posix())
+        if rules:
+            # kopia bez haseł i tokenów (trafia też na NAS i do kopii zapasowych)
+            from emustart import ingame
+            try:
+                text = ingame.blank_secrets(f.read_text(encoding="utf-8-sig", errors="replace"), rules)
+            except OSError:
+                continue
+            if dst.is_file() and dst.read_text(encoding="utf-8", errors="replace") == text:
+                continue
+            _write_atomic(dst, text)
+            n += 1
+            continue
         if dst.is_file() and _same_file(f, dst):
             continue
         _copy_file(f, dst)
@@ -717,7 +763,7 @@ def resume_put(cfg: dict, pid: int, g: dict, family: str, path: str, created: fl
             tmp = d / (fname + ".emustart-tmp")
             shutil.copy2(path, tmp)
             os.replace(tmp, d / fname)
-        old = idx.get(key, {}).get("file")
+        old = _rfile(idx.get(key, {}).get("file"))
         if old and old != fname:
             (d / old).unlink(missing_ok=True)
         idx[key] = {"family": family, "file": fname, "created": created, "host": socket.gethostname()}
@@ -728,13 +774,19 @@ def resume_put(cfg: dict, pid: int, g: dict, family: str, path: str, created: fl
         return False
 
 
+def _rfile(name) -> str:
+    """Nazwa pliku stanu z indeksu na NAS — tylko „abc123.ext”, bez ścieżek."""
+    name = str(name or "")
+    return name if re.fullmatch(r"[0-9a-f]{16}\.[A-Za-z0-9_.-]{1,16}", name) and ".." not in name else ""
+
+
 def resume_drop(cfg: dict, pid: int, g: dict) -> None:
     """Stan wznowienia zużyty — inne komputery nie mogą go już wczytać."""
     prof = get(pid)
     if not prof or not nas_online(cfg):
         return
     d, idx = _resume_index(cfg, prof)
-    old = idx.get(_rkey(g), {}).get("file")
+    old = _rfile(idx.get(_rkey(g), {}).get("file"))
     if old:
         (d / old).unlink(missing_ok=True)
     idx[_rkey(g)] = {"dropped": time.time()}
@@ -759,6 +811,9 @@ def resume_pull(cfg: dict, pid: int, g: dict) -> dict | None:
     path = ""
     if e.get("file"):
         from emustart import ingame
+        if not _rfile(e["file"]):
+            log.warning("wznowienie: niepoprawna nazwa pliku w indeksie NAS — pomijam")
+            return None
         src = d / e["file"]
         if not src.is_file():
             return None
@@ -849,3 +904,53 @@ def nas_rename(cfg: dict, pid: int) -> str:
         c.execute("UPDATE profiles SET nas_name=? WHERE id=?", (new, pid))
     log.info("profil %s: folder na NAS %s → %s", prof["name"], old_dir.name, new)
     return ""
+
+
+def _merge_rules(*maps) -> dict:
+    out: dict = {}
+    for m in maps:
+        for rel, rules in m.items():
+            out.setdefault(rel, []).extend(rules)
+    return out
+
+
+# ── jednorazowe czyszczenie: sekrety w kopiach ustawień zapisanych przed 0.16.5 ──
+
+SECRET_FILES = {
+    "retroarch.cfg": [("", r"cheevos_password|cheevos_token|netplay_password|netplay_spectate_password|"
+                           r".*_api_key|.*_auth_token")],
+    "settings.ini": [("Cheevos", "Token")],
+    "PCSX2.ini": [("Achievements", "Token")],
+}
+
+
+def scrub_settings_copies(cfg: dict) -> int:
+    """Usuwa hasła/tokeny z kopii ustawień profili (lokalnie i na NAS, także
+    w _backup). Pliki emulatorów i profiles/_machine (ten komputer) zostają."""
+    from emustart import ingame
+    roots = [LOCAL]
+    if nas_online(cfg):
+        roots.append(nas_root(cfg))
+    n = 0
+    for root in roots:
+        try:
+            files = [f for name in SECRET_FILES for f in root.rglob(name)]
+        except OSError:
+            continue
+        for f in files:
+            parts = {p.lower() for p in f.parts}
+            if "settings" not in parts or "_machine" in parts:
+                continue
+            try:
+                text = f.read_text(encoding="utf-8-sig", errors="replace")
+                new = ingame.blank_secrets(text, SECRET_FILES[f.name])
+                if new != text:
+                    st = f.stat()
+                    _write_atomic(f, new)
+                    os.utime(f, (st.st_mtime, st.st_mtime))
+                    n += 1
+            except OSError as ex:
+                log.warning("czyszczenie %s: %s", f, ex)
+    if n:
+        log.info("usunięto hasła/tokeny z %d kopii ustawień", n)
+    return n

@@ -137,6 +137,23 @@ def ini_set(path: Path, changes: dict) -> None:
     os.replace(tmp, path)
 
 
+def blank_secrets(text: str, rules: list) -> str:
+    """Tekst ini/cfg z pustymi wartościami kluczy pasujących do reguł."""
+    out, cur = [], None
+    for line in text.splitlines(keepends=True):
+        m = re.match(r"^\s*\[(.+?)\]\s*$", line)
+        if m:
+            cur = m.group(1)
+        else:
+            m = re.match(r"^(\s*)([^=;#\[]+?)(\s*=\s*)(.*?)(\r?\n?)$", line)
+            if m and m.group(4) not in ("", '""') and any(
+                    re.fullmatch(sr, cur or "") and re.fullmatch(kr, m.group(2)) for sr, kr in rules):
+                quote = '""' if m.group(4).startswith('"') else ""
+                line = f"{m.group(1)}{m.group(2)}{m.group(3)}{quote}{m.group(5)}"
+        out.append(line)
+    return "".join(out)
+
+
 def ini_pick(path: Path, rules: list) -> dict:
     """Wartości {(sekcja, klucz): wartość} pasujące do reguł [(regex sekcji, regex klucza)];
     plik bez sekcji (retroarch.cfg) = sekcja ''."""
@@ -294,6 +311,11 @@ class Adapter:
         (ścieżki, karta grafiki, urządzenie audio), których profil nie nadpisuje."""
         return {}
 
+    def secret_keys(self) -> dict:
+        """{plik: [(regex sekcji, regex klucza)]} — hasła i tokeny: w kopii
+        ustawień profilu (lokalnie i na NAS) zapisywane jako puste."""
+        return {}
+
     # RetroAchievements: konto profilu na tę sesję ({"user", "token", "hardcore"})
     cheevos: dict | None = None
 
@@ -405,6 +427,10 @@ class RetroArch(Adapter):
         return {"retroarch.cfg": [("", r".*(_directory|_path|_dir)|video_driver|video_adapter_index|"
                                        r"audio_driver|audio_device|video_monitor_index|cheevos_.*")]}
 
+    def secret_keys(self) -> dict:
+        return {"retroarch.cfg": [("", r"cheevos_password|cheevos_token|netplay_password|"
+                                       r"netplay_spectate_password|.*_api_key|.*_auth_token")]}
+
     def read_cheevos(self) -> dict:
         cfg = self.home / "retroarch.cfg"
         user, token = _ini_value(cfg, "cheevos_username"), _ini_value(cfg, "cheevos_token")
@@ -468,6 +494,9 @@ class DuckStation(Adapter):
 
     def _portable(self) -> bool:
         return self._ini().parent == self.home
+
+    def secret_keys(self) -> dict:
+        return {"settings.ini": [("Cheevos", "Token")]}
 
     def read_cheevos(self) -> dict:
         # DuckStation trzyma token zaszyfrowany (dstoken) — oddajemy zwykły
@@ -540,6 +569,9 @@ class PCSX2(Adapter):
 
     def _secrets(self) -> Path:
         return self._ini().parent / "secrets.ini"
+
+    def secret_keys(self) -> dict:
+        return {"inis/PCSX2.ini": [("Achievements", "Token")]}
 
     def read_cheevos(self) -> dict:
         user = ini_section(self._ini(), "Achievements").get("Username", "")

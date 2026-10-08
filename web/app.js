@@ -1076,7 +1076,8 @@ window.addEventListener("pywebviewready", async () => {
 if (new URLSearchParams(location.search).has("dev")) {
   window.pywebview = {
     api: new Proxy({}, {
-      get: (_t, name) => (...args) => fetch("/api/" + name, { method: "POST", body: JSON.stringify(args) }).then((r) => r.json()),
+      get: (_t, name) => (...args) => fetch("/api/" + name, { method: "POST", headers: { "X-EmuStart": "1" },
+                                                                 body: JSON.stringify(args) }).then((r) => r.json()),
     }),
   };
   setTimeout(() => window.dispatchEvent(new Event("pywebviewready")), 0);
