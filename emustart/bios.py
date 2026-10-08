@@ -64,3 +64,36 @@ def sync(cfg: dict, ra_root: Path, core: str, extra: tuple = ()) -> list:
     if copied:
         log.info("BIOS-y dla %s skopiowane z %s: %s", core, src_root, ", ".join(copied))
     return copied
+
+
+# WHDLoad w rdzeniu PUAE: emulowany dysk z WHDLoad leży w <saves>/PUAE/WHDLoad,
+# a WHDLoad szuka Kickstartów w devs:kickstarts. Rdzeń wkłada tam tylko pliki
+# .RTB — same ROM-y trzeba dołożyć, inaczej gry wymagające kickemu kończą się
+# „DOS-Error #205 … devs:kickstarts/kick34005.a500”.
+WHDLOAD_KICKSTARTS = ("kick33180.A500", "kick34005.A500", "kick37175.A500", "kick40063.A600",
+                      "kick40068.A1200", "kick40068.A4000")
+
+
+def whdload_kickstarts(cfg: dict, ra_root: Path, saves_dir: Path) -> list:
+    from emustart import installer
+    target = saves_dir / "PUAE" / "WHDLoad" / "Devs" / "Kickstarts"
+    sources = [installer.ra_system_dir(ra_root)]
+    if cfg.get("bios_dir"):
+        sources.append(Path(cfg["bios_dir"]))
+    copied = []
+    for name in WHDLOAD_KICKSTARTS:
+        dst = target / name
+        if dst.exists():
+            continue
+        src = next((d / name for d in sources if (d / name).is_file()), None)
+        if not src:
+            continue
+        try:
+            target.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
+            copied.append(name)
+        except OSError as ex:
+            log.warning("WHDLoad %s: %s", name, ex)
+    if copied:
+        log.info("Kickstarty dla WHDLoad (%s): %s", target, ", ".join(copied))
+    return copied

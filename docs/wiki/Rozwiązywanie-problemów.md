@@ -29,6 +29,11 @@ RetroArcha (EmuStart proponuje pobranie przy pierwszej grze). Gry WHDLoad
 i niektóre dyskietki potrzebują Kickstartu — zob.
 [Foldery z grami → Amiga](Foldery-z-grami-i-systemy#amiga).
 
+**WHDLoad: „DOS-Error #205 … devs:kickstarts/kick34005.a500”** — brak Kickstartu na
+emulowanym dysku WHDLoad. Od 0.17.1 EmuStart kopiuje Kickstarty do
+`saves\PUAE\WHDLoad\Devs\Kickstarts` przed startem gry — wystarczy, że są w folderze
+`system` RetroArcha albo w folderze BIOS-ów.
+
 ## Profile i NAS
 
 **Komunikat o konflikcie save'ów** — ten sam save zmienił się na dwóch komputerach

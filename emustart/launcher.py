@@ -24,7 +24,7 @@ import time
 import zipfile
 from pathlib import Path
 
-from emustart import (arcade, cache, emulators, hotkey, ingame, library, pads,
+from emustart import (arcade, bios, cache, emulators, hotkey, ingame, library, pads,
                       paths, profiles, systems, winutil)
 
 log = logging.getLogger("emustart.launcher")
@@ -280,6 +280,12 @@ class Session:
         # profil najpierw: ustawienia, save'y i konto RA muszą być na miejscu,
         # zanim policzymy parametry startu (RetroArch czyta z nich foldery)
         save_names = self._profile_prepare(adapter)
+        if adapter.family == "retroarch" and g["es"] in systems.WHD_SYSTEMS:
+            try:   # po podpięciu profilu — folder saves wskazuje już na właściwego gracza
+                bios.whdload_kickstarts(self.cfg, adapter.home,
+                                        adapter._cfg_dir("savefile_directory", "saves"))
+            except Exception:
+                log.exception("Kickstarty WHDLoad")
         po = (self.cfg.get("pad_order") or {}).get("mode", "windows")
         # bateria (rodzaj zasilania) potrzebna tylko w trybie „bezprzewodowe pierwsze”
         order = pads.order(self.cfg, pads.connected(battery=po == "wireless_first"))

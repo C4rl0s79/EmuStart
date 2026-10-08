@@ -546,3 +546,18 @@ def test_bios_copied_from_bios_dir(tmp_path):
     assert (ra / "system" / "kick40068.A1200").read_bytes() == b"MOJ"
     assert not (ra / "zly.rom").exists()
     assert bios.sync({}, ra, "puae") == []
+
+
+def test_whdload_kickstarts_copied_to_devs(tmp_path):
+    from emustart import bios
+    ra = tmp_path / "RetroArch"
+    _write(ra / "retroarch.cfg", b'system_directory = ":\\system"\n')
+    _write(ra / "system" / "kick34005.A500", b"KS13")
+    _write(tmp_path / "bios" / "kick40068.A1200", b"KS31")
+    saves = tmp_path / "saves"
+    _write(saves / "PUAE" / "WHDLoad" / "Devs" / "Kickstarts" / "kick34005.A500.RTB", b"RTB")
+    got = bios.whdload_kickstarts({"bios_dir": str(tmp_path / "bios")}, ra, saves)
+    ks = saves / "PUAE" / "WHDLoad" / "Devs" / "Kickstarts"
+    assert sorted(got) == ["kick34005.A500", "kick40068.A1200"]
+    assert (ks / "kick34005.A500").read_bytes() == b"KS13" and (ks / "kick40068.A1200").read_bytes() == b"KS31"
+    assert bios.whdload_kickstarts({}, ra, saves) == []                  # drugi raz nic

@@ -4,6 +4,15 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 [Keep a Changelog](https://keepachangelog.com/pl/1.1.0/), wersje według
 [SemVer](https://semver.org/lang/pl/).
 
+## [0.17.1] — 2026-10-08
+
+### Naprawione
+- **Gry WHDLoad: „DOS-Error #205 (object not found) on reading
+  devs:kickstarts/kick34005.a500”** — rdzeń PUAE zakłada emulowany dysk WHDLoad
+  w `saves\PUAE\WHDLoad` i wkłada do `Devs\Kickstarts` tylko pliki `.RTB`, bez
+  samych ROM-ów. EmuStart dokłada tam teraz Kickstarty (z folderu `system`
+  RetroArcha albo z folderu BIOS-ów) przed startem gry WHDLoad.
+
 ## [0.17.0] — 2026-10-08
 
 ### Dodane
