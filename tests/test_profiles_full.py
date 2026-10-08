@@ -368,3 +368,13 @@ def test_msu1_zip_is_fully_extracted(tmp_path):
     s.run_dir = tmp_path / "run2"
     with pytest.raises(launcher.LaunchError):
         s._extract(bad, info)
+
+
+def test_post_game_sync_runs_in_background():
+    import threading
+    gate = threading.Event()
+    launcher.start_post(lambda: gate.wait(5), "Gra")
+    assert launcher.post_busy() == "Gra"                 # UI wraca od razu, zapis trwa
+    assert not launcher.wait_post(timeout=0.05)
+    gate.set()
+    assert launcher.wait_post(timeout=5) and launcher.post_busy() == ""

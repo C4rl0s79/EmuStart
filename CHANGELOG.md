@@ -4,6 +4,16 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 [Keep a Changelog](https://keepachangelog.com/pl/1.1.0/), wersje według
 [SemVer](https://semver.org/lang/pl/).
 
+## [0.16.4] — 2026-10-08
+
+### Naprawione
+- **„Gra uruchomiona” wisiało kilkanaście–kilkadziesiąt sekund po wyjściu
+  z gry**: EmuStart czekał, aż ustawienia i save'y dojdą na NAS (w logu do 58 s).
+  Teraz ekran wraca od razu, a synchronizacja idzie w tle — w górnym pasku
+  widać „⇅ zapisuję save'y na NAS: <gra>”. Następna gra poczeka na jej koniec
+  („Kończę zapis poprzedniej gry na NAS…”), zamknięcie EmuStart też (do 2 min;
+  czego nie zdąży wysłać, wyśle przy następnym uruchomieniu).
+
 ## [0.16.3] — 2026-10-08
 
 ### Naprawione

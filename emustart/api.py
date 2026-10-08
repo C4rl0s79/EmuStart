@@ -1058,6 +1058,10 @@ class Api:
                                               directory=start or "")
         return res[0] if res else ""
 
+    def post_status(self) -> str:
+        """Tytuł gry, której save'y idą właśnie na NAS ('' = nic)."""
+        return launcher.post_busy()
+
     def _shutdown(self) -> None:
         """Przerywa zadania w tle przed wyjściem z programu (grafiki, pobieranie
         emulatorów, kopiowanie do cache). Część z nich (pula wątków grafik)
@@ -1072,6 +1076,9 @@ class Api:
             s.cancel.set()
         if self._session:
             self._session.cancel.set()
+        # save'y ostatniej gry muszą dojść na NAS (inaczej zostaną „do wysłania”)
+        if launcher.post_busy() and not launcher.wait_post(timeout=120):
+            log.warning("zamknięcie w trakcie wysyłania save'ów — dokończy następne uruchomienie")
 
     def quit(self) -> None:
         if self._session:

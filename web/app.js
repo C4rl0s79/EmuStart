@@ -1019,6 +1019,9 @@ async function refreshState() {
 
 async function pollCopies() {
   try {
+    const post = await api().post_status();
+    $("syncInfo").textContent = post ? `⇅ zapisuję save'y na NAS: ${post}` : "";
+    $("syncInfo").classList.toggle("hidden", !post);
     const list = await api().copy_status();
     const el = $("copyInfo");
     if (list.length) {

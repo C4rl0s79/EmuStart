@@ -306,15 +306,25 @@ class Session:
                     restore_pads()
                 except Exception:
                     log.exception("przywracanie padów")
-            if save_names:
-                self._resume_to_nas(g, started_at)
-            self._profile_finish(adapter, save_names)
-            self._learn_states(g, adapter, started_at)
+            # zapis na NAS i porządki — w tle: ekran gry znika od razu po wyjściu
+            # z emulatora, a następna gra poczeka na koniec synchronizacji
+            def post() -> None:
+                try:
+                    if save_names:
+                        self._resume_to_nas(g, started_at)
+                    self._profile_finish(adapter, save_names)
+                    self._learn_states(g, adapter, started_at)
+                    cache.enforce_limit(self.cfg, keep_ids=(g["id"],))
+                except Exception:
+                    log.exception("po grze")
+            start_post(post, g["title"])
         self.phase = "finished"
-        cache.enforce_limit(self.cfg, keep_ids=(g["id"],))
 
     # ── profile: save'y emulatora na czas gry należą do profilu ──
     def _profile_prepare(self, adapter) -> list:
+        if post_busy():
+            self.message = "Kończę zapis poprzedniej gry na NAS…"
+            wait_post()
         if not self.profiles_on or not (adapter.save_dirs() or adapter.settings_files()):
             return []
         try:
@@ -459,3 +469,32 @@ def _zip_multi(path: Path) -> bool:
             return sum(1 for m in z.infolist() if not m.is_dir()) > 1
     except (OSError, zipfile.BadZipFile):
         return False
+
+
+# ── synchronizacja po grze (w tle) ──
+_post: list = []          # [(wątek, tytuł)]
+_post_lock = threading.Lock()
+
+
+def start_post(fn, title: str) -> None:
+    t = threading.Thread(target=fn, daemon=False, name="po-grze")
+    with _post_lock:
+        _post[:] = [(th, ti) for th, ti in _post if th.is_alive()]
+        _post.append((t, title))
+    t.start()
+
+
+def post_busy() -> str:
+    """Tytuł gry, której save'y właśnie idą na NAS ('' = nic)."""
+    with _post_lock:
+        alive = [ti for th, ti in _post if th.is_alive()]
+    return alive[0] if alive else ""
+
+
+def wait_post(timeout: float | None = None) -> bool:
+    with _post_lock:
+        threads = [th for th, _ti in _post if th.is_alive()]
+    end = None if timeout is None else time.monotonic() + timeout
+    for th in threads:
+        th.join(None if end is None else max(0.0, end - time.monotonic()))
+    return not post_busy()
