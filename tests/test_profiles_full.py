@@ -632,3 +632,91 @@ def test_reset_demo_art(env, tmp_path, monkeypatch):
     assert art.reset_system("amigawhddemos") == 1
     assert library.db().execute("SELECT art_box FROM games WHERE es='amigawhddemos'").fetchone()[0] == 0
     assert not (tmp_path / "media" / "amigawhddemos").exists()
+
+
+# ── pobieranie blokami, równolegle, na żądanie ──
+
+def test_partial_parallel_resume_and_demand_read(tmp_path, monkeypatch):
+    import random
+    from emustart import cache, partial
+    monkeypatch.setattr(partial, "BLOCK", 64 * 1024)
+    data = random.Random(1).randbytes(64 * 1024 * 37 + 1234)
+    src = tmp_path / "nas" / "gra.chd"
+    _write(src, data)
+    dst = tmp_path / "cache" / "gra.chd"
+    # czytanie na żądanie zanim cokolwiek pobrano (wirtualny dysk)
+    p = partial.Partial(src, dst, len(data), 1000.0)
+    assert p.read(64 * 1024 * 20 + 5, 100000) == data[64 * 1024 * 20 + 5:64 * 1024 * 20 + 5 + 100000]
+    assert p.read(len(data) - 10, 100) == data[-10:]
+    # przerwane w połowie, wznowione: brakujące liczone z mapy
+    import threading
+    cancel = threading.Event()
+    prog = cache.Progress(len(data), 1)
+    orig = p._fetch
+    def stop_after(i, f, _n=[0]):
+        _n[0] += 1
+        if _n[0] > 10:
+            cancel.set()
+        return orig(i, f)
+    p._fetch = stop_after
+    with pytest.raises(cache.Cancelled):
+        p.run(prog, cancel)
+    game = {"files": [["gra.chd", len(data), 1000.0]], "es": "x", "rel": "gra.chd"}
+    monkeypatch.setattr(cache, "_local_file", lambda c, g, rel: dst)
+    left = cache.missing_bytes({}, game)
+    assert 0 < left < len(data)
+    p2 = partial.Partial(src, dst, len(data), 1000.0)
+    prog2 = cache.Progress(left, 1)
+    p2.run(prog2)
+    assert dst.read_bytes() == data and not p2.part.exists() and not p2.mapf.exists()
+    assert prog2.done == left
+
+
+def test_partial_resumes_old_sequential_part(tmp_path, monkeypatch):
+    from emustart import partial
+    monkeypatch.setattr(partial, "BLOCK", 1024)
+    data = bytes(range(256)) * 40
+    src = tmp_path / "s.bin"; _write(src, data)
+    dst = tmp_path / "d.bin"
+    _write(dst.with_name("d.bin.part"), data[:2500])          # stary format: dopisywany po kolei
+    p = partial.Partial(src, dst, len(data), 1.0)
+    assert sum(p.done) == 2                                     # dwa pełne bloki zachowane
+    p.run()
+    assert dst.read_bytes() == data
+
+
+def test_stream_game_through_winfsp(tmp_path, monkeypatch):
+    import random
+    import threading
+    from emustart import cache, partial, vfs
+    if not vfs.available():
+        pytest.skip("WinFsp nie jest zainstalowany")
+    monkeypatch.setattr(partial, "MIN_SIZE", 1024)
+    monkeypatch.setattr(partial, "BLOCK", 64 * 1024)
+    nas = tmp_path / "nas" / "psx"
+    data = random.Random(7).randbytes(64 * 1024 * 9 + 77)
+    _write(nas / "Gra (USA).bin", data)
+    _write(nas / "Gra (USA).cue", b'FILE "Gra (USA).bin" BINARY\n')
+    cfg = {"cache_dir": str(tmp_path / "cache")}
+    g = {"id": 4242, "es": "psx", "title": "Gra", "rel": "Gra (USA).cue", "size": len(data) + 30,
+         "files": [["Gra (USA).cue", 28, 1.0], ["Gra (USA).bin", len(data), 1.0]]}
+    cue_dst = cache._local_file(cfg, g, "Gra (USA).cue")
+    _write(cue_dst, (nas / "Gra (USA).cue").read_bytes())
+    os.utime(cue_dst, (1.0, 1.0))
+    s = launcher.Session.__new__(launcher.Session)
+    s.cfg, s.cancel = cfg, threading.Event()
+    alive = threading.Event()
+    s.copy_thread = threading.Thread(target=alive.wait, daemon=True)
+    s.copy_thread.start()
+    try:
+        base = s._stream(g, nas)
+        assert base is not None
+        assert (base / "Gra (USA).cue").read_bytes().startswith(b"FILE")
+        with open(base / "Gra (USA).bin", "rb") as f:
+            f.seek(64 * 1024 * 5 + 3)
+            assert f.read(100000) == data[64 * 1024 * 5 + 3:64 * 1024 * 5 + 3 + 100000]
+        s._stream_done()
+        assert not (base / "Gra (USA).bin").exists()
+    finally:
+        alive.set()
+        vfs.shutdown()

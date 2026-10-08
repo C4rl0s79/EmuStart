@@ -4,6 +4,22 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 [Keep a Changelog](https://keepachangelog.com/pl/1.1.0/), wersje według
 [SemVer](https://semver.org/lang/pl/).
 
+## [0.19.0] — 2026-10-09
+
+### Dodane
+- **Pobieranie gier w 4 strumieniach naraz** (pliki od 32 MB), blokami po 4 MB
+  z mapą pobranych bloków — przerwane pobieranie wznawia się od brakujących bloków.
+  Zmierzone przez Tailscale (NAS > 1000 km): 268 Mb/s zamiast 110 Mb/s. Plik `.part`
+  jest rzadki (NTFS), więc zapis bloku z końca pliku nie zapisuje zer przed nim.
+- **Graj w trakcie pobierania (WinFsp)**: w trybie zdalnym gra startuje od razu
+  z wirtualnego dysku tylko do odczytu (`emustart/vfs.py`, natywne API WinFsp przez
+  ctypes, bez dodatkowych pakietów). Pobrane fragmenty idą z dysku lokalnego, brakujące
+  są pobierane natychmiast poza kolejką (ok. 0,25 s na blok 4 MB, powtórny odczyt
+  1 ms), a pobieranie w tle przesuwa się w miejsce, które gra czyta. Struktura plików
+  jak na NAS-ie, więc `.cue`/`.m3u` działają. Ustawienia → „Graj w trakcie pobierania”.
+- **Sprawdzenie WinFsp przy starcie** (log, Ustawienia). Bez WinFsp albo przy błędzie
+  montowania — dotychczasowe zachowanie (ekran pobierania, „Graj teraz” z NAS-a).
+
 ## [0.18.1] — 2026-10-08
 
 ### Naprawione

@@ -3,8 +3,9 @@
 Układ: `<cache_dir>\\<es>\\<ścieżka względna jak na NAS>`, dzięki czemu względne
 odwołania w .m3u/.cue działają bez przepisywania.
 
-Kopiowanie idzie do `<plik>.part` z dopisywaniem — przerwane pobieranie przez
-Tailscale wznawia się od miejsca przerwania. Plik w cache uznajemy za aktualny,
+Kopiowanie idzie do `<plik>.part` — małe pliki dopisywane po kolei, duże blokami
+w kilku strumieniach naraz (emustart/partial.py, mapa bloków w `.part.map`);
+przerwane pobieranie przez Tailscale wznawia się od brakujących bloków. Plik w cache uznajemy za aktualny,
 gdy rozmiar zgadza się z NAS-em, a data modyfikacji nie jest starsza.
 
 Limit: `cache_recent` ostatnio uruchomionych gier + przypięte (poza limitem).
@@ -94,6 +95,16 @@ def missing_bytes(cfg: dict, game: dict) -> int:
         if _fresh(_local_file(cfg, game, rel), size, mt):
             continue
         part = _local_file(cfg, game, rel).with_name(Path(rel).name + ".part")
+        mapf = part.with_name(part.name + ".map")
+        if mapf.exists():                  # pobieranie blokami: brakujące bloki z mapy
+            from emustart import partial
+            try:
+                m = mapf.read_bytes()
+                full = sum(m[:-1]) * partial.BLOCK + (size - (len(m) - 1) * partial.BLOCK if m and m[-1] else 0)
+                total += max(0, size - full)
+                continue
+            except OSError:
+                pass
         have = part.stat().st_size if part.exists() else 0
         total += max(0, size - have)
     return total
@@ -117,6 +128,12 @@ def copy_game(cfg: dict, game: dict, rom_dir: Path, prog: Progress,
 
 def _copy_one(src: Path, dst: Path, size: int, mtime: float,
               prog: Progress, cancel: threading.Event) -> None:
+    from emustart import partial
+    if size >= partial.MIN_SIZE:
+        # duże pliki: bloki, kilka strumieni naraz, wznawianie z mapą bloków;
+        # wirtualny dysk (vfs) może w tym czasie czytać grę i prosić o bloki poza kolejką
+        partial.open_partial(src, dst, size, mtime).run(prog, cancel)
+        return
     dst.parent.mkdir(parents=True, exist_ok=True)
     part = dst.with_name(dst.name + ".part")
     have = part.stat().st_size if part.exists() else 0

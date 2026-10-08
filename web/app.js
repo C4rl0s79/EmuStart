@@ -535,7 +535,9 @@ async function updateLaunch() {
   }
   const msg = $("lMsg");
   msg.className = "lmsg" + (st.phase === "error" ? " err" : "");
-  if (st.phase === "running") msg.textContent = st.copying ? "Gra działa wprost z NAS, kopia do pamięci podręcznej trwa w tle." : "Miłej gry!";
+  if (st.phase === "running") msg.textContent = !st.copying ? "Miłej gry!"
+    : st.mode === "stream" ? "Gra działa w trakcie pobierania — brakujące fragmenty dociągane na bieżąco."
+    : "Gra działa wprost z NAS, kopia do pamięci podręcznej trwa w tle.";
   else if (st.phase === "downloading" && st.mode === "remote") msg.textContent = "Następnym razem gra uruchomi się od razu z dysku lokalnego.";
   else msg.textContent = st.message || "";
 
@@ -697,6 +699,9 @@ function buildSetRows() {
   rows.push({ head: "Pamięć podręczna i sieć" });
   rows.push({ k: "Trzymaj ostatnie gry", key: "cache_recent", type: "num", step: 1, min: 1, max: 100, fmt: (v) => `${v} + przypięte` });
   rows.push({ k: "Tryb sieci", key: "network_mode", type: "enum", opts: Object.keys(NET), fmt: (v) => NET[v] });
+  rows.push({ k: "Graj w trakcie pobierania", key: "stream_play", type: "bool",
+              fmt: (v) => c.winfsp !== "dostępny" ? `niedostępne — ${c.winfsp} (https://winfsp.dev)`
+                : v ? "tak — gra startuje od razu, brakujące fragmenty dociągane na bieżąco (WinFsp)" : "nie — najpierw pobranie" });
   rows.push({ k: "Próg LAN", key: "lan_threshold_mbps", type: "num", step: 50, min: 50, max: 2000, fmt: (v) => `${v} Mb/s` });
   rows.push({ head: "Wygląd" });
   rows.push({ k: "Pełny ekran", key: "fullscreen", type: "bool", fmt: (v) => (v ? "tak" : "nie") + " (po restarcie)" });

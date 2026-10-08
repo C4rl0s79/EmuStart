@@ -53,6 +53,12 @@ class Api:
         self._background: list = []          # sesje, które jeszcze kopiują w tle
         self._pin_jobs: dict = {}            # game_id → Session-like (kopiowanie przypiętych)
         self._amiga_asked = False
+        try:                              # WinFsp: granie w trakcie pobierania (emustart/vfs.py)
+            from emustart import vfs
+            self._winfsp = vfs.status_text()
+        except Exception as ex:
+            self._winfsp = f"błąd: {ex}"
+        log.info("WinFsp: %s", self._winfsp)
         self._scan = {"running": False, "text": "", "done": 0, "total": 0, "result": None}
         ingame.restore_pending()          # ustawienia padów po ewentualnej awarii
         profiles.adopt_existing_install()  # aktualizacja: komputer już ma swój profil
@@ -988,6 +994,8 @@ class Api:
                 "games_logo": cfg.get("games_logo", False),
                 "pad_backend": cfg.get("pad_backend", "python"),
                 "profile_settings": cfg.get("profile_settings", True),
+                "stream_play": cfg.get("stream_play", True),
+                "winfsp": self._winfsp,
                 "bios_dir": cfg.get("bios_dir", ""),
                 **{k: bool(cfg.get(k)) for k in self.HIDE_KEYS},
                 "ask_profile": profiles.ask_at_start(),
@@ -1022,6 +1030,8 @@ class Api:
         for k in ("fullscreen", "hide_arcade_clones", "games_logo", *self.HIDE_KEYS):
             if k in data:
                 cfg[k] = bool(data[k])
+        if "stream_play" in data:
+            cfg["stream_play"] = bool(data["stream_play"])
         if "profile_settings" in data:
             cfg["profile_settings"] = bool(data["profile_settings"])
         if data.get("look_scope") in ("profile", "machine"):
@@ -1128,6 +1138,11 @@ class Api:
             s.cancel.set()
         if self._session:
             self._session.cancel.set()
+        try:
+            from emustart import vfs
+            vfs.shutdown()                # dysk strumieniowy (WinFsp)
+        except Exception:
+            log.exception("dysk strumieniowy")
         # save'y ostatniej gry muszą dojść na NAS (inaczej zostaną „do wysłania”)
         if launcher.post_busy() and not launcher.wait_post(timeout=120):
             log.warning("zamknięcie w trakcie wysyłania save'ów — dokończy następne uruchomienie")

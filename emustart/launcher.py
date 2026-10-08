@@ -100,6 +100,10 @@ class Session:
             log.exception("launch failed")
             self.phase, self.message = "error", f"Nieoczekiwany błąd: {ex}"
         finally:
+            try:
+                self._stream_done()
+            except Exception:
+                log.exception("dysk strumieniowy po grze")
             shutil.rmtree(self.run_dir, ignore_errors=True)
             if self.on_finished:
                 try:
@@ -175,6 +179,11 @@ class Session:
         if self.mode == "lan":
             log.info("LAN: start z NAS, kopia w tle (%s)", g["title"])
             return rom_dir
+        if self.copy_thread.is_alive() and self.cfg.get("stream_play", True):
+            base = self._stream(g, rom_dir)
+            if base:
+                self.mode = "stream"
+                return base
         while self.copy_thread.is_alive():
             if self.play_now.wait(0.2):
                 log.info("Graj mimo to: start z NAS (%s)", g["title"])
@@ -183,6 +192,54 @@ class Session:
                 raise cache.Cancelled()
         self._raise_copy_error()
         return cache_dir
+
+    def _stream(self, g: dict, rom_dir: Path) -> Path | None:
+        """Gra od razu z dysku strumieniowego (WinFsp): pobrane fragmenty z cache,
+        brakujące na żądanie, reszta dalej w tle. None = nie da się (brak WinFsp,
+        błąd montowania) — wtedy jak dotąd: czekanie na pobranie albo „Graj teraz”."""
+        from emustart import partial, vfs
+        if not vfs.available():
+            return None
+        try:
+            disk = vfs.disk()
+        except Exception as ex:
+            log.warning("dysk strumieniowy niedostępny: %s", ex)
+            return None
+        self.message = "Przygotowuję grę do grania w trakcie pobierania…"
+        top = str(g["id"])
+        end = time.monotonic() + 30
+        for rel, size, mt in g["files"]:
+            dst = cache._local_file(self.cfg, g, rel)
+            src = rom_dir / rel
+            if size >= partial.MIN_SIZE:
+                source = partial.open_partial(src, dst, size, mt)
+            else:
+                # małe pliki (.cue, .m3u) kopiują się jako pierwsze — czekamy chwilę
+                while not cache._fresh(dst, size, mt) and self.copy_thread.is_alive() \
+                        and time.monotonic() < end and not self.cancel.is_set():
+                    time.sleep(0.1)
+                source = dst if cache._fresh(dst, size, mt) else src
+            disk.add_file(f"{top}/{rel}", source, size, mt)
+        self._streamed = (disk, top, g)
+        log.info("gra strumieniowo z dysku %s: (%s), pobieranie w tle trwa", disk.letter, g["title"])
+        return Path(f"{disk.letter}:\\") / top
+
+    def _stream_done(self) -> None:
+        """Po grze: zdjęcie gry z dysku strumieniowego i dokończenie plików, które
+        pobrały się w trakcie (przemianowanie blokowane przez otwarty plik)."""
+        st = getattr(self, "_streamed", None)
+        if not st:
+            return
+        from emustart import partial
+        disk, top, g = st
+        disk.remove(top)
+        for rel, size, mt in g["files"]:
+            p = partial.active(cache._local_file(self.cfg, g, rel))
+            if p:
+                p.close_demand()
+                if p.finalize():
+                    cache._mark(g["id"], complete=1, size=g["size"]) if cache.is_complete(self.cfg, g) else None
+        self._streamed = None
 
     def _copy(self, g, rom_dir, extra) -> None:
         try:

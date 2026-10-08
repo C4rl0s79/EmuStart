@@ -16,6 +16,24 @@
 Tryb sieci można wymusić: Ustawienia → Tryb sieci (automatycznie / zawsze LAN /
 zawsze zdalnie).
 
+## Szybsze pobieranie i granie w trakcie pobierania
+
+- **Pobieranie w 4 strumieniach naraz** (pliki od 32 MB) — na łączu przez Tailscale
+  zmierzone 268 Mb/s zamiast 110 Mb/s jednym strumieniem. Plik pobierany jest
+  blokami po 4 MB, a mapa pobranych bloków (`.part.map`) pozwala wznowić przerwane
+  pobieranie od brakujących bloków.
+- **Graj w trakcie pobierania (WinFsp)** — gdy zainstalowany jest
+  [WinFsp](https://winfsp.dev), gra w trybie zdalnym startuje od razu z wirtualnego
+  dysku EmuStart (wolna litera, np. `Y:`). Fragmenty już pobrane czytane są z dysku
+  lokalnego, brakujące pobierane natychmiast, przed resztą kolejki (ok. 0,25 s na
+  blok przy połączeniu z NAS-em oddalonym o ponad 1000 km), a pobieranie w tle
+  kieruje się w miejsce, które gra właśnie czyta. Krótkie przycięcia są możliwe tylko
+  przy pierwszym wejściu w niepobrany fragment. Po pobraniu całości gra jest w pamięci
+  podręcznej jak zwykle.
+- EmuStart sprawdza WinFsp przy starcie (wynik w logu i w Ustawieniach → „Graj
+  w trakcie pobierania”). Bez WinFsp działa jak dotąd: ekran pobierania i „Graj teraz”
+  wprost z NAS-a. Opcję można wyłączyć w Ustawieniach.
+
 ## Pamięć podręczna
 
 - Trzyma **ostatnie gry** (domyślnie 10, Ustawienia → Trzymaj ostatnie gry)
