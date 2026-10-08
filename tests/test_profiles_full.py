@@ -342,3 +342,27 @@ def test_nas_folder_rename_and_other_pc_follows(prof_env):
         c.execute("UPDATE profiles SET nas_name='Gracz' WHERE id=?", (pid,))
     assert profiles.import_from_nas(cfg) == []                              # nie powstaje duplikat
     assert profiles.get(pid)["nas_name"] == "Jezus"
+
+
+def test_msu1_zip_is_fully_extracted(tmp_path):
+    import zipfile
+    z = tmp_path / "Gra (USA) (MSU1).zip"
+    with zipfile.ZipFile(z, "w") as f:
+        f.writestr("Gra_(USA)_(MSU1).sfc", b"R" * 100)
+        f.writestr("Gra_(USA)_(MSU1).msu", b"M")
+        f.writestr("Gra_(USA)_(MSU1)-1.pcm", b"P" * 500)
+    assert launcher._zip_multi(z)
+    s = launcher.Session.__new__(launcher.Session)
+    s.run_dir = tmp_path / "run"
+    info = {"exts": "sfc,smc,zip"}
+    rom = s._extract(z, info)
+    assert rom.name.endswith(".sfc")
+    assert {p.name for p in rom.parent.iterdir()} == {"Gra_(USA)_(MSU1).sfc", "Gra_(USA)_(MSU1).msu",
+                                                       "Gra_(USA)_(MSU1)-1.pcm"}
+    bad = tmp_path / "Bez gry.zip"
+    with zipfile.ZipFile(bad, "w") as f:
+        f.writestr("x.msu", b"M")
+        f.writestr("x-1.pcm", b"P")
+    s.run_dir = tmp_path / "run2"
+    with pytest.raises(launcher.LaunchError):
+        s._extract(bad, info)

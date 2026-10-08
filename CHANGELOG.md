@@ -4,6 +4,16 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 [Keep a Changelog](https://keepachangelog.com/pl/1.1.0/), wersje według
 [SemVer](https://semver.org/lang/pl/).
 
+## [0.16.2] — 2026-10-08
+
+### Naprawione
+- **Gry MSU-1 (SNES z muzyką CD) bez muzyki**: RetroArch dostawał zip i sam
+  wypakowywał z niego tylko ROM, więc pliki `.msu` i ścieżki `.pcm` zostawały
+  w archiwum. Zip z więcej niż jednym plikiem jest teraz wypakowywany w całości
+  do pamięci (folder sesji, sprzątany po grze), także dla RetroArcha.
+- Archiwum bez pliku gry (np. sama muzyka MSU-1 bez ROM-u) daje czytelny
+  komunikat zamiast nieudanego startu emulatora.
+
 ## [0.16.1] — 2026-10-08
 
 ### Naprawione

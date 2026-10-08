@@ -222,8 +222,11 @@ class Session:
             eboot = main / "PS3_GAME" / "USRDIR" / "EBOOT.BIN"
             return eboot if eboot.is_file() else main
 
+        # RetroArch czyta zip sam, ale wypakowuje z niego tylko ROM — paczka
+        # z plikami towarzyszącymi (MSU-1: .msu + ścieżki .pcm) musi leżeć
+        # rozpakowana w jednym folderze, więc wypakowujemy ją całą
         if main.suffix.lower() == ".zip" and info["kind"] != "arcade" \
-                and not emulators.zip_native(exe):
+                and (not emulators.zip_native(exe) or _zip_multi(main)):
             self.phase, self.message = "extracting", "Rozpakowuję do pamięci…"
             main = self._extract(main, info)
 
@@ -254,6 +257,10 @@ class Session:
                     shutil.copyfileobj(src, dst, 1024 * 1024)
         files = [out_dir / Path(m.filename).name for m in members]
         pick = [f for f in files if f.suffix.lower().lstrip(".") in wanted]
+        if not pick and len(files) > 1:
+            exts = ", ".join(sorted(wanted - {"m3u"}))
+            raise LaunchError(f"W archiwum nie ma pliku gry ({exts}) — są tylko pliki dodatkowe "
+                              f"(np. muzyka MSU-1). Dołóż ROM do archiwum.")
         return max(pick or files, key=lambda f: f.stat().st_size)
 
     # ── gra ──
@@ -443,3 +450,12 @@ def resume_from_nas(cfg: dict, pid: int, g: dict) -> None:
         return
     if not local or e["created"] > local["created"] + 1:
         library.set_resume(pid, g["id"], e["family"], e["path"], e["created"])
+
+
+def _zip_multi(path: Path) -> bool:
+    """Archiwum z więcej niż jednym plikiem (ROM + pliki towarzyszące)."""
+    try:
+        with zipfile.ZipFile(path) as z:
+            return sum(1 for m in z.infolist() if not m.is_dir()) > 1
+    except (OSError, zipfile.BadZipFile):
+        return False
