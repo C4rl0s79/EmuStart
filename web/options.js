@@ -640,7 +640,9 @@ function soItems() {
       instOpen(`Pobierz emulator: ${d.display}`, stepList(d.install), [["a", "Pobierz"], ["b", "Anuluj"]]);
     } });
     items.push({ label: "Grafiki: pobierz brakujące", value: "okładki i zrzuty tego systemu", act: async () => {
-      const r = await api().art_start(SO.es); closeSo(); if (!r.ok) return toast(r.reason); openArt(); } });
+      const r = await api().art_start(SO.es); closeSo();
+      if (!r.ok) toast(r.reason.includes("trwa") ? "Pobieranie już trwa — pokazuję postęp." : r.reason);
+      if (r.ok || r.reason.includes("trwa")) openArt(); } });
     items.push({ label: "Skanuj ponownie", value: "tylko ten system", act: async () => {
       const r = await api().system_rescan(SO.es); toast(r.ok ? "Skanuję… lista odświeży się za chwilę." : r.reason);
       setTimeout(async () => { await refreshState(); if (S.screen === "systems" && !S.modal) renderSystems(); }, 4000); } });

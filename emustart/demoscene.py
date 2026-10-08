@@ -119,8 +119,8 @@ def _pouet(title: str, groups: list) -> dict | None:
         "screenshot": det.get("screenshot") or "", "description": "",
         "url": f"https://www.pouet.net/prod.php?which={det.get('id')}",
     }
-    dz = det.get("demozoo")
-    if dz:
+    dz = str(det.get("demozoo") or "").strip()
+    if dz.isdigit() and int(dz) > 0:          # Pouet daje „0”, gdy nie ma odnośnika
         z = _demozoo_detail(str(dz))
         if z:
             out["description"] = z.get("description", "")

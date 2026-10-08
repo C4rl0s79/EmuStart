@@ -623,7 +623,8 @@ function openMenu() {
   const items = [
     ["Ustawienia", () => openSettings()],
     ["Wygląd (logo, czcionki, kolory)", () => openLook()],
-    ["Grafiki i metadane", () => openArt()],
+    [S.artJob ? `Grafiki i metadane — trwa ${S.artJob.total ? Math.floor((100 * S.artJob.done) / S.artJob.total) : 0}%`
+              : "Grafiki i metadane", () => openArt()],
     ["Zmień profil", () => openProfiles()],
     ["Kolejność padów", () => openPads()],
     ["Skanuj kolekcję ponownie", () => startScan()],
@@ -1021,6 +1022,12 @@ async function refreshState() {
 
 async function pollCopies() {
   try {
+    // pobieranie grafik/metadanych w tle — widoczne na każdym ekranie
+    const job = await api().art_status();
+    S.artJob = job && job.running ? job : null;
+    $("artInfo").classList.toggle("hidden", !S.artJob || S.screen === "art");
+    if (S.artJob) $("artInfo").textContent = `🖼 grafiki ${S.artJob.done}/${S.artJob.total}` +
+      (S.artJob.total ? ` (${Math.floor((100 * S.artJob.done) / S.artJob.total)}%)` : "");
     const post = await api().post_status();
     $("syncInfo").textContent = post ? `⇅ zapisuję save'y na NAS: ${post}` : "";
     $("syncInfo").classList.toggle("hidden", !post);

@@ -4,6 +4,18 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 [Keep a Changelog](https://keepachangelog.com/pl/1.1.0/), wersje według
 [SemVer](https://semver.org/lang/pl/).
 
+## [0.18.1] — 2026-10-08
+
+### Naprawione
+- **Nie było jak wrócić do postępu pobierania grafik**: po wyjściu z ekranu postępu
+  „Grafiki: pobierz brakujące” w opcjach systemu kończyło się komunikatem
+  „Pobieranie już trwa”. Teraz otwiera ekran z postępem.
+- Zbędne zapytania do Demozoo o produkcję „0” (Pouet podaje 0, gdy nie ma odnośnika).
+
+### Dodane
+- Wskaźnik pobierania grafik w górnym pasku na każdym ekranie („🖼 grafiki 120/900
+  (13%)”), a w menu Start „Grafiki i metadane — trwa 13%”.
+
 ## [0.18.0] — 2026-10-08
 
 ### Dodane
