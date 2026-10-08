@@ -4,6 +4,17 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 [Keep a Changelog](https://keepachangelog.com/pl/1.1.0/), wersje według
 [SemVer](https://semver.org/lang/pl/).
 
+## [0.16.3] — 2026-10-08
+
+### Naprawione
+- **DuckStation prosił o zalogowanie do RetroAchievements**: DuckStation trzyma
+  token zaszyfrowany (AES-128-CBC, klucz z nazwy użytkownika i — poza trybem
+  przenośnym — identyfikatora komputera), a EmuStart wpisywał mu zwykły token
+  (taki jak w PCSX2 i RetroArch), którego DuckStation nie umiał odczytać. Token
+  jest teraz szyfrowany w formacie DuckStation przy zapisie i odszyfrowywany przy
+  przejmowaniu konta z DuckStation (szyfrowanie przez Windows CNG, bez
+  dodatkowych bibliotek).
+
 ## [0.16.2] — 2026-10-08
 
 ### Naprawione

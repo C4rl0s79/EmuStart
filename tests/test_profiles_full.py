@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from emustart import art, ingame, launcher, paths, profiles
+from emustart import art, dstoken, ingame, launcher, paths, profiles
 
 from test_core import _write, env  # noqa: F401  (fixture)
 
@@ -118,12 +118,12 @@ def test_retroachievements_per_profile(prof_env):
     first = profiles.first_id()
     ola = profiles.create("Ola")["id"]
     duck, ps2 = _duck(tmp), _pcsx2(tmp)
-    ingame.ini_set(duck._ini(), {("Cheevos", "Username"): "caros", ("Cheevos", "Token"): "TOK1"})
+    ingame.ini_set(duck._ini(), {("Cheevos", "Username"): "caros",
+                                 ("Cheevos", "Token"): dstoken.encrypt("TOK1", "caros", True)})
     assert profiles.ra_for_launch(cfg, first, duck)["user"] == ""     # komputer jeszcze bez właściciela
     profiles.finish_setup(first, ask=False)
     # konto zalogowane wcześniej w DuckStation → przejmuje je profil tego komputera
-    ingame.ini_set(duck._ini(), {("Cheevos", "Username"): "caros", ("Cheevos", "Token"): "TOK1"})
-    assert profiles.ra_for_launch(cfg, first, duck)["user"] == "caros"
+    assert profiles.ra_for_launch(cfg, first, duck) == {"user": "caros", "token": "TOK1", "hardcore": False}
     profiles.ra_set(cfg, ola, {"user": "ola", "token": "TOK2", "hardcore": True})
 
     # gra Ola w PCSX2: jej konto, token w secrets.ini, hardcore
@@ -134,10 +134,12 @@ def test_retroachievements_per_profile(prof_env):
     assert ingame.ini_section(ps2._secrets(), "Achievements")["Token"] == "TOK2"
     assert ps2.read_cheevos() == {"user": "ola", "token": "TOK2"}
 
-    # potem pierwszy profil w DuckStation: jego konto wraca
+    # potem pierwszy profil w DuckStation: jego konto wraca, token zaszyfrowany jak w DuckStation
     s = _session(cfg, first)
     s._profile_finish(duck, s._profile_prepare(duck))
     assert duck.read_cheevos() == {"user": "caros", "token": "TOK1"}
+    stored = ingame.ini_section(duck._ini(), "Cheevos")["Token"]
+    assert stored != "TOK1" and dstoken.decrypt(stored, "caros", True) == "TOK1"
 
     # profil bez konta wyłącza osiągnięcia
     bez = profiles.create("Gość")["id"]

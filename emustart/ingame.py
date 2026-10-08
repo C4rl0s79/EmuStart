@@ -23,7 +23,7 @@ import socket
 import time
 from pathlib import Path
 
-from emustart import emulators, paths, winutil
+from emustart import dstoken, emulators, paths, winutil
 
 log = logging.getLogger("emustart.ingame")
 
@@ -466,15 +466,22 @@ class DuckStation(Adapter):
                                  ("Audio", "Backend|Driver|OutputDevice"), ("Main", "SettingsVersion"),
                                  ("Cheevos", "Enabled|Username|Token|LoginTimestamp|ChallengeMode")]}
 
+    def _portable(self) -> bool:
+        return self._ini().parent == self.home
+
     def read_cheevos(self) -> dict:
+        # DuckStation trzyma token zaszyfrowany (dstoken) — oddajemy zwykły
         c = ini_section(self._ini(), "Cheevos")
-        return {"user": c["Username"], "token": c["Token"]} if c.get("Username") and c.get("Token") else {}
+        user = c.get("Username", "")
+        token = dstoken.decrypt(c.get("Token", ""), user, self._portable()) if user else ""
+        return {"user": user, "token": token} if user and token else {}
 
     def apply_cheevos(self, ra: dict | None) -> None:
         on = bool(ra and ra.get("user") and ra.get("token"))
+        token = dstoken.encrypt(ra["token"], ra["user"], self._portable()) if on else ""
         ini_set(self._ini(), {("Cheevos", "Enabled"): "true" if on else "false",
                               ("Cheevos", "Username"): ra["user"] if on else "",
-                              ("Cheevos", "Token"): ra["token"] if on else "",
+                              ("Cheevos", "Token"): token,
                               ("Cheevos", "LoginTimestamp"): str(int(time.time())) if on else "0",
                               ("Cheevos", "ChallengeMode"): "true" if on and ra.get("hardcore") else "false"})
 
