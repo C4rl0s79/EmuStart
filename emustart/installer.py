@@ -253,6 +253,48 @@ def _retroarch_exe(emu_root: Path) -> Path | None:
     return None
 
 
+CAPSIMG_REPO = "FrodeSolheim/capsimg"
+KICKSTARTS = ("kick34005.A500", "kick40068.A1200", "kick40063.A600", "kick37175.A500")
+
+
+def ra_system_dir(ra_root: Path) -> Path:
+    """Folder „system” RetroArcha (BIOS-y, capsimg, Kickstarty) wg retroarch.cfg."""
+    d = ""
+    try:
+        m = re.search(r'^\s*system_directory\s*=\s*"?([^"\r\n]*)"?', (ra_root / "retroarch.cfg").read_text(
+            encoding="utf-8", errors="replace"), re.M)
+        d = m.group(1).strip() if m else ""
+    except OSError:
+        pass
+    if d.startswith(":"):
+        d = str(ra_root) + d[1:]
+    return Path(d) if d and d != "default" else ra_root / "system"
+
+
+def amiga_extras(emu_root: str) -> list:
+    """Brakujące dodatki Amigi w RetroArchu: capsimg.dll (pliki .ipf)."""
+    ra = _retroarch_exe(Path(emu_root))
+    ra_root = ra.parent if ra else Path(emu_root) / "RetroArch"
+    if (ra_system_dir(ra_root) / "capsimg.dll").is_file():
+        return []
+    return [{"kind": "capsimg", "key": "capsimg", "label": "capsimg — obsługa obrazów .ipf (Amiga)"}]
+
+
+def amiga_kickstart_missing(emu_root: str) -> bool:
+    ra = _retroarch_exe(Path(emu_root))
+    sysdir = ra_system_dir(ra.parent if ra else Path(emu_root) / "RetroArch")
+    return not any((sysdir / k).is_file() for k in KICKSTARTS)
+
+
+def _capsimg_url() -> dict:
+    rel = _json(f"https://api.github.com/repos/{CAPSIMG_REPO}/releases/latest")
+    for a in rel.get("assets", []):
+        if re.search(r"Windows_x86-64\.(tar\.xz|zip)$", a["name"]):
+            return {"url": a["browser_download_url"], "size": a.get("size", 0),
+                    "version": rel.get("tag_name", ""), "name": a["name"]}
+    raise OSError("brak paczki capsimg dla Windows x64")
+
+
 def plan_for(es: str, emu_root: str) -> list:
     """Co trzeba pobrać, żeby system `es` miał emulator: lista kroków
     [{kind: standalone|retroarch|core, key, label}] (pusta = nie umiemy)."""
@@ -268,6 +310,8 @@ def plan_for(es: str, emu_root: str) -> list:
     if not _retroarch_exe(root):
         steps.append({"kind": "retroarch", "key": "retroarch", "label": "RetroArch"})
     steps.append({"kind": "core", "key": core, "label": f"RetroArch: rdzeń {core}"})
+    if plat == "AMIGA":
+        steps += amiga_extras(emu_root)
     return steps
 
 
@@ -283,6 +327,9 @@ def describe(steps: list) -> list:
             elif s["kind"] == "retroarch":
                 url, ver = _retroarch_url()
                 d.update(size=_head_size(url), version=ver)
+            elif s["kind"] == "capsimg":
+                r = _capsimg_url()
+                d.update(size=r["size"], version=r["version"])
             else:
                 d.update(size=_head_size(core_url(s["key"])), version="nightly")
         except Exception as ex:
@@ -354,6 +401,8 @@ class Job:
             return
         if s["kind"] == "retroarch" and _retroarch_exe(root):
             return
+        if s["kind"] == "capsimg":
+            return self._capsimg(root)
         with tempfile.TemporaryDirectory(prefix="emustart_dl_") as td:
             if s["kind"] == "standalone":
                 c = STANDALONE[s["key"]]
@@ -383,6 +432,36 @@ class Job:
                     z.extractall(cores)
                 self._ra_info(root / "RetroArch")
 
+    def _capsimg(self, root: Path) -> None:
+        """capsimg.dll do folderu system RetroArcha — z niej rdzeń PUAE czyta .ipf."""
+        ra = _retroarch_exe(root)
+        if not ra:
+            raise OSError("najpierw potrzebny RetroArch")
+        target = ra_system_dir(ra.parent) / "capsimg.dll"
+        if target.is_file():
+            return
+        r = _capsimg_url()
+        with tempfile.TemporaryDirectory(prefix="emustart_dl_") as td:
+            arch = Path(td) / r["name"]
+            _download(r["url"], arch, self._progress, self.cancel)
+            data = None
+            if r["name"].endswith(".zip"):
+                with zipfile.ZipFile(arch) as z:
+                    for m in z.infolist():
+                        if Path(m.filename).name.lower() == "capsimg.dll":
+                            data = z.read(m)
+            else:
+                import tarfile
+                with tarfile.open(arch, "r:*") as t:
+                    for m in t.getmembers():
+                        if m.isfile() and Path(m.name).name.lower() == "capsimg.dll":
+                            data = t.extractfile(m).read()   # sam plik, bez ścieżek z archiwum
+            if not data:
+                raise OSError("w paczce capsimg nie ma capsimg.dll")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data)
+        _save_version("capsimg", r["version"])
+
     def _ra_info(self, ra: Path) -> None:
         """Pliki info/*.info — z nich EmuStart rozpoznaje, który rdzeń obsługuje system."""
         if (ra / "info").is_dir() and any((ra / "info").glob("*.info")):
@@ -396,6 +475,9 @@ class Job:
     def _assign(self, es: str) -> None:
         """Po instalacji: emulator systemu = domyślna opcja (jak po „Wykryj emulatory”)."""
         emulators.forget_scan()
+        cur0 = (self.cfg.get("systems") or {}).get(es) or {}
+        if cur0.get("exe") and Path(cur0["exe"]).is_file():
+            return                    # system ma już emulator (np. doinstalowany capsimg)
         opt = emulators.default_option(systems.info(es), self.cfg.get("emu_root", ""))
         if opt:
             cur = self.cfg.setdefault("systems", {}).setdefault(es, {"enabled": True})

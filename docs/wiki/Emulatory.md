@@ -24,6 +24,7 @@ Ustawienia → **Pobierz brakujące emulatory**.
 | PPSSPP | PSP | GitHub |
 | Vita3K | PS Vita | GitHub |
 | Dolphin | GameCube, Wii | dolphin-emu.org |
+| capsimg (dla rdzenia PUAE) | Amiga `.ipf` | GitHub |
 | Cemu | Wii U | GitHub |
 | Eden | Switch | eden-emu.dev |
 | Azahar | 3DS | GitHub |
@@ -34,6 +35,14 @@ Ustawienia → **Pobierz brakujące emulatory**.
 
 Archiwa `.7z` rozpakowuje 7-Zip (zainstalowany albo `7zr.exe` pobrany z 7-zip.org).
 Emulatory instalowane są w trybie przenośnym (ustawienia obok exe), gdy go mają.
+
+## BIOS-y
+
+Ustawienia → **BIOS-y**: folder z plikami BIOS w układzie folderu `system`
+RetroArcha (np. `bios` z RetroBat lub Batocery). Przed startem gry na RetroArchu
+EmuStart czyta z pliku `info\<rdzeń>_libretro.info`, jakich BIOS-ów potrzebuje
+rdzeń, i kopiuje **brakujące** do folderu `system` RetroArcha (istniejących nie
+nadpisuje). Dla Amigi kopiuje też `capsimg.dll`.
 
 ## Co EmuStart umie z danym emulatorem
 

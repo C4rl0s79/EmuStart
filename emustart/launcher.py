@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import shutil
 import subprocess
 import threading
@@ -228,7 +229,7 @@ class Session:
         if main.suffix.lower() == ".zip" and info["kind"] != "arcade" \
                 and (not emulators.zip_native(exe) or _zip_multi(main)):
             self.phase, self.message = "extracting", "Rozpakowuję do pamięci…"
-            main = self._extract(main, info)
+            main = self._extract(main, info, m3u_ok=emulators.supports_m3u(exe))
 
         if g["multidisc"] and emulators.supports_m3u(exe):
             self.run_dir.mkdir(parents=True, exist_ok=True)
@@ -243,7 +244,7 @@ class Session:
                 return discs[0]
         return main
 
-    def _extract(self, zpath: Path, info: dict) -> Path:
+    def _extract(self, zpath: Path, info: dict, m3u_ok: bool = False) -> Path:
         out_dir = self.run_dir / "rom"
         out_dir.mkdir(parents=True, exist_ok=True)
         wanted = systems.ext_set(info) - {"zip", "7z"}
@@ -261,6 +262,15 @@ class Session:
             exts = ", ".join(sorted(wanted - {"m3u"}))
             raise LaunchError(f"W archiwum nie ma pliku gry ({exts}) — są tylko pliki dodatkowe "
                               f"(np. muzyka MSU-1). Dołóż ROM do archiwum.")
+        disks = sorted((f for f in pick if f.suffix.lower() in DISK_EXTS), key=_disk_order)
+        if m3u_ok and len(disks) > 1:
+            # gra na kilku dyskietkach (Amiga .ipf/.adf): playlista — emulator
+            # zmienia dyskietki sam albo z menu (RetroArch: sterowanie dyskami)
+            m3u = out_dir / (zpath.stem + ".m3u")
+            m3u.write_text("\n".join(d.name for d in disks) + "\n", encoding="utf-8")
+            return m3u
+        if disks:
+            return disks[0]
         return max(pick or files, key=lambda f: f.stat().st_size)
 
     # ── gra ──
@@ -516,3 +526,12 @@ def cleanup_run_dirs(max_age: float = 3600) -> int:
         except OSError:
             pass
     return n
+
+
+DISK_EXTS = {".ipf", ".adf", ".adz", ".dms", ".fdi", ".d64", ".st", ".msa", ".dsk"}
+
+
+def _disk_order(p: Path):
+    """„Gra (Disk 2).ipf” po „Gra (Disk 1).ipf”, „Disk 10” po „Disk 9”."""
+    m = re.search(r"\((?:Disk|Disc|Side)\s*(\d+)", p.name, re.I)
+    return (int(m.group(1)) if m else 0, p.name.lower())

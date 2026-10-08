@@ -75,7 +75,10 @@ SYSTEMS: dict = {
     "lynx": _s("Atari Lynx", "LYNX", "Atari - Lynx", "lnx," + _CART),
     # ── inne ──
     "3do": _s("3DO", "3DO", "The 3DO Company - 3DO", _DISC, "disc"),
-    "amiga": _s("Amiga", "AMIGA", "Commodore - Amiga", "lha,adf,hdf,m3u," + _CART, "mixed"),
+    "amiga": _s("Amiga", "AMIGA", "Commodore - Amiga", "ipf,adf,adz,dms,hdf,lha,m3u," + _CART, "mixed"),
+    # WHDLoad: gry i dema zainstalowane na „dysk twardy” (paczki .lha, np. Retroplay)
+    "amigawhdgames": _s("Amiga WHDLoad — gry", "AMIGA", "Commodore - Amiga", "lha,lzh,lzx," + _CART, "mixed"),
+    "amigawhddemos": _s("Amiga WHDLoad — dema", "AMIGA", "Commodore - Amiga", "lha,lzh,lzx," + _CART, "mixed"),
     "c64": _s("Commodore 64", "C64", "Commodore - 64", "d64,t64,prg,crt,m3u," + _CART),
     "msx": _s("MSX", "MSX", "Microsoft - MSX", "rom,mx1,dsk," + _CART),
     "msx2": _s("MSX2", "MSX2", "Microsoft - MSX2", "rom,mx2,dsk," + _CART),
@@ -149,6 +152,13 @@ def thumb_name(title: str) -> str:
 # formatu: „Atari - Atari 7800 (BIN)”, „Nintendo - Wii - NKit RVZ [zstd-19-128k]”.
 # Klucz: nazwa po zdjęciu dopisku w [] i „ - NKit …”; wartość: folder ES.
 FOLDER_ALIASES = {
+    # WHDLoad: osobno gry i dema (także jako podfoldery Games/Demos folderu WHDLoad)
+    "WHDLoad Games": "amigawhdgames", "Amiga WHDLoad Games": "amigawhdgames",
+    "Commodore - Amiga - WHDLoad Games": "amigawhdgames", "Commodore Amiga - WHDLoad - Games": "amigawhdgames",
+    "amiga-whdload-games": "amigawhdgames", "whdload_games": "amigawhdgames",
+    "WHDLoad Demos": "amigawhddemos", "Amiga WHDLoad Demos": "amigawhddemos",
+    "Commodore - Amiga - WHDLoad Demos": "amigawhddemos", "Commodore Amiga - WHDLoad - Demos": "amigawhddemos",
+    "amiga-whdload-demos": "amigawhddemos", "whdload_demos": "amigawhddemos",
     "3DO Interactive Multiplayer": "3do", "Panasonic - 3DO Interactive Multiplayer": "3do",
     "Microsoft - Xbox 360": "x360", "Nintendo - GameCube": "gamecube", "Nintendo - Wii": "wii",
     "Sega - Dreamcast": "dreamcast", "Sega - Mega CD & Sega CD": "segacd", "Sega - Saturn": "saturn",
@@ -207,3 +217,40 @@ def match_folder(name: str) -> str | None:
         for es, info_ in SYSTEMS.items():
             _ALIAS_NORM.setdefault(_fold(info_["libretro"]), es)
     return _ALIAS_NORM.get(_fold(name))
+
+
+WHD_SYSTEMS = ("amigawhdgames", "amigawhddemos")
+_WHD_TAGS = {"aga": "AGA", "ecs": "ECS", "ocs": "OCS", "cd32": "CD32", "cdtv": "CDTV", "ntsc": "NTSC",
+             "pal": "PAL", "fast": "Fast", "slow": "Slow", "chip": "Chip", "files": "Files",
+             "image": "Image", "lowmem": "LowMem", "demo": "Demo", "preview": "Preview",
+             "beta": "Beta", "alt": "Alt", "music": "Music", "2disk": "2 Disk", "1disk": "1 Disk"}
+_WHD_LANGS = {"de", "fr", "it", "es", "pl", "se", "dk", "fi", "nl", "cz", "gr", "hu", "no", "pt", "en"}
+
+
+def _split_camel(s: str) -> str:
+    s = re.sub(r"(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])|(?<=[A-Za-z])(?=\d)|(?<=\d)(?=[A-Z][a-z])", " ", s)
+    return re.sub(r"\s+", " ", s.replace("&", " & ")).strip()
+
+
+def whd_title(stem: str, demo: bool = False) -> tuple:
+    """Nazwa paczki WHDLoad → (tytuł, oznaczenia):
+    „1869_v1.0_De_AGA_1653” → („1869”, „(v1.0) (De) (AGA)”),
+    „AlienBreedSE_v1.4” → („Alien Breed SE”, „(v1.4)”),
+    „242_v1.2_Fairlight&VirtualDreams” (demo) → („242”, „(v1.2) (Fairlight & Virtual Dreams)”)."""
+    parts = stem.split("_")
+    title, tags = _split_camel(parts[0]), []
+    for p in parts[1:]:
+        low = p.lower()
+        if re.fullmatch(r"v\d[\d.]*[a-z]?", low):
+            tags.append(p)
+        elif re.fullmatch(r"\d{3,5}", p):
+            continue                      # numer paczki w zestawie (np. 1653)
+        elif low in _WHD_TAGS:
+            tags.append(_WHD_TAGS[low])
+        elif low in _WHD_LANGS:
+            tags.append(p[:1].upper() + p[1:].lower())
+        elif demo:
+            tags.append(_split_camel(p))  # grupa demoscenowa
+        else:
+            tags.append(_split_camel(p))
+    return title, " ".join(f"({t})" for t in tags)

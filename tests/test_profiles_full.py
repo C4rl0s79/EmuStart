@@ -470,3 +470,79 @@ def test_cleanup_old_run_dirs(tmp_path, monkeypatch):
     old.mkdir(); new.mkdir()
     os.utime(old, (1, 1))
     assert launcher.cleanup_run_dirs() == 1 and new.exists() and not old.exists()
+
+
+# ── Amiga: IPF, WHDLoad ──
+
+def test_whdload_titles_and_folders(tmp_path):
+    from emustart import systems, scanner
+    assert systems.whd_title("1869_v1.0_De_AGA_1653") == ("1869", "(v1.0) (De) (AGA)")
+    assert systems.whd_title("WhereInTheWorldIsCarmenSandiego_v0.1_NTSC_2479")[0] == "Where In The World Is Carmen Sandiego"
+    assert systems.whd_title("242_v1.2_Fairlight&VirtualDreams", demo=True) == ("242", "(v1.2) (Fairlight & Virtual Dreams)")
+    whd = tmp_path / "WHDLoad"
+    for sub in ("Games", "Demos", "Magazines"):
+        (whd / sub).mkdir(parents=True)
+    found, unknown = scanner.collect_systems({"rom_roots": [str(whd)]})
+    assert set(found) == {"amigawhdgames", "amigawhddemos"}
+    assert [d.name for d in unknown] == ["Magazines"]
+
+
+def test_amiga_multidisk_zip_becomes_m3u(tmp_path):
+    import zipfile
+    z = tmp_path / "Sensible World of Soccer (Europe).zip"
+    with zipfile.ZipFile(z, "w") as f:
+        f.writestr("Sensible World of Soccer (Europe) (Disk 2).ipf", b"B" * 10)
+        f.writestr("Sensible World of Soccer (Europe) (Disk 1).ipf", b"A" * 5)
+    s = launcher.Session.__new__(launcher.Session)
+    s.run_dir = tmp_path / "run"
+    info = {"exts": "ipf,adf,zip"}
+    m3u = s._extract(z, info, m3u_ok=True)
+    assert m3u.suffix == ".m3u"
+    assert m3u.read_text(encoding="utf-8").splitlines() == ["Sensible World of Soccer (Europe) (Disk 1).ipf",
+                                                           "Sensible World of Soccer (Europe) (Disk 2).ipf"]
+    s.run_dir = tmp_path / "run2"
+    assert s._extract(z, info, m3u_ok=False).name.endswith("(Disk 1).ipf")      # bez m3u: pierwsza dyskietka
+
+
+def test_capsimg_install_from_tar(tmp_path, monkeypatch):
+    import io
+    import tarfile
+    from emustart import installer
+    ra = tmp_path / "emu" / "RetroArch"
+    _write(ra / "retroarch.exe", b"")
+    _write(ra / "retroarch.cfg", b'system_directory = ":\\system"\n')
+    assert installer.ra_system_dir(ra) == ra / "system"
+    assert installer.amiga_extras(str(tmp_path / "emu"))[0]["kind"] == "capsimg"
+    assert installer.amiga_kickstart_missing(str(tmp_path / "emu"))
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:xz") as t:
+        for name, data in (("../evil.dll", b"X"), ("CAPSImg/Windows/x86-64/capsimg.dll", b"DLL")):
+            ti = tarfile.TarInfo(name); ti.size = len(data); t.addfile(ti, io.BytesIO(data))
+    monkeypatch.setattr(installer, "_capsimg_url", lambda: {"url": "x", "size": 3, "version": "v5", "name": "c.tar.xz"})
+    monkeypatch.setattr(installer, "_download", lambda url, dest, p, c: dest.write_bytes(buf.getvalue()))
+    monkeypatch.setattr(installer, "_save_version", lambda k, v: None)
+    job = installer.Job({"emu_root": str(tmp_path / "emu")}, [])
+    job._install(tmp_path / "emu", {"kind": "capsimg", "key": "capsimg", "label": "capsimg"})
+    assert (ra / "system" / "capsimg.dll").read_bytes() == b"DLL"
+    assert not (ra / "evil.dll").exists() and not (tmp_path / "emu" / "evil.dll").exists()
+    assert installer.amiga_extras(str(tmp_path / "emu")) == []
+
+
+def test_bios_copied_from_bios_dir(tmp_path):
+    from emustart import bios
+    ra = tmp_path / "RetroArch"
+    _write(ra / "retroarch.cfg", b'system_directory = ":\\system"\n')
+    _write(ra / "info" / "puae_libretro.info", b'firmware0_path = "kick34005.A500"\nfirmware1_path = "kick40068.A1200"\n'
+                                                b'firmware2_path = "../zly.rom"\n')
+    src = tmp_path / "bios"
+    _write(src / "kick34005.A500", b"KS13")
+    _write(src / "capsimg.dll", b"DLL")
+    _write(src / "zly.rom", b"X")
+    _write(ra / "system" / "kick40068.A1200", b"MOJ")                    # istniejący zostaje
+    _write(src / "kick40068.A1200", b"INNY")
+    assert bios.core_name('-L "C:\\RA\\cores\\puae_libretro.dll" -f') == "puae"
+    got = bios.sync({"bios_dir": str(src)}, ra, "puae", ("capsimg.dll",))
+    assert sorted(got) == ["capsimg.dll", "kick34005.A500"]
+    assert (ra / "system" / "kick40068.A1200").read_bytes() == b"MOJ"
+    assert not (ra / "zly.rom").exists()
+    assert bios.sync({}, ra, "puae") == []

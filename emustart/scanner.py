@@ -197,7 +197,11 @@ def scan_system(es: str, rom_dirs, progress=None) -> int:
                 hidden = 1 if a["category"] in ("bios", "device") else 0
         else:
             name = _DISC_RE.sub("", stem) if g["multidisc"] else stem
-        title, tags = split_title(name)
+        if es in systems.WHD_SYSTEMS:
+            title, tags = systems.whd_title(stem, demo=es == "amigawhddemos")
+            name = f"{title} {tags}".strip()
+        else:
+            title, tags = split_title(name)
         rows.append((es, g["rel"], name, title or name, tags,
                      json.dumps(g["files"]), sum(f[1] for f in g["files"]),
                      1 if g.get("is_dir") else 0, 1 if g["multidisc"] else 0,
@@ -241,7 +245,9 @@ def collect_systems(cfg: dict) -> tuple:
         except OSError:
             continue
         for d in subdirs:
-            es = systems.match_folder(d.name)
+            # „Games”/„Demos” same w sobie nic nie mówią — w folderze „WHDLoad”
+            # znaczą WHDLoad, stąd druga próba z nazwą folderu nadrzędnego
+            es = systems.match_folder(d.name) or systems.match_folder(f"{Path(root).name} {d.name}")
             if not es:
                 unknown.append(d)
                 if (syscfg.get(d.name) or {}).get("enabled") is not True:

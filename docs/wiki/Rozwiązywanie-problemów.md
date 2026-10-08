@@ -24,6 +24,11 @@ z rdzeniem bsnes lub Snes9x), a ROM, `.msu` i `.pcm` muszą mieć w archiwum tę
 **„Profil gra teraz na komputerze …”** — ten sam profil gra na innym komputerze.
 Blokada starsza niż 12 godzin (np. po awarii) jest ignorowana.
 
+**Gra Amigi (.ipf) się nie uruchamia** — potrzebny `capsimg.dll` w folderze `system`
+RetroArcha (EmuStart proponuje pobranie przy pierwszej grze). Gry WHDLoad
+i niektóre dyskietki potrzebują Kickstartu — zob.
+[Foldery z grami → Amiga](Foldery-z-grami-i-systemy#amiga).
+
 ## Profile i NAS
 
 **Komunikat o konflikcie save'ów** — ten sam save zmienił się na dwóch komputerach

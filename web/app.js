@@ -488,6 +488,7 @@ async function launch(state = "") {
   const r = await api().launch(g.id, state);
   if (r.need_install) return askInstallForGame(r.need_install);
   if (!r.ok) return toast(r.reason);
+  if (r.warning) toast(r.warning, 7000);
   S.modal = "launch";
   $("launch").classList.remove("hidden");
   $("lSystem").textContent = "";
@@ -691,6 +692,7 @@ function buildSetRows() {
   rows.push({ head: "Inne foldery" });
   rows.push({ k: "Emulatory", key: "emu_root", type: "path" });
   rows.push({ k: "Pamięć podręczna", key: "cache_dir", type: "path" });
+  rows.push({ k: "BIOS-y", key: "bios_dir", type: "path", fmt: (v) => v || "nie ustawiono — A wybierz folder (np. bios z RetroBat)" });
   rows.push({ head: "Pamięć podręczna i sieć" });
   rows.push({ k: "Trzymaj ostatnie gry", key: "cache_recent", type: "num", step: 1, min: 1, max: 100, fmt: (v) => `${v} + przypięte` });
   rows.push({ k: "Tryb sieci", key: "network_mode", type: "enum", opts: Object.keys(NET), fmt: (v) => NET[v] });

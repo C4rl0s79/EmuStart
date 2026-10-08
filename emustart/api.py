@@ -16,7 +16,7 @@ import urllib.error
 import time
 from pathlib import Path
 
-from emustart import (__version__, art, art_sources, cache, ingame, installer, launchbox, logos, sysinfo, metadata, pads, profiles, uipad, config, emulators, launcher, library,
+from emustart import (__version__, art, bios, art_sources, cache, ingame, installer, launchbox, logos, sysinfo, metadata, pads, profiles, uipad, config, emulators, launcher, library,
                       paths, scanner, systems, winutil)
 
 log = logging.getLogger("emustart.api")
@@ -52,6 +52,7 @@ class Api:
         self._session: launcher.Session | None = None
         self._background: list = []          # sesje, które jeszcze kopiują w tle
         self._pin_jobs: dict = {}            # game_id → Session-like (kopiowanie przypiętych)
+        self._amiga_asked = False
         self._scan = {"running": False, "text": "", "done": 0, "total": 0, "result": None}
         ingame.restore_pending()          # ustawienia padów po ewentualnej awarii
         profiles.adopt_existing_install()  # aktualizacja: komputer już ma swój profil
@@ -432,6 +433,27 @@ class Api:
                 return {"ok": False, "need_install": {
                     "es": g["es"], "system": info["display"],
                     "steps": installer.describe(steps)}}
+        warning = ""
+        if g and ingame.adapter_for(emu["exe"]).family == "retroarch":
+            # BIOS-y rdzenia z folderu BIOS-ów (Kickstarty, capsimg, BIOS-y PS1…)
+            amiga = systems.info(g["es"])["plat"] == "AMIGA"
+            try:
+                bios.sync(self._cfg, Path(emu["exe"]).parent, bios.core_name(emu.get("args", "")),
+                          ("capsimg.dll",) if amiga else ())
+            except Exception:
+                log.exception("BIOS-y")
+        if g and systems.info(g["es"])["plat"] == "AMIGA" and ingame.adapter_for(emu["exe"]).family == "retroarch":
+            root = self._cfg.get("emu_root", "")
+            extra = installer.amiga_extras(root)
+            if extra and g["rel"].lower().endswith((".ipf", ".zip")) and not self._amiga_asked:
+                self._amiga_asked = True      # raz na uruchomienie programu
+                return {"ok": False, "need_install": {
+                    "es": g["es"], "system": "Amiga — obrazy .ipf",
+                    "steps": installer.describe(extra)}}
+            if installer.amiga_kickstart_missing(root):
+                warning = ("Brak ROM-ów Kickstart (np. kick34005.A500, kick40068.A1200) w folderze system "
+                           "RetroArcha" + ("" if self._cfg.get("bios_dir") else " — wskaż Folder z BIOS-ami w Ustawieniach")
+                           + ". Rdzeń użyje zamiennika AROS, część gier może nie działać.")
         bg = next((s for s in self._background if s.game_id == int(game_id)), None)
         if bg:   # kopia tej gry trwa w tle — przejmujemy ją (wznowienie z .part)
             bg.cancel.set()
@@ -446,7 +468,7 @@ class Api:
                                          ui=self if self._window else None,
                                          start_state=state or "")
         self._session.start()
-        return {"ok": True}
+        return {"ok": True, "warning": warning}
 
     def launch_status(self) -> dict:
         return self._session.status() if self._session else {"phase": "idle"}
@@ -943,6 +965,7 @@ class Api:
                 "games_logo": cfg.get("games_logo", False),
                 "pad_backend": cfg.get("pad_backend", "python"),
                 "profile_settings": cfg.get("profile_settings", True),
+                "bios_dir": cfg.get("bios_dir", ""),
                 **{k: bool(cfg.get(k)) for k in self.HIDE_KEYS},
                 "ask_profile": profiles.ask_at_start(),
                 "machine_profile": profiles.machine_owner(),
@@ -969,6 +992,8 @@ class Api:
                     cfg[k] = max(1, int(data[k]))
                 except (TypeError, ValueError):
                     pass
+        if "bios_dir" in data:
+            cfg["bios_dir"] = str(data["bios_dir"]).strip()
         if data.get("pad_backend") in ("python", "browser", "none"):
             cfg["pad_backend"] = data["pad_backend"]
         for k in ("fullscreen", "hide_arcade_clones", "games_logo", *self.HIDE_KEYS):

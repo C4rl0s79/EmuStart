@@ -4,6 +4,29 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 [Keep a Changelog](https://keepachangelog.com/pl/1.1.0/), wersje według
 [SemVer](https://semver.org/lang/pl/).
 
+## [0.17.0] — 2026-10-08
+
+### Dodane
+- **Amiga: obrazy `.ipf`** (No-Intro). Gra na kilku dyskietkach w jednym zipie
+  dostaje playlistę `.m3u` (zmiana dyskietki w RetroArchu: Sterowanie dyskami).
+  Przy pierwszej grze EmuStart proponuje pobranie **capsimg** (biblioteka `.ipf`
+  dla rdzenia PUAE) do folderu `system` RetroArcha; brak ROM-ów Kickstart
+  sygnalizuje ostrzeżeniem (rdzeń użyje wtedy AROS).
+- **Amiga WHDLoad — dwa nowe systemy: gry i dema** (`.lha`/`.lzx`). Rozpoznawane
+  podfoldery `Games`/`Demos` folderu `WHDLoad` oraz typowe nazwy zestawów
+  („WHDLoad Games”, „Commodore Amiga - WHDLoad - Demos”…). Nazwy paczek zamieniane
+  na tytuły z oznaczeniami: „Burntime (v1.2) (AGA)”, w demach z grupą —
+  „Vector Balls (v1.0) (Hypnosis)”.
+
+- Ustawienia → **BIOS-y**: folder z BIOS-ami (np. `bios` z RetroBat). Przed startem
+  gry na RetroArchu brakujące BIOS-y rdzenia (lista z jego pliku `.info`, np.
+  Kickstarty dla PUAE) kopiowane są do folderu `system` RetroArcha; dla Amigi także
+  `capsimg.dll`. Istniejące pliki nie są nadpisywane.
+
+### Zmienione
+- Doinstalowanie dodatku (np. capsimg) nie zmienia już emulatora przypisanego
+  do systemu.
+
 ## [0.16.5] — 2026-10-08
 
 Przegląd bezpieczeństwa i wycieku danych.

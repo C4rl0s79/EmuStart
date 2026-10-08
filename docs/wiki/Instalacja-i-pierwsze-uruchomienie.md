@@ -30,6 +30,8 @@ Otwierają się **Ustawienia**:
    np. `D:\emu\emulatory`.
 3. **Pamięć podręczna** — gdzie trzymać lokalne kopie gier (domyślnie `cache\`
    obok programu).
+   **BIOS-y** (opcjonalnie) — folder z BIOS-ami, np. `bios` z RetroBat; EmuStart
+   kopiuje z niego brakujące pliki do RetroArcha (patrz [Emulatory](Emulatory#bios-y)).
 4. **Wykryj emulatory i skanuj** — przypisuje znalezione emulatory do systemów
    i skanuje kolekcję.
 5. **Pobierz brakujące emulatory** — dla systemów bez emulatora (patrz
