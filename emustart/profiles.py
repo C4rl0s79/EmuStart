@@ -291,33 +291,68 @@ def _same_sig(a, b) -> bool:
     return bool(a) and bool(b) and a[0] == b[0] and abs(a[1] - b[1]) <= 2
 
 
+def _scan(root: Path) -> dict:
+    """{ścieżka względna: (rozmiar, czas)} — os.scandir: na Windows rozmiar i czas
+    przychodzą razem z listą plików, bez osobnego zapytania o każdy plik (na
+    NAS-ie przez sieć to różnica 27 s → 2 s dla kilkuset plików)."""
+    out, stack = {}, [root]
+    while stack:
+        d = stack.pop()
+        try:
+            with os.scandir(d) as it:
+                for e in it:
+                    try:
+                        if e.is_dir(follow_symlinks=False):
+                            stack.append(Path(e.path))
+                        elif e.is_file(follow_symlinks=False) and not e.name.endswith(".emustart-tmp"):
+                            st = e.stat()
+                            out[Path(e.path).relative_to(root)] = (st.st_size, st.st_mtime)
+                    except OSError:
+                        continue
+        except OSError:
+            continue
+    return out
+
+
 def _copy_newer(src: Path, dst: Path, backup: Path | None, man: dict | None = None,
-                prefix: str = "", conflicts: list | None = None) -> int:
+                prefix: str = "", conflicts: list | None = None, dst_known: bool = False) -> int:
     """Kopiuje pliki, które w src są nowsze (albo ich brak w dst). Zwraca liczbę.
 
     man: stan plików z ostatniej synchronizacji ({klucz: [rozmiar, czas]}) —
     gdy od tamtej pory zmieniły się OBIE strony (gra na dwóch komputerach bez
-    NAS-a), to konflikt: wygrywa nowszy, przegrany trafia do `backup`."""
+    NAS-a), to konflikt: wygrywa nowszy, przegrany trafia do `backup`.
+    dst_known: cel nie zmienił się od ostatniej synchronizacji (znacznik na NAS) —
+    nie listujemy go; pliki zgodne z manifestem pomijamy od razu."""
     n = 0
     if not src.is_dir():
         return 0
-    for f in src.rglob("*"):
-        if not f.is_file() or f.name.endswith(".emustart-tmp"):
-            continue
-        rel = f.relative_to(src)
-        d = dst / rel
+    src_files = _scan(src)
+    dst_files = None if dst_known else _scan(dst)
+    for rel, (s_size, s_mtime) in src_files.items():
+        f, d = src / rel, dst / rel
         key = f"{prefix}/{rel.as_posix()}"
+        s_sig = [s_size, round(s_mtime)]
         try:
-            st = f.stat()
-            if d.exists():
-                dt = d.stat()
-                if dt.st_mtime >= st.st_mtime - 2 and dt.st_size == st.st_size:
+            if dst_files is None:
+                if man is not None and _same_sig(man.get(key), s_sig):
+                    continue                 # bez zmian od ostatniej synchronizacji
+                try:
+                    dt_ = d.stat()
+                    dinfo = (dt_.st_size, dt_.st_mtime)
+                except OSError:
+                    dinfo = None
+            else:
+                dinfo = dst_files.get(rel)
+            if dinfo:
+                d_size, d_mtime = dinfo
+                d_sig = [d_size, round(d_mtime)]
+                if d_mtime >= s_mtime - 2 and d_size == s_size:
                     if man is not None:
-                        man[key] = _sig(dt)
+                        man[key] = d_sig
                     continue
                 base = man.get(key) if man is not None else None
-                if base and not _same_sig(base, _sig(st)) and not _same_sig(base, _sig(dt)):
-                    src_wins = st.st_mtime > dt.st_mtime + 2
+                if base and not _same_sig(base, s_sig) and not _same_sig(base, d_sig):
+                    src_wins = s_mtime > d_mtime + 2
                     loser = d if src_wins else f
                     if backup:
                         b = backup / "konflikt" / rel
@@ -327,7 +362,7 @@ def _copy_newer(src: Path, dst: Path, backup: Path | None, man: dict | None = No
                                 key, "wysyłana" if src_wins else "z drugiej strony")
                     if conflicts is not None:
                         conflicts.append(key)
-                if dt.st_mtime > st.st_mtime + 2:
+                if d_mtime > s_mtime + 2:
                     continue                 # cel nowszy — nie cofamy save'a
                 if backup:
                     b = backup / rel
@@ -338,7 +373,7 @@ def _copy_newer(src: Path, dst: Path, backup: Path | None, man: dict | None = No
             shutil.copy2(f, tmp)
             os.replace(tmp, d)
             if man is not None:
-                man[key] = _sig(d.stat())
+                man[key] = s_sig             # copy2 zachowuje rozmiar i czas
             n += 1
         except OSError as ex:
             log.warning("sync %s: %s", f, ex)
@@ -393,18 +428,47 @@ def _sync(cfg: dict, pid: int, kind: str, family: str, names: list, up: bool) ->
     prof = get(pid)
     stamp = time.strftime("%Y%m%d-%H%M%S")
     mf, man = _manifest(pid)
-    fam_man = man.setdefault(f"{kind}/{family}", {})
+    fam_key = f"{kind}/{family}"
+    fam_man = man.setdefault(fam_key, {})
+    # znacznik zmian na NAS: nowy przy każdym wysłaniu. Ten sam co przy naszej
+    # ostatniej synchronizacji = nikt inny nic nie wysłał — NAS-a nie listujemy
+    # (raz na dobę i tak pełne porównanie)
+    stamps = man.setdefault("_stamps", {})
+    stamp_file = _nas_dir(cfg, prof) / kind / family / ".emustart-stamp"
+    try:
+        nas_stamp = stamp_file.read_text(encoding="utf-8").strip()
+    except OSError:
+        nas_stamp = ""
+    mine = stamps.get(fam_key) or {}
+    unchanged = bool(nas_stamp) and mine.get("stamp") == nas_stamp and time.time() - mine.get("full", 0) < 86400
+    locals_ = [local_dir(pid, family, nm) if kind == "save" else LOCAL / str(pid) / "settings" / family
+               for nm in names]
+    if not up and unchanged and all(d.is_dir() for d in locals_):
+        return 0
     conflicts: list = []
     n = 0
-    for name in names:
-        local = local_dir(pid, family, name) if kind == "save" else LOCAL / str(pid) / "settings" / family
+    for name, local in zip(names, locals_):
         nas = _nas_dir(cfg, prof) / kind / family / (name if kind == "save" else "")
         if up:
             bak = _nas_dir(cfg, prof) / "_backup" / f"{stamp}-{socket.gethostname()}" / kind / family / name
-            n += _copy_newer(local, nas, bak, fam_man, name, conflicts)
+            n += _copy_newer(local, nas, bak, fam_man, name, conflicts, dst_known=unchanged)
         else:
             bak = LOCAL / str(pid) / "_backup" / stamp / kind / family / name
             n += _copy_newer(nas, local, bak, fam_man, name, conflicts)
+    full = mine.get("full", 0) if unchanged else time.time()
+    if up and (n or not nas_stamp):
+        new = f"{time.time():.3f}-{socket.gethostname()}"
+        try:
+            stamp_file.parent.mkdir(parents=True, exist_ok=True)
+            stamp_file.write_text(new, encoding="utf-8")
+            if nas_stamp and mine.get("stamp") != nas_stamp:
+                stamps.pop(fam_key, None)    # ktoś inny też coś wysłał — następnym razem pełne porównanie
+            else:
+                stamps[fam_key] = {"stamp": new, "full": full}
+        except OSError as ex:
+            log.warning("znacznik synchronizacji: %s", ex)
+    elif nas_stamp and (unchanged or not up):
+        stamps[fam_key] = {"stamp": nas_stamp, "full": full}
     _manifest_save(mf, man)
     _note_conflicts(pid, conflicts)
     if up and n:

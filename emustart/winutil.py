@@ -42,6 +42,10 @@ def find_window(title: str) -> int:
     return _u32.FindWindowW(None, title) or 0
 
 
+def is_iconic(hwnd: int) -> bool:
+    return bool(IS_WIN and hwnd and _u32.IsIconic(hwnd))
+
+
 def bring_to_front(hwnd: int) -> None:
     """SetForegroundWindow bywa blokowane, gdy proces nie ma „prawa” do fokusu.
     Naciśnięcie i puszczenie Alt odblokowuje je (znany, nieszkodliwy trik)."""

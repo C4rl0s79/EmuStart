@@ -573,3 +573,27 @@ def test_retroarch_keyboard_for_computer_systems(tmp_path):
     text = Path(ad.launch_args(tmp_path / "run2", False)[1]).read_text(encoding="utf-8")
     assert 'input_auto_game_focus = "1"' in text
     assert 'input_player1_select = "nul"' in text and 'input_player1_up = "nul"' in text
+
+
+def test_sync_down_skips_nas_walk_when_nothing_changed(prof_env, monkeypatch):
+    cfg, tmp = prof_env
+    pid = profiles.first_id()
+    local = profiles.local_dir(pid, "retroarch", "saves")
+    _write(local / "gra.srm", b"S1")
+    assert profiles.sync_up(cfg, pid, "retroarch", ["saves"]) == 1
+    calls = []
+    real = profiles._scan
+    monkeypatch.setattr(profiles, "_scan", lambda root: calls.append(root) or real(root))
+    assert profiles.sync_down(cfg, pid, "retroarch", ["saves"]) == 0
+    assert calls == []                                   # NAS bez zmian — nie listujemy
+    # po grze: zmieniony jeden plik — wysyłany bez listowania NAS-a
+    _write(local / "gra.srm", b"S2-dluzszy")
+    assert profiles.sync_up(cfg, pid, "retroarch", ["saves"]) == 1
+    assert all(Path(c) == local for c in calls)
+    nas = Path(cfg["profiles_nas"]) / "Gracz" / "save" / "retroarch"
+    assert (nas / "saves" / "gra.srm").read_bytes() == b"S2-dluzszy"
+    # inny komputer wysłał coś swojego → pełne porównanie
+    _write(nas / "saves" / "inna.srm", b"X")
+    (nas / ".emustart-stamp").write_text("pc2", encoding="utf-8")
+    assert profiles.sync_down(cfg, pid, "retroarch", ["saves"]) == 1
+    assert (local / "inna.srm").read_bytes() == b"X"

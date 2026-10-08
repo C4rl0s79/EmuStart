@@ -43,6 +43,7 @@ class Session:
     def __init__(self, cfg: dict, game_id: int, profile_id: int,
                  on_running=None, on_finished=None, ui=None, start_state: str = ""):
         self.cfg = cfg
+        self._t_created = time.monotonic()
         self.game_id = game_id
         self.profile_id = profile_id
         self.on_running = on_running
@@ -279,7 +280,9 @@ class Session:
         adapter = ingame.adapter_for(exe)
         # profil najpierw: ustawienia, save'y i konto RA muszą być na miejscu,
         # zanim policzymy parametry startu (RetroArch czyta z nich foldery)
+        t_prof = time.monotonic()
         save_names = self._profile_prepare(adapter)
+        self._t_prof = time.monotonic() - t_prof
         adapter.keyboard_game = systems.info(g["es"])["plat"] in systems.COMPUTER_PLATS
         if adapter.family == "retroarch" and g["es"] in systems.WHD_SYSTEMS:
             try:   # po podpięciu profilu — folder saves wskazuje już na właściwego gracza
@@ -428,6 +431,8 @@ class Session:
 
     def _run_process(self, g: dict, exe: str, cmd: list, adapter) -> None:
         log.info("start: %s", cmd)
+        log.info("czas do startu: %.1f s (profil: zapisy, ustawienia, NAS %.1f s)",
+                 time.monotonic() - self._t_created, getattr(self, "_t_prof", 0.0))
         self.phase, self.message = "running", ""
         t0 = time.monotonic()
         try:

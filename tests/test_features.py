@@ -50,9 +50,10 @@ def test_sync_up_down_newer_wins(prof_env):
     assert profiles.sync_up(cfg, pid, "pcsx2", ["memcards"]) == 1
     nas = Path(cfg["profiles_nas"]) / "Gracz" / "save" / "pcsx2" / "memcards" / "a.ps2"
     assert nas.read_bytes() == b"v1"
-    # inny komputer zapisał nowszą wersję na NAS
+    # inny komputer zapisał nowszą wersję na NAS (i — jak każdy EmuStart — nowy znacznik)
     nas.write_bytes(b"v2-newer")
     os.utime(nas, (nas.stat().st_mtime + 100,) * 2)
+    (nas.parent.parent / ".emustart-stamp").write_text("inny-komputer", encoding="utf-8")
     assert profiles.sync_down(cfg, pid, "pcsx2", ["memcards"]) == 1
     assert (local / "a.ps2").read_bytes() == b"v2-newer"
     assert list((profiles.LOCAL / str(pid) / "_backup").rglob("a.ps2"))   # stara wersja w kopii

@@ -4,6 +4,27 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 [Keep a Changelog](https://keepachangelog.com/pl/1.1.0/), wersje według
 [SemVer](https://semver.org/lang/pl/).
 
+## [0.17.3] — 2026-10-08
+
+### Naprawione
+- **Długie czekanie przed startem gry** (także gry już lokalnej, w logu do 60 s):
+  przed każdą grą EmuStart porównywał save'y profilu z NAS-em, sprawdzając każdy
+  plik osobnym zapytaniem przez sieć — dla RetroArcha (np. dysk WHDLoad z PUAE)
+  samo przejście po folderze trwało 27 s. Teraz:
+  - lista plików z rozmiarami i datami pobierana jednym przejściem (27 s → ok. 3 s),
+  - znacznik zmian na NAS-ie: jeśli od ostatniej synchronizacji nikt nic nie
+    wysłał, porównanie jest pomijane (ok. 0,2 s); pełne porównanie raz na dobę
+    i zawsze, gdy inny komputer coś wysłał,
+  - po grze wysyłane są tylko zmienione pliki, bez listowania NAS-a.
+- **RetroArch startował zminimalizowany**: EmuStart dawał fokus tylko pierwszemu
+  oknu emulatora, a RetroArch przy ładowaniu rdzenia tworzy okno pełnoekranowe od
+  nowa — bez fokusu Windows je minimalizował. Teraz okno emulatora jest pilnowane,
+  aż przez 3 s utrzyma się na wierzchu (najwyżej 25 s od startu).
+
+### Dodane
+- W logu czas od wybrania gry do startu emulatora (i ile z tego zajęła
+  synchronizacja profilu) — do diagnozy.
+
 ## [0.17.2] — 2026-10-08
 
 ### Naprawione

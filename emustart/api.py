@@ -490,12 +490,29 @@ class Api:
         """Okno EmuStart zostaje pod spodem; pilnujemy tylko, żeby emulator
         dostał fokus, gdy pokaże swoje okno."""
         def focus():
-            end = time.monotonic() + 15
+            # RetroArch (i inne) najpierw pokazuje okno, a przy ładowaniu rdzenia
+            # tworzy je od nowa na pełnym ekranie — wtedy fokus wracał do EmuStart,
+            # a pełnoekranowe okno bez fokusu Windows minimalizuje. Pilnujemy więc
+            # okna emulatora, aż przez 3 s utrzyma się na wierzchu (najwyżej 25 s).
+            end = time.monotonic() + 25
+            stable_since, last_push = None, 0.0
             while time.monotonic() < end and s.proc and s.proc.poll() is None:
+                if self._menu.get("open"):
+                    return                    # menu w grze — fokus należy do EmuStart
                 wins = winutil.windows_of(s.proc.pid)
                 if wins:
-                    winutil.bring_to_front(wins[0])
-                    return
+                    fg = winutil.foreground()
+                    ok = fg in wins and not winutil.is_iconic(fg)
+                    now = time.monotonic()
+                    if ok:
+                        stable_since = stable_since or now
+                        if now - stable_since >= 3:
+                            return
+                    else:
+                        stable_since = None
+                        if now - last_push >= 0.8:
+                            winutil.bring_to_front(wins[0])
+                            last_push = now
                 time.sleep(0.25)
         threading.Thread(target=focus, daemon=True, name="emu-focus").start()
 
