@@ -4,6 +4,29 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 [Keep a Changelog](https://keepachangelog.com/pl/1.1.0/), wersje według
 [SemVer](https://semver.org/lang/pl/).
 
+## [0.18.0] — 2026-10-08
+
+### Dodane
+- **Dema WHDLoad: dane z Pouet.net i Demozoo** — grupa, rok, party z miejscem
+  w konkursie, typ produkcji, opis i zrzut ekranu. Grupa z nazwy paczki rozstrzyga
+  między demami o tej samej nazwie („Megademo” Dragons ≠ „Megademo” Vision).
+  Na próbce z kolekcji: 12/12 trafionych, wszystkie ze zrzutem.
+- **Gry WHDLoad: metadane i grafiki** — LaunchBox (platforma Commodore Amiga)
+  z dopasowaniem „Kings Quest 5” = „King's Quest V”, „Speedball 2” = „Speedball 2:
+  Brutal Deluxe”; w ostateczności dane i grafiki tej samej gry z kolekcji zipów
+  Amigi. Na próbce 300 gier: 273 trafione (wcześniej 0 — LaunchBox nie znał
+  platformy tych systemów).
+
+### Naprawione
+- Dopasowanie w LaunchBox sprawdza numer części: „Back to the Future Part 3” nie
+  trafia już w „Part II”, „Might & Magic 3” w „Might and Magic II”, a dopasowanie po
+  początku tytułu wymaga podtytułu („Archon” ≠ „Archon II”, „A Train” ≠ „Trains”).
+
+### Zmienione
+- Jednorazowo przy starcie: grafiki i metadane dem WHDLoad przypisane wcześniej po
+  nazwie (z baz gier) są usuwane i pobierane od nowa z Pouet/Demozoo; gry WHDLoad
+  oznaczone jako „bez grafiki/opisu” są wyszukiwane ponownie.
+
 ## [0.17.3] — 2026-10-08
 
 ### Naprawione

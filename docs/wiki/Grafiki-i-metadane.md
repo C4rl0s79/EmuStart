@@ -27,6 +27,19 @@ Dopasowanie po nazwie w zewnętrznych bazach wymaga podobieństwa ≥ 0,8, żeby
 wstawiać okładek innych gier. Pojedynczą grafikę można wybrać ręcznie:
 przytrzymane A na grze → Okładka / Zrzut / Logo.
 
+## Amiga WHDLoad
+
+- **Gry** — szukane w LaunchBox (platforma Commodore Amiga) po tytule z nazwy paczki;
+  „Kings Quest 5” znajduje „King's Quest V”, „Speedball 2” — „Speedball 2: Brutal
+  Deluxe” (dalsza część musi być podtytułem, a numery części muszą się zgadzać).
+  W ostateczności dane i grafiki brane są z tej samej gry w kolekcji zipów Amigi.
+- **Dema** — dane z [Pouet.net](https://www.pouet.net) i [Demozoo](https://demozoo.org):
+  grupa, rok, party z miejscem w konkursie, typ (demo, intro, musicdisk…), opis
+  i zrzut ekranu (jako okładka i zrzut). Grupa z nazwy paczki (`…_v1.0_Hypnosis`)
+  rozstrzyga, gdy dem o tej samej nazwie jest kilka. Bez wyszukiwania po nazwie
+  w bazach gier. Zapytania są wysyłane spokojnie (najwyżej jedno na sekundę), więc
+  pełne pobranie dla ok. 900 dem trwa kilkadziesiąt minut.
+
 ## Miejsce na dysku
 
 - Grafiki zapisywane są **zmniejszone do rozmiaru ekranowego, w WebP**

@@ -111,7 +111,16 @@ def cleanup_tmp() -> int:
 
 
 def _download(es: str, name: str, kind: str) -> int | None:
-    """Tylko libretro (dokładnie + po liście plików): HAS / MISSING / None."""
+    """Tylko libretro (dokładnie + po liście plików): HAS / MISSING / None.
+    WHDLoad: dema — zrzut z Pouet/Demozoo, gry — najpierw z kolekcji zipów Amigi."""
+    if es in ("amigawhddemos", "amigawhdgames") and kind in ("box", "snap"):
+        got = art_sources.Sources.__new__(art_sources.Sources)
+        res = got._scene(name, {kind}) if es == "amigawhddemos" else got._whd_sibling(name, {kind})
+        if kind in res:
+            save(es, name, kind, res[kind][0])
+            return HAS
+        if es == "amigawhddemos":
+            return MISSING if art_sources.online() else None
     data = art_sources.from_libretro(es, name, kind)
     if data:
         save(es, name, kind, data)
@@ -169,7 +178,10 @@ class Fetcher:
         if not r:
             return
         if self._logos() and not r["art_logo"]:
-            self._fetch_logo(gid, r)
+            if r["es"] == "amigawhddemos":
+                library.set_art(gid, "logo", MISSING)   # dema nie mają logo w bazach gier
+            else:
+                self._fetch_logo(gid, r)
         for kind, state in (("box", r["art_box"]), ("snap", r["art_snap"])):
             if state:
                 continue
@@ -369,3 +381,36 @@ class Job:
             if need - set(got):
                 self.missing += 1
             self.done += 1
+
+
+def reset_system(es: str) -> int:
+    """Usuwa pobrane grafiki i automatyczne metadane systemu (ręczne poprawki
+    zostają) — np. dema WHDLoad, którym wcześniej przypisano grafiki gier po nazwie."""
+    import shutil as _sh
+    d = paths.MEDIA / es
+    n = sum(1 for _ in d.glob("*")) if d.is_dir() else 0
+    _sh.rmtree(d, ignore_errors=True)
+    con = library.db()
+    with con:
+        con.execute("UPDATE games SET art_box=0, art_snap=0, art_logo=0 WHERE es=?", (es,))
+        con.execute("UPDATE game_meta SET data='{}', online=0 WHERE game_id IN "
+                    "(SELECT id FROM games WHERE es=?)", (es,))
+    log.info("%s: usunięto %d grafik i metadane pobrane automatycznie", es, n)
+    return n
+
+
+def retry_missing(es: str) -> None:
+    """Ponowne szukanie: grafiki oznaczone jako brakujące i metadane z LaunchBoksa
+    (np. gry WHDLoad, zanim LaunchBox znał ich platformę). Pobrane zostają."""
+    import json as _json
+    con = library.db()
+    with con:
+        for col in ("art_box", "art_snap", "art_logo"):
+            con.execute(f"UPDATE games SET {col}=0 WHERE es=? AND {col}=?", (es, MISSING))
+        rows = con.execute("SELECT m.game_id, m.data FROM game_meta m JOIN games g ON g.id=m.game_id "
+                           "WHERE g.es=?", (es,)).fetchall()
+        for r in rows:
+            d = _json.loads(r["data"] or "{}")
+            if d.pop("_lb_checked", None) is not None:
+                con.execute("UPDATE game_meta SET data=?, online=0 WHERE game_id=?",
+                            (_json.dumps(d, ensure_ascii=False), r["game_id"]))

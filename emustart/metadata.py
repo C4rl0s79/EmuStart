@@ -451,16 +451,59 @@ def fill_launchbox(cfg: dict, game: dict) -> bool:
     g = launchbox.find_game(game["es"], game["name"], setname)
     got = {"_lb_checked": 1}
     new_desc = False
-    if g:
-        for k, v in launchbox.metadata_of(g).items():
-            if k == "description":
-                if not auto.get("description"):
-                    got[k] = v
-                    new_desc = True
-            elif not auto.get(k):
+    if game["es"] == "amigawhddemos":
+        g = None                      # dema: Pouet/Demozoo (fill_scene), nie gry z LaunchBoksa
+    data = launchbox.metadata_of(g) if g else {}
+    if not data.get("description"):
+        sib = whd_sibling(game)       # w ostateczności: ta sama gra z kolekcji zipów Amigi
+        if sib:
+            data = {**{k: v for k, v in get(sib["id"]).items() if k in FIELDS and v}, **data}
+    for k, v in data.items():
+        if k == "description":
+            if not auto.get("description"):
                 got[k] = v
+                new_desc = True
+        elif not auto.get(k):
+            got[k] = v
     _store(game["id"], got)
+    if game["es"] == "amigawhddemos" and fill_scene(game):
+        new_desc = True
     return new_desc
+
+
+def whd_sibling(game: dict) -> dict | None:
+    """Ta sama gra w kolekcji Amigi (zipy No-Intro) — dla gry WHDLoad."""
+    from emustart import launchbox, library
+    if game["es"] != "amigawhdgames":
+        return None
+    key = launchbox.norm_title(game["title"] or game["name"])
+    if len(key) < 3:
+        return None
+    best = None
+    for r in library.db().execute("SELECT id, es, name, title, art_box, art_snap, art_logo FROM games "
+                                  "WHERE es='amiga' AND hidden=0"):
+        k = launchbox.norm_title(r["title"] or r["name"])
+        if k == key:
+            r = dict(r)
+            # wersja z grafiką i opisem przed pierwszą lepszą
+            score = (r["art_box"] == 1) + (r["art_snap"] == 1) + bool(get(r["id"]).get("description"))
+            if not best or score > best[0]:
+                best = (score, r)
+    return best[1] if best else None
+
+
+def fill_scene(game: dict) -> bool:
+    """Dema WHDLoad: dane z Pouet.net / Demozoo (sieć). True, gdy znaleziono."""
+    from emustart import demoscene
+    if game["es"] != "amigawhddemos" or get(game["id"]).get("_auto", {}).get("_scene_checked"):
+        return False
+    p = demoscene.find(Path(game["rel"]).stem)
+    got = {"_scene_checked": 1}
+    if p:
+        got.update(demoscene.metadata(p))
+        got["scene_shot"] = p.get("screenshot", "")
+    _store(game["id"], got)
+    return bool(p)
 
 
 def fill_wikipedia(game: dict) -> bool:
@@ -480,6 +523,9 @@ def fetch_online(cfg: dict, game: dict, igdb: art_sources.Igdb | None = None,
     Zapisuje i zwraca scalone metadane."""
     ensure_local(cfg, game)
     fill_launchbox(cfg, game)
+    if game["es"] == "amigawhddemos":
+        _store(game["id"], {}, online=True)       # dema: Pouet/Demozoo, bez IGDB i Wikipedii
+        return get(game["id"])
     title = art_sources.plain_title(game["name"])
     plat = systems.info(game["es"])["plat"]
     if igdb is None:

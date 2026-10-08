@@ -48,7 +48,8 @@ PLATFORMS = {
     "supergrafx": "PC Engine SuperGrafx", "pc88": "NEC PC-8801", "pc98": "NEC PC-9801",
     "atari2600": "Atari 2600", "atari5200": "Atari 5200", "atari7800": "Atari 7800",
     "atarijaguar": "Atari Jaguar", "lynx": "Atari Lynx", "atari800": "Atari 800", "atarist": "Atari ST",
-    "3do": "3DO Interactive Multiplayer", "amiga": "Commodore Amiga", "c64": "Commodore 64",
+    "3do": "3DO Interactive Multiplayer", "amiga": "Commodore Amiga",
+    "amigawhdgames": "Commodore Amiga", "amigawhddemos": "Commodore Amiga", "c64": "Commodore 64",
     "vic20": "Commodore VIC-20", "plus4": "Commodore Plus 4", "msx": "Microsoft MSX",
     "msx2": "Microsoft MSX2", "ngp": "SNK Neo Geo Pocket", "ngpc": "SNK Neo Geo Pocket Color",
     "wswan": "WonderSwan", "wswanc": "WonderSwan Color", "odyssey2": "Magnavox Odyssey 2",
@@ -404,11 +405,64 @@ def find_game(es: str, name: str, setname: str = "") -> dict | None:
             continue
         rows = [dict(r) for r in con.execute(
             "SELECT * FROM games WHERE id IN (%s)" % ",".join("?" * len(gids)), gids)]
+        rows = [r for r in rows if _nums_ok(t, r["name"])]   # „Part 3” ≠ „Part II”
+        if not rows:
+            continue
         best = max(rows, key=lambda g: (art_sources.similarity(art_sources.plain_title(t), g["name"]),
                                         bool(g["overview"])))
         if art_sources.similarity(art_sources.plain_title(t), best["name"]) >= 0.6 or len(rows) == 1:
             return best
+    return _find_variants(con, plat, name) if plat else None
+
+
+_ROMAN = {"1": "i", "2": "ii", "3": "iii", "4": "iv", "5": "v", "6": "vi", "7": "vii", "8": "viii",
+          "9": "ix", "10": "x"}
+
+
+def _find_variants(con, plat: str, name: str) -> dict | None:
+    """Ostatnie próby (np. nazwy WHDLoad): „Kings Quest 5” = „King's Quest V”,
+    „Speedball 2” = „Speedball 2: Brutal Deluxe” (ten sam początek tytułu)."""
+    n = norm_title(name)
+    if len(n) < 5:
+        return None
+    variants = [re.sub(r"(\d+)$", lambda m: _ROMAN.get(m.group(1), m.group(1)), n)]
+    variants = [v for v in variants if v != n]
+    for v in variants:
+        r = con.execute("SELECT gid FROM names WHERE platform=? AND norm=? LIMIT 1", (plat, v)).fetchone()
+        if r:
+            return dict(con.execute("SELECT * FROM games WHERE id=?", (r["gid"],)).fetchone())
+    for v in [n] + variants:
+        rows = con.execute("SELECT gid, norm FROM names WHERE platform=? AND norm LIKE ? LIMIT 30",
+                           (plat, v + "%")).fetchall()
+        ok = []
+        for r in sorted(rows, key=lambda r: len(r["norm"])):
+            g = dict(con.execute("SELECT * FROM games WHERE id=?", (r["gid"],)).fetchone())
+            # dalsza część musi być podtytułem: „Xenon 2: Megablast”, nie „Archon II”
+            main = re.split(r":| - ", g["name"], maxsplit=1)[0]
+            if norm_title(main) in (n, *variants) and _nums_ok(name, g["name"]):
+                ok.append(g)
+        if ok:
+            return ok[0]
     return None
+
+
+_ROMAN_INT = {"ii": 2, "iii": 3, "iv": 4, "v": 5, "vi": 6, "vii": 7, "viii": 8, "ix": 9, "x": 10}
+
+
+def _nums(title: str) -> set:
+    """Numery części w głównym tytule (przed „:”/„ - ”), rzymskie jako liczby."""
+    main = re.split(r":| - ", _TAG_RE.sub(" ", title or ""), maxsplit=1)[0]
+    out = set()
+    for w in re.findall(r"[a-z0-9]+", main.lower()):
+        if w.isdigit():
+            out.add(int(w))
+        elif w in _ROMAN_INT:
+            out.add(_ROMAN_INT[w])
+    return out
+
+
+def _nums_ok(a: str, b: str) -> bool:
+    return _nums(a) == _nums(b)
 
 
 def metadata_of(g: dict) -> dict:

@@ -154,6 +154,12 @@ class Api:
         zalogowane w emulatorach → profil tego komputera, ustawienia EmuStart profilu."""
         try:
             launcher.cleanup_run_dirs()
+            if library.meta_get("demos_reset", "") != "1":
+                art.reset_system("amigawhddemos")
+                library.meta_set("demos_reset", "1")
+            if library.meta_get("whd_games_retry", "") != "1":
+                art.retry_missing("amigawhdgames")
+                library.meta_set("whd_games_retry", "1")
             if library.meta_get("secrets_scrubbed", "") != "1" and profiles.nas_online(self._cfg):
                 profiles.scrub_settings_copies(self._cfg)
                 library.meta_set("secrets_scrubbed", "1")

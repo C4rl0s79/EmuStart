@@ -21,6 +21,7 @@ EmuStart łączy się tylko z:
   (grafiki, pobieranie emulatorów i rdzeni),
 - gamesdb.launchbox-app.com (baza LaunchBox), Wikipedią/Wikidatą (opisy),
 - SteamGridDB, IGDB, TheGamesDB (gdy są klucze),
+- api.pouet.net i demozoo.org (dane dem Amigi),
 - retroachievements.org (logowanie).
 
 Wszystko przez HTTPS, z identyfikatorem programu w nagłówku User-Agent

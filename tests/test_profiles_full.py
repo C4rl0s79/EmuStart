@@ -597,3 +597,38 @@ def test_sync_down_skips_nas_walk_when_nothing_changed(prof_env, monkeypatch):
     (nas / ".emustart-stamp").write_text("pc2", encoding="utf-8")
     assert profiles.sync_down(cfg, pid, "retroarch", ["saves"]) == 1
     assert (local / "inna.srm").read_bytes() == b"X"
+
+
+def test_launchbox_part_numbers():
+    from emustart import launchbox
+    assert launchbox._nums("Back to the Future Part III") == {3}
+    assert launchbox._nums_ok("Kings Quest 5", "King's Quest V: Absence Makes the Heart Go Yonder!")
+    assert not launchbox._nums_ok("Might & Magic 3", "Might and Magic II")
+    assert not launchbox._nums_ok("Archon", "Archon II: Adept")
+    assert launchbox._nums_ok("Frontier", "Frontier: Elite II")          # numer w podtytule się nie liczy
+
+
+def test_demoscene_matching_by_group(monkeypatch):
+    from emustart import demoscene
+    assert demoscene.split_whd("242_v1.2_Fairlight&VirtualDreams") == ("242", ["Fairlight", "Virtual Dreams"])
+    assert demoscene.split_whd("Numb_v1.2_Movement_AGA") == ("Numb", ["Movement"])
+    cands = [("Megademo", ["Vision"], "vision"), ("Megademo", ["Dragons"], "dragons")]
+    assert demoscene._pick(cands, "Megademo", ["Dragons"]) == "dragons"
+    assert demoscene._pick(cands[:1], "Megademo", ["Vortex 42"]) is None       # inna grupa
+    meta = demoscene.metadata({"groups": ["Crionics", "The Silents"], "date": "1991-12-15", "type": "demo",
+                               "party": "The Party", "party_year": "1991", "place": "1", "compo": "Amiga demo",
+                               "url": "https://www.pouet.net/prod.php?which=981"})
+    assert meta["year"] == "1991" and meta["developer"] == "Crionics & The Silents" and meta["genre"] == "Demo"
+    assert "The Party 1991 (Amiga demo), 1. miejsce" in meta["description"]
+
+
+def test_reset_demo_art(env, tmp_path, monkeypatch):
+    from emustart import art, library
+    monkeypatch.setattr(paths, "MEDIA", tmp_path / "media")
+    _write(tmp_path / "media" / "amigawhddemos" / "X.box.png", b"zla")
+    with library.db() as c:
+        c.execute("INSERT INTO games(es, rel, name, title, tags, files, size, art_box, seen) "
+                  "VALUES('amigawhddemos','X.lha','X','X','','[]',0,1,0)")
+    assert art.reset_system("amigawhddemos") == 1
+    assert library.db().execute("SELECT art_box FROM games WHERE es='amigawhddemos'").fetchone()[0] == 0
+    assert not (tmp_path / "media" / "amigawhddemos").exists()

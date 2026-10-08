@@ -29,7 +29,7 @@ from emustart import paths, systems
 log = logging.getLogger("emustart.art_sources")
 
 MATCH_MIN = 0.8
-UA = {"User-Agent": "EmuStart/0.17 (+https://github.com/C4rl0s79/EmuStart)"}
+UA = {"User-Agent": "EmuStart/0.18 (+https://github.com/C4rl0s79/EmuStart)"}
 INDEX_TTL = 30 * 86400
 
 # platformy IGDB / TheGamesDB dla kodów z systems.py
@@ -402,11 +402,45 @@ class Sources:
                 "igdb": bool(self.igdb.cid and self.igdb.secret), "tgdb": bool(self.tgdb.key),
                 "tgdb_remaining": Tgdb.remaining}
 
+    def _whd_sibling(self, name: str, need: set) -> dict:
+        """Gra WHDLoad: grafiki tej samej gry z kolekcji zipów Amigi (już pobrane)."""
+        from emustart import art, library, metadata
+        r = library.db().execute("SELECT * FROM games WHERE es='amigawhdgames' AND name=?", (name,)).fetchone()
+        sib = metadata.whd_sibling(dict(r)) if r else None
+        out = {}
+        for kind in need if sib else ():
+            if sib.get(f"art_{kind}") == 1:
+                p = art.media_path("amiga", sib["name"], kind)
+                try:
+                    out[kind] = (p.read_bytes(), "kolekcja Amiga")
+                except OSError:
+                    pass
+        return out
+
+    def _scene(self, name: str, need: set) -> dict:
+        """Demo WHDLoad: zrzut ekranu z Pouet.net / Demozoo (także jako okładka —
+        dema nie mają pudełek). Bez wyszukiwania po nazwie w bazach gier."""
+        from emustart import library, metadata
+        r = library.db().execute("SELECT * FROM games WHERE es='amigawhddemos' AND name=?", (name,)).fetchone()
+        if not r:
+            return {}
+        g = dict(r)
+        metadata.fill_scene(g)
+        url = metadata.get(g["id"]).get("scene_shot") or ""
+        data = fetch(url) if url else None
+        if not is_image(data):
+            return {}
+        return {k: (data, "pouet" if "pouet" in url else "demozoo") for k in need & {"box", "snap"}}
+
     def find(self, es: str, name: str, need: set, setname: str = "") -> dict:
         """{kind: (bytes, źródło)} dla rodzajów z `need` ({'box','snap','logo'})."""
         from emustart import launchbox
         out = {}
-        for kind in need - {"logo"}:
+        if es == "amigawhddemos":
+            return self._scene(name, need)
+        if es == "amigawhdgames":
+            out.update(self._whd_sibling(name, need))
+        for kind in need - {"logo"} - set(out):
             data = from_libretro(es, name, kind)
             if data:
                 out[kind] = (data, "libretro")
