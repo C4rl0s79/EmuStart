@@ -56,7 +56,7 @@ Zapisy z gry są **wspólne z komputerem**:
 
 | Emulator w telefonie | Co jest synchronizowane | Na serwerze (wspólne z PC) |
 |---|---|---|
-| RetroArch | zapisy gry (`.srm`, `.sav`, …) | `saveetroarch\saves` |
+| RetroArch | zapisy gry (`.srm`, `.sav`, …) | `save\retroarch\saves` |
 | DuckStation | karty pamięci gry (`<gra>_1.mcd`, `shared_card_*`) | `save\duckstation\memcards` |
 | ArmSX2, AetherSX2 / NetherSX2 | karty `Mcd001.ps2`, `Mcd002.ps2` | `save\pcsx2\memcards` (PCSX2) |
 
