@@ -17,7 +17,7 @@ import time
 from pathlib import Path
 
 from emustart import (__version__, art, bios, art_sources, cache, ingame, installer, launchbox, logos, sysinfo, metadata, pads, profiles, uipad, config, emulators, launcher, library,
-                      netsrc, paths, scanner, systems, winutil)
+                      nasfs, netsrc, paths, scanner, systems, winutil)
 
 log = logging.getLogger("emustart.api")
 
@@ -64,8 +64,9 @@ class Api:
         profiles.adopt_existing_install()  # aktualizacja: komputer już ma swój profil
         self._uipad = uipad.UiPad(self._uipad_active) if self.pad_backend() == "python" else None
         self._profile = self._initial_profile()
-        threading.Thread(target=lambda: profiles.sync_pending(self._cfg), daemon=True,
-                         name="sync-pending").start()
+        # lokalne save'y i ustawienia profili → NAS/serwer (zaległe po grze bez połączenia,
+        # pierwsze przejście na serwer); gra uruchomiona w tym czasie poczeka (post_busy)
+        launcher.start_post(lambda: profiles.push_all(self._cfg), "zapisy profili")
         threading.Thread(target=self._profiles_bootstrap, daemon=True, name="profiles").start()
         threading.Thread(target=self._arcade_meta, daemon=True, name="arcade-meta").start()
         threading.Thread(target=self._platforms_meta, daemon=True, name="platforms").start()
@@ -1006,6 +1007,7 @@ class Api:
                 "server_url_guess": netsrc.guess_url(config.rom_roots(cfg)) if not cfg.get("server_url") else "",
                 "server_key": cfg.get("server_key", ""),
                 "server_games": cfg.get("server_games", True),
+                "server_profiles": cfg.get("server_profiles", True),
                 **{k: bool(cfg.get(k)) for k in self.HIDE_KEYS},
                 "ask_profile": profiles.ask_at_start(),
                 "machine_profile": profiles.machine_owner(),
@@ -1018,7 +1020,7 @@ class Api:
         if r.get("ok") and "find" not in r.get("features", []):
             r = {**r, "ok": False, "reason": f"serwer {r.get('name')} ma EmuStart {r.get('version')} — "
                                              "zaktualizuj go do wersji z pobieraniem gier przez serwer"}
-        return {k: v for k, v in r.items() if k != "features"}
+        return {k: v for k, v in r.items() if k not in ("features", "nas_id")}
 
     def server_paste_key(self) -> dict:
         """Klucz serwera ze schowka (EmuStart.exe --server-key na serwerze kopiuje go)."""
@@ -1054,8 +1056,12 @@ class Api:
         for k in ("server_url", "server_key"):
             if k in data:
                 cfg[k] = str(data[k]).strip()
-        if "server_games" in data:
-            cfg["server_games"] = bool(data["server_games"])
+        for k in ("server_games", "server_profiles"):
+            if k in data:
+                cfg[k] = bool(data[k])
+        if any(k in data for k in ("server_url", "server_key", "server_profiles")):
+            nasfs.reset()
+            netsrc._info.clear()
         if data.get("pad_backend") in ("python", "browser", "none"):
             cfg["pad_backend"] = data["pad_backend"]
         for k in ("fullscreen", "hide_arcade_clones", "games_logo", *self.HIDE_KEYS):

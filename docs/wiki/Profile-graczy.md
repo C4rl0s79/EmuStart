@@ -39,6 +39,15 @@ Nowy profil zaczyna od bieżących ustawień.
 nowsze lokalne → NAS (`Z:\emustart\Profiles\<profil>\`). Nadpisywane wersje trafiają
 do kopii zapasowych. Szczegóły: [Kilka komputerów, jeden NAS](Kilka-komputerów-jeden-NAS).
 
+**Przez serwer EmuStart.** Gdy w Ustawieniach jest [serwer EmuStart](Serwer-dla-Androida)
+(i włączone „Zapisy i profile przez serwer”), zapisy, ustawienia, blokada profilu
+i stany wznowienia idą przez serwer zamiast przez SMB: pliki są skompresowane
+(pusta karta pamięci PS2 8 MB → kilka KB), kopię zapasową nadpisywanej wersji robi
+serwer u siebie, kilka plików idzie naraz. To ten sam folder `Profiles` na NAS-ie —
+komputery przez SMB i przez serwer mogą działać równocześnie. Serwer niedostępny —
+przez SMB jak dotąd. Przy starcie EmuStart wysyła wszystkie lokalne zapisy, których
+nie ma na NAS-ie (np. z gry bez połączenia).
+
 **Blokada.** Ten sam profil nie może grać na dwóch komputerach naraz — drugi
 dostaje komunikat „Profil gra teraz na komputerze …” (wymaga dostępu do NAS-a).
 

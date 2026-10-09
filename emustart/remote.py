@@ -11,6 +11,16 @@ Serwer działa na komputerze z grami (NAS) i udostępnia przez HTTP (Tailscale):
                                          kilkoma strumieniami, wznawianie)
     GET /media/…                         grafiki (jak w UI)
 
+Folder profili (zapisy, ustawienia, blokady — EmuStart na Windows i Androidzie):
+
+    GET    /v1/nas/scan?p=…              pliki pod ścieżką: {ścieżka: [rozmiar, czas]}
+    GET    /v1/nas/list?p=…              zawartość folderu: [[nazwa, czy_folder]]
+    GET    /v1/nas/stat?p=…              rozmiar i czas pliku
+    GET    /v1/nas/file?p=…              plik (zstd, gdy klient obsługuje); X-Mtime
+    PUT    /v1/nas/file?p=…&mtime=…&backup=…   zapis atomowy; poprzednia wersja do
+                                         kopii zapasowej (przycinanej do ostatnich 10)
+    DELETE /v1/nas/file?p=…
+
 Każde zapytanie wymaga klucza serwera: nagłówek `Authorization: Bearer <klucz>`
 albo parametr `?k=<klucz>` (dla <img> w WebView). Klucz powstaje przy pierwszym
 starcie serwera (config.json → server_token); `--server-key` go wypisuje.
@@ -33,6 +43,8 @@ from emustart import __version__, config
 log = logging.getLogger("emustart.remote")
 
 API = None                    # emustart.api.Api (tryb serwera)
+NAS_ROOT: Path | None = None  # folder profili na tym komputerze (None = nie znaleziono)
+NAS_ID = ""
 DEFAULT_PORT = 8740
 CHUNK = 1024 * 1024
 
@@ -84,8 +96,11 @@ def handle(handler) -> None:
     parts = [p for p in path.split("/") if p][1:]           # bez „v1”
     try:
         if parts == ["info"]:
+            feats = ["find"] + (["nas"] if NAS_ROOT else [])
             return _json(handler, {"name": socket.gethostname(), "version": __version__, "api": 1,
-                                   "features": ["find"]})
+                                   "features": feats, "nas_id": NAS_ID})
+        if parts and parts[0] == "nas":
+            return _nas(handler, "GET", parts[1:])
         if parts == ["find"]:
             return _find(handler)
         if parts == ["systems"]:
@@ -120,6 +135,140 @@ def handle(handler) -> None:
             _json(handler, {"error": str(ex)}, 500)
         except OSError:
             pass
+
+
+def find_nas_root(cfg: dict) -> Path | None:
+    r"""Folder profili na komputerze z serwerem: `profiles_nas` z ustawień, a gdy go tu
+    nie ma — `emustart\Profiles` w którymś folderze nadrzędnym folderów z grami
+    (klienci widzą go przez udział, np. Z:\emustart\Profiles = <udział>\emustart\Profiles)."""
+    own = cfg.get("profiles_nas") or ""
+    if own and Path(own).is_dir():
+        return Path(own)
+    for r in config.rom_roots(cfg):
+        for d in [Path(r), *Path(r).parents]:
+            cand = d / "emustart" / "Profiles"
+            try:
+                if cand.is_dir():
+                    return cand
+            except OSError:
+                continue
+    return None
+
+
+def init_nas(cfg: dict) -> None:
+    """Przy starcie serwera: folder profili i jego znacznik (klient sprawdza, że przez
+    SMB widzi ten sam folder)."""
+    global NAS_ROOT, NAS_ID
+    from emustart import nasfs
+    NAS_ROOT = find_nas_root(cfg)
+    NAS_ID = nasfs.root_id(NAS_ROOT, create=True) if NAS_ROOT else ""
+    log.info("folder profili serwera: %s", NAS_ROOT or "nie znaleziono (zapisy przez SMB)")
+
+
+def handle_write(handler, method: str) -> None:
+    """PUT/DELETE /v1/nas/… (zapis w folderze profili)."""
+    if not authorized(handler):
+        return _json(handler, {"error": "brak lub zły klucz serwera"}, 401)
+    path = urllib.parse.unquote(urllib.parse.urlsplit(handler.path).path)
+    parts = [p for p in path.split("/") if p][1:]
+    if not parts or parts[0] != "nas":
+        n = int(handler.headers.get("Content-Length") or 0)
+        if n:
+            handler.rfile.read(min(n, 1 << 20))
+        handler.close_connection = True
+        return _json(handler, {"error": "nieznany adres"}, 404)
+    # treść odczytana od razu: odpowiedź z błędem przy nieprzeczytanej treści psuje
+    # utrzymywane połączenie (Windows zrywa je zamiast zamknąć)
+    from emustart import nasfs
+    n = int(handler.headers.get("Content-Length") or 0)
+    if n > nasfs.MAX_BODY:
+        handler.close_connection = True
+        return _json(handler, {"error": "za duży plik"}, 413)
+    handler.body = handler.rfile.read(n) if n else b""
+    try:
+        return _nas(handler, method, parts[1:])
+    except (BrokenPipeError, ConnectionResetError):
+        pass
+    except Exception as ex:
+        log.exception("API zdalne %s %s", method, path)
+        handler.close_connection = True
+        try:
+            _json(handler, {"error": str(ex)}, 500)
+        except OSError:
+            pass
+
+
+def _nas(handler, method: str, parts: list) -> None:
+    from emustart import nasfs
+    import time as _time
+    q = urllib.parse.parse_qs(urllib.parse.urlsplit(handler.path).query)
+    arg = lambda k: (q.get(k) or [""])[0]      # noqa: E731
+    if NAS_ROOT is None:
+        return _json(handler, {"error": "serwer nie ma folderu profili"}, 404)
+    try:
+        rel = nasfs.clean_rel(arg("p"))
+    except ValueError as ex:
+        return _json(handler, {"error": str(ex)}, 400)
+    target = NAS_ROOT / rel if rel else NAS_ROOT
+    op = parts[0] if parts else ""
+    if method == "GET" and op == "scan":
+        return _json(handler, {"files": {k: list(v) for k, v in nasfs.scan_dir(target).items()}})
+    if method == "GET" and op == "list":
+        try:
+            ents = [[e.name, e.is_dir()] for e in os.scandir(target)]
+        except OSError:
+            return _json(handler, {"error": "nie ma"}, 404)
+        return _json(handler, {"entries": ents})
+    if method == "GET" and op == "stat":
+        try:
+            st = target.stat()
+        except OSError:
+            return _json(handler, {"error": "nie ma"}, 404)
+        return _json(handler, {"size": st.st_size, "mtime": st.st_mtime, "dir": target.is_dir()})
+    if method == "GET" and op == "file":
+        try:
+            st = target.stat()
+            data = target.read_bytes() if target.is_file() else None
+        except OSError:
+            data = None
+        if data is None:
+            return _json(handler, {"error": "nie ma"}, 404)
+        enc = ""
+        z = nasfs._zstd()
+        if z and "zstd" in (handler.headers.get("Accept-Encoding") or "") and len(data) >= nasfs.ZSTD_MIN:
+            packed = z.compress(data, 3)
+            if len(packed) < len(data):
+                data, enc = packed, "zstd"
+        handler.send_response(200)
+        handler.send_header("Content-Type", "application/octet-stream")
+        handler.send_header("Content-Length", str(len(data)))
+        handler.send_header("X-Mtime", repr(st.st_mtime))
+        if enc:
+            handler.send_header("Content-Encoding", enc)
+        handler.end_headers()
+        handler.wfile.write(data)
+        return
+    if method == "PUT" and op == "file":
+        if not rel or rel == nasfs.ROOT_MARK:
+            return _json(handler, {"error": "zła ścieżka"}, 400)
+        body = getattr(handler, "body", b"")
+        if (handler.headers.get("Content-Encoding") or "") == "zstd":
+            body = nasfs._zstd().decompress(body)
+        backup = arg("backup")
+        if backup:
+            brel = nasfs.clean_rel(backup)
+            nasfs.backup_copy(target, NAS_ROOT / brel)
+            broot = nasfs.backup_root(brel)
+            if broot:
+                nasfs.prune_backups(NAS_ROOT / broot)
+        mtime = float(arg("mtime") or 0) or _time.time()
+        nasfs.write_atomic(target, body, mtime)
+        return _json(handler, {"ok": True, "size": len(body)})
+    if method == "DELETE" and op == "file":
+        if rel and rel != nasfs.ROOT_MARK and target.is_file():
+            target.unlink()
+        return _json(handler, {"ok": True})
+    return _json(handler, {"error": "nieznana operacja"}, 404)
 
 
 def _find(handler) -> None:

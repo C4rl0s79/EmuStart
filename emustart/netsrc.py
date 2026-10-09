@@ -170,7 +170,7 @@ def info(cfg: dict, fresh: bool = False) -> dict:
         else:
             d = json.loads(body)
             res = {"ok": True, "name": d.get("name", ""), "version": d.get("version", ""),
-                   "features": d.get("features") or [], "rtt": rtt}
+                   "features": d.get("features") or [], "nas_id": d.get("nas_id", ""), "rtt": rtt}
     except (OSError, http.client.HTTPException, ValueError) as ex:
         res = {"ok": False, "reason": f"brak połączenia z {ep[0]}:{ep[1]} ({ex})"}
     with _info_lock:

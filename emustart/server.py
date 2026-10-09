@@ -71,6 +71,20 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def do_PUT(self):
+        if urllib.parse.urlsplit(self.path).path.startswith("/v1/"):
+            from emustart import remote      # zapis w folderze profili (z kluczem)
+            return remote.handle_write(self, "PUT")
+        self.close_connection = True
+        return self.send_error(405)
+
+    def do_DELETE(self):
+        if urllib.parse.urlsplit(self.path).path.startswith("/v1/"):
+            from emustart import remote
+            return remote.handle_write(self, "DELETE")
+        self.close_connection = True
+        return self.send_error(405)
+
     def do_GET(self):
         raw = urllib.parse.urlsplit(self.path).path
         if raw.startswith("/v1/"):

@@ -775,6 +775,8 @@ function buildSetRows() {
     S.settings = await api().get_settings(); renderSettings(); toast("Klucz zapisany"); } });
   rows.push({ k: "Gry z serwera", key: "server_games", type: "bool",
               fmt: (v) => (v ? "tak — 8 strumieni; gdy serwer nie ma gry albo nie odpowiada: SMB" : "nie — zawsze SMB") });
+  rows.push({ k: "Zapisy i profile przez serwer", key: "server_profiles", type: "bool",
+              fmt: (v) => (v ? "tak — kopie zapasowe robi serwer, pliki skompresowane; gdy serwer nie odpowiada: SMB" : "nie — zawsze SMB") });
   rows.push({ k: "Sprawdź połączenie", type: "action", run: async () => {
     toast("Łączę z serwerem…", 10000); const r = await api().server_test();
     toast(r.ok ? `Połączono: ${r.name} (EmuStart ${r.version}), ${Math.round(r.rtt * 1000)} ms` : `Błąd: ${r.reason}`, 6000); } });
@@ -1123,7 +1125,7 @@ async function pollCopies() {
     if (S.artJob) $("artInfo").textContent = `🖼 grafiki ${S.artJob.done}/${S.artJob.total}` +
       (S.artJob.total ? ` (${Math.floor((100 * S.artJob.done) / S.artJob.total)}%)` : "");
     const post = await api().post_status();
-    $("syncInfo").textContent = post ? `⇅ zapisuję save'y na NAS: ${post}` : "";
+    $("syncInfo").textContent = post ? `⇅ wysyłam zapisy: ${post}` : "";
     $("syncInfo").classList.toggle("hidden", !post);
     const list = await api().copy_status();
     const el = $("copyInfo");

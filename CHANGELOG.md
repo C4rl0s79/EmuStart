@@ -8,6 +8,26 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.24.0] — 2026-10-09
+
+### Dodane
+- **Zapisy, ustawienia emulatorów, blokada profilu i stany wznowienia przez serwer
+  EmuStart** zamiast przez SMB (Ustawienia → Serwer EmuStart → „Zapisy i profile przez
+  serwer”, domyślnie włączone):
+  - pliki skompresowane zstd (pusta karta pamięci PS2 8 MB → kilka KB),
+  - kopię zapasową nadpisywanej wersji robi serwer u siebie — przez SMB szła najpierw
+    do komputera i z powrotem,
+  - kilka plików naraz, jedno zapytanie zamiast wielu wymian SMB.
+  Ten sam folder `Profiles` na NAS-ie: serwer znajduje go sam i oznacza znacznikiem;
+  klient wybiera serwer tylko przy zgodnym znaczniku. Serwer niedostępny — SMB.
+- **Przy starcie EmuStart wysyła wszystkie lokalne zapisy i ustawienia profili**, których
+  nie ma na NAS-ie / serwerze (gra uruchomiona w tym czasie czeka na koniec wysyłki).
+- Serwer: `/v1/nas/…` (lista, odczyt, zapis z kopią zapasową, usuwanie w folderze profili).
+  **Serwer na komputerze z grami trzeba zaktualizować do 0.24.0.**
+
+### Zmienione
+- Pasek stanu: „⇅ wysyłam zapisy: …” (przez serwer albo NAS).
+
 ## [0.23.0] — 2026-10-09
 
 ### Dodane

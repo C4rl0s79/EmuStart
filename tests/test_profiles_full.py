@@ -15,11 +15,14 @@ from emustart import art, dstoken, ingame, launcher, paths, profiles
 from test_core import _write, env  # noqa: F401  (fixture)
 
 
-@pytest.fixture()
-def prof_env(env, monkeypatch):
+@pytest.fixture(params=["nas", "serwer"])
+def prof_env(env, monkeypatch, request):
     cfg, roms, tmp = env
     monkeypatch.setattr(profiles, "LOCAL", tmp / "profiles")
     cfg["profiles_nas"] = str(tmp / "nas")
+    if request.param == "serwer":            # te same testy przez serwer EmuStart (HTTP)
+        from _srv import use_server
+        use_server(cfg, tmp / "nas", monkeypatch)
     return cfg, tmp
 
 

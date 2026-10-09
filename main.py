@@ -128,6 +128,7 @@ def _server_mode() -> None:
         lines = [f"{c}: {'OK' if code == 0 else 'błąd'} {o[:120]}" for c, code, o in res]
         return _message(("Serwer będzie startował razem z Windows." if ok else
                          "Nie wszystko się udało — uruchom jako administrator.") + "\n\n" + "\n".join(lines))
+    remote.init_nas(api._cfg)             # folder profili (zapisy klientów przez serwer)
     base = server.start(port, dev_api=api, bind="0.0.0.0")
     log.info("serwer %s: API dla Androida na porcie %d; administracja: %s/index.html?dev",
              __import__("emustart").__version__, port, base.replace("0.0.0.0", "127.0.0.1"))

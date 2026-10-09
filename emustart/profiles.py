@@ -36,7 +36,7 @@ import threading
 import time
 from pathlib import Path
 
-from emustart import library, paths
+from emustart import library, nasfs, paths
 
 log = logging.getLogger("emustart.profiles")
 
@@ -98,9 +98,9 @@ def rename(pid: int, name: str, cfg: dict | None = None) -> None:
         c.execute("UPDATE profiles SET name=? WHERE id=?", (name, pid))
     if cfg is not None and prof and nas_online(cfg):
         new = _safe_name(name)
-        old_dir, new_dir = nas_root(cfg) / prof["nas_name"], nas_root(cfg) / new
+        fs = nasfs.backend(cfg)
         taken = library.db().execute("SELECT 1 FROM profiles WHERE nas_name=? AND id!=?", (new, pid)).fetchone()
-        if not old_dir.exists() and not new_dir.exists() and not taken:
+        if not fs.exists(prof["nas_name"]) and not fs.exists(new) and not taken:
             with library.db() as c:
                 c.execute("UPDATE profiles SET nas_name=? WHERE id=?", (new, pid))
 
@@ -272,12 +272,13 @@ def _nas_dir(cfg: dict, prof: dict) -> Path:
 
 
 def nas_online(cfg: dict) -> bool:
-    root = nas_root(cfg)
-    try:
-        root.mkdir(parents=True, exist_ok=True)
-        return root.is_dir()
-    except OSError:
-        return False
+    """Folder profili dostępny — przez serwer EmuStart albo SMB (nasfs.backend)."""
+    return nasfs.backend(cfg).online()
+
+
+def via(cfg: dict) -> str:
+    """„serwer” albo „NAS” — którędy idą zapisy (do komunikatów)."""
+    return nasfs.backend(cfg).name
 
 
 NAS_BACKUPS = 10        # tyle ostatnich kopii nadpisanych plików trzymamy na NAS
@@ -292,57 +293,119 @@ def _same_sig(a, b) -> bool:
 
 
 def _scan(root: Path) -> dict:
-    """{ścieżka względna: (rozmiar, czas)} — os.scandir: na Windows rozmiar i czas
-    przychodzą razem z listą plików, bez osobnego zapytania o każdy plik (na
-    NAS-ie przez sieć to różnica 27 s → 2 s dla kilkuset plików)."""
-    out, stack = {}, [root]
-    while stack:
-        d = stack.pop()
-        try:
-            with os.scandir(d) as it:
-                for e in it:
-                    try:
-                        if e.is_dir(follow_symlinks=False):
-                            stack.append(Path(e.path))
-                        elif e.is_file(follow_symlinks=False) and not e.name.endswith(".emustart-tmp"):
-                            st = e.stat()
-                            out[Path(e.path).relative_to(root)] = (st.st_size, st.st_mtime)
-                    except OSError:
-                        continue
-        except OSError:
-            continue
-    return out
+    """{ścieżka względna „/”: (rozmiar, czas)} — patrz nasfs.scan_dir."""
+    return nasfs.scan_dir(root)
 
 
-def _copy_newer(src: Path, dst: Path, backup: Path | None, man: dict | None = None,
-                prefix: str = "", conflicts: list | None = None, dst_known: bool = False) -> int:
-    """Kopiuje pliki, które w src są nowsze (albo ich brak w dst). Zwraca liczbę.
+SKIP = (".emustart-stamp",)
+PARALLEL = 4                # równoległe przesyłanie plików (przez serwer: osobne połączenia)
 
-    man: stan plików z ostatniej synchronizacji ({klucz: [rozmiar, czas]}) —
-    gdy od tamtej pory zmieniły się OBIE strony (gra na dwóch komputerach bez
-    NAS-a), to konflikt: wygrywa nowszy, przegrany trafia do `backup`.
-    dst_known: cel nie zmienił się od ostatniej synchronizacji (znacznik na NAS) —
-    nie listujemy go; pliki zgodne z manifestem pomijamy od razu."""
-    n = 0
-    if not src.is_dir():
+
+def _run_jobs(jobs: list) -> int:
+    """jobs: [(funkcja, po_sukcesie)] — przesyłanie równolegle. Zwraca liczbę udanych
+    z `po_sukcesie` (kopie przegranych wersji konfliktu, bez niego, się nie liczą)."""
+    if not jobs:
         return 0
-    src_files = _scan(src)
-    dst_files = None if dst_known else _scan(dst)
+    from concurrent.futures import ThreadPoolExecutor
+
+    def one(job):
+        fn, done = job
+        try:
+            fn()
+        except (OSError, ValueError) as ex:
+            log.warning("sync: %s", ex)
+            return 0
+        if done:
+            done()
+            return 1
+        return 0
+    if len(jobs) == 1:
+        return one(jobs[0])
+    with ThreadPoolExecutor(min(PARALLEL, len(jobs)), thread_name_prefix="sync") as ex:
+        return sum(ex.map(one, jobs))
+
+
+def _conflict(man, key: str, s_sig: list, d_sig: list) -> bool:
+    base = man.get(key) if man is not None else None
+    return bool(base) and not _same_sig(base, s_sig) and not _same_sig(base, d_sig)
+
+
+def _push(local: Path, fs, nrel: str, bak: str, man: dict | None = None, prefix: str = "",
+          conflicts: list | None = None, dst_known: bool = False) -> int:
+    """Lokalnie → NAS: pliki nowsze lokalnie (albo brakujące na NAS). Nadpisywana wersja
+    na NAS trafia do kopii zapasowej `bak` (przez serwer kopię robi serwer u siebie).
+
+    man: stan plików z ostatniej synchronizacji ({klucz: [rozmiar, czas]}) — gdy od tamtej
+    pory zmieniły się OBIE strony, to konflikt: wygrywa nowszy, przegrany do `bak/konflikt`.
+    dst_known: NAS nie zmienił się od ostatniej synchronizacji (znacznik) — nie listujemy go;
+    pliki zgodne z manifestem pomijamy od razu."""
+    if not local.is_dir():
+        return 0
+    src_files = _scan(local)
+    dst_files = None if dst_known else fs.scan(nrel)
+    jobs = []
     for rel, (s_size, s_mtime) in src_files.items():
-        f, d = src / rel, dst / rel
-        key = f"{prefix}/{rel.as_posix()}"
+        if rel.rsplit("/", 1)[-1] in SKIP:
+            continue
+        f = local / rel
+        key = f"{prefix}/{rel}"
         s_sig = [s_size, round(s_mtime)]
         try:
             if dst_files is None:
                 if man is not None and _same_sig(man.get(key), s_sig):
                     continue                 # bez zmian od ostatniej synchronizacji
-                try:
-                    dt_ = d.stat()
-                    dinfo = (dt_.st_size, dt_.st_mtime)
-                except OSError:
-                    dinfo = None
+                dinfo = fs.stat(f"{nrel}/{rel}")
             else:
                 dinfo = dst_files.get(rel)
+        except (OSError, ValueError) as ex:
+            log.warning("sync %s: %s", f, ex)
+            continue
+        backup = ""
+        if dinfo:
+            d_size, d_mtime = dinfo
+            d_sig = [d_size, round(d_mtime)]
+            if d_mtime >= s_mtime - 2 and d_size == s_size:
+                if man is not None:
+                    man[key] = d_sig
+                continue
+            if _conflict(man, key, s_sig, d_sig):
+                src_wins = s_mtime > d_mtime + 2
+                log.warning("konflikt save'ów %s: obie wersje zmienione, zostaje nowsza (%s)",
+                            key, "wysyłana" if src_wins else "z NAS")
+                if conflicts is not None:
+                    conflicts.append(key)
+                if not src_wins:             # nasza (starsza) wersja do kopii zapasowej na NAS
+                    jobs.append((lambda f=f, r=f"{bak}/konflikt/{rel}": fs.put_file(f, r), None))
+                    continue
+                backup = f"{bak}/konflikt/{rel}"
+            elif d_mtime > s_mtime + 2:
+                continue                     # NAS nowszy — nie cofamy save'a
+            else:
+                backup = f"{bak}/{rel}"
+
+        def done(key=key, s_sig=s_sig):
+            if man is not None:
+                man[key] = s_sig
+        jobs.append((lambda f=f, r=f"{nrel}/{rel}", b=backup: fs.put_file(f, r, b), done))
+    return _run_jobs(jobs)
+
+
+def _pull(fs, nrel: str, local: Path, bak: Path, man: dict | None = None, prefix: str = "",
+          conflicts: list | None = None) -> int:
+    """NAS → lokalnie: pliki nowsze na NAS. Nadpisywany plik lokalny → `bak`."""
+    src_files = fs.scan(nrel)
+    if not src_files:
+        return 0
+    dst_files = _scan(local) if local.is_dir() else {}
+    jobs = []
+    for rel, (s_size, s_mtime) in src_files.items():
+        if rel.rsplit("/", 1)[-1] in SKIP:
+            continue
+        d = local / rel
+        key = f"{prefix}/{rel}"
+        s_sig = [s_size, round(s_mtime)]
+        dinfo = dst_files.get(rel)
+        try:
             if dinfo:
                 d_size, d_mtime = dinfo
                 d_sig = [d_size, round(d_mtime)]
@@ -350,34 +413,29 @@ def _copy_newer(src: Path, dst: Path, backup: Path | None, man: dict | None = No
                     if man is not None:
                         man[key] = d_sig
                     continue
-                base = man.get(key) if man is not None else None
-                if base and not _same_sig(base, s_sig) and not _same_sig(base, d_sig):
+                if _conflict(man, key, s_sig, d_sig):
                     src_wins = s_mtime > d_mtime + 2
-                    loser = d if src_wins else f
-                    if backup:
-                        b = backup / "konflikt" / rel
-                        b.parent.mkdir(parents=True, exist_ok=True)
-                        shutil.copy2(loser, b)
                     log.warning("konflikt save'ów %s: obie wersje zmienione, zostaje nowsza (%s)",
-                                key, "wysyłana" if src_wins else "z drugiej strony")
+                                key, "z NAS" if src_wins else "lokalna")
                     if conflicts is not None:
                         conflicts.append(key)
-                if d_mtime > s_mtime + 2:
-                    continue                 # cel nowszy — nie cofamy save'a
-                if backup:
-                    b = backup / rel
-                    b.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(d, b)
-            d.parent.mkdir(parents=True, exist_ok=True)
-            tmp = d.with_name(d.name + ".emustart-tmp")
-            shutil.copy2(f, tmp)
-            os.replace(tmp, d)
-            if man is not None:
-                man[key] = s_sig             # copy2 zachowuje rozmiar i czas
-            n += 1
+                    if not src_wins:         # wersja z NAS (starsza) do lokalnej kopii zapasowej
+                        jobs.append((lambda r=f"{nrel}/{rel}", t=bak / "konflikt" / rel: fs.get_file(r, t), None))
+                        continue
+                    nasfs.backup_copy(d, bak / "konflikt" / rel)
+                elif d_mtime > s_mtime + 2:
+                    continue                 # lokalny nowszy — nie cofamy save'a
+                else:
+                    nasfs.backup_copy(d, bak / rel)
         except OSError as ex:
-            log.warning("sync %s: %s", f, ex)
-    return n
+            log.warning("sync %s: %s", d, ex)
+            continue
+
+        def done(key=key, s_sig=s_sig):
+            if man is not None:
+                man[key] = s_sig
+        jobs.append((lambda r=f"{nrel}/{rel}", t=d: fs.get_file(r, t), done))
+    return _run_jobs(jobs)
 
 
 def _manifest(pid: int) -> tuple[Path, dict]:
@@ -412,31 +470,24 @@ def pop_conflicts() -> list:
     return data
 
 
-def _prune_nas_backups(root: Path) -> None:
-    try:
-        dirs = sorted((d for d in root.iterdir() if d.is_dir()), key=lambda d: d.name)
-    except OSError:
-        return
-    for d in dirs[:-NAS_BACKUPS]:
-        shutil.rmtree(d, ignore_errors=True)
-
-
 def _sync(cfg: dict, pid: int, kind: str, family: str, names: list, up: bool) -> int:
-    r"""kind: save | settings. Lokalnie ↔ NAS, z manifestem i kopiami zapasowymi:
-    w dół — nadpisywane pliki lokalne do profiles\<id>\_backup, w górę —
-    nadpisywane pliki na NAS do <profil NAS>\_backup (ostatnie NAS_BACKUPS)."""
+    r"""kind: save | settings. Lokalnie ↔ NAS (przez serwer EmuStart albo SMB), z manifestem
+    i kopiami zapasowymi: w dół — nadpisywane pliki lokalne do profiles\<id>\_backup,
+    w górę — nadpisywane pliki na NAS do <profil NAS>\_backup (ostatnie 10)."""
     prof = get(pid)
+    fs = nasfs.backend(cfg)
     stamp = time.strftime("%Y%m%d-%H%M%S")
     mf, man = _manifest(pid)
     fam_key = f"{kind}/{family}"
     fam_man = man.setdefault(fam_key, {})
+    base = f"{prof['nas_name']}/{kind}/{family}"
     # znacznik zmian na NAS: nowy przy każdym wysłaniu. Ten sam co przy naszej
     # ostatniej synchronizacji = nikt inny nic nie wysłał — NAS-a nie listujemy
     # (raz na dobę i tak pełne porównanie)
     stamps = man.setdefault("_stamps", {})
-    stamp_file = _nas_dir(cfg, prof) / kind / family / ".emustart-stamp"
+    stamp_rel = f"{base}/.emustart-stamp"
     try:
-        nas_stamp = stamp_file.read_text(encoding="utf-8").strip()
+        nas_stamp = (fs.read(stamp_rel) or b"").decode("utf-8", "replace").strip()
     except OSError:
         nas_stamp = ""
     mine = stamps.get(fam_key) or {}
@@ -448,19 +499,18 @@ def _sync(cfg: dict, pid: int, kind: str, family: str, names: list, up: bool) ->
     conflicts: list = []
     n = 0
     for name, local in zip(names, locals_):
-        nas = _nas_dir(cfg, prof) / kind / family / (name if kind == "save" else "")
+        nrel = f"{base}/{name}" if kind == "save" else base
         if up:
-            bak = _nas_dir(cfg, prof) / "_backup" / f"{stamp}-{socket.gethostname()}" / kind / family / name
-            n += _copy_newer(local, nas, bak, fam_man, name, conflicts, dst_known=unchanged)
+            bak = f"{prof['nas_name']}/_backup/{stamp}-{socket.gethostname()}/{kind}/{family}/{name}"
+            n += _push(local, fs, nrel, bak, fam_man, name, conflicts, dst_known=unchanged)
         else:
             bak = LOCAL / str(pid) / "_backup" / stamp / kind / family / name
-            n += _copy_newer(nas, local, bak, fam_man, name, conflicts)
+            n += _pull(fs, nrel, local, bak, fam_man, name, conflicts)
     full = mine.get("full", 0) if unchanged else time.time()
     if up and (n or not nas_stamp):
         new = f"{time.time():.3f}-{socket.gethostname()}"
         try:
-            stamp_file.parent.mkdir(parents=True, exist_ok=True)
-            stamp_file.write_text(new, encoding="utf-8")
+            fs.write(stamp_rel, new.encode("utf-8"))
             if nas_stamp and mine.get("stamp") != nas_stamp:
                 stamps.pop(fam_key, None)    # ktoś inny też coś wysłał — następnym razem pełne porównanie
             else:
@@ -472,7 +522,7 @@ def _sync(cfg: dict, pid: int, kind: str, family: str, names: list, up: bool) ->
     _manifest_save(mf, man)
     _note_conflicts(pid, conflicts)
     if up and n:
-        _prune_nas_backups(_nas_dir(cfg, prof) / "_backup")
+        fs.prune(f"{prof['nas_name']}/_backup")
     return n
 
 
@@ -516,6 +566,51 @@ def sync_pending(cfg: dict) -> int:
     return n
 
 
+def local_families(pid: int) -> dict:
+    """{emulator: [foldery save'ów]} zapisane lokalnie dla profilu."""
+    out = {}
+    base = LOCAL / str(pid)
+    try:
+        for fam in base.iterdir():
+            if fam.is_dir() and not fam.name.startswith(("_", ".")) and fam.name != "settings":
+                names = [d.name for d in fam.iterdir() if d.is_dir()]
+                if names:
+                    out[fam.name] = names
+    except OSError:
+        pass
+    return out
+
+
+def push_all(cfg: dict) -> int:
+    """Przy starcie: wszystkie lokalne save'y i ustawienia profili → NAS/serwer (tylko
+    zmienione i brakujące). Np. po przejściu na serwer albo po grze bez połączenia."""
+    if not nas_online(cfg):
+        return 0
+    resolve_moves(cfg)
+    n = 0
+    for prof in all_profiles():
+        pid = prof["id"]
+        for family, names in local_families(pid).items():
+            try:
+                n += _sync(cfg, pid, "save", family, names, up=True)
+            except Exception:
+                log.exception("wysyłanie save'ów %s/%s", prof["name"], family)
+        sdir = LOCAL / str(pid) / "settings"
+        try:
+            fams = [d.name for d in sdir.iterdir() if d.is_dir()] if sdir.is_dir() else []
+        except OSError:
+            fams = []
+        for family in fams:
+            try:
+                n += _sync(cfg, pid, "settings", family, ["-"], up=True)
+            except Exception:
+                log.exception("wysyłanie ustawień %s/%s", prof["name"], family)
+    library.meta_set("sync_pending", "{}")
+    if n:
+        log.info("start: wysłano %d plików profili (%s)", n, via(cfg))
+    return n
+
+
 # ── blokada ──
 
 def lock(cfg: dict, pid: int) -> str:
@@ -523,16 +618,19 @@ def lock(cfg: dict, pid: int) -> str:
     prof = get(pid)
     if not prof or not nas_online(cfg):
         return ""
-    f = _nas_dir(cfg, prof) / "lock"
+    fs = nasfs.backend(cfg)
+    rel = f"{prof['nas_name']}/lock"
     me = socket.gethostname()
     try:
-        cur = json.loads(f.read_text(encoding="utf-8"))
+        cur = json.loads(fs.read(rel) or b"{}")
         if cur.get("host") != me and time.time() - cur.get("time", 0) < LOCK_MAX_AGE:
             return cur.get("host", "?")
     except (OSError, ValueError):
         pass
-    f.parent.mkdir(parents=True, exist_ok=True)
-    f.write_text(json.dumps({"host": me, "time": time.time()}), encoding="utf-8")
+    try:
+        fs.write(rel, json.dumps({"host": me, "time": time.time()}).encode("utf-8"))
+    except OSError as ex:
+        log.warning("blokada profilu: %s", ex)
     return ""
 
 
@@ -540,10 +638,11 @@ def unlock(cfg: dict, pid: int) -> None:
     prof = get(pid)
     if not prof:
         return
-    f = _nas_dir(cfg, prof) / "lock"
+    fs = nasfs.backend(cfg)
+    rel = f"{prof['nas_name']}/lock"
     try:
-        if json.loads(f.read_text(encoding="utf-8")).get("host") == socket.gethostname():
-            f.unlink()
+        if json.loads(fs.read(rel) or b"{}").get("host") == socket.gethostname():
+            fs.unlink(rel)
     except (OSError, ValueError):
         pass
 
@@ -553,26 +652,24 @@ def unlock(cfg: dict, pid: int) -> None:
 def import_from_nas(cfg: dict) -> list:
     """Zakłada profile dla folderów na NAS, których nie ma w bazie. Zwraca nazwy."""
     resolve_moves(cfg)
-    root = nas_root(cfg)
+    fs = nasfs.backend(cfg)
     try:
-        if not root.is_dir():
-            return []
-        dirs = [d for d in root.iterdir() if d.is_dir() and not d.name.startswith((".", "_"))]
-    except OSError:
+        dirs = [name for name, is_dir in fs.listdir("") if is_dir and not name.startswith((".", "_"))]
+    except (OSError, ValueError):
         return []
     have = {p["nas_name"].lower() for p in all_profiles()} | {p["name"].lower() for p in all_profiles()}
     added = []
-    for d in sorted(dirs, key=lambda x: x.name.lower()):
-        if d.name.lower() in have:
-            continue
-        if not any((d / sub).exists() for sub in ("save", "settings", "emustart.json", "retroachievements.json")):
+    for d in sorted(dirs, key=str.lower):
+        if d.lower() in have:
             continue
         try:
+            if not any(fs.exists(f"{d}/{sub}") for sub in ("save", "settings", "emustart.json", "retroachievements.json")):
+                continue
             with library.db() as c:
-                c.execute("INSERT INTO profiles(name, nas_name, color) VALUES(?,?,?)", (d.name[:32], d.name, ""))
-            added.append(d.name)
+                c.execute("INSERT INTO profiles(name, nas_name, color) VALUES(?,?,?)", (d[:32], d, ""))
+            added.append(d)
         except Exception:
-            log.exception("profil z NAS %s", d.name)
+            log.exception("profil z NAS %s", d)
     if added:
         log.info("profile z NAS: %s", ", ".join(added))
     return added
@@ -581,10 +678,10 @@ def import_from_nas(cfg: dict) -> list:
 # ── małe pliki profilu (emustart.json, retroachievements.json): nowszy wygrywa ──
 
 def _json_paths(cfg: dict, pid: int, name: str):
+    """(plik lokalny, ścieżka na NAS względem folderu profili albo None)."""
     prof = get(pid)
     local = LOCAL / str(pid) / name
-    nas = _nas_dir(cfg, prof) / name if prof else None
-    return local, nas
+    return local, (f"{prof['nas_name']}/{name}" if prof else None)
 
 
 _json_lock = threading.Lock()
@@ -611,35 +708,42 @@ def json_get(cfg: dict, pid: int, name: str) -> dict | None:
 
 def _json_get(cfg: dict, pid: int, name: str) -> dict | None:
     local, nas = _json_paths(cfg, pid, name)
-    best = None
-    for f in (local, nas):
+    fs = nasfs.backend(cfg) if nas else None
+    try:
+        lst = local.stat().st_mtime if local.is_file() else None
+    except OSError:
+        lst = None
+    nst = None
+    if fs is not None:
         try:
-            if f and f.is_file():
-                mt = f.stat().st_mtime
-                if best is None or mt > best[0] + 1:
-                    best = (mt, f)
+            st = fs.stat(nas)
+            nst = st[1] if st else None
         except OSError:
-            pass
-    if not best:
+            fs = None                         # NAS/serwer niedostępny — kopia lokalna
+    if lst is None and nst is None:
         return None
     try:
-        data = json.loads(best[1].read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    if not isinstance(data, dict):
-        return None
-    try:
-        if best[1] != local:                 # kopia lokalna na wypadek braku NAS
-            _write_atomic(local, best[1].read_text(encoding="utf-8"))
-            os.utime(local, (best[0], best[0]))
-        elif nas and nas_online(cfg) and (not nas.is_file() or nas.stat().st_mtime < best[0] - 1):
-            # zapis lokalny nie doszedł na NAS (był niedostępny) — dosyłamy
-            _write_atomic(nas, local.read_text(encoding="utf-8"))
-            os.utime(nas, (best[0], best[0]))
-            log.info("dosłano %s profilu %s na NAS", name, pid)
-    except OSError as ex:
+        if nst is not None and (lst is None or nst > lst + 1):
+            raw = fs.read(nas)
+            if raw is None:
+                return None
+            text = raw.decode("utf-8")
+            _write_atomic(local, text)        # kopia lokalna na wypadek braku NAS
+            os.utime(local, (nst, nst))
+        else:
+            text = local.read_text(encoding="utf-8")
+            if fs is not None and (nst is None or nst < lst - 1):
+                # zapis lokalny nie doszedł na NAS (był niedostępny) — dosyłamy
+                fs.write(nas, text.encode("utf-8"), lst)
+                log.info("dosłano %s profilu %s na NAS", name, pid)
+        data = json.loads(text)
+    except (OSError, ValueError) as ex:
         log.warning("synchronizacja %s: %s", name, ex)
-    return data
+        try:
+            data = json.loads(local.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+    return data if isinstance(data, dict) else None
 
 
 def json_set(cfg: dict, pid: int, name: str, data: dict) -> None:
@@ -649,9 +753,7 @@ def json_set(cfg: dict, pid: int, name: str, data: dict) -> None:
         _write_atomic(local, text)
         if nas and nas_online(cfg):
             try:
-                _write_atomic(nas, text)
-                st = local.stat()
-                os.utime(nas, (st.st_mtime, st.st_mtime))
+                nasfs.backend(cfg).write(nas, text.encode("utf-8"), local.stat().st_mtime)
             except OSError as ex:
                 log.warning("zapis %s na NAS: %s (dośle się przy następnym odczycie)", name, ex)
 
@@ -797,19 +899,16 @@ def _rkey(g: dict) -> str:
     return f"{g['es']}/{g['name']}"
 
 
-def _resume_index(cfg: dict, prof: dict) -> tuple[Path, dict]:
-    d = _nas_dir(cfg, prof) / "resume"
+def _resume_index(cfg: dict, prof: dict) -> tuple[str, dict]:
+    d = f"{prof['nas_name']}/resume"
     try:
-        return d, json.loads((d / "index.json").read_text(encoding="utf-8"))
+        return d, json.loads(nasfs.backend(cfg).read(f"{d}/index.json") or b"{}")
     except (OSError, ValueError):
         return d, {}
 
 
-def _resume_write(d: Path, idx: dict) -> None:
-    d.mkdir(parents=True, exist_ok=True)
-    tmp = d / "index.json.emustart-tmp"
-    tmp.write_text(json.dumps(idx, ensure_ascii=False, indent=1), encoding="utf-8")
-    os.replace(tmp, d / "index.json")
+def _resume_write(cfg: dict, d: str, idx: dict) -> None:
+    nasfs.backend(cfg).write(f"{d}/index.json", json.dumps(idx, ensure_ascii=False, indent=1).encode("utf-8"))
 
 
 def resume_put(cfg: dict, pid: int, g: dict, family: str, path: str, created: float) -> bool:
@@ -817,21 +916,19 @@ def resume_put(cfg: dict, pid: int, g: dict, family: str, path: str, created: fl
     if not prof or not nas_online(cfg):
         return False
     import hashlib
+    fs = nasfs.backend(cfg)
     d, idx = _resume_index(cfg, prof)
     key = _rkey(g)
     fname = ""
     try:
         if path:
             fname = hashlib.sha1(key.encode("utf-8")).hexdigest()[:16] + Path(path).suffix
-            d.mkdir(parents=True, exist_ok=True)
-            tmp = d / (fname + ".emustart-tmp")
-            shutil.copy2(path, tmp)
-            os.replace(tmp, d / fname)
+            fs.put_file(Path(path), f"{d}/{fname}")
         old = _rfile(idx.get(key, {}).get("file"))
         if old and old != fname:
-            (d / old).unlink(missing_ok=True)
+            fs.unlink(f"{d}/{old}")
         idx[key] = {"family": family, "file": fname, "created": created, "host": socket.gethostname()}
-        _resume_write(d, idx)
+        _resume_write(cfg, d, idx)
         return True
     except OSError as ex:
         log.warning("wznowienie na NAS: %s", ex)
@@ -851,11 +948,11 @@ def resume_drop(cfg: dict, pid: int, g: dict) -> None:
         return
     d, idx = _resume_index(cfg, prof)
     old = _rfile(idx.get(_rkey(g), {}).get("file"))
-    if old:
-        (d / old).unlink(missing_ok=True)
-    idx[_rkey(g)] = {"dropped": time.time()}
     try:
-        _resume_write(d, idx)
+        if old:
+            nasfs.backend(cfg).unlink(f"{d}/{old}")
+        idx[_rkey(g)] = {"dropped": time.time()}
+        _resume_write(cfg, d, idx)
     except OSError as ex:
         log.warning("wznowienie na NAS: %s", ex)
 
@@ -878,15 +975,21 @@ def resume_pull(cfg: dict, pid: int, g: dict) -> dict | None:
         if not _rfile(e["file"]):
             log.warning("wznowienie: niepoprawna nazwa pliku w indeksie NAS — pomijam")
             return None
-        src = d / e["file"]
-        if not src.is_file():
-            return None
         dst_dir = ingame.resume_dir(pid)
         dst_dir.mkdir(parents=True, exist_ok=True)
+        suffix = Path(e["file"]).suffix
+        dst = dst_dir / f"{g['id']}{suffix}"
+        tmp = dst_dir / f"{g['id']}.pobieranie{suffix}"
+        try:
+            if not nasfs.backend(cfg).get_file(f"{d}/{e['file']}", tmp):
+                return None
+        except OSError as ex:
+            log.warning("wznowienie z NAS: %s", ex)
+            return None
         for old in dst_dir.glob(f"{g['id']}.*"):
-            old.unlink(missing_ok=True)
-        dst = dst_dir / f"{g['id']}{src.suffix}"
-        shutil.copy2(src, dst)
+            if old != tmp:
+                old.unlink(missing_ok=True)
+        os.replace(tmp, dst)
         path = str(dst)
     return {"family": e.get("family", ""), "path": path, "created": e.get("created", 0)}
 
@@ -904,19 +1007,17 @@ def nas_wanted(prof: dict) -> str:
 
 def resolve_moves(cfg: dict) -> int:
     """Profile, których folder na NAS przeniesiono z innego komputera → nowy folder."""
-    root = nas_root(cfg)
+    fs = nasfs.backend(cfg)
     n = 0
-    try:
-        if not root.is_dir():
-            return 0
-    except OSError:
-        return 0
     for prof in all_profiles():
         name, seen = prof["nas_name"], set()
         while name not in seen and len(seen) < 5:
             seen.add(name)
             try:
-                data = json.loads((root / name / MOVED).read_text(encoding="utf-8"))
+                raw = fs.read(f"{name}/{MOVED}")
+                if raw is None:
+                    break
+                data = json.loads(raw)
             except (OSError, ValueError):
                 break
             to = str(data.get("to") or "")
@@ -940,9 +1041,9 @@ def nas_rename(cfg: dict, pid: int) -> str:
     new = nas_wanted(prof)
     if new == prof["nas_name"]:
         return ""
-    if not nas_online(cfg):
-        return "NAS jest niedostępny."
     root = nas_root(cfg)
+    if not nasfs.SmbFs(root).online():
+        return "Zmiana folderu profilu wymaga dostępu do NAS-a przez sieć (SMB)."
     old_dir, new_dir = root / prof["nas_name"], root / new
     if new_dir.exists():
         return f"Na NAS jest już folder „{new}”."
@@ -993,7 +1094,7 @@ def scrub_settings_copies(cfg: dict) -> int:
     w _backup). Pliki emulatorów i profiles/_machine (ten komputer) zostają."""
     from emustart import ingame
     roots = [LOCAL]
-    if nas_online(cfg):
+    if nasfs.SmbFs(nas_root(cfg)).online():
         roots.append(nas_root(cfg))
     n = 0
     for root in roots:

@@ -4,7 +4,7 @@ Kierunek: **serwer EmuStart jako centrum** — gry, zapisy, profile, ustawienia 
 idą przez serwer (HTTP z kluczem, przez Tailscale), wspólnie dla Windows i Androida.
 Dostęp SMB do NAS-a zostaje jako zapas i do zarządzania.
 
-Stan na 2026-10-09 (EmuStart 0.23.0). Kolejność może się zmienić; to, co już wydane,
+Stan na 2026-10-09 (EmuStart 0.24.0). Kolejność może się zmienić; to, co już wydane,
 opisuje [CHANGELOG.md](CHANGELOG.md).
 
 ## Dlaczego serwer (pomiary)
@@ -58,7 +58,8 @@ Układ profilu na NAS-ie:
       blokada wygasa sama; „przejmij profil” z potwierdzeniem.
 - [ ] **PIN profilu**: na serwerze tylko skrót (scrypt), opóźnienie po błędnych próbach;
       bez PIN-u serwer nie wydaje zapisów ani ustawień profilu.
-- [ ] Windows: synchronizacja przez serwer, SMB jako zapas.
+- [x] Windows: synchronizacja przez serwer, SMB jako zapas (0.24.0; kompresja zstd,
+      kopie zapasowe po stronie serwera, wysyłka zaległych zapisów przy starcie).
 - [ ] Android: wybór profilu, zapisy tylko uruchamianej gry przed startem i po powrocie,
       kolejka wysyłek bez połączenia; RetroArch, DuckStation, ArmSX2/AetherSX2,
       potem PPSSPP, Dolphin.
@@ -73,7 +74,7 @@ Układ profilu na NAS-ie:
 - [ ] Nowa instalacja: adres + klucz → profil + PIN → wszystko gotowe; lokalnie tylko
       ścieżki emulatorów, pady, GPU.
 - [ ] Grafiki i metadane pobierane raz, na serwerze; klient dostaje pomniejszone obrazki.
-- [ ] Kompresja zstd (Python 3.14 ma ją wbudowaną) dla bazy, list, zapisów i stanów;
+- [ ] Kompresja zstd (Python 3.14 ma ją wbudowaną) dla bazy i list (zapisy i stany: 0.24.0);
       nie dla CHD/RVZ/ZIP (już skompresowane).
 
 ## Etap D — serwer jako usługa

@@ -63,10 +63,20 @@ Każde zapytanie z kluczem: nagłówek `Authorization: Bearer <klucz>` albo `?k=
 | `GET /v1/games/<id>` | szczegóły gry, opis, lista plików |
 | `GET /v1/games/<id>/file/<ścieżka>` | plik gry, obsługa `Range` |
 | `GET /media/...` | grafiki |
+| `GET /v1/nas/scan\|list\|stat\|file?p=…` | folder profili: lista plików, zawartość, plik (zstd) |
+| `PUT /v1/nas/file?p=…&mtime=…&backup=…` | zapis pliku profilu; poprzednia wersja do kopii zapasowej |
+| `DELETE /v1/nas/file?p=…` | usunięcie pliku profilu |
+
+Folder profili serwera: `profiles_nas` z jego ustawień, a gdy tam go nie ma —
+`emustart\Profiles` w którymś folderze nadrzędnym folderów z grami (np. udział
+`EMU_ROMS` → `EMU_ROMS\emustart\Profiles`, czyli `Z:\emustart\Profiles` na klientach).
+Serwer zakłada w nim znacznik `.emustart-root`; klient korzysta z serwera tylko wtedy,
+gdy przez SMB widzi ten sam znacznik (albo SMB jest niedostępny).
 
 ## Bezpieczeństwo
 
 - Klucz serwera jest losowy (`config.json` → `server_token`), porównywany w stałym czasie.
 - Serwer wydaje wyłącznie pliki gier z biblioteki (ścieżka spoza gry → 404).
+- Zapis tylko w folderze profili (ścieżki z `..`, dyskiem albo bezwzględne → 400).
 - Połączenie przez Tailscale jest szyfrowane; nie wystawiaj portu 8740 do internetu
   bez Tailscale.

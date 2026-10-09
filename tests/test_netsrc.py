@@ -112,3 +112,74 @@ def test_reader_reconnects_after_close(srv):
 def test_guess_url_from_unc():
     assert netsrc.guess_url([r"\\100.85.254.31\EMU_ROMS\ROMS"]) == "http://100.85.254.31:8740"
     assert netsrc.guess_url([r"C:\gry"]) in ("", )
+
+
+# ── folder profili przez serwer ──
+
+def _nas_server(env, monkeypatch, nas_name="nas"):
+    from emustart import profiles
+    from _srv import use_server
+    cfg, _roms, tmp = env
+    monkeypatch.setattr(profiles, "LOCAL", tmp / "profiles")
+    cfg["profiles_nas"] = str(tmp / nas_name)
+    use_server(cfg, tmp / "nas", monkeypatch)
+    return cfg, tmp
+
+
+def test_remote_write_is_compressed_and_backed_up_on_server(env, monkeypatch):
+    from emustart import nasfs
+    cfg, tmp = _nas_server(env, monkeypatch)
+    fs = nasfs.backend(cfg)
+    sent = []
+    orig = fs._req
+    monkeypatch.setattr(fs, "_req", lambda m, p, q, body=None, headers=None:
+                        sent.append((m, len(body or b""), (headers or {}).get("Content-Encoding"))) or orig(m, p, q, body, headers))
+    card = b"\xff" * (8 << 20)                                     # pusta karta PS2
+    fs.write("Ania/save/pcsx2/memcards/Mcd001.ps2", card, 1000.0)
+    put = [x for x in sent if x[0] == "PUT"][0]
+    assert put[2] == "zstd" and put[1] < 10_000                     # 8 MB → kilka KB
+    f = tmp / "nas" / "Ania" / "save" / "pcsx2" / "memcards" / "Mcd001.ps2"
+    assert f.read_bytes() == card and abs(f.stat().st_mtime - 1000.0) < 1
+    fs.write("Ania/save/pcsx2/memcards/Mcd001.ps2", b"nowa", 2000.0,
+             backup="Ania/_backup/20260101-000000-pc/save/pcsx2/memcards/Mcd001.ps2")
+    assert (tmp / "nas" / "Ania" / "_backup" / "20260101-000000-pc" / "save" / "pcsx2" / "memcards" / "Mcd001.ps2").read_bytes() == card
+    assert fs.read("Ania/save/pcsx2/memcards/Mcd001.ps2") == b"nowa"
+    assert fs.scan("Ania/save") == {"pcsx2/memcards/Mcd001.ps2": (4, 2000.0)}
+
+
+def test_remote_rejects_paths_outside_profiles(env, monkeypatch):
+    import http.client
+    from _srv import KEY
+    cfg, tmp = _nas_server(env, monkeypatch)
+    host, port = cfg["server_url"].split(":")
+    for p in ("../x", "..\\x", "C:/Windows/x", ".emustart-root"):
+        c = http.client.HTTPConnection(host, int(port))
+        c.request("PUT", "/v1/nas/file?p=" + p.replace("\\", "%5C"), body=b"zle",
+                  headers={"Authorization": f"Bearer {KEY}"})
+        assert c.getresponse().status == 400, p
+    c = http.client.HTTPConnection(host, int(port))
+    c.request("GET", "/v1/nas/list?p=", headers={"Authorization": "Bearer zly"})
+    assert c.getresponse().status == 401
+    assert not (tmp / "x").exists()
+
+
+def test_other_folder_on_smb_means_smb(env, monkeypatch):
+    from emustart import nasfs
+    cfg, tmp = _nas_server(env, monkeypatch, nas_name="inny")      # SMB widzi inny folder niż serwer
+    (tmp / "inny").mkdir()
+    nasfs.reset()
+    fs = nasfs.backend(cfg)
+    assert isinstance(fs, nasfs.SmbFs) and fs.root == tmp / "inny"
+
+
+def test_push_all_sends_existing_local_saves(env, monkeypatch):
+    from emustart import profiles
+    cfg, tmp = _nas_server(env, monkeypatch)
+    pid = profiles.first_id()
+    _write(profiles.local_dir(pid, "duckstation", "memcards") / "a.mcd", b"A" * 5000)
+    _write(profiles.LOCAL / str(pid) / "settings" / "duckstation" / "settings.ini", b"[Main]\n")
+    assert profiles.push_all(cfg) == 2
+    nas = tmp / "nas" / profiles.get(pid)["nas_name"]
+    assert (nas / "save" / "duckstation" / "memcards" / "a.mcd").read_bytes() == b"A" * 5000
+    assert (nas / "settings" / "duckstation" / "settings.ini").is_file()
+    assert profiles.push_all(cfg) == 0                             # drugi raz nic do wysłania
