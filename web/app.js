@@ -61,7 +61,15 @@ function toast(text, ms = 2500) {
 
 /* ───────────── podpowiedzi przycisków ───────────── */
 const BTN = { a: "A", b: "B", x: "X", y: "Y", lb: "LB", rb: "RB", lt: "LT", rt: "RT", start: "Start", select: "Select", dpad: "↔" };
-const hint = (b, text) => `<span class="hint"><span class="btn ${b}">${BTN[b]}</span>${esc(text)}</span>`;
+const hint = (b, text) => `<span class="hint" data-a="${b}"><span class="btn ${b}">${BTN[b]}</span>${esc(text)}</span>`;
+// podpowiedzi przycisków są klikalne — EmuStart da się obsłużyć samą myszą (np. na NAS-ie bez pada)
+document.addEventListener("click", (e) => {
+  const h = e.target.closest?.(".hint[data-a]");
+  if (!h || h.dataset.a === "dpad") return;
+  e.preventDefault();
+  press(h.dataset.a, false);
+  release(h.dataset.a);
+});
 function setHints(list, el = $("hintbar")) { el.innerHTML = list.map(([b, t]) => hint(b, t)).join(""); }
 
 /* ───────────── wejście: pad + klawiatura ───────────── */

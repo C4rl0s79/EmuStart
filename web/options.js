@@ -577,7 +577,7 @@ function renderFb() {
   $("fbList").querySelector("li.sel")?.scrollIntoView({ block: "nearest" });
   const h = [["a", "Otwórz"], ["b", d.path ? "W górę" : "Anuluj"]];
   if (d.path) h.unshift(["x", "Wybierz ten folder"]);
-  h.push(["start", "Anuluj"]);
+  h.push(["y", "Wpisz ścieżkę"], ["start", "Anuluj"]);
   setHints(h, $("fbHints"));
 }
 function fbClose(path) {
@@ -596,6 +596,9 @@ async function fbInput(a) {
     if (!d.path) return a === "b" ? fbClose(null) : undefined;
     return fbLoad(d.parent || "", d.path);
   } else if (a === "x" && d.path) return fbClose(d.path);
+  else if (a === "y") {          // ścieżka z klawiatury (np. na komputerze bez pada)
+    return oskOpen("Wpisz ścieżkę folderu", d.path || "", (p) => { if (p.trim()) fbLoad(p.trim()); });
+  }
   else if (a === "start") return fbClose(null);
   renderFb();
 }

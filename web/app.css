@@ -351,3 +351,9 @@ img.glow { filter: drop-shadow(0 0 1px rgba(255,255,255,.9)) drop-shadow(0 0 6px
 .pv3 .box img, .pv3 .snap img { height: var(--pv-h, var(--media-h)); max-width: none; }
 .pv3 .noart { height: var(--pv-h, var(--media-h)); width: calc(var(--pv-h, var(--media-h)) * 0.75); }
 .pv3 .snap { max-width: none; }
+
+/* podpowiedzi przycisków działają też jako przyciski (mysz) */
+.hint[data-a] { cursor: pointer; border-radius: 99px; padding: .15em .5em .15em .15em; }
+.hint[data-a]:hover { background: var(--line); }
+.hint[data-a="dpad"] { cursor: default; }
+.hint[data-a="dpad"]:hover { background: none; }

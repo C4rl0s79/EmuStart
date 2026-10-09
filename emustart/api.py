@@ -1123,12 +1123,32 @@ class Api:
         return {"path": str(p), "parent": parent, "entries": entries, "systems": recognized}
 
     def pick_folder(self, start: str = "") -> str:
-        import webview
         if not self._window:
-            return ""
+            return self._pick_folder_dialog(start)    # interfejs w przeglądarce
+        import webview
         res = self._window.create_file_dialog(webview.FileDialog.FOLDER,
                                               directory=start or "")
         return res[0] if res else ""
+
+    @staticmethod
+    def _pick_folder_dialog(start: str = "") -> str:
+        """Okno wyboru folderu Windows bez okna EmuStart (tryb przeglądarki)."""
+        import os
+        import subprocess
+        ps = ("Add-Type -AssemblyName System.Windows.Forms;"
+              "$d = New-Object System.Windows.Forms.FolderBrowserDialog;"
+              "$d.Description = 'EmuStart - wybierz folder';"
+              "$d.SelectedPath = $env:EMUSTART_START;"
+              "$f = New-Object System.Windows.Forms.Form -Property @{TopMost=$true};"
+              "if ($d.ShowDialog($f) -eq 'OK') { [Console]::Out.Write($d.SelectedPath) }")
+        try:
+            r = subprocess.run(["powershell", "-NoProfile", "-STA", "-Command", ps], capture_output=True,
+                               text=True, timeout=600, env={**os.environ, "EMUSTART_START": start or ""},
+                               creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            return r.stdout.strip()
+        except Exception as ex:
+            log.warning("okno wyboru folderu: %s", ex)
+            return ""
 
     def post_status(self) -> str:
         """Tytuł gry, której save'y idą właśnie na NAS ('' = nic)."""
