@@ -183,3 +183,26 @@ def test_push_all_sends_existing_local_saves(env, monkeypatch):
     assert (nas / "save" / "duckstation" / "memcards" / "a.mcd").read_bytes() == b"A" * 5000
     assert (nas / "settings" / "duckstation" / "settings.ini").is_file()
     assert profiles.push_all(cfg) == 0                             # drugi raz nic do wysłania
+
+
+def test_system_look_pushed_to_server(srv, monkeypatch, tmp_path):
+    from emustart import logos
+    cfg, _roms, _tmp = srv
+    server_cfg = {"server_token": KEY, "systems": {}}
+    monkeypatch.setattr(remote.API, "_cfg", server_cfg)
+    monkeypatch.setattr(remote.config, "save", lambda c: None)
+    mine, theirs = tmp_path / "pc", tmp_path / "serwer"
+    mine.mkdir(); theirs.mkdir()
+    (mine / "lynx.custom.png").write_bytes(b"\x89PNG lynx")
+    cfg["systems"] = {"lynx": {"logo": "custom", "logo_glow": True, "name": "Atari Lynx"},
+                      "nes": {"logo": "none"}}
+    monkeypatch.setattr(logos, "_dir", lambda: mine)
+    sent = []
+    monkeypatch.setattr(logos, "_store_custom", lambda es, data, ext: sent.append((es, data, ext)))
+    assert logos.push_to_server(cfg) == 2
+    assert sent == [("lynx", b"\x89PNG lynx", "png")]
+    assert server_cfg["systems"]["lynx"] == {"logo": "custom", "logo_glow": True, "name": "Atari Lynx"}
+    assert server_cfg["systems"]["nes"]["logo"] == "none"
+    assert logos.push_to_server(cfg) == 0                         # bez zmian — nic nie idzie
+    cfg["systems"]["lynx"]["logo_glow"] = False
+    assert logos.push_to_server(cfg, ["lynx"]) == 1 and server_cfg["systems"]["lynx"]["logo_glow"] is False

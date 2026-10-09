@@ -4,7 +4,7 @@ Kierunek: **serwer EmuStart jako centrum** — gry, zapisy, profile, ustawienia 
 idą przez serwer (HTTP z kluczem, przez Tailscale), wspólnie dla Windows i Androida.
 Dostęp SMB do NAS-a zostaje jako zapas i do zarządzania.
 
-Stan na 2026-10-09 (EmuStart 0.25.2). Kolejność może się zmienić; to, co już wydane,
+Stan na 2026-10-09 (EmuStart 0.25.5). Kolejność może się zmienić; to, co już wydane,
 opisuje [CHANGELOG.md](CHANGELOG.md).
 
 ## Dlaczego serwer (pomiary)

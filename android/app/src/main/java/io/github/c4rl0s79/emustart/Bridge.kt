@@ -95,7 +95,50 @@ class Bridge(private val act: MainActivity) {
         "profile_rename", "profile_delete", "profile_nas_rename" -> JSONObject().put("ok", false)
             .put("reason", "Nazwę i folder profilu zmienia się w EmuStart na komputerze.")
         "pad_backend" -> "android"
-        else -> null      // request_art, meta_fetch, ui_log… — niepotrzebne na Androidzie
+        "browse" -> browse(a.optString(0, ""))
+        "pick_folder" -> null                       // okno wyboru folderu Windows — tu przeglądarka padem (browse)
+        "ingame_poll" -> JSONObject().put("open", false).put("seq", 0).put("inputs", JSONArray())
+        "meta_fetch", "request_art" -> JSONObject().put("ok", true)   // opisy i grafiki robi serwer
+        "ui_log" -> { Log.i(tag, "UI: " + a.optString(0, "")); null }
+        // pozostałe (grafiki, pady, instalacja emulatorów, opcje gier i systemów, RetroAchievements,
+        // skanowanie) są tylko w EmuStart na komputerze — tests/test_android_api.py pilnuje listy
+        else -> JSONObject().put("ok", false)
+            .put("reason", "Na telefonie niedostępne — zmień to w EmuStart na komputerze z grami.")
+    }
+
+    /** Przeglądarka folderów dla pada (jak na Windows): pamięć telefonu i karty SD, potem podfoldery. */
+    private fun browse(path: String): JSONObject {
+        val roots = (listOf(android.os.Environment.getExternalStorageDirectory()) +
+            (File("/storage").listFiles()?.filter { it.isDirectory && it.canRead() && it.name != "emulated" && it.name != "self" }
+                ?: emptyList()))
+        if (path.isEmpty()) {
+            val arr = JSONArray()
+            roots.forEachIndexed { i, r ->
+                arr.put(JSONObject().put("name", if (i == 0) "Pamięć telefonu" else "Karta ${r.name}")
+                    .put("path", r.absolutePath).put("info", ""))
+            }
+            return JSONObject().put("path", "").put("parent", JSONObject.NULL).put("entries", arr).put("systems", 0)
+        }
+        val d = File(path)
+        val parent = if (roots.any { it.absolutePath == d.absolutePath }) "" else (d.parent ?: "")
+        val subs = d.listFiles()?.filter { it.isDirectory && !it.name.startsWith(".") }?.sortedBy { it.name.lowercase() }
+            ?: return JSONObject().put("path", d.absolutePath).put("parent", parent).put("entries", JSONArray())
+                .put("systems", 0).put("error", "brak dostępu")
+        val arr = JSONArray()
+        for (x in subs) {
+            // podpowiedź: co emulator trzyma w tym folderze
+            val inside = setOf("memcards", "sstates", "saves", "states").filter { File(x, it).isDirectory }
+            val info = when {
+                x.name.equals("memcards", true) -> "karty pamięci"
+                x.name.equals("sstates", true) || x.name.equals("states", true) -> "stany gry"
+                x.name.equals("saves", true) -> "zapisy"
+                inside.isNotEmpty() -> "zawiera: " + inside.joinToString(", ")
+                x.name == "Android" -> "niedostępne dla innych aplikacji"
+                else -> ""
+            }
+            arr.put(JSONObject().put("name", x.name).put("path", x.absolutePath).put("info", info))
+        }
+        return JSONObject().put("path", d.absolutePath).put("parent", parent).put("entries", arr).put("systems", 0)
     }
 
     // ── stan i listy ──

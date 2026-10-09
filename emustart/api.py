@@ -67,6 +67,7 @@ class Api:
         # lokalne save'y i ustawienia profili → NAS/serwer (zaległe po grze bez połączenia,
         # pierwsze przejście na serwer); gra uruchomiona w tym czasie poczeka (post_busy)
         launcher.start_post(lambda: profiles.push_all(self._cfg), "zapisy profili")
+        logos.push_later(self._cfg)       # wygląd systemów → serwer (Android pokazuje to samo)
         threading.Thread(target=self._profiles_bootstrap, daemon=True, name="profiles").start()
         threading.Thread(target=self._arcade_meta, daemon=True, name="arcade-meta").start()
         threading.Thread(target=self._platforms_meta, daemon=True, name="platforms").start()
@@ -749,6 +750,8 @@ class Api:
             o = data["emulator"]
             sc.update(label=o["label"], exe=o["exe"], args=o.get("args", ""), enabled=True)
         config.save(self._cfg)
+        if "glow" in data or "name" in data:
+            logos.push_later(self._cfg, [es])
         return {"ok": True}
 
     def system_logo_candidates(self, es: str) -> list:
@@ -760,6 +763,7 @@ class Api:
             sc = self._cfg["systems"][es]
             sc.setdefault("logo_glow", False)
             config.save(self._cfg)
+            logos.push_later(self._cfg, [es])
         return {"ok": ok, **logos.url_for(es, self._cfg)} if ok else             {"ok": False, "reason": "Nie udało się pobrać tego logo."}
 
     def system_rescan(self, es: str) -> dict:

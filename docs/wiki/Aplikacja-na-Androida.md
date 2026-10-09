@@ -85,7 +85,17 @@ telefonu, nie w `Android/data` (tam Android nie wpuszcza innych aplikacji):
   **RetroArch** (rdzeń SwanStation — DuckStation w wersji dla RetroArcha): jego zapis `.srm`
   to ta sama karta pamięci co `.mcd` DuckStation na komputerze.
 
-Ustawienia → **Zapisy gier** pokazują wykryte foldery; można też wpisać je ręcznie.
+Ustawienia → **Zapisy gier** pokazują wykryte foldery. EmuStart szuka folderów
+`memcards` / `sstates` w całej pamięci telefonu (do 3 poziomów), a po pierwszej grze
+zapamiętuje, gdzie emulator zapisał. Folder można też wskazać: **A** — przeglądarka
+folderów (padem; wystarczy folder danych emulatora, np. `ArmSX2` — EmuStart sam weźmie
+z niego `memcards`, `sstates`, `saves` albo `states`), **X** — z powrotem wykrywanie
+automatyczne.
+
+**Pierwsza synchronizacja** pliku, który jest już na serwerze (np. karta pamięci PS2
+z komputera), zostawia wersję z serwera — wersja z telefonu trafia do kopii zapasowej,
+EmuStart pokaże komunikat. Dzięki temu nowa, pusta karta z telefonu nie nadpisze
+zapisów z komputera.
 
 ## Aktualizacje aplikacji
 

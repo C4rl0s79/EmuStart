@@ -568,9 +568,10 @@ async function fbLoad(path, focusName) {
 function renderFb() {
   const d = FB.data;
   $("fbTitle").textContent = FB.title;
-  $("fbPath").textContent = d.path || "Komputer";
+  const phone = S.platform === "android";
+  $("fbPath").textContent = d.path || (phone ? "Telefon" : "Komputer");
   $("fbInfo").textContent = d.error ? `Brak dostępu: ${d.error}`
-    : !d.path ? "Wybierz dysk"
+    : !d.path ? (phone ? "Wybierz pamięć" : "Wybierz dysk")
     : d.systems ? `Rozpoznane systemy w tym folderze: ${d.systems}` : `${d.entries.length} ${plural(d.entries.length, "folder", "foldery", "folderów")}`;
   $("fbList").innerHTML = d.entries.map((e, i) =>
     `<li class="${i === FB.idx ? "sel" : ""}" data-i="${i}"><span>📁 ${esc(e.name)}</span><span class="gv">${esc(e.info || "")}</span></li>`).join("")

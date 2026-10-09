@@ -8,6 +8,25 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.25.5] — 2026-10-09
+
+### Dodane
+- **Wygląd systemów z komputera na serwerze** — logo wybrane albo pobrane na PC, poświata
+  i własna nazwa systemu idą na serwer EmuStart (przy starcie i po każdej zmianie), więc
+  aplikacja na Androida pokazuje te same loga co Windows. **Serwer trzeba zaktualizować.**
+- Android: **przeglądarka folderów padem** dla folderów zapisów i stanów (wystarczy wskazać
+  folder danych emulatora, np. `ArmSX2`); X — wykrywanie automatyczne.
+- Test spójności interfejsu: każda funkcja wołana przez interfejs musi istnieć na Windows
+  i być obsłużona na Androidzie albo świadomie oznaczona jako tylko dla komputera.
+
+### Poprawione
+- Android: foldery `memcards` / `sstates` wykrywane w całej pamięci telefonu (do 3 poziomów),
+  nie tylko w folderach pierwszego poziomu o nazwie emulatora — zapisy ArmSX2 nie szły na serwer.
+- Android: **pierwsza synchronizacja nie nadpisuje pliku z serwera** (np. karty pamięci
+  z komputera) — zostaje wersja z serwera, wersja z telefonu w kopii zapasowej.
+- Android: menu w grze odpytywane w trakcie gry zwracało błąd co 80 ms; opisy i grafiki
+  „na żądanie” oraz nieobsłużone funkcje odpowiadają teraz celowo (komunikat), nie pustką.
+
 ## [0.25.4] — 2026-10-09
 
 ### Poprawione

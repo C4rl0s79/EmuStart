@@ -141,10 +141,34 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
     private fun topDirs(): List<File> =
         ext.listFiles()?.filter { it.isDirectory && it.name != "Android" && !it.name.startsWith(".") } ?: emptyList()
 
+    @Volatile private var deep: Pair<Long, Map<String, List<File>>>? = null
+
+    /** Foldery `memcards` / `sstates` w pamięci telefonu (do 3 poziomów, bez Android/ i EmuStart/). */
+    private fun deepFind(sub: String, fresh: Boolean = false): List<File> {
+        val cached = deep
+        if (!fresh && cached != null && System.currentTimeMillis() - cached.first < 60_000) return cached.second[sub] ?: emptyList()
+        val found = HashMap<String, MutableList<File>>()
+        var budget = 5000
+        fun walk(d: File, depth: Int) {
+            val list = d.listFiles() ?: return
+            for (x in list) {
+                if (budget-- <= 0) return
+                if (!x.isDirectory || x.name.startsWith(".")) continue
+                if (depth == 0 && (x.name == "Android" || x.name == "EmuStart")) continue
+                val n = x.name.lowercase()
+                if (n == "memcards" || n == "sstates") found.getOrPut(n) { mutableListOf() } += x
+                else if (depth < 3) walk(x, depth + 1)
+            }
+        }
+        walk(ext, 0)
+        deep = Pair(System.currentTimeMillis(), found)
+        return found[sub] ?: emptyList()
+    }
+
     /** Foldery zapisów emulatora: ustawiony ręcznie, wykryty po grze, typowe miejsca. */
     fun phoneDirs(f: Fam, g: Game?): List<File> {
         val out = LinkedHashSet<File>()
-        prefs.saveDir(f.dirs).takeIf { it.isNotBlank() }?.let { out += File(it) }
+        prefs.saveDir(f.dirs).takeIf { it.isNotBlank() }?.let { out += inner(f, File(it)) }
         prefs.learnedDir(f.dirs).takeIf { it.isNotBlank() }?.let { out += File(it) }
         if (f.ra) {
             out += File(ext, if (f.kind == Kind.RA_STATES) "RetroArch/states" else "RetroArch/saves")
@@ -153,16 +177,33 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
             // stany PS2 obok kart pamięci (ten sam folder danych emulatora)
             if (f.cards.isNotEmpty()) (prefs.saveDir(f.cards).ifEmpty { prefs.learnedDir(f.cards) })
                 .takeIf { it.isNotBlank() }?.let { File(it).parentFile?.let { d -> out += File(d, f.sub) } }
-            topDirs().filter { f.dirName.containsMatchIn(it.name) }.forEach { out += File(it, f.sub) }
+            // foldery memcards / sstates w pamięci telefonu (do 3 poziomów); najpierw te
+            // w folderze o nazwie emulatora, gdy takich nie ma — wszystkie znalezione
+            val all = deepFind(f.sub)
+            val named = all.filter { d -> d.absolutePath.split('/').any { f.dirName.containsMatchIn(it) } }
+            out += named.ifEmpty { all }
         }
         return out.filter { it.isDirectory }
+    }
+
+    /** Wskazany ręcznie folder danych emulatora (np. ArmSX2, RetroArch) → jego podfolder
+     *  z kartami / stanami / zapisami; wskazany bezpośrednio podfolder zostaje. */
+    private fun inner(f: Fam, d: File): File {
+        val sub = when (f.kind) {
+            Kind.BY_STEM, Kind.PS1_SRM -> "saves"
+            Kind.RA_STATES -> "states"
+            else -> f.sub
+        }
+        val x = File(d, sub)
+        return if (!d.name.equals(sub, true) && x.isDirectory) x else d
     }
 
     /** Opis dla Ustawień: gdzie telefon szuka zapisów emulatora. */
     fun describe(f: Fam): String {
         val dirs = phoneDirs(f, null)
         return when {
-            prefs.saveDir(f.id).isNotBlank() -> prefs.saveDir(f.id) + (if (dirs.isEmpty()) " (nie ma takiego folderu)" else "")
+            prefs.saveDir(f.id).isNotBlank() -> inner(f, File(prefs.saveDir(f.id))).absolutePath +
+                (if (dirs.isEmpty()) " (nie ma takiego folderu)" else "")
             prefs.learnedDir(f.id).isNotBlank() && dirs.isNotEmpty() -> prefs.learnedDir(f.id) + " (wykryty)"
             dirs.isNotEmpty() -> dirs.joinToString(", ") { it.absolutePath }
             f.kind == Kind.BY_STEM || f.states -> "wykryje się po pierwszej grze"
@@ -382,8 +423,11 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
                 }
             }
             if (!download) {
-                if (x != null && m == null && same(nSig, sig(x)))
-                    man.put(key, JSONObject().put("n", nSig).put("p", sig(x)).put("rel", rel))
+                // pierwsze spotkanie z plikiem: zapamiętujemy wersję z serwera jako punkt odniesienia
+                // (bez tego wysyłka po grze uznałaby plik z serwera za nieznany i go nie nadpisała)
+                if (x != null && m == null)
+                    man.put(key, JSONObject().put("n", nSig)
+                        .put("p", if (same(nSig, sig(x))) sig(x) else JSONArray().put(-1).put(0)).put("rel", rel))
                 continue
             }
             val targets = if (x != null) listOf(x) else newTargets(f, g, dirs, rel)
@@ -440,7 +484,7 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
     private fun learn(f: Fam, g: Game, startedAt: Long) {
         val cands = LinkedHashSet<File>()
         cands += phoneDirs(f, g)
-        if (!f.ra) topDirs().forEach { cands += File(it, f.sub) }
+        if (!f.ra) cands += deepFind(f.sub, fresh = true)
         if (f.kind == Kind.PS2_STATES) {
             // stany zapisane w trakcie tej gry → przedrostek gry (także na serwer, dla innych telefonów)
             val found = LinkedHashSet<String>()
@@ -505,9 +549,13 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
         val v = nas[rel]
         val nSig = v?.let { sig(it[0].toLong(), it[1]) }
         val bak = "$profile/_backup/${stamp()}-${safe(device)}/${f.nas}"
-        if (v != null && m != null && !same(m.optJSONArray("n"), nSig) && v[1] > x.lastModified() / 1000.0 + 2) {
-            // serwer zmieniony w międzyczasie i nowszy: zostaje; wersja z telefonu do kopii zapasowej
-            conflicts += JSONObject().put("profile", profile).put("file", "$name (zostaje wersja z serwera, telefonu w kopii zapasowej)")
+        val first = v != null && m == null && !same(nSig, pSig)
+        if (first || (v != null && m != null && !same(m.optJSONArray("n"), nSig) && v[1] > x.lastModified() / 1000.0 + 2)) {
+            // serwer zmieniony w międzyczasie i nowszy — albo plik, którego telefon jeszcze nie
+            // synchronizował (np. karta pamięci z komputera): zostaje wersja z serwera,
+            // wersja z telefonu do kopii zapasowej (na serwerze i w telefonie)
+            conflicts += JSONObject().put("profile", profile).put("file",
+                "$name (zostaje wersja z serwera, wersja z telefonu w kopii zapasowej" + (if (first) " — pierwsza synchronizacja)" else ")"))
             server.nasPut("$bak/konflikt/$rel", x.readBytes(), x.lastModified() / 1000.0)
             backupLocal(x, "konflikt")
             server.nasGet("$profile/${f.nas}/$rel", x)

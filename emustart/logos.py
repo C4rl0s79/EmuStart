@@ -241,3 +241,78 @@ def _run(cfg: dict, todo: list) -> None:
         finally:
             with _lock:
                 _busy.discard(es)
+
+
+# ── wygląd systemów na serwerze EmuStart (dla aplikacji na Androida) ──
+
+_push_lock = threading.Lock()
+
+
+def _system_state(cfg: dict, es: str):
+    """(logo, plik, poświata, nazwa) systemu na tym komputerze; logo: custom/none/default/keep."""
+    sc = (cfg.get("systems") or {}).get(es) or {}
+    lg = url_for(es, cfg)
+    url = lg["url"].split("?")[0]
+    f = None
+    if sc.get("logo") == "none":
+        logo = "none"
+    elif url.startswith("/media/_systems/"):
+        f = _dir() / url.rsplit("/", 1)[1]
+        logo = "custom" if f.is_file() else "keep"
+    elif url.startswith("/assets/"):
+        logo = "default"
+    else:
+        logo = "keep"                         # nic tu nie ma — serwer zostaje przy swoim
+    name = sc.get("name", "")
+    return logo, f, bool(lg["glow"]), name
+
+
+def push_to_server(cfg: dict, only: list | None = None) -> int:
+    """Logo, poświata i nazwa systemów z tego komputera → serwer EmuStart (tylko zmienione
+    od ostatniego wysłania). Aplikacja na Androida pokazuje to, co ma serwer."""
+    import hashlib
+    import http.client
+    import urllib.parse
+    from emustart import library, netsrc
+    ep = netsrc.endpoint(cfg)
+    if not ep:
+        return 0
+    info = netsrc.info(cfg)
+    if not info.get("ok") or "system" not in info.get("features", []):
+        return 0
+    with _push_lock:
+        es_list = only or sorted(set((cfg.get("systems") or {})) | {p.name.split(".")[0] for p in _dir().glob("*.*")})
+        n = 0
+        for es in es_list:
+            try:
+                logo, f, glow, name = _system_state(cfg, es)
+                data = f.read_bytes() if logo == "custom" and f else b""
+                sig = hashlib.sha1(f"{logo}|{int(glow)}|{name}".encode() + data).hexdigest()
+                if library.meta_get(f"logo_pushed:{ep[0]}:{es}", "") == sig:
+                    continue
+                q = {"es": es, "logo": logo, "glow": "1" if glow else "0", "name": name}
+                if logo == "custom":
+                    q["ext"] = f.suffix.lower().lstrip(".")
+                c = http.client.HTTPConnection(ep[0], ep[1], timeout=20)
+                try:
+                    c.request("PUT", "/v1/system?" + urllib.parse.urlencode(q), body=data,
+                              headers={"Authorization": f"Bearer {ep[2]}"})
+                    r = c.getresponse()
+                    r.read()
+                finally:
+                    c.close()
+                if r.status == 200:
+                    library.meta_set(f"logo_pushed:{ep[0]}:{es}", sig)
+                    n += 1
+                else:
+                    log.warning("logo %s na serwer: %s", es, r.status)
+            except (OSError, http.client.HTTPException, ValueError) as ex:
+                log.info("logo %s na serwer: %s", es, ex)
+                break
+        if n:
+            log.info("wygląd %d systemów wysłany na serwer %s", n, ep[0])
+        return n
+
+
+def push_later(cfg: dict, only: list | None = None) -> None:
+    threading.Thread(target=lambda: push_to_server(cfg, only), daemon=True, name="logo-serwer").start()

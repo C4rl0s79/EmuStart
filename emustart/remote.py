@@ -96,7 +96,7 @@ def handle(handler) -> None:
     parts = [p for p in path.split("/") if p][1:]           # bez „v1”
     try:
         if parts == ["info"]:
-            feats = ["find"] + (["nas"] if NAS_ROOT else [])
+            feats = ["find", "system"] + (["nas"] if NAS_ROOT else [])
             return _json(handler, {"name": socket.gethostname(), "version": __version__, "api": 1,
                                    "features": feats, "nas_id": NAS_ID})
         if parts and parts[0] == "nas":
@@ -171,6 +171,8 @@ def handle_write(handler, method: str) -> None:
         return _json(handler, {"error": "brak lub zły klucz serwera"}, 401)
     path = urllib.parse.unquote(urllib.parse.urlsplit(handler.path).path)
     parts = [p for p in path.split("/") if p][1:]
+    if method == "PUT" and parts == ["system"]:
+        return _system_put(handler)
     if not parts or parts[0] != "nas":
         n = int(handler.headers.get("Content-Length") or 0)
         if n:
@@ -196,6 +198,43 @@ def handle_write(handler, method: str) -> None:
             _json(handler, {"error": str(ex)}, 500)
         except OSError:
             pass
+
+
+def _system_put(handler) -> None:
+    """Wygląd systemu z EmuStart na Windows: logo (plik w treści), poświata, nazwa —
+    serwer pokazuje je potem aplikacji na Androida tak jak na komputerze."""
+    from emustart import logos
+    n = int(handler.headers.get("Content-Length") or 0)
+    if n > 5 * 1024 * 1024:
+        handler.close_connection = True
+        return _json(handler, {"error": "za duże logo"}, 413)
+    body = handler.rfile.read(n) if n else b""
+    q = urllib.parse.parse_qs(urllib.parse.urlsplit(handler.path).query)
+    arg = lambda k: (q.get(k) or [""])[0]      # noqa: E731
+    es, logo, ext = arg("es"), arg("logo"), arg("ext").lower()
+    if not re.fullmatch(r"[a-z0-9_]{1,40}", es) or logo not in ("custom", "none", "default", "keep"):
+        return _json(handler, {"error": "zły system albo logo"}, 400)
+    if logo == "custom" and (ext not in ("svg", "png", "jpg", "webp") or not body):
+        return _json(handler, {"error": "zły plik logo"}, 400)
+    cfg = API._cfg
+    sc = cfg.setdefault("systems", {}).setdefault(es, {})
+    if logo == "custom":
+        logos._store_custom(es, body, ext)
+        sc["logo"] = "custom"
+    elif logo == "none":
+        sc["logo"] = "none"
+    elif logo == "default":
+        sc["logo"] = ""
+    if arg("glow") in ("0", "1"):
+        sc["logo_glow"] = arg("glow") == "1"
+    if "name" in q:
+        name = arg("name").strip()[:60]
+        if name:
+            sc["name"] = name
+        else:
+            sc.pop("name", None)
+    config.save(cfg)
+    return _json(handler, {"ok": True})
 
 
 def _nas(handler, method: str, parts: list) -> None:

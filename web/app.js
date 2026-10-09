@@ -745,9 +745,8 @@ function buildSetRowsAndroid() {
   rows.push({ k: "Profil", type: "action", fmt: () => c.profile || "nie wybrano — A: wybierz", run: () => openProfiles() });
   if (c.pending_saves) rows.push({ k: "Czekają na wysłanie", type: "info", key: "pending_saves", fmt: (v) => `${v} gier (wyślą się, gdy serwer będzie dostępny)` });
   for (const f of c.save_fams || []) {
-    rows.push({ k: `Folder zapisów: ${f.label}`, key: `save_dir:${f.id}`, type: "text",
-                prefill: () => f.value || "/storage/emulated/0/",
-                fmt: (v) => (v ? v : `auto: ${f.found}`) });
+    rows.push({ k: `Folder: ${f.label}`, key: `save_dir:${f.id}`, type: "path",
+                fmt: (v) => (v ? f.found : `auto: ${f.found}`) });
     c[`save_dir:${f.id}`] = f.value;
   }
   rows.push({ head: "Gry w telefonie" });
@@ -871,7 +870,8 @@ function renderSettings() {
   if (sel) sel.scrollIntoView({ block: "nearest" });
   const r = S.setRows[S.setIdx] || {};
   const h = [["dpad", "Zmień"], ["a", r.type === "action" ? "Wykonaj" : ["path", "root", "addroot"].includes(r.type) ? "Wybierz folder" : "Przełącz"]];
-  if (["path", "root", "addroot"].includes(r.type)) h.push(["x", "Okno Windows (mysz)"]);
+  if (["path", "root", "addroot"].includes(r.type))
+    h.push(["x", S.platform === "android" ? "Wykrywaj automatycznie" : "Okno Windows (mysz)"]);
   if (r.type === "root") h.push(["y", "Usuń"]);
   h.push(["b", "Wstecz"]);
   setHints(h);
@@ -958,6 +958,9 @@ async function settingsInput(a) {
   } else if (r.type === "path") {
     if (a === "a") return folderBrowse(r.k, S.settings[r.key] || "", async (p) => { await saveSetting(r.key, p); renderSettings(); });
     if (a === "y") return startEdit(S.setIdx);      // wpisanie ścieżki klawiaturą — tylko na życzenie
+    if (a === "x" && S.platform === "android") {      // bez okna Windows: wyczyszczenie = wykrywanie automatyczne
+      await saveSetting(r.key, ""); S.settings = await api().get_settings(); buildSetRows(); return renderSettings();
+    }
     if (a === "x") {
       const p = await api().pick_folder(S.settings[r.key]);
       if (p) { await saveSetting(r.key, p); if (r.key === "rom_root") { S.settings = await api().get_settings(); buildSetRows(); } }
