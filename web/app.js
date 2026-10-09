@@ -225,6 +225,11 @@ function renderSystems() {
   if (car.childElementCount !== n) {
     car.innerHTML = S.systems.map((s, i) =>
       `<div class="syscard" data-i="${i}">${s.logo ? `<img src="${s.logo}" alt=""${s.logo_glow ? ' class="glow"' : ""}>` : `<div class="txt">${esc(s.display)}</div>`}</div>`).join("");
+    // logo, które się nie wczytało (np. brak połączenia z serwerem) — nazwa systemu zamiast pustej karty
+    car.querySelectorAll(".syscard img").forEach((img) => img.addEventListener("error", () => {
+      const s = S.systems[+img.parentElement.dataset.i];
+      img.replaceWith(Object.assign(document.createElement("div"), { className: "txt", textContent: s ? s.display : "" }));
+    }));
     car.querySelectorAll(".syscard").forEach((el) => el.addEventListener("click", () => {
       const i = +el.dataset.i;
       if (i === S.sysIdx) openSystem(); else { S.sysIdx = i; renderSystems(); }

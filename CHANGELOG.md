@@ -8,6 +8,14 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.25.4] — 2026-10-09
+
+### Poprawione
+- Android: **loga platform** — serwer podaje też, czy logo potrzebuje jasnej poświaty
+  (pobrane loga bywają czarne i na ciemnym tle były niewidoczne). **Serwer trzeba
+  zaktualizować do 0.25.4.**
+- Logo systemu, które się nie wczytało, zastępuje nazwa systemu (zamiast pustej karty).
+
 ## [0.25.3] — 2026-10-09
 
 ### Poprawione

@@ -107,7 +107,7 @@ def handle(handler) -> None:
             from emustart import installer, systems
             out = []
             for s_ in API.list_systems():
-                d = {k: s_.get(k) for k in ("es", "display", "games", "logo", "kind")}
+                d = {k: s_.get(k) for k in ("es", "display", "games", "logo", "logo_glow", "kind")}
                 plat = systems.info(s_["es"])["plat"]
                 d["plat"] = plat
                 d["core"] = installer.CORES.get(plat, "")     # rdzeń RetroArcha (Android: *_libretro_android.so)
