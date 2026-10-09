@@ -45,6 +45,48 @@ najnowsza.
 RetroArch dostaje ścieżkę pliku, pozostałe emulatory — plik z uprawnieniem do odczytu.
 Rdzenie RetroArcha pobierz w samym RetroArchu (Online Updater → Core Downloader).
 
+## Profile i zapisy gier
+
+Telefon używa **tych samych profili co EmuStart na komputerze** (foldery profili na
+serwerze). Przy pierwszym uruchomieniu wybierz swój profil („Kto gra na tym telefonie?”),
+później: Start → **Zmień profil**. Zapisy zastane w emulatorach telefonu trafiają do
+pierwszego wybranego profilu.
+
+Zapisy z gry są **wspólne z komputerem**:
+
+| Emulator w telefonie | Co jest synchronizowane | Na serwerze (wspólne z PC) |
+|---|---|---|
+| RetroArch | zapisy gry (`.srm`, `.sav`, …) | `saveetroarch\saves` |
+| DuckStation | karty pamięci gry (`<gra>_1.mcd`, `shared_card_*`) | `save\duckstation\memcards` |
+| ArmSX2, AetherSX2 / NetherSX2 | karty `Mcd001.ps2`, `Mcd002.ps2` | `save\pcsx2\memcards` (PCSX2) |
+
+- Przed grą nowsze zapisy z serwera trafiają do folderu emulatora, po powrocie do
+  EmuStart zmienione wracają na serwer (poprzednia wersja zostaje w kopii zapasowej
+  profilu na serwerze).
+- Gra po obu stronach od ostatniej synchronizacji — zostaje nowsza wersja, druga
+  w kopii zapasowej, EmuStart pokaże komunikat.
+- Profil gra na komputerze — telefon nie uruchomi gry na tym samym profilu (i odwrotnie).
+- Bez połączenia gra działa na zapisach z telefonu; wyślą się przy następnym
+  połączeniu (Ustawienia → Zapisy gier → „Czekają na wysłanie”).
+- Stany gry (savestate) nie są wspólne — różne wersje emulatorów często ich nie wczytują.
+
+**Foldery emulatorów.** EmuStart musi widzieć folder zapisów emulatora — w pamięci
+telefonu, nie w `Android/data` (tam Android nie wpuszcza innych aplikacji):
+
+- **RetroArch**: Ustawienia → Katalogi → *Zapisy gier* = `/storage/emulated/0/RetroArch/saves`
+  (albo „obok gry”). EmuStart wykryje folder po pierwszej grze.
+- **DuckStation, ArmSX2, AetherSX2**: przy pierwszym uruchomieniu (albo w ustawieniach)
+  wybierz folder danych w pamięci telefonu, np. `/storage/emulated/0/DuckStation`,
+  `/storage/emulated/0/ArmSX2` — karty są w jego podfolderze `memcards`.
+
+Ustawienia → **Zapisy gier** pokazują wykryte foldery; można też wpisać je ręcznie.
+
+## Aktualizacje aplikacji
+
+Od wersji 0.25.0 aplikacja jest podpisana stałym kluczem — kolejne wersje instalują się
+na poprzedniej. **Jednorazowo** trzeba odinstalować wersję wcześniejszą niż 0.25.0
+(była podpisana kluczem tymczasowym); pobrane gry w `EmuStart/games` zostają.
+
 ## Sterowanie
 
 Jak na Windows ([Sterowanie](Sterowanie)): krzyżak/gałka, A — wybierz (gra), B —
@@ -66,4 +108,3 @@ Przycisk „wstecz” telefonu działa jak B.
   wirtualnego dysku) — gra najpierw się pobiera.
 - Opcje gier i systemów, grafiki, metadane i ustawienia emulatorów zmienia się
   w EmuStart na komputerze z grami.
-- Zapisy (save'y) i profile — w kolejnych wersjach.

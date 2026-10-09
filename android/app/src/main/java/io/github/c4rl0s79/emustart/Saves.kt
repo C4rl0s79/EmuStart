@@ -33,7 +33,9 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
     val device: String = "Telefon " + Build.MODEL
 
     enum class Kind { BY_STEM, PS1_CARDS, PS2_CARDS }
-    data class Fam(val id: String, val label: String, val nas: String, val kind: Kind)
+    /** Emulator: id (ustawienia, manifest), folder na serwerze, sposób dobierania plików,
+     *  nazwa folderu danych w pamięci telefonu (wykrywanie). */
+    data class Fam(val id: String, val label: String, val nas: String, val kind: Kind, val dirName: Regex)
 
     /** Gra: nazwa (jak na serwerze), nazwa pliku bez rozszerzenia, folder gry w telefonie, rdzeń RetroArcha. */
     data class Game(val es: String, val name: String, val stem: String, val dir: File, val core: String) {
@@ -48,20 +50,18 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
     class Locked(val host: String) : Exception("Profil gra teraz na: $host")
 
     companion object {
+        private fun rx(s: String) = Regex(s, RegexOption.IGNORE_CASE)
+        // ArmSX2 i AetherSX2 mają osobne foldery w telefonie, na serwerze — wspólne karty PCSX2
         val FAMS = listOf(
-            Fam("retroarch", "RetroArch", "save/retroarch/saves", Kind.BY_STEM),
-            Fam("duckstation", "DuckStation", "save/duckstation/memcards", Kind.PS1_CARDS),
-            Fam("pcsx2", "ArmSX2 / AetherSX2", "save/pcsx2/memcards", Kind.PS2_CARDS))
+            Fam("retroarch", "RetroArch", "save/retroarch/saves", Kind.BY_STEM, rx("^retroarch$")),
+            Fam("duckstation", "DuckStation", "save/duckstation/memcards", Kind.PS1_CARDS, rx("duck")),
+            Fam("armsx2", "ArmSX2", "save/pcsx2/memcards", Kind.PS2_CARDS, rx("armsx2")),
+            Fam("nethersx2", "AetherSX2 / NetherSX2", "save/pcsx2/memcards", Kind.PS2_CARDS, rx("aether|nether")))
 
-        fun famFor(emu: String): Fam? = when (emu.substringBefore('@')) {
-            "retroarch" -> FAMS[0]
-            "duckstation" -> FAMS[1]
-            "armsx2", "nethersx2" -> FAMS[2]
-            else -> null
-        }
+        fun famFor(emu: String): Fam? = FAMS.firstOrNull { it.id == emu.substringBefore('@') }
 
-        private val NOT_SAVE = Regex("""\.(state\d*|auto|png|jpg|jpeg|bmp|webp|txt|cfg|opt|ldci|emustart-tmp)$""",
-                                     RegexOption.IGNORE_CASE)
+        /** Pliki zapisów rdzeni RetroArcha (nie sama gra, nie stany, nie zrzuty). */
+        private val SAVE_EXT = rx("""\.(srm|sav|rtc|eep|fla|mpk|sra|nv|mcr|bkr|bcr|brm|dsv|ram)$""")
         private const val LOCK_MAX_AGE = 12 * 3600.0
 
         /** Nazwy folderów rdzeni (RetroArch sortuje save'y wg nazwy rdzenia), gdy różnią się od identyfikatora. */
@@ -113,8 +113,7 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
                 out += File(ext, "RetroArch/saves")
                 if (g != null) out += g.dir                       // „zapis obok gry” (domyślne w części wersji)
             }
-            Kind.PS1_CARDS -> topDirs().filter { it.name.contains("duck", true) }.forEach { out += File(it, "memcards") }
-            Kind.PS2_CARDS -> topDirs().filter { it.name.contains("sx2", true) }.forEach { out += File(it, "memcards") }
+            else -> topDirs().filter { f.dirName.containsMatchIn(it.name) }.forEach { out += File(it, "memcards") }
         }
         return out.filter { it.isDirectory }
     }
@@ -132,7 +131,7 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
     }
 
     private fun matches(f: Fam, g: Game, name: String): Boolean = when (f.kind) {
-        Kind.BY_STEM -> name.startsWith(g.stem + ".") && !NOT_SAVE.containsMatchIn(name)
+        Kind.BY_STEM -> name.startsWith(g.stem + ".") && SAVE_EXT.containsMatchIn(name)
         Kind.PS1_CARDS -> name.endsWith(".mcd", true) && (name.startsWith(g.name + "_") || name.startsWith("shared_card", true))
         Kind.PS2_CARDS -> name.endsWith(".ps2", true)
     }

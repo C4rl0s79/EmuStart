@@ -4,7 +4,7 @@ Kierunek: **serwer EmuStart jako centrum** — gry, zapisy, profile, ustawienia 
 idą przez serwer (HTTP z kluczem, przez Tailscale), wspólnie dla Windows i Androida.
 Dostęp SMB do NAS-a zostaje jako zapas i do zarządzania.
 
-Stan na 2026-10-09 (EmuStart 0.24.0). Kolejność może się zmienić; to, co już wydane,
+Stan na 2026-10-09 (EmuStart 0.25.0). Kolejność może się zmienić; to, co już wydane,
 opisuje [CHANGELOG.md](CHANGELOG.md).
 
 ## Dlaczego serwer (pomiary)
@@ -60,11 +60,11 @@ Układ profilu na NAS-ie:
       bez PIN-u serwer nie wydaje zapisów ani ustawień profilu.
 - [x] Windows: synchronizacja przez serwer, SMB jako zapas (0.24.0; kompresja zstd,
       kopie zapasowe po stronie serwera, wysyłka zaległych zapisów przy starcie).
-- [ ] Android: wybór profilu, zapisy tylko uruchamianej gry przed startem i po powrocie,
-      kolejka wysyłek bez połączenia; RetroArch, DuckStation, ArmSX2/AetherSX2,
-      potem PPSSPP, Dolphin.
-- [ ] Android: sprawdzenie folderów danych emulatorów (muszą być we wspólnej pamięci,
-      nie w `Android/data`) i podpowiedź, gdzie przestawić.
+- [x] Android: wybór profilu, zapisy tylko uruchamianej gry przed startem i po powrocie,
+      kolejka wysyłek bez połączenia; RetroArch, DuckStation, ArmSX2/AetherSX2 (0.25.0).
+- [ ] Android: PPSSPP, Dolphin.
+- [x] Android: sprawdzenie folderów danych emulatorów (muszą być we wspólnej pamięci,
+      nie w `Android/data`) i podpowiedź, gdzie przestawić (0.25.0).
 - [ ] Wspólne zapisy między różnymi emulatorami tylko przy zgodnym formacie
       (np. karta PS1: DuckStation `.mcd` ↔ SwanStation `.srm`).
 
@@ -91,7 +91,7 @@ Układ profilu na NAS-ie:
 
 ## Android — sprawy bieżące
 
-- [ ] **Stały klucz podpisu APK** — bez niego każda aktualizacja wymaga odinstalowania
+- [x] **Stały klucz podpisu APK** (0.25.0) — bez niego każda aktualizacja wymaga odinstalowania
       (traci ustawienia aplikacji). Potrzebny przed etapem B (kolejka zapisów w telefonie).
 - [ ] Test uruchamiania gier: RetroArch (oba warianty), ArmSX2, AetherSX2.
 - [ ] Później, opcjonalnie: wbudowany silnik libretro dla starszych systemów.

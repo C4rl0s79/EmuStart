@@ -8,6 +8,19 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.25.0] — 2026-10-09
+
+### Dodane
+- Android: **profile i zapisy gier wspólne z EmuStart na komputerze** (foldery profili na
+  serwerze): wybór profilu przy pierwszym uruchomieniu i w menu Start, zapisy uruchamianej
+  gry z serwera przed grą i na serwer po grze — RetroArch (`.srm` itd.), DuckStation (karty
+  gry), ArmSX2 i AetherSX2 / NetherSX2 (karty PCSX2 `Mcd00x.ps2`). Konflikty: nowsza wersja,
+  druga w kopii zapasowej. Blokada: ten sam profil nie gra naraz na telefonie i komputerze.
+  Bez połączenia — kolejka wysyłek. Ustawienia → **Zapisy gier**: profil, foldery
+  emulatorów (wykrywane, także po pierwszej grze), zaległe wysyłki.
+- Android: **stały klucz podpisu** — kolejne wersje instalują się na poprzedniej.
+  Jednorazowo trzeba odinstalować wersję sprzed 0.25.0.
+
 ## [0.24.0] — 2026-10-09
 
 ### Dodane
