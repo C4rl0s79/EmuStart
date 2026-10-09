@@ -1,6 +1,8 @@
 # Sterowanie
 
 EmuStart obsługuje się padem; klawiatura i mysz działają zastępczo.
+Podpowiedzi przycisków na dole ekranu można klikać — wszystko da się zrobić samą myszą
+(np. na komputerze bez pada). Przy wyborze folderu: Y — wpisanie ścieżki z klawiatury.
 
 ## Wszędzie
 

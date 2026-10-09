@@ -4,6 +4,16 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 [Keep a Changelog](https://keepachangelog.com/pl/1.1.0/), wersje według
 [SemVer](https://semver.org/lang/pl/).
 
+## [0.22.2] — 2026-10-09
+
+### Dodane
+- **Obsługa samą myszą** (np. na komputerze z grami bez pada): podpowiedzi przycisków
+  na dole ekranu i w oknach są klikalne — działają jak przyciski pada (Wybierz ten
+  folder, W górę, Anuluj…).
+- Wybór folderu: **Y — wpisz ścieżkę** z klawiatury (np. `D:\ROMS\No-Intro`).
+- „Okno Windows (mysz)” do wyboru folderu działa także, gdy interfejs jest otwarty
+  w przeglądarce.
+
 ## [0.22.1] — 2026-10-09
 
 ### Naprawione
