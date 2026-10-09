@@ -34,6 +34,21 @@ class Prefs(ctx: Context) {
         get() = try { JSONObject(sp.getString("look", "{}") ?: "{}") } catch (e: Exception) { JSONObject() }
         set(v) = sp.edit().putString("look", v.toString()).apply()
 
+    /** Profil grający na telefonie (nazwa folderu profilu na serwerze); '' = nie wybrano. */
+    var profile: String
+        get() = sp.getString("profile", "") ?: ""
+        set(v) = sp.edit().putString("profile", v).apply()
+
+    /** Profil, do którego należą zapisy zastane w emulatorach (pierwszy wybrany). */
+    var phoneOwner: String
+        get() = sp.getString("phone_owner", "") ?: ""
+        set(v) = sp.edit().putString("phone_owner", v).apply()
+
+    fun saveDir(fam: String): String = sp.getString("save_dir:$fam", "") ?: ""
+    fun setSaveDir(fam: String, v: String) = sp.edit().putString("save_dir:$fam", v.trim()).apply()
+    fun learnedDir(fam: String): String = sp.getString("learned_dir:$fam", "") ?: ""
+    fun setLearnedDir(fam: String, v: String) = sp.edit().putString("learned_dir:$fam", v).apply()
+
     fun emulator(es: String): String = sp.getString("emu:$es", "") ?: ""
     fun setEmulator(es: String, id: String) = sp.edit().putString("emu:$es", id).apply()
 

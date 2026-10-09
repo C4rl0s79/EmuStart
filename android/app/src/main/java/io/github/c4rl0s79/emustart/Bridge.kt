@@ -19,8 +19,14 @@ import java.util.concurrent.Executors
 class Bridge(private val act: MainActivity) {
     private val prefs = Prefs(act)
     private val server = Server(prefs)
+    private val saves = Saves(act, server, prefs)
     private val pool = Executors.newFixedThreadPool(6)
     private val tag = "EmuStart"
+    @Volatile private var profList: List<String> = emptyList()
+
+    init {
+        pool.execute { try { saves.retryPending() } catch (e: Exception) { Log.w(tag, "zaległe zapisy: $e") } }
+    }
 
     @Volatile private var systemsCache: JSONArray? = null
     private val gamesCache = HashMap<String, JSONArray>()
@@ -33,6 +39,9 @@ class Bridge(private val act: MainActivity) {
         @Volatile var progress: Progress? = null
         @Volatile var startedAt = 0L
         var downloader: Downloader? = null
+        var emu = ""
+        var saveGame: Saves.Game? = null
+        var profile = ""
     }
     @Volatile private var launch: Launch? = null
 
@@ -76,12 +85,15 @@ class Bridge(private val act: MainActivity) {
         "look_save" -> { prefs.look = a.getJSONObject(0); JSONObject().put("ok", true) }
         "quit" -> { act.runOnUiThread { act.finishAndRemoveTask() }; null }
         "copy_status" -> JSONArray()
-        "post_status" -> ""
+        "post_status" -> saves.busy
         "art_status" -> null
         "art_for" -> JSONObject()
         "system_info" -> JSONObject()
-        "profiles_list" -> JSONObject().put("profiles", JSONArray().put(JSONObject().put("id", 1).put("name", "Telefon")))
-            .put("current", 1)
+        "profiles_list" -> profilesList()
+        "profile_select", "profile_setup" -> selectProfile(a.getInt(0))
+        "profile_create" -> createProfile(a.getString(0))
+        "profile_rename", "profile_delete", "profile_nas_rename" -> JSONObject().put("ok", false)
+            .put("reason", "Nazwę i folder profilu zmienia się w EmuStart na komputerze.")
         "pad_backend" -> "android"
         else -> null      // request_art, meta_fetch, ui_log… — niepotrzebne na Androidzie
     }
@@ -89,13 +101,16 @@ class Bridge(private val act: MainActivity) {
     // ── stan i listy ──
     private fun state(): JSONObject {
         val sys = try { systems() } catch (e: Exception) { JSONArray() }
+        if (profList.isEmpty() && online) try { profList = saves.profiles() } catch (e: Exception) { }
         return JSONObject()
             .put("version", BuildConfig.VERSION_NAME).put("platform", "android")
             .put("configured", prefs.configured).put("rom_online", online)
             .put("network_mode", "remote").put("systems", sys).put("copying", JSONArray())
             .put("games_logo", prefs.gamesLogo).put("look", prefs.look).put("look_scope", "profile")
-            .put("setup_needed", false).put("ask_profile", false).put("conflicts", JSONArray())
-            .put("profile", JSONObject().put("id", 1).put("name", "Telefon")).put("profiles", 1)
+            .put("setup_needed", prefs.configured && online && prefs.profile.isEmpty())
+            .put("ask_profile", false).put("conflicts", drainConflicts())
+            .put("profile", JSONObject().put("id", profileId()).put("name", prefs.profile.ifEmpty { "—" }))
+            .put("profiles", profList.size.coerceAtLeast(1))
             .put("py_pad", false).put("pad_backend", "android")
     }
 
@@ -194,6 +209,9 @@ class Bridge(private val act: MainActivity) {
             .put("server_url", prefs.serverUrl).put("server_key", prefs.serverKey)
             .put("cache_recent", prefs.cacheRecent).put("streams", prefs.streams)
             .put("games_logo", prefs.gamesLogo).put("games_dir", prefs.gamesDir(act).absolutePath)
+            .put("profile", prefs.profile).put("pending_saves", saves.pendingCount())
+            .put("save_fams", JSONArray(Saves.FAMS.map { f ->
+                JSONObject().put("id", f.id).put("label", f.label).put("value", prefs.saveDir(f.id)).put("found", saves.describe(f)) }))
             .put("systems", sys)
     }
 
@@ -213,6 +231,7 @@ class Bridge(private val act: MainActivity) {
                 k == "streams" -> prefs.streams = d.getInt(k)
                 k == "games_logo" -> prefs.gamesLogo = d.getBoolean(k)
                 k.startsWith("emu:") -> { prefs.setEmulator(k.removePrefix("emu:"), d.getString(k)); systemsCache = null }
+                k.startsWith("save_dir:") -> prefs.setSaveDir(k.removePrefix("save_dir:"), d.getString(k))
             }
         }
     }
@@ -285,6 +304,22 @@ class Bridge(private val act: MainActivity) {
                 (0 until files.length()).map { File(base, files.getJSONObject(it).getString("path")).absolutePath } })
             Cache.enforce(act, prefs.cacheRecent, key(es, g.optString("name")))
             val main = File(base, g.optString("file").ifEmpty { files.getJSONObject(0).getString("path") })
+            // zapisy profilu: nowsze z serwera do folderu emulatora (wspólne z EmuStart na Windows)
+            if (prefs.profile.isNotEmpty() && Saves.famFor(emu) != null) {
+                l.phase = "preparing"; l.message = "Zapisy profilu ${prefs.profile}…"
+                val sg = Saves.Game(es, g.optString("name"), main.nameWithoutExtension, main.parentFile ?: base,
+                                    Emulators.retroCore(l.sys.optString("plat"), l.sys.optString("core")))
+                try {
+                    val msg = saves.before(prefs.profile, emu, sg)
+                    l.message = msg
+                    if (msg.isNotEmpty()) Log.i(tag, msg)
+                } catch (e: Saves.Locked) {
+                    l.phase = "error"
+                    l.message = "Profil „${prefs.profile}” gra teraz na: ${e.host}. Wybierz inny profil albo zakończ tamtą grę."
+                    return
+                }
+                l.emu = emu; l.saveGame = sg; l.profile = prefs.profile
+            }
             val intent = Emulators.intent(act, emu, main, l.sys.optString("plat"), l.sys.optString("core"))
             l.startedAt = System.currentTimeMillis()
             l.phase = "running"
@@ -316,9 +351,45 @@ class Bridge(private val act: MainActivity) {
         val l = launch ?: return
         if (l.phase == "running" && System.currentTimeMillis() - l.startedAt > 3000) {
             l.phase = "finished"
+            val sg = l.saveGame
+            if (sg != null) pool.execute {
+                try { saves.after(l.profile, l.emu, sg, l.startedAt, l.game.optString("title")) }
+                catch (e: Exception) { Log.w(tag, "zapisy po grze: $e") }
+            }
             synchronized(gamesCache) { gamesCache.clear() }
             act.js("window.__emuResumed && window.__emuResumed()")
         }
+    }
+
+    // ── profile (foldery profili na serwerze, te same co w EmuStart na Windows) ──
+    private fun profileId(): Int = profList.indexOfFirst { it == prefs.profile }.let { if (it < 0) 0 else it + 1 }
+
+    private fun profilesList(): JSONObject {
+        try { profList = saves.profiles() } catch (e: Exception) { Log.w(tag, "profile: $e") }
+        val arr = JSONArray()
+        profList.forEachIndexed { i, n -> arr.put(JSONObject().put("id", i + 1).put("name", n).put("nas_name", n)) }
+        return JSONObject().put("profiles", arr).put("current", profileId())
+    }
+
+    private fun selectProfile(id: Int): JSONObject {
+        val n = profList.getOrNull(id - 1) ?: return JSONObject().put("ok", false)
+        prefs.profile = n
+        if (prefs.phoneOwner.isEmpty()) prefs.phoneOwner = n
+        return JSONObject().put("ok", true)
+    }
+
+    private fun createProfile(name: String): JSONObject = try {
+        val n = saves.createProfile(name)
+        profList = saves.profiles()
+        JSONObject().put("ok", true).put("profile", JSONObject().put("id", profList.indexOf(n) + 1).put("name", n))
+    } catch (e: Exception) {
+        JSONObject().put("ok", false).put("reason", if (e is IllegalArgumentException) e.message else explain(e))
+    }
+
+    private fun drainConflicts(): JSONArray {
+        val out = JSONArray()
+        synchronized(saves.conflicts) { saves.conflicts.forEach { out.put(it) }; saves.conflicts.clear() }
+        return out
     }
 
     private fun togglePin(id: Int): JSONObject {

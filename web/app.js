@@ -665,7 +665,8 @@ function openMenu() {
   ];
   if (S.platform === "android") {
     items.length = 0;
-    items.push(["Ustawienia", () => openSettings()], ["Wygląd (logo, czcionki, kolory)", () => openLook()],
+    items.push(["Ustawienia", () => openSettings()], ["Zmień profil", () => openProfiles()],
+               ["Wygląd (logo, czcionki, kolory)", () => openLook()],
                ["Odśwież listę z serwera", async () => { await api().rescan(); await refreshState(); show("systems"); }],
                ["Wyjdź z EmuStart", () => api().quit()]);
   }
@@ -735,6 +736,15 @@ function buildSetRowsAndroid() {
     toast("Łączę z serwerem…", 10000); const r = await api().server_test();
     toast(r.ok ? `Połączono: ${r.name} (EmuStart ${r.version}), ${r.systems} systemów` : `Błąd: ${r.reason}`, 6000);
     if (r.ok) { await refreshState(); } } });
+  rows.push({ head: "Zapisy gier  ·  wspólne z EmuStart na komputerze (folder profilu na serwerze)" });
+  rows.push({ k: "Profil", type: "action", fmt: () => c.profile || "nie wybrano — A: wybierz", run: () => openProfiles() });
+  if (c.pending_saves) rows.push({ k: "Czekają na wysłanie", type: "info", key: "pending_saves", fmt: (v) => `${v} gier (wyślą się, gdy serwer będzie dostępny)` });
+  for (const f of c.save_fams || []) {
+    rows.push({ k: `Folder zapisów: ${f.label}`, key: `save_dir:${f.id}`, type: "text",
+                prefill: () => f.value || "/storage/emulated/0/",
+                fmt: (v) => (v ? v : `auto: ${f.found}`) });
+    c[`save_dir:${f.id}`] = f.value;
+  }
   rows.push({ head: "Gry w telefonie" });
   rows.push({ k: "Folder gier", key: "games_dir", type: "info", fmt: (v) => v });
   rows.push({ k: "Trzymaj ostatnie gry", key: "cache_recent", type: "num", step: 1, min: 1, max: 100, fmt: (v) => `${v} + przypięte` });
@@ -827,7 +837,7 @@ function setValue(r) {
   if (r.type === "system") return r.sys.enabled ? (r.sys.label || "brak emulatora") : (r.sys.known ? "wyłączony" : "nierozpoznany folder — wyłączony");
   if (r.type === "root") return r.path;
   if (r.type === "addroot") return "A wybierz folder";
-  if (r.type === "action") return "";
+  if (r.type === "action") return r.fmt ? r.fmt() : "";
   const v = c[r.key];
   return r.fmt ? r.fmt(v) : v;
 }

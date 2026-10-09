@@ -336,11 +336,15 @@ async function openProfiles(startup = false) {
 }
 function renderProfiles() {
   const setup = PR.startup === "setup";
-  $("profTitle").textContent = setup ? "Kto gra na tym komputerze?" : PR.startup ? "Kto gra?" : "Profile";
+  const here = S.platform === "android" ? "tym telefonie" : "tym komputerze";
+  $("profTitle").textContent = setup ? `Kto gra na ${here}?` : PR.startup ? "Kto gra?" : "Profile";
   $("profIntro").classList.toggle("hidden", !setup);
   $("profIntro").textContent = setup
-    ? "Wybierz swój profil (profile z NAS są już na liście) albo utwórz nowy. Do niego trafią save'y i konto " +
-      "RetroAchievements zastane w emulatorach na tym komputerze. Później zmienisz to w Ustawieniach → Profile." : "";
+    ? (S.platform === "android"
+      ? "Wybierz swój profil (te same co w EmuStart na komputerze) albo utwórz nowy. Zapisy gier będą wspólne " +
+        "z komputerem; zapisy zastane w emulatorach telefonu trafią do tego profilu."
+      : "Wybierz swój profil (profile z NAS są już na liście) albo utwórz nowy. Do niego trafią save'y i konto " +
+        "RetroAchievements zastane w emulatorach na tym komputerze. Później zmienisz to w Ustawieniach → Profile.") : "";
   const cards = PR.list.map((p, i) =>
     `<div class="pcard${i === PR.idx ? " sel" : ""}${p.id === PR.current ? " cur" : ""}" data-i="${i}">` +
     `<div class="pav">${esc((p.name[0] || "?").toUpperCase())}</div><div class="pname">${esc(p.name)}</div></div>`).join("") +
@@ -349,6 +353,7 @@ function renderProfiles() {
   $("profCards").querySelectorAll(".pcard").forEach((el) => el.addEventListener("click", () => { PR.idx = +el.dataset.i; profilesInput("a"); }));
   const onProfile = PR.idx < PR.list.length;
   if (setup) return setHints([["a", onProfile ? "To mój profil" : "Utwórz"], ["y", `Pytaj przy starcie: ${PR.ask ? "tak" : "nie"}`]]);
+  if (S.platform === "android") return setHints(onProfile ? [["a", "Graj jako"], ["b", "Wstecz"]] : [["a", "Utwórz"], ["b", "Wstecz"]]);
   setHints(onProfile ? [["a", "Graj jako"], ["start", "Opcje profilu"], ["y", "Zmień nazwę"], ["x", "Usuń"], ["b", "Wstecz"]] : [["a", "Utwórz"], ["b", "Wstecz"]]);
 }
 async function profilesInput(a) {
@@ -379,7 +384,7 @@ async function profilesInput(a) {
     applyLook(st.look || {}, true);         // wygląd zapisany w profilu
     toast(`Gra: ${p.name}`);
     return show("systems");
-  } else if (a === "start" && p) {
+  } else if (a === "start" && p && S.platform !== "android") {
     return profileMenu(p);
   } else if (a === "y" && p) {
     return oskOpen("Nowa nazwa profilu", p.name, async (name) => {
