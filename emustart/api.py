@@ -995,6 +995,7 @@ class Api:
                 "pad_backend": cfg.get("pad_backend", "python"),
                 "profile_settings": cfg.get("profile_settings", True),
                 "stream_play": cfg.get("stream_play", True),
+                "stream_min_seconds": cfg.get("stream_min_seconds", 45),
                 "winfsp": self._winfsp,
                 "bios_dir": cfg.get("bios_dir", ""),
                 **{k: bool(cfg.get(k)) for k in self.HIDE_KEYS},
@@ -1032,6 +1033,11 @@ class Api:
                 cfg[k] = bool(data[k])
         if "stream_play" in data:
             cfg["stream_play"] = bool(data["stream_play"])
+        if "stream_min_seconds" in data:
+            try:
+                cfg["stream_min_seconds"] = max(0, min(600, int(data["stream_min_seconds"])))
+            except (TypeError, ValueError):
+                pass
         if "profile_settings" in data:
             cfg["profile_settings"] = bool(data["profile_settings"])
         if data.get("look_scope") in ("profile", "machine"):

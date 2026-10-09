@@ -720,3 +720,17 @@ def test_stream_game_through_winfsp(tmp_path, monkeypatch):
     finally:
         alive.set()
         vfs.shutdown()
+
+
+def test_streaming_only_for_long_downloads():
+    from emustart import cache
+    s = launcher.Session.__new__(launcher.Session)
+    s.cfg = {"stream_min_seconds": 45}
+    s._mbps = 250
+    s.prog = cache.Progress(900 * 1024 * 1024, 1)          # ~30 s — najpierw pobrać
+    assert not s._worth_streaming()
+    s.prog = cache.Progress(4 * 1024 ** 3, 1)               # ~140 s — grać od razu
+    assert s._worth_streaming()
+    s.cfg = {"stream_min_seconds": 0}
+    s.prog = cache.Progress(100 * 1024 * 1024, 1)
+    assert s._worth_streaming()

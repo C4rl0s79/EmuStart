@@ -702,6 +702,9 @@ function buildSetRows() {
   rows.push({ k: "Graj w trakcie pobierania", key: "stream_play", type: "bool",
               fmt: (v) => c.winfsp !== "dostępny" ? `niedostępne — ${c.winfsp} (https://winfsp.dev)`
                 : v ? "tak — gra startuje od razu, brakujące fragmenty dociągane na bieżąco (WinFsp)" : "nie — najpierw pobranie" });
+  rows.push({ k: "…gdy pobieranie potrwa dłużej niż", key: "stream_min_seconds", type: "num", step: 15, min: 0, max: 600,
+              fmt: (v) => v ? `${v} s — krótsze pobranie: najpierw cała gra (przy 250 Mb/s ${Math.round(v * 250 / 8 / 1024 * 10) / 10} GB)`
+                                : "zawsze w trakcie pobierania" });
   rows.push({ k: "Próg LAN", key: "lan_threshold_mbps", type: "num", step: 50, min: 50, max: 2000, fmt: (v) => `${v} Mb/s` });
   rows.push({ head: "Wygląd" });
   rows.push({ k: "Pełny ekran", key: "fullscreen", type: "bool", fmt: (v) => (v ? "tak" : "nie") + " (po restarcie)" });

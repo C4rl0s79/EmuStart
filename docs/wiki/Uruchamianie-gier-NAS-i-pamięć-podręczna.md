@@ -30,6 +30,9 @@ zawsze zdalnie).
   kieruje się w miejsce, które gra właśnie czyta. Krótkie przycięcia są możliwe tylko
   przy pierwszym wejściu w niepobrany fragment. Po pobraniu całości gra jest w pamięci
   podręcznej jak zwykle.
+- Granie w trakcie pobierania włącza się tylko, gdy pobranie trwałoby dłużej niż próg
+  (Ustawienia → „…gdy pobieranie potrwa dłużej niż”, domyślnie 45 s). Mniejsze gry
+  szybciej po prostu pobrać w całości.
 - EmuStart sprawdza WinFsp przy starcie (wynik w logu i w Ustawieniach → „Graj
   w trakcie pobierania”). Bez WinFsp działa jak dotąd: ekran pobierania i „Graj teraz”
   wprost z NAS-a. Opcję można wyłączyć w Ustawieniach.

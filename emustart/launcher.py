@@ -179,7 +179,7 @@ class Session:
         if self.mode == "lan":
             log.info("LAN: start z NAS, kopia w tle (%s)", g["title"])
             return rom_dir
-        if self.copy_thread.is_alive() and self.cfg.get("stream_play", True):
+        if self.copy_thread.is_alive() and self.cfg.get("stream_play", True) and self._worth_streaming():
             base = self._stream(g, rom_dir)
             if base:
                 self.mode = "stream"
@@ -192,6 +192,18 @@ class Session:
                 raise cache.Cancelled()
         self._raise_copy_error()
         return cache_dir
+
+    def _worth_streaming(self) -> bool:
+        """Granie w trakcie pobierania ma sens tylko przy długim pobieraniu — krótsze
+        (np. gra do ~1 GB przy ~250 Mb/s) szybciej po prostu pobrać i uruchomić."""
+        mbps = getattr(self, "_mbps", 0) or 0
+        if mbps <= 0:
+            return True
+        left = max(0, self.prog.total - self.prog.done)
+        est = left * 8 / (mbps * 1e6)
+        limit = float(self.cfg.get("stream_min_seconds", 45))
+        log.info("pobieranie potrwa ok. %.0f s (próg grania w trakcie: %.0f s)", est, limit)
+        return est > limit
 
     def _stream(self, g: dict, rom_dir: Path) -> Path | None:
         """Gra od razu z dysku strumieniowego (WinFsp): pobrane fragmenty z cache,
@@ -271,6 +283,7 @@ class Session:
             time.sleep(0.05)
         elapsed = max(0.001, time.monotonic() - t0)
         mbps = self.prog.done * 8 / elapsed / 1e6
+        self._mbps = mbps
         log.info("pomiar sieci: %.0f Mb/s", mbps)
         return "lan" if mbps >= float(self.cfg.get("lan_threshold_mbps", 200)) else "remote"
 

@@ -4,6 +4,17 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 [Keep a Changelog](https://keepachangelog.com/pl/1.1.0/), wersje według
 [SemVer](https://semver.org/lang/pl/).
 
+## [0.19.1] — 2026-10-09
+
+### Zmienione
+- **Granie w trakcie pobierania tylko przy długim pobieraniu**: dla mniejszych gier
+  (do ok. 1 GB) samo pobranie w 4 strumieniach było szybsze niż start z dysku
+  strumieniowego. EmuStart liczy teraz czas pobrania z pomiaru prędkości i gra
+  w trakcie pobierania dopiero, gdy pobranie trwałoby dłużej niż próg (domyślnie
+  45 s — przy ~250 Mb/s to ok. 1,4 GB). Ustawienia → „…gdy pobieranie potrwa dłużej
+  niż” (0 = zawsze w trakcie pobierania).
+- Zapas pobierania przed miejscem czytanym przez grę: 8 bloków (32 MB) zamiast 4.
+
 ## [0.19.0] — 2026-10-09
 
 ### Dodane

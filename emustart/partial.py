@@ -20,7 +20,7 @@ log = logging.getLogger("emustart.partial")
 
 BLOCK = 4 * 1024 * 1024
 STREAMS = 4
-READ_AHEAD = 4                 # tyle bloków za żądanym trafia na początek kolejki
+READ_AHEAD = 8                 # tyle bloków za żądanym trafia na początek kolejki
 MIN_SIZE = 32 * 1024 * 1024    # mniejsze pliki — jednym strumieniem, jak dotąd
 
 # pliki pobierane właśnie teraz (ścieżka docelowa → Partial) — dla wirtualnego dysku
