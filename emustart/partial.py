@@ -16,6 +16,8 @@ import threading
 import time
 from pathlib import Path
 
+from emustart import netsrc
+
 log = logging.getLogger("emustart.partial")
 
 BLOCK = 1024 * 1024            # 1 MB: gra czyta rozrzucone kawałki — większe bloki
@@ -34,7 +36,11 @@ _active_lock = threading.Lock()
 
 class Partial:
     def __init__(self, src: Path, dst: Path, size: int, mtime: float):
-        self.src, self.dst, self.size, self.mtime = Path(src), Path(dst), size, mtime
+        # źródło: ścieżka na NAS-ie (SMB) albo plik na serwerze EmuStart (netsrc.RemoteFile)
+        self.src = src if netsrc.is_remote(src) else Path(src)
+        self.dst, self.size, self.mtime = Path(dst), size, mtime
+        # z serwera kolejne brakujące bloki idą jednym zapytaniem (mniej wymian przy dalekim serwerze)
+        self.coalesce = netsrc.COALESCE if netsrc.is_remote(src) else 1
         self.part = self.dst.with_name(self.dst.name + ".part")
         self.mapf = self.dst.with_name(self.dst.name + ".part.map")
         self.blocks = max(1, (size + BLOCK - 1) // BLOCK)
@@ -111,11 +117,15 @@ class Partial:
                 return i
         return None
 
-    def _fetch(self, i: int, fsrc) -> int:
+    def _fetch(self, i: int, fsrc, count: int = 1) -> int:
+        """Bloki i … i+count-1 jednym odczytem."""
         off = i * BLOCK
-        n = min(BLOCK, self.size - off)
+        n = min(count * BLOCK, self.size - off)
         fsrc.seek(off)
-        return self._store(i, fsrc.read(n))
+        data = fsrc.read(n)
+        if len(data) != n:
+            raise OSError(f"krótki odczyt ({self.src.name}, blok {i})")
+        return sum(self._store(i + k, data[k * BLOCK:(k + 1) * BLOCK]) for k in range(count))
 
     def _store(self, i: int, data: bytes) -> int:
         off = i * BLOCK
@@ -141,7 +151,7 @@ class Partial:
 
     def _worker(self, progress, cancel) -> None:
         try:
-            with open(self.src, "rb", buffering=0) as fsrc:
+            with netsrc.open_src(self.src) as fsrc:
                 while not (cancel and cancel.is_set()):
                     with self.lock:
                         if self.error or self.finished:
@@ -153,19 +163,25 @@ class Partial:
                             self.lock.wait(0.1)   # gra czyta — czekamy na jej życzenia
                             continue
                         self.busy.add(i)
+                        run = 1                   # dołączamy kolejne brakujące, wolne bloki
+                        while (run < self.coalesce and i + run < self.blocks
+                               and not self.done[i + run] and i + run not in self.busy):
+                            self.busy.add(i + run)
+                            run += 1
                     try:
-                        self._fetch(i, fsrc)
+                        self._fetch(i, fsrc, run)
                     except Exception:
                         with self.lock:
-                            self.busy.discard(i)
+                            self.busy.difference_update(range(i, i + run))
                         raise
         except Exception as ex:
             with self.lock:
                 self.error = self.error or ex
                 self.lock.notify_all()
 
-    def run(self, progress=None, cancel=None, streams: int = STREAMS) -> None:
-        """Pobiera brakujące bloki (STREAMS wątków); po wszystkim plik docelowy."""
+    def run(self, progress=None, cancel=None, streams: int = 0) -> None:
+        """Pobiera brakujące bloki (STREAMS wątków, z serwera netsrc.STREAMS); po wszystkim plik docelowy."""
+        streams = streams or (netsrc.STREAMS if netsrc.is_remote(self.src) else STREAMS)
         with _active_lock:
             ACTIVE[str(self.dst).lower()] = self
         self.error = None
@@ -192,7 +208,7 @@ class Partial:
 
     def _handle(self, k: int):
         if self._handles[k] is None:
-            self._handles[k] = open(self.src, "rb", buffering=0)
+            self._handles[k] = netsrc.open_src(self.src)
         return self._handles[k]
 
     def _read_range(self, k: int, off: int, n: int) -> bytes:

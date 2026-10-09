@@ -17,7 +17,7 @@ import time
 from pathlib import Path
 
 from emustart import (__version__, art, bios, art_sources, cache, ingame, installer, launchbox, logos, sysinfo, metadata, pads, profiles, uipad, config, emulators, launcher, library,
-                      paths, scanner, systems, winutil)
+                      netsrc, paths, scanner, systems, winutil)
 
 log = logging.getLogger("emustart.api")
 
@@ -1002,11 +1002,32 @@ class Api:
                 "stream_min_seconds": cfg.get("stream_min_seconds", 0),
                 "winfsp": self._winfsp,
                 "bios_dir": cfg.get("bios_dir", ""),
+                "server_url": cfg.get("server_url", ""),
+                "server_url_guess": netsrc.guess_url(config.rom_roots(cfg)) if not cfg.get("server_url") else "",
+                "server_key": cfg.get("server_key", ""),
+                "server_games": cfg.get("server_games", True),
                 **{k: bool(cfg.get(k)) for k in self.HIDE_KEYS},
                 "ask_profile": profiles.ask_at_start(),
                 "machine_profile": profiles.machine_owner(),
                 "profile_names": {str(p["id"]): p["name"] for p in profiles.all_profiles()},
                 "systems": rows}
+
+    def server_test(self) -> dict:
+        """Ustawienia → Sprawdź połączenie z serwerem EmuStart."""
+        r = netsrc.info(self._cfg, fresh=True)
+        if r.get("ok") and "find" not in r.get("features", []):
+            r = {**r, "ok": False, "reason": f"serwer {r.get('name')} ma EmuStart {r.get('version')} — "
+                                             "zaktualizuj go do wersji z pobieraniem gier przez serwer"}
+        return {k: v for k, v in r.items() if k != "features"}
+
+    def server_paste_key(self) -> dict:
+        """Klucz serwera ze schowka (EmuStart.exe --server-key na serwerze kopiuje go)."""
+        text = _clipboard_text().strip()
+        if not (16 <= len(text) <= 128) or any(ch.isspace() for ch in text):
+            return {"ok": False, "reason": "w schowku nie ma klucza serwera"}
+        self._cfg["server_key"] = text
+        config.save(self._cfg)
+        return {"ok": True}
 
     def emulator_options(self, es: str) -> list:
         return emulators.options_for(systems.info(es), self._cfg.get("emu_root", ""))
@@ -1030,6 +1051,11 @@ class Api:
                     pass
         if "bios_dir" in data:
             cfg["bios_dir"] = str(data["bios_dir"]).strip()
+        for k in ("server_url", "server_key"):
+            if k in data:
+                cfg[k] = str(data[k]).strip()
+        if "server_games" in data:
+            cfg["server_games"] = bool(data["server_games"])
         if data.get("pad_backend") in ("python", "browser", "none"):
             cfg["pad_backend"] = data["pad_backend"]
         for k in ("fullscreen", "hide_arcade_clones", "games_logo", *self.HIDE_KEYS):
@@ -1214,3 +1240,27 @@ def clean_look(data) -> dict:
         elif isinstance(v, str) and _LOOK_STR.match(v):
             out[k] = v
     return out
+
+
+def _clipboard_text() -> str:
+    """Tekst ze schowka Windows (bez dodatkowych bibliotek)."""
+    import ctypes
+    from ctypes import wintypes
+    u, k = ctypes.windll.user32, ctypes.windll.kernel32
+    u.GetClipboardData.restype = wintypes.HANDLE
+    k.GlobalLock.restype = ctypes.c_void_p
+    k.GlobalLock.argtypes = [wintypes.HANDLE]
+    k.GlobalUnlock.argtypes = [wintypes.HANDLE]
+    if not u.OpenClipboard(None):
+        return ""
+    try:
+        h = u.GetClipboardData(13)          # CF_UNICODETEXT
+        if not h:
+            return ""
+        ptr = k.GlobalLock(h)
+        try:
+            return ctypes.wstring_at(ptr) if ptr else ""
+        finally:
+            k.GlobalUnlock(h)
+    finally:
+        u.CloseClipboard()

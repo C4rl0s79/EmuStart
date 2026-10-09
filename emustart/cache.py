@@ -112,11 +112,12 @@ def missing_bytes(cfg: dict, game: dict) -> int:
 
 
 def copy_game(cfg: dict, game: dict, rom_dir: Path, prog: Progress,
-              cancel: threading.Event, extra: list | None = None) -> None:
-    """Kopiuje brakujące pliki gry (i `extra` = [(src, dst, size, mtime)])."""
+              cancel: threading.Event, extra: list | None = None, srcs: dict | None = None) -> None:
+    """Kopiuje brakujące pliki gry (i `extra` = [(src, dst, size, mtime)]).
+    `srcs` = {rel: netsrc.RemoteFile} — te pliki z serwera EmuStart, reszta z NAS-a."""
     jobs = []
     for rel, size, mt in game["files"]:
-        jobs.append((rom_dir / rel, _local_file(cfg, game, rel), size, mt))
+        jobs.append(((srcs or {}).get(rel) or rom_dir / rel, _local_file(cfg, game, rel), size, mt))
     jobs += extra or []
     _mark(game["id"], complete=0)
     for i, (src, dst, size, mt) in enumerate(jobs, 1):
@@ -127,7 +128,7 @@ def copy_game(cfg: dict, game: dict, rom_dir: Path, prog: Progress,
     _mark(game["id"], complete=1, size=game["size"])
 
 
-def _copy_one(src: Path, dst: Path, size: int, mtime: float,
+def _copy_one(src, dst: Path, size: int, mtime: float,
               prog: Progress, cancel: threading.Event) -> None:
     from emustart import partial
     if size >= partial.MIN_SIZE:
@@ -141,7 +142,8 @@ def _copy_one(src: Path, dst: Path, size: int, mtime: float,
     if have > size:
         part.unlink()
         have = 0
-    with open(src, "rb") as fi, open(part, "ab") as fo:
+    from emustart import netsrc
+    with netsrc.open_src(src) as fi, open(part, "ab") as fo:
         fi.seek(have)
         while True:
             if cancel.is_set():

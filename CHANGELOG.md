@@ -8,7 +8,21 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.23.0] — 2026-10-09
+
 ### Dodane
+- **Gry na Windows z serwera EmuStart** zamiast przez SMB — przez Tailscale na dużą
+  odległość ok. 3× szybciej (pomiar: SMB ok. 25 MB/s, serwer z 8 strumieniami ok. 78 MB/s;
+  SMB idzie jednym połączeniem TCP niezależnie od liczby strumieni).
+  - Ustawienia → **Serwer EmuStart**: adres (podpowiedź z udziału sieciowego z grami),
+    klucz (**Wklej klucz ze schowka**), **Sprawdź połączenie**, włącznik **Gry z serwera**.
+  - 8 strumieni, kolejne brakujące bloki łączone w zapytania do 4 MB; granie w trakcie
+    pobierania (WinFsp) czyta brakujące fragmenty z serwera.
+  - Plik z serwera tylko przy zgodnym rozmiarze; serwer wyłączony, starszy, bez gry —
+    SMB jak dotąd. NAS przez SMB niedostępny, a serwer działa — gra i tak się pobierze.
+  - Ekran pobierania pokazuje źródło.
+- Serwer: `GET /v1/find?es=&rel=` (gra po systemie i ścieżce), `features` w `/v1/info`.
+  **Serwer na komputerze z grami trzeba zaktualizować do 0.23.0.**
 - `ROADMAP.md` — plan przejścia na serwer EmuStart (gry, zapisy, profile, biblioteka)
   z pomiarami prędkości SMB i HTTP.
 - `tools/httpbench.py` — pomiar odczytu z serwera EmuStart.

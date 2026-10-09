@@ -84,7 +84,10 @@ def handle(handler) -> None:
     parts = [p for p in path.split("/") if p][1:]           # bez „v1”
     try:
         if parts == ["info"]:
-            return _json(handler, {"name": socket.gethostname(), "version": __version__, "api": 1})
+            return _json(handler, {"name": socket.gethostname(), "version": __version__, "api": 1,
+                                   "features": ["find"]})
+        if parts == ["find"]:
+            return _find(handler)
         if parts == ["systems"]:
             from emustart import installer, systems
             out = []
@@ -117,6 +120,22 @@ def handle(handler) -> None:
             _json(handler, {"error": str(ex)}, 500)
         except OSError:
             pass
+
+
+def _find(handler) -> None:
+    """Gra po (system, ścieżka względna) — EmuStart na Windows pobiera ją stąd zamiast
+    przez SMB. Odpowiedź: id i pliki (ścieżka, rozmiar); pobieranie jak dla Androida."""
+    from emustart import library
+    q = urllib.parse.parse_qs(urllib.parse.urlsplit(handler.path).query)
+    es, rel = (q.get("es") or [""])[0], (q.get("rel") or [""])[0].replace("\\", "/")
+    if not es or not rel:
+        return _json(handler, {"error": "brak es/rel"}, 400)
+    rows = library.db().execute("SELECT id, rel, files FROM games WHERE es=?", (es,)).fetchall()
+    for r in rows:
+        if r["rel"].replace("\\", "/") == rel:
+            files = [{"path": f, "size": size} for f, size, _m in json.loads(r["files"])]
+            return _json(handler, {"id": r["id"], "files": files})
+    return _json(handler, {"error": "nie ma takiej gry"}, 404)
 
 
 def _send_file(handler, gid: int, rel: str) -> None:

@@ -4,7 +4,7 @@ Kierunek: **serwer EmuStart jako centrum** — gry, zapisy, profile, ustawienia 
 idą przez serwer (HTTP z kluczem, przez Tailscale), wspólnie dla Windows i Androida.
 Dostęp SMB do NAS-a zostaje jako zapas i do zarządzania.
 
-Stan na 2026-10-09 (EmuStart 0.22.6). Kolejność może się zmienić; to, co już wydane,
+Stan na 2026-10-09 (EmuStart 0.23.0). Kolejność może się zmienić; to, co już wydane,
 opisuje [CHANGELOG.md](CHANGELOG.md).
 
 ## Dlaczego serwer (pomiary)
@@ -26,16 +26,16 @@ Tailscale, bezpośrednie połączenie (nie przez przekaźnik), ok. 1000 km, RTT 
 
 Narzędzie pomiaru: `tools/httpbench.py`.
 
-## Etap A — gry na Windows przez serwer *(w toku)*
+## Etap A — gry na Windows przez serwer *(0.23.0 — do sprawdzenia na prawdziwym serwerze)*
 
-- [ ] Ustawienia Windows: adres i klucz serwera (podpowiedź adresu z udziału NAS-a,
+- [x] Ustawienia Windows: adres i klucz serwera (podpowiedź adresu z udziału NAS-a,
       klucz wklejany ze schowka — `--server-key` na serwerze kopiuje go do schowka).
-- [ ] Serwer: plik gry po (system, ścieżka względna, rozmiar) — tylko pliki z biblioteki
+- [x] Serwer: plik gry po (system, ścieżka względna, rozmiar) — tylko pliki z biblioteki
       serwera; `/v1/info` podaje obsługiwane funkcje.
-- [ ] Pobieranie i granie w trakcie pobierania (WinFsp) przez HTTP: 8 strumieni,
+- [x] Pobieranie i granie w trakcie pobierania (WinFsp) przez HTTP: 8 strumieni,
       kolejne bloki łączone w zapytania do 4 MB, bloki na żądanie gry — 1 MB.
-- [ ] Zapas: serwer nie odpowiada, nie ma pliku albo jest starszy — SMB jak dotąd.
-- [ ] Postęp pobierania pokazuje źródło (serwer / NAS).
+- [x] Zapas: serwer nie odpowiada, nie ma pliku albo jest starszy — SMB jak dotąd.
+- [x] Postęp pobierania pokazuje źródło (serwer / NAS).
 
 ## Etap B — profile, zapisy i ustawienia przez serwer (Windows + Android)
 

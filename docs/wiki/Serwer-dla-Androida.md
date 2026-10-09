@@ -1,7 +1,9 @@
 # Serwer dla Androida
 
 EmuStart może działać na komputerze z grami (NAS) jako **serwer** dla aplikacji
-EmuStart na Androida (w przygotowaniu). Serwer udostępnia przez sieć (Tailscale):
+EmuStart na Androida i dla EmuStart na innych komputerach z Windows (szybsze pobieranie
+gier niż przez SMB — patrz [Uruchamianie gier](Uruchamianie-gier-NAS-i-pamięć-podręczna)).
+Serwer udostępnia przez sieć (Tailscale):
 
 - listę systemów i gier z metadanymi, opisami, okładkami, zrzutami i logo — telefon
   nic nie skanuje ani nie pobiera z baz grafik,
@@ -54,7 +56,8 @@ Każde zapytanie z kluczem: nagłówek `Authorization: Bearer <klucz>` albo `?k=
 
 | Adres | Zawartość |
 |---|---|
-| `GET /v1/info` | nazwa komputera, wersja |
+| `GET /v1/info` | nazwa komputera, wersja, obsługiwane funkcje (`features`) |
+| `GET /v1/find?es=<system>&rel=<ścieżka>` | gra po systemie i ścieżce względnej: `id` i pliki (EmuStart na Windows) |
 | `GET /v1/systems` | systemy (`es`, `display`, `games`, `logo`, `kind`) |
 | `GET /v1/systems/<es>/games` | gry systemu (tytuł, tagi, rozmiar, gatunek, rok, gracze, producent, adresy grafik) |
 | `GET /v1/games/<id>` | szczegóły gry, opis, lista plików |

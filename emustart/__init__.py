@@ -1,3 +1,3 @@
 """EmuStart — frontend emulatorów sterowany padem, przystosowany do ROM-ów na NAS."""
 
-__version__ = "0.22.6"
+__version__ = "0.23.0"

@@ -52,6 +52,8 @@ class Session:
         self.phase = "preparing"
         self.message = ""
         self.mode = ""                  # lan | remote | cache
+        self.srcs: dict = {}            # {rel: netsrc.RemoteFile} — pliki z serwera EmuStart
+        self.source = ""                # serwer | serwer + NAS | NAS
         self.prog: cache.Progress | None = None
         self.cancel = threading.Event()
         self.play_now = threading.Event()
@@ -73,7 +75,7 @@ class Session:
 
     def status(self) -> dict:
         info = systems.info(self.game.get("es", ""))
-        out = {"phase": self.phase, "message": self.message, "mode": self.mode,
+        out = {"phase": self.phase, "message": self.message, "mode": self.mode, "source": self.source,
                "title": self.game.get("title", ""), "tags": self.game.get("tags", ""),
                "system": info["display"], "game_id": self.game_id,
                "can_play_now": self.phase == "downloading" and not self.game.get("is_dir")
@@ -158,8 +160,17 @@ class Session:
 
     def _fetch(self, g: dict, info: dict, rom_dir: Path, extra: list) -> Path:
         """Kopiuje grę do cache; zwraca katalog, z którego uruchamiamy."""
-        if not (rom_dir / g["rel"]).exists():
-            raise LaunchError("NAS niedostępny, a tej gry nie ma w cache. "
+        from emustart import netsrc
+        # pliki z serwera EmuStart (szybciej przez daleki Tailscale), reszta przez SMB
+        self.srcs = netsrc.sources(self.cfg, g)
+        server_all = len(self.srcs) == len(g["files"])
+        self.source = "serwer" if server_all else ("serwer + NAS" if self.srcs else "NAS")
+        # sprawdzenie NAS-a przez SMB potrafi wisieć, gdy NAS jest niedostępny — przy grze
+        # w całości z serwera pytamy o NAS tylko w sieci lokalnej (start prosto z NAS-a)
+        on_lan = bool(self.srcs) and netsrc.on_lan(self.cfg)
+        nas_ok = (rom_dir / g["rel"]).exists() if (not server_all or on_lan) else False
+        if not nas_ok and not server_all:
+            raise LaunchError("NAS i serwer EmuStart niedostępne, a tej gry nie ma w cache. "
                               "Połącz się z siecią domową lub Tailscale.")
         total = cache.missing_bytes(self.cfg, g) + sum(s for _a, _b, s, _m in extra)
         self.prog = cache.Progress(total, len(g["files"]) + len(extra))
@@ -176,7 +187,12 @@ class Session:
             self._wait_copy()
             return cache_dir
 
-        self.mode = self._network_mode()
+        if self.srcs and nas_ok and on_lan:
+            self.mode = "lan"               # serwer odpowiada jak w sieci lokalnej — NAS też jest blisko
+        elif self.srcs:
+            self.mode = "remote"            # pomiar SMB nie dotyczy pobierania z serwera
+        else:
+            self.mode = self._network_mode()
         if self.mode == "lan":
             log.info("LAN: start z NAS, kopia w tle (%s)", g["title"])
             return rom_dir
@@ -186,7 +202,7 @@ class Session:
                 self.mode = "stream"
                 return base
         while self.copy_thread.is_alive():
-            if self.play_now.wait(0.2):
+            if self.play_now.wait(0.2) and nas_ok:
                 log.info("Graj mimo to: start z NAS (%s)", g["title"])
                 return rom_dir
             if self.cancel.is_set():
@@ -223,7 +239,7 @@ class Session:
         end = time.monotonic() + 30
         for rel, size, mt in g["files"]:
             dst = cache._local_file(self.cfg, g, rel)
-            src = rom_dir / rel
+            src = (getattr(self, "srcs", None) or {}).get(rel) or rom_dir / rel
             if size >= partial.MIN_SIZE:
                 source = partial.open_partial(src, dst, size, mt)
                 source.prewarm()          # połączenia z NAS-em i początek pliku — zanim emulator zapyta
@@ -232,7 +248,7 @@ class Session:
                 while not cache._fresh(dst, size, mt) and self.copy_thread.is_alive() \
                         and time.monotonic() < end and not self.cancel.is_set():
                     time.sleep(0.1)
-                source = dst if cache._fresh(dst, size, mt) else src
+                source = dst if cache._fresh(dst, size, mt) else rom_dir / rel
             disk.add_file(f"{top}/{rel}", source, size, mt)
         self._streamed = (disk, top, g)
         log.info("gra strumieniowo z dysku %s: (%s), pobieranie w tle trwa", disk.letter, g["title"])
@@ -257,7 +273,8 @@ class Session:
 
     def _copy(self, g, rom_dir, extra) -> None:
         try:
-            cache.copy_game(self.cfg, g, rom_dir, self.prog, self.cancel, extra)
+            cache.copy_game(self.cfg, g, rom_dir, self.prog, self.cancel, extra,
+                            srcs=getattr(self, "srcs", None))
         except cache.Cancelled:
             pass
         except Exception as ex:

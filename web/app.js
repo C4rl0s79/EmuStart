@@ -541,7 +541,9 @@ async function updateLaunch() {
   const p = st.progress;
   const head = {
     preparing: "Przygotowuję…",
-    downloading: st.mode === "remote" ? "Pobieranie z NAS (połączenie zdalne)"
+    downloading: st.source && st.source !== "NAS"
+      ? `Pobieranie z ${st.source === "serwer" ? "serwera EmuStart" : "serwera EmuStart i NAS"}`
+      : st.mode === "remote" ? "Pobieranie z NAS (połączenie zdalne)"
       : st.mode === "lan" ? "Kopiowanie z NAS" : "Kopiowanie do pamięci podręcznej",
     extracting: "Rozpakowuję do pamięci…",
     running: "Gra uruchomiona",
@@ -761,6 +763,21 @@ function buildSetRows() {
   rows.push({ k: "Emulatory", key: "emu_root", type: "path" });
   rows.push({ k: "Pamięć podręczna", key: "cache_dir", type: "path" });
   rows.push({ k: "BIOS-y", key: "bios_dir", type: "path", fmt: (v) => v || "nie ustawiono — A wybierz folder (np. bios z RetroBat)" });
+  rows.push({ head: "Serwer EmuStart  ·  gry pobierane z serwera zamiast przez SMB (szybciej przez Tailscale)" });
+  rows.push({ k: "Adres serwera", key: "server_url", type: "text",
+              prefill: () => c.server_url || c.server_url_guess || "http://",
+              fmt: (v) => v || (c.server_url_guess ? `nie ustawiono — A: podpowiedź ${c.server_url_guess}` : "nie ustawiono — gry przez SMB jak dotąd") });
+  rows.push({ k: "Klucz serwera", key: "server_key", type: "text", secret: true,
+              fmt: (v) => (v ? "••••••" + v.slice(-4) : "brak — na serwerze EmuStart.exe --server-key (kopiuje do schowka)") });
+  rows.push({ k: "Wklej klucz ze schowka", type: "action", run: async () => {
+    const r = await api().server_paste_key();
+    if (!r.ok) return toast(r.reason, 4000);
+    S.settings = await api().get_settings(); renderSettings(); toast("Klucz zapisany"); } });
+  rows.push({ k: "Gry z serwera", key: "server_games", type: "bool",
+              fmt: (v) => (v ? "tak — 8 strumieni; gdy serwer nie ma gry albo nie odpowiada: SMB" : "nie — zawsze SMB") });
+  rows.push({ k: "Sprawdź połączenie", type: "action", run: async () => {
+    toast("Łączę z serwerem…", 10000); const r = await api().server_test();
+    toast(r.ok ? `Połączono: ${r.name} (EmuStart ${r.version}), ${Math.round(r.rtt * 1000)} ms` : `Błąd: ${r.reason}`, 6000); } });
   rows.push({ head: "Pamięć podręczna i sieć" });
   rows.push({ k: "Trzymaj ostatnie gry", key: "cache_recent", type: "num", step: 1, min: 1, max: 100, fmt: (v) => `${v} + przypięte` });
   rows.push({ k: "Tryb sieci", key: "network_mode", type: "enum", opts: Object.keys(NET), fmt: (v) => NET[v] });
@@ -901,7 +918,7 @@ async function settingsInput(a) {
   else if (a === "b") { await refreshState(); return show("systems"); }
   else if (a === "start") return openMenu();
   else if (r.type === "text" && a === "a") {
-    return oskOpen(r.k, S.settings[r.key] || "", async (v) => { await saveSetting(r.key, v.trim()); renderSettings(); });
+    return oskOpen(r.k, r.prefill ? r.prefill() : (S.settings[r.key] || ""), async (v) => { await saveSetting(r.key, v.trim()); renderSettings(); }, false, !!r.secret);
   }
   else if (r.type === "root" || r.type === "addroot") {
     const roots = [...(S.settings.rom_roots || [])];

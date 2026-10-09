@@ -653,11 +653,11 @@ def test_partial_parallel_resume_and_demand_read(tmp_path, monkeypatch):
     cancel = threading.Event()
     prog = cache.Progress(len(data), 1)
     orig = p._fetch
-    def stop_after(i, f, _n=[0]):
+    def stop_after(i, f, count=1, _n=[0]):
         _n[0] += 1
         if _n[0] > 10:
             cancel.set()
-        return orig(i, f)
+        return orig(i, f, count)
     p._fetch = stop_after
     with pytest.raises(cache.Cancelled):
         p.run(prog, cancel)
