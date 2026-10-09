@@ -435,7 +435,7 @@ class Api:
                 "copying": g["id"] in self._copying()}
 
     # ── uruchamianie ──
-    def launch(self, game_id: int, state: str = "") -> dict:
+    def launch(self, game_id: int, state: str = "", takeover: bool = False) -> dict:
         if self._session and self._session.phase in ("preparing", "downloading",
                                                      "extracting", "running"):
             return {"ok": False, "reason": "Inna gra jest właśnie uruchamiana."}
@@ -484,7 +484,7 @@ class Api:
                                          on_running=self._on_running,
                                          on_finished=self._on_finished,
                                          ui=self if self._window else None,
-                                         start_state=state or "")
+                                         start_state=state or "", takeover=bool(takeover))
         self._session.start()
         return {"ok": True, "warning": warning}
 

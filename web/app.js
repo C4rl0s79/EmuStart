@@ -517,9 +517,9 @@ async function togglePin() {
 
 /* ───────────── uruchamianie ───────────── */
 let launchPoll;
-async function launch(state = "") {
+async function launch(state = "", takeover = false) {
   const g = S.games[S.gameIdx];
-  const r = await api().launch(g.id, state);
+  const r = await api().launch(g.id, state, takeover);
   if (r.need_install) return askInstallForGame(r.need_install);
   if (!r.ok) return toast(r.reason);
   if (r.warning) toast(r.warning, 7000);
@@ -581,7 +581,10 @@ async function updateLaunch() {
   if (st.phase === "downloading") {
     if (st.can_play_now) hints.push(["x", "Graj teraz (z sieci)"]);
     hints.push(["b", "Anuluj"]);
-  } else if (["error", "cancelled"].includes(st.phase)) hints.push(["a", "Zamknij"]);
+  } else if (["error", "cancelled"].includes(st.phase)) {
+    if (st.locked_by) hints.push(["y", "Przejmij profil i graj"]);
+    hints.push(["a", "Zamknij"]);
+  }
   setHints(hints, $("lHints"));
 
   if (st.phase === "finished") closeLaunch();
@@ -598,6 +601,10 @@ function launchInput(a) {
   const ph = lastLaunch.phase;
   if (ph === "downloading" && a === "b") api().launch_cancel();
   else if (ph === "downloading" && a === "x" && lastLaunch.can_play_now) api().launch_play_now();
+  else if (ph === "error" && a === "y" && lastLaunch.locked_by) {
+    // profil zablokowany przez urządzenie, na którym już nie grasz — przejęcie
+    (async () => { await closeLaunch(); launch("", true); })();
+  }
   else if (["error", "cancelled"].includes(ph) && (a === "a" || a === "b")) closeLaunch();
 }
 

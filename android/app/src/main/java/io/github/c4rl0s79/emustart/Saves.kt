@@ -100,7 +100,11 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
 
         /** Pliki zapisów rdzeni RetroArcha (nie sama gra, nie stany, nie zrzuty). */
         private val SAVE_EXT = rx("""\.(srm|sav|rtc|eep|fla|mpk|sra|nv|mcr|bkr|bcr|brm|dsv|ram)$""")
-        private const val LOCK_MAX_AGE = 12 * 3600.0
+        // dzierżawa blokady profilu: telefon odnawia ją, dopóki działa aplikacja; po jej
+        // zamknięciu w trakcie gry blokada przestaje obowiązywać po LOCK_LEASE s
+        private const val LOCK_LEASE = 900.0
+        private const val LOCK_BEAT_MS = 120_000L
+        private const val LOCK_LEGACY = 900.0
 
         /** Nazwy folderów rdzeni (RetroArch sortuje save'y wg nazwy rdzenia), gdy różnią się od identyfikatora. */
         private val CORE_DIR = mapOf(
@@ -303,23 +307,49 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
     }
 
     // ── blokada: ten sam profil nie gra na dwóch urządzeniach naraz ──
-    private fun lockProfile(profile: String) {
+    @Volatile private var beat: Thread? = null
+
+    private fun now() = System.currentTimeMillis() / 1000.0
+
+    private fun writeLock(profile: String) = server.nasPut("$profile/lock",
+        JSONObject().put("host", device).put("time", now()).put("lease", LOCK_LEASE).toString().toByteArray(), now())
+
+    private fun lockProfile(profile: String, force: Boolean) {
         val raw = server.nasRead("$profile/lock")
         if (raw != null) {
             val cur = try { JSONObject(String(raw)) } catch (e: Exception) { JSONObject() }
             val host = cur.optString("host")
-            if (host.isNotEmpty() && host != device && System.currentTimeMillis() / 1000.0 - cur.optDouble("time", 0.0) < LOCK_MAX_AGE)
-                throw Locked(host)
+            val active = host.isNotEmpty() && host != device &&
+                now() - cur.optDouble("time", 0.0) < cur.optDouble("lease", LOCK_LEGACY)
+            if (active && !force) throw Locked(host)
         }
-        server.nasPut("$profile/lock", JSONObject().put("host", device).put("time", System.currentTimeMillis() / 1000.0)
-            .toString().toByteArray(), System.currentTimeMillis() / 1000.0)
+        writeLock(profile)
+        // odnawianie, dopóki proces aplikacji żyje (gra w emulatorze, EmuStart w tle)
+        beat?.interrupt()
+        beat = Thread({
+            try {
+                while (true) {
+                    Thread.sleep(LOCK_BEAT_MS)
+                    val cur = server.nasRead("$profile/lock")?.let { JSONObject(String(it)) } ?: break
+                    if (cur.optString("host") != device) break      // przejęty przez inne urządzenie
+                    writeLock(profile)
+                }
+            } catch (e: InterruptedException) { } catch (e: Exception) { Log.w(tag, "odnowienie blokady: $e") }
+        }, "blokada").apply { isDaemon = true; start() }
     }
 
     private fun unlockProfile(profile: String) {
+        beat?.interrupt(); beat = null
         try {
             val raw = server.nasRead("$profile/lock") ?: return
             if (JSONObject(String(raw)).optString("host") == device) server.nasDelete("$profile/lock")
         } catch (e: Exception) { Log.w(tag, "blokada: $e") }
+    }
+
+    /** Start aplikacji bez trwającej gry: własna blokada z poprzedniego uruchomienia
+     *  (aplikację zamknięto w trakcie gry) nie może dalej blokować komputera. */
+    fun releaseStaleLock(profile: String) {
+        if (profile.isNotEmpty()) synchronized(lock) { unlockProfile(profile) }
     }
 
     // ── właściciel plików w folderze emulatora ──
@@ -365,20 +395,20 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
 
     // ── przed grą ──
     /** Zapisy profilu do folderu emulatora. Zwraca komunikat dla użytkownika ('' = OK). */
-    fun before(profile: String, emu: String, g: Game): String {
+    fun before(profile: String, emu: String, g: Game, takeover: Boolean = false): String {
         synchronized(lock) {
             if (prefs.phoneOwner.isEmpty()) prefs.phoneOwner = profile
             retryLocked()
             var msg = ""
             for (f in famsFor(emu, g.plat)) {
-                val m = beforeLocked(profile, f, g)
+                val m = beforeLocked(profile, f, g, takeover)
                 if (msg.isEmpty()) msg = m
             }
             return msg
         }
     }
 
-    private fun beforeLocked(profile: String, f: Fam, g: Game): String {
+    private fun beforeLocked(profile: String, f: Fam, g: Game, takeover: Boolean): String {
         if (f.kind == Kind.PS2_STATES) {
             // przedrostki stanów z serwera (inny telefon / po reinstalacji)
             try {
@@ -392,7 +422,7 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
         val phone = phoneFiles(f, g, dirs)
         swapOwner(profile, f, g, phone)
         try {
-            lockProfile(profile)
+            lockProfile(profile, takeover)
         } catch (e: Locked) { throw e } catch (e: Exception) {
             own(profile, phone.values)
             return "Serwer niedostępny — gra na zapisach z telefonu; wyślą się później."

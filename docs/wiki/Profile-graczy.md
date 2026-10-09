@@ -48,8 +48,13 @@ komputery przez SMB i przez serwer mogą działać równocześnie. Serwer niedos
 przez SMB jak dotąd. Przy starcie EmuStart wysyła wszystkie lokalne zapisy, których
 nie ma na NAS-ie (np. z gry bez połączenia).
 
-**Blokada.** Ten sam profil nie może grać na dwóch komputerach naraz — drugi
-dostaje komunikat „Profil gra teraz na komputerze …” (wymaga dostępu do NAS-a).
+**Blokada.** Ten sam profil nie gra naraz na dwóch urządzeniach (komputery, telefon) —
+drugie dostaje komunikat „Profil gra teraz na urządzeniu …”. Blokada to dzierżawa:
+urządzenie w grze odnawia ją (komputer co minutę, telefon co 2 minuty, dopóki działa
+aplikacja). Gdy urządzenie padło albo aplikację zamknięto w trakcie gry, blokada
+przestaje obowiązywać po 5 min (komputer) / 15 min (telefon); wcześniej można
+**przejąć profil** (Y na ekranie błędu). Telefon przy uruchomieniu aplikacji zdejmuje
+własną blokadę z poprzedniej, niedokończonej gry.
 
 ## Zmiana nazwy profilu
 

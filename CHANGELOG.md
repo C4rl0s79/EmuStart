@@ -8,6 +8,18 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.25.7] — 2026-10-09
+
+### Poprawione
+- **Blokada profilu nie „wisi” po zamknięciu aplikacji w trakcie gry** — zamiast stałej
+  12-godzinnej blokady dzierżawa odnawiana przez urządzenie w grze (komputer co minutę,
+  telefon co 2 minuty); bez odnowienia wygasa po 5 min (komputer) / 15 min (telefon).
+  Telefon przy uruchomieniu aplikacji zdejmuje własną blokadę z niedokończonej gry.
+- **Przejęcie profilu**: ekran „Profil gra teraz na urządzeniu …” ma opcję **Y — Przejmij
+  profil i graj** (Windows i Android).
+- Windows: blokada zdejmowana także wtedy, gdy start gry nie powiedzie się po jej założeniu
+  (wcześniej zostawała).
+
 ## [0.25.6] — 2026-10-09
 
 ### Poprawione

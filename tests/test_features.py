@@ -292,3 +292,33 @@ def test_clean_look_keeps_only_simple_values():
                       "bad key": 1, "x": True, "y": float("inf"), "z": "<script>", "w": [1]})
     assert out == {"fs_list": 125, "pvlogo": 18.5, "accent": "#1fb5c4", "bg": "grafit"}
     assert clean_look(None) == {}
+
+
+def test_lock_lease_expiry_and_takeover(prof_env):
+    import json
+    import time
+    cfg, tmp = prof_env
+    pid = profiles.first_id()
+    nas = tmp / "nas" / profiles.get(pid)["nas_name"]
+    nas.mkdir(parents=True, exist_ok=True)
+
+    def other(age, lease=None):
+        d = {"host": "Telefon X", "time": time.time() - age}
+        if lease is not None:
+            d["lease"] = lease
+        (nas / "lock").write_text(json.dumps(d), encoding="utf-8")
+
+    other(10, lease=900)                                   # telefon gra — blokuje
+    assert profiles.lock(cfg, pid) == "Telefon X"
+    assert profiles.lock(cfg, pid, force=True) == ""       # przejęcie po potwierdzeniu
+    assert json.loads((nas / "lock").read_text())["host"] != "Telefon X"
+    profiles.unlock(cfg, pid)
+    assert not (nas / "lock").exists()
+
+    other(1000, lease=900)                                 # dzierżawa minęła (aplikację zamknięto)
+    assert profiles.lock(cfg, pid) == ""
+    profiles.unlock(cfg, pid)
+    other(16 * 60)                                         # stara blokada bez dzierżawy (12 h w starszych wersjach)
+    assert profiles.lock(cfg, pid) == ""
+    profiles.unlock(cfg, pid)
+    assert not profiles._beats                             # odnawianie zatrzymane

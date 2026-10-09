@@ -25,7 +25,11 @@ class Bridge(private val act: MainActivity) {
     @Volatile private var profList: List<String> = emptyList()
 
     init {
-        pool.execute { try { saves.retryPending() } catch (e: Exception) { Log.w(tag, "zaległe zapisy: $e") } }
+        pool.execute {
+            try { saves.retryPending() } catch (e: Exception) { Log.w(tag, "zaległe zapisy: $e") }
+            // blokada profilu z poprzedniego uruchomienia (aplikację zamknięto w trakcie gry)
+            try { if (launch == null) saves.releaseStaleLock(prefs.profile) } catch (e: Exception) { }
+        }
     }
 
     @Volatile private var systemsCache: JSONArray? = null
@@ -42,6 +46,7 @@ class Bridge(private val act: MainActivity) {
         var emu = ""
         var saveGame: Saves.Game? = null
         var profile = ""
+        var lockedBy = ""
     }
     @Volatile private var launch: Launch? = null
 
@@ -76,7 +81,7 @@ class Bridge(private val act: MainActivity) {
         "save_settings" -> { saveSettings(a.getJSONObject(0)); JSONObject().put("ok", true) }
         "server_test" -> serverTest()
         "rescan" -> { systemsCache = null; synchronized(gamesCache) { gamesCache.clear() }; JSONObject().put("ok", true) }
-        "launch" -> startLaunch(a.getInt(0))
+        "launch" -> startLaunch(a.getInt(0), a.optBoolean(2, false))
         "launch_status" -> launchStatus()
         "launch_cancel" -> { launch?.downloader?.cancel?.set(true); null }
         "launch_dismiss" -> { val l = launch; if (l != null && l.phase in setOf("finished", "error", "cancelled")) launch = null; null }
@@ -306,7 +311,7 @@ class Bridge(private val act: MainActivity) {
     }
 
     // ── gra ──
-    private fun startLaunch(id: Int): JSONObject {
+    private fun startLaunch(id: Int, takeover: Boolean = false): JSONObject {
         val busy = launch?.phase.let { it == "preparing" || it == "downloading" }
         if (busy) return JSONObject().put("ok", false).put("reason", "Inna gra jest właśnie pobierana.")
         val g = try { server.game(id) } catch (e: Exception) {
@@ -318,11 +323,11 @@ class Bridge(private val act: MainActivity) {
             .put("reason", "Brak emulatora dla ${s.optString("display")} — zainstaluj go i wybierz w Ustawieniach.")
         val l = Launch(g, s)
         launch = l
-        pool.execute { runLaunch(l, emu) }
+        pool.execute { runLaunch(l, emu, takeover) }
         return JSONObject().put("ok", true)
     }
 
-    private fun runLaunch(l: Launch, emu: String) {
+    private fun runLaunch(l: Launch, emu: String, takeover: Boolean = false) {
         try {
             val g = l.game
             val es = g.optString("es")
@@ -354,12 +359,13 @@ class Bridge(private val act: MainActivity) {
                                     Emulators.retroCore(l.sys.optString("plat"), l.sys.optString("core")),
                                     l.sys.optString("plat"))
                 try {
-                    val msg = saves.before(prefs.profile, emu, sg)
+                    val msg = saves.before(prefs.profile, emu, sg, takeover)
                     l.message = msg
                     if (msg.isNotEmpty()) Log.i(tag, msg)
                 } catch (e: Saves.Locked) {
-                    l.phase = "error"
-                    l.message = "Profil „${prefs.profile}” gra teraz na: ${e.host}. Wybierz inny profil albo zakończ tamtą grę."
+                    l.phase = "error"; l.lockedBy = e.host
+                    l.message = "Profil „${prefs.profile}” gra teraz na: ${e.host}. Jeśli tam już nie grasz, " +
+                        "przejmij profil — inaczej wybierz inny profil."
                     return
                 }
                 l.emu = emu; l.saveGame = sg; l.profile = prefs.profile
@@ -385,7 +391,7 @@ class Bridge(private val act: MainActivity) {
         val o = JSONObject().put("phase", l.phase).put("message", l.message).put("mode", "remote")
             .put("title", l.game.optString("title")).put("tags", l.game.optString("tags"))
             .put("system", l.sys.optString("display")).put("game_id", l.game.optInt("id"))
-            .put("can_play_now", false).put("copying", false)
+            .put("can_play_now", false).put("copying", false).put("locked_by", l.lockedBy)
         l.progress?.let { o.put("progress", JSONObject(it.snapshot())) }
         return o
     }

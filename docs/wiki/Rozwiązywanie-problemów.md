@@ -21,8 +21,10 @@ Archiwum bez pliku gry (np. sama muzyka MSU-1) daje komunikat o brakującym ROM-
 **Gra MSU-1 bez muzyki** — emulator/rdzeń musi obsługiwać MSU-1 (np. RetroArch
 z rdzeniem bsnes lub Snes9x), a ROM, `.msu` i `.pcm` muszą mieć w archiwum tę samą nazwę.
 
-**„Profil gra teraz na komputerze …”** — ten sam profil gra na innym komputerze.
-Blokada starsza niż 12 godzin (np. po awarii) jest ignorowana.
+**„Profil gra teraz na urządzeniu …”** — ten sam profil gra na innym komputerze albo
+telefonie. Jeśli tam już nie grasz (np. aplikację na telefonie zamknięto w trakcie gry),
+naciśnij **Y — Przejmij profil i graj**. Blokada bez odnowienia wygasa sama po 5 min
+(komputer) / 15 min (telefon).
 
 **Gra Amigi (.ipf) się nie uruchamia** — potrzebny `capsimg.dll` w folderze `system`
 RetroArcha (EmuStart proponuje pobranie przy pierwszej grze). Gry WHDLoad

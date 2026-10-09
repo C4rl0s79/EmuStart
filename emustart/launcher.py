@@ -38,12 +38,23 @@ class LaunchError(Exception):
     pass
 
 
+class ProfileLocked(LaunchError):
+    """Profil gra na innym urządzeniu — interfejs proponuje przejęcie."""
+
+    def __init__(self, msg: str, host: str):
+        super().__init__(msg)
+        self.host = host
+
+
 class Session:
     """Jedno uruchomienie gry. UI odpytuje `status()`."""
 
     def __init__(self, cfg: dict, game_id: int, profile_id: int,
-                 on_running=None, on_finished=None, ui=None, start_state: str = ""):
+                 on_running=None, on_finished=None, ui=None, start_state: str = "",
+                 takeover: bool = False):
         self.cfg = cfg
+        self.takeover = takeover          # przejęcie profilu zablokowanego przez inne urządzenie
+        self.locked_by = ""
         self._t_created = time.monotonic()
         self.game_id = game_id
         self.profile_id = profile_id
@@ -77,7 +88,7 @@ class Session:
         info = systems.info(self.game.get("es", ""))
         out = {"phase": self.phase, "message": self.message, "mode": self.mode, "source": self.source,
                "title": self.game.get("title", ""), "tags": self.game.get("tags", ""),
-               "system": info["display"], "game_id": self.game_id,
+               "system": info["display"], "game_id": self.game_id, "locked_by": self.locked_by,
                "can_play_now": self.phase == "downloading" and not self.game.get("is_dir")
                and info["kind"] in ("disc", "mixed")}
         if self.prog:
@@ -97,6 +108,8 @@ class Session:
             self._launch()
         except cache.Cancelled:
             self.phase, self.message = "cancelled", "Anulowano. Pobrana część zostanie użyta następnym razem."
+        except ProfileLocked as ex:
+            self.phase, self.message, self.locked_by = "error", str(ex), ex.host
         except LaunchError as ex:
             self.phase, self.message = "error", str(ex)
         except Exception as ex:          # nie zostawiamy UI w zawieszeniu
@@ -380,40 +393,46 @@ class Session:
         t_prof = time.monotonic()
         save_names = self._profile_prepare(adapter)
         self._t_prof = time.monotonic() - t_prof
-        adapter.keyboard_game = systems.info(g["es"])["plat"] in systems.COMPUTER_PLATS
-        if adapter.family == "retroarch" and g["es"] in systems.WHD_SYSTEMS:
-            try:   # po podpięciu profilu — folder saves wskazuje już na właściwego gracza
-                bios.whdload_kickstarts(self.cfg, adapter.home,
-                                        adapter._cfg_dir("savefile_directory", "saves"))
-            except Exception:
-                log.exception("Kickstarty WHDLoad")
-        po = (self.cfg.get("pad_order") or {}).get("mode", "windows")
-        # bateria (rodzaj zasilania) potrzebna tylko w trybie „bezprzewodowe pierwsze”
-        order = pads.order(self.cfg, pads.connected(battery=po == "wireless_first"))
-        if self.start_state and Path(self.start_state).is_file():
-            # stan wybrany ręcznie ma pierwszeństwo przed stanem wznowienia
-            resume = None
-            extra = adapter.start_state_args(self.run_dir, Path(self.start_state), order)
-        else:
-            if self.profiles_on:
-                resume_from_nas(self.cfg, self.profile_id, g)
-            resume = library.get_resume(self.profile_id, g["id"])
-            if resume and resume["family"] != adapter.family:
-                resume = None              # stan zapisał inny emulator — nie wczytamy go
-            if resume and resume["path"] and not Path(resume["path"]).is_file():
+        try:
+            adapter.keyboard_game = systems.info(g["es"])["plat"] in systems.COMPUTER_PLATS
+            if adapter.family == "retroarch" and g["es"] in systems.WHD_SYSTEMS:
+                try:   # po podpięciu profilu — folder saves wskazuje już na właściwego gracza
+                    bios.whdload_kickstarts(self.cfg, adapter.home,
+                                            adapter._cfg_dir("savefile_directory", "saves"))
+                except Exception:
+                    log.exception("Kickstarty WHDLoad")
+            po = (self.cfg.get("pad_order") or {}).get("mode", "windows")
+            # bateria (rodzaj zasilania) potrzebna tylko w trybie „bezprzewodowe pierwsze”
+            order = pads.order(self.cfg, pads.connected(battery=po == "wireless_first"))
+            if self.start_state and Path(self.start_state).is_file():
+                # stan wybrany ręcznie ma pierwszeństwo przed stanem wznowienia
                 resume = None
-            extra = adapter.launch_args(self.run_dir, bool(resume), order)
-            if resume and resume["path"]:
-                extra += adapter.resume_args(Path(resume["path"]))
-        cmd[1:1] = extra
-        self.resumed = bool(resume)
+                extra = adapter.start_state_args(self.run_dir, Path(self.start_state), order)
+            else:
+                if self.profiles_on:
+                    resume_from_nas(self.cfg, self.profile_id, g)
+                resume = library.get_resume(self.profile_id, g["id"])
+                if resume and resume["family"] != adapter.family:
+                    resume = None              # stan zapisał inny emulator — nie wczytamy go
+                if resume and resume["path"] and not Path(resume["path"]).is_file():
+                    resume = None
+                extra = adapter.launch_args(self.run_dir, bool(resume), order)
+                if resume and resume["path"]:
+                    extra += adapter.resume_args(Path(resume["path"]))
+            cmd[1:1] = extra
+            self.resumed = bool(resume)
 
-        restore_pads = None
-        if not pads.is_identity(order):
-            try:
-                restore_pads = adapter.remap_pads(order)
-            except Exception:
-                log.exception("przepinanie padów")
+            restore_pads = None
+            if not pads.is_identity(order):
+                try:
+                    restore_pads = adapter.remap_pads(order)
+                except Exception:
+                    log.exception("przepinanie padów")
+        except BaseException:
+            # blokada profilu założona, a emulator nie wystartował — zdejmujemy ją
+            if save_names:
+                profiles.unlock(self.cfg, self.profile_id)
+            raise
         started_at = time.time()
         try:
             self._run_process(g, exe, cmd, adapter)
@@ -449,11 +468,12 @@ class Session:
                 profiles.resolve_moves(self.cfg)   # folder przeniesiony z innego komputera
         except Exception:
             log.exception("przeniesione profile")
-        host = profiles.lock(self.cfg, self.profile_id)
+        host = profiles.lock(self.cfg, self.profile_id, force=getattr(self, "takeover", False))
         if host:
             prof = profiles.get(self.profile_id) or {}
-            raise LaunchError(f"Profil „{prof.get('name', '?')}” gra teraz na komputerze {host}. "
-                              "Wybierz inny profil albo zakończ tamtą grę.")
+            raise ProfileLocked(f"Profil „{prof.get('name', '?')}” gra teraz na urządzeniu: {host}. "
+                                "Jeśli tam już nie grasz (np. aplikację zamknięto w trakcie gry), "
+                                "przejmij profil — inaczej wybierz inny profil.", host)
         self._settings_on = self.cfg.get("profile_settings", True)
         if self._settings_on:
             try:

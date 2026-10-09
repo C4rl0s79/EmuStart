@@ -21,7 +21,7 @@ NAS: <profiles_nas>\\<nazwa NAS profilu>\\save\\<emulator>\\<folder>\\…
   przed grą: nowsze pliki z NAS → lokalnie, po grze: nowsze lokalne → NAS.
   Nadpisywany plik lokalny trafia najpierw do profiles\\<id>\\_backup\\<czas>\\.
 Blokada: <profil>\\lock z nazwą komputera — ten sam profil nie gra równocześnie
-na dwóch komputerach (blokada starsza niż 12 h jest ignorowana).
+na dwóch urządzeniach (dzierżawa odnawiana w trakcie gry, patrz lock()).
 """
 
 from __future__ import annotations
@@ -40,7 +40,9 @@ from emustart import library, nasfs, paths
 
 log = logging.getLogger("emustart.profiles")
 
-LOCK_MAX_AGE = 12 * 3600
+LOCK_LEASE = 300           # blokada bez odnowienia przez tyle s przestaje blokować
+LOCK_BEAT = 60             # odnawianie w trakcie gry
+LOCK_LEGACY = 900          # blokady bez „lease” (starsze wersje)
 LOCAL = paths.APP / "profiles"
 
 
@@ -613,28 +615,73 @@ def push_all(cfg: dict) -> int:
 
 # ── blokada ──
 
-def lock(cfg: dict, pid: int) -> str:
-    """'' = zablokowano; inaczej nazwa komputera, na którym profil właśnie gra."""
+# Dzierżawa: {"host", "time", "lease"} — urządzenie w grze odnawia ją co LOCK_BEAT s
+# (telefon rzadziej, dłuższa dzierżawa). Urządzenie, które padło albo zamknięto
+# aplikację w trakcie gry, przestaje blokować po upływie dzierżawy; wcześniej można
+# profil przejąć (force) — po potwierdzeniu w interfejsie.
+
+def lock_active(cur: dict, me: str = "") -> bool:
+    """Blokada innego urządzenia, która jeszcze obowiązuje."""
+    me = me or socket.gethostname()
+    if not cur.get("host") or cur.get("host") == me:
+        return False
+    return time.time() - float(cur.get("time", 0)) < float(cur.get("lease", LOCK_LEGACY))
+
+
+_beats: dict = {}
+_beats_lock = threading.Lock()
+
+
+def _lock_write(cfg: dict, rel: str) -> None:
+    data = {"host": socket.gethostname(), "time": time.time(), "lease": LOCK_LEASE}
+    nasfs.backend(cfg).write(rel, json.dumps(data).encode("utf-8"))
+
+
+def lock(cfg: dict, pid: int, force: bool = False) -> str:
+    """'' = zablokowano (i odnawiane co minutę do unlock); inaczej nazwa urządzenia,
+    na którym profil właśnie gra. force — przejęcie profilu po potwierdzeniu."""
     prof = get(pid)
     if not prof or not nas_online(cfg):
         return ""
     fs = nasfs.backend(cfg)
     rel = f"{prof['nas_name']}/lock"
-    me = socket.gethostname()
     try:
         cur = json.loads(fs.read(rel) or b"{}")
-        if cur.get("host") != me and time.time() - cur.get("time", 0) < LOCK_MAX_AGE:
+        if lock_active(cur) and not force:
             return cur.get("host", "?")
+        if lock_active(cur):
+            log.warning("profil %s przejęty od %s", prof["name"], cur.get("host"))
     except (OSError, ValueError):
         pass
     try:
-        fs.write(rel, json.dumps({"host": me, "time": time.time()}).encode("utf-8"))
+        _lock_write(cfg, rel)
     except OSError as ex:
         log.warning("blokada profilu: %s", ex)
+    stop = threading.Event()
+
+    def beat():
+        while not stop.wait(LOCK_BEAT):
+            try:
+                cur = json.loads(fs.read(rel) or b"{}")
+                if cur.get("host") != socket.gethostname():
+                    return                     # ktoś przejął profil — nie odbieramy
+                _lock_write(cfg, rel)
+            except (OSError, ValueError) as ex:
+                log.info("odnowienie blokady: %s", ex)
+    with _beats_lock:
+        old = _beats.pop(pid, None)
+        if old:
+            old.set()
+        _beats[pid] = stop
+    threading.Thread(target=beat, daemon=True, name="blokada").start()
     return ""
 
 
 def unlock(cfg: dict, pid: int) -> None:
+    with _beats_lock:
+        stop = _beats.pop(pid, None)
+    if stop:
+        stop.set()
     prof = get(pid)
     if not prof:
         return
@@ -1051,7 +1098,7 @@ def nas_rename(cfg: dict, pid: int) -> str:
         return f"Folder „{new}” należy do innego profilu."
     try:
         cur = json.loads((old_dir / "lock").read_text(encoding="utf-8"))
-        if cur.get("host") != socket.gethostname() and time.time() - cur.get("time", 0) < LOCK_MAX_AGE:
+        if lock_active(cur):
             return f"Profil właśnie gra na komputerze {cur.get('host', '?')}."
     except (OSError, ValueError):
         pass
