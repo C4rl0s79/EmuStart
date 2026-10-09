@@ -8,6 +8,17 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.25.11] — 2026-10-09
+
+### Zmienione
+- Android: **układ dla ekranu telefonu** (poziomo, ok. 900 × 410 px): niskie paski górny
+  i dolny, większy tekst i wiersze listy; podgląd gry — okładka i zrzut obok siebie
+  (zrzut ok. 2× większy), obok tytuł i **wszystkie szczegóły**, pod obrazkami opis;
+  w nagłówku listy logo platformy i logo gry; większe logo w karuzeli systemów;
+  okna dopasowane do szerokości. Rozmiary obrazków liczone tak, żeby szczegóły miały
+  zawsze co najmniej 38 % szerokości (także przy kwadratowych i szerokich okładkach).
+  Podgląd w przeglądarce na komputerze: `index.html?dev&phone`.
+
 ## [0.25.10] — 2026-10-09
 
 ### Zmienione

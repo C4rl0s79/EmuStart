@@ -357,3 +357,71 @@ img.glow { filter: drop-shadow(0 0 1px rgba(255,255,255,.9)) drop-shadow(0 0 6px
 .hint[data-a]:hover { background: var(--line); }
 .hint[data-a="dpad"] { cursor: default; }
 .hint[data-a="dpad"]:hover { background: none; }
+
+/* ── telefon (aplikacja na Androida, poziomo: ok. 900 × 410 px CSS) ──
+   ekran niski i szeroki: stałe paski zamiast 7 % wysokości. Podgląd gry:
+     okładka | zrzut   | tytuł + wszystkie szczegóły (cała wysokość)
+     opis (pod obrazkami)  |
+   nagłówek listy: logo platformy + logo gry (jak na komputerze) */
+body.phone {
+  --fs: calc(15px * var(--fs-all));
+  --row: 36px; --setrow: 40px;
+  --listlogo-h: 42px; --car-h: 50%; --car-w: 36vw;
+  --ph-media: 56%;
+}
+.phone .topbar { height: 38px; padding: 0 2vw; }
+.phone .brand { font-size: 1.25em; }
+.phone .hintbar { height: 38px; padding: 0 2vw; gap: 1.4em; }
+.phone .screen { inset: 38px 0 38px 0; }
+
+/* systemy */
+.phone .carousel { top: 3%; height: 52%; }
+.phone .syscard .txt { font-size: 5vw; }
+.phone .sysinfo { top: 57%; }
+.phone .sysinfo h1 { font-size: calc(1.6em * var(--fs-sys)); margin-bottom: .1em; }
+.phone .sysinfo p { font-size: calc(1em * var(--fs-sysdesc)); }
+.phone .sysabout { width: 80%; margin-top: .35em; }
+.phone .sysfacts { margin: 0 0 .25em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.phone .sysdesc { -webkit-line-clamp: 1; }
+
+/* lista gier */
+.phone #games { grid-template-columns: minmax(0, 33%) minmax(0, 1fr); gap: 1.6vw; padding: 0 1.6vw; }
+.phone .listhead { height: calc(var(--listlogo-h) + 8px); gap: 10px; }
+.phone .listhead img#listLogo { max-width: 13vw; }
+.phone #listGameLogo { max-width: 15vw; }
+.phone .listhead .lhtext h2 { display: none; }        /* nazwa platformy — jest logo */
+.phone .listhead .lhtext p { font-size: .8em; }
+.phone .row { padding: 0 .6em; }
+.phone .row .g { font-size: .75em; }
+
+/* podgląd gry */
+.phone .preview.pv3 { grid-template-columns: var(--ph-bw, auto) var(--ph-sw, auto) minmax(0, 1fr);
+  grid-template-rows: var(--ph-h, 56%) minmax(0, 1fr);
+  grid-template-areas: "box snap meta" "desc desc meta";
+  gap: 8px 1.4vw; padding: 6px 0 4px; height: 100%; }
+.phone .pv3 .box { grid-area: box; height: var(--ph-h); width: var(--ph-bw, auto); }
+.phone .pv3 .box img { height: var(--ph-h); width: auto; max-width: none; object-fit: contain; }
+.phone .pv3 .noart { height: var(--ph-h); width: calc(var(--ph-h) * .75); }
+.phone .pv3 .snap { grid-area: snap; height: var(--ph-h); width: var(--ph-sw, auto); min-height: 0; }
+.phone .pv3 .snap img { height: var(--ph-h); width: auto; max-width: none; object-fit: contain; }
+.phone .pv3 .meta { grid-area: meta; height: 100%; overflow: hidden; }
+.phone .pv3 .meta h1 { font-size: calc(1.2em * var(--fs-title)); }
+.phone .pv3 .meta .tags { margin: .15em 0 .45em; }
+.phone .pv3 .meta dl { grid-template-columns: auto minmax(0, 1fr); gap: .2em .8em; font-size: calc(.88em * var(--fs-meta)); }
+.phone .pv3 .desc { grid-area: desc; display: -webkit-box; margin: 0; font-size: calc(.85em * var(--fs-desc));
+  line-height: 1.35; -webkit-line-clamp: 6; }
+
+/* okna */
+.phone .panel { min-width: 0; max-width: 94vw; max-height: 94vh; padding: 14px 3vw; overflow: hidden auto; }
+.phone .panel.wide { width: 90vw; }
+.phone #lTitle { font-size: 1.6em; }
+.phone .lstats { margin: .8em 0 .2em; }
+.phone .hints { margin-top: .8em; gap: 1.2em; flex-wrap: wrap; }
+.phone #settings, .phone #profiles, .phone #pads, .phone #art { padding: 0 3vw; }
+.phone #settings h1, .phone #profiles h1 { font-size: 1.4em; margin: .3em 0; }
+.phone .setrow { grid-template-columns: 34% 1fr auto; }
+.phone .pcards { margin-top: 3vh; }
+.phone .lookpanel { width: 62vw; min-width: 0; top: 44px; bottom: 44px; }
+.phone .golist, .phone .artgrid { max-height: 62vh; }
+.phone .pv3 .desc { display: block; -webkit-line-clamp: unset; overflow: hidden;
+  -webkit-mask-image: linear-gradient(#000 78%, transparent); mask-image: linear-gradient(#000 78%, transparent); }

@@ -479,10 +479,24 @@ function setTitleArt(g, title) {
 function layoutPreview() {
   const pv = document.querySelector(".preview.pv3");
   if (!pv || !pv.clientWidth) return;
-  const css = getComputedStyle(document.documentElement).getPropertyValue("--media-h").trim();
-  const mediaH = css.endsWith("vh") ? (parseFloat(css) * window.innerHeight) / 100 : parseFloat(css) || 300;
   const ratio = (img, dflt) => (img.classList.contains("hidden") ? dflt
     : img.naturalWidth && img.naturalHeight ? img.naturalWidth / img.naturalHeight : dflt);
+  if (document.body.classList.contains("phone")) {
+    // telefon: okładka i zrzut obok siebie w górnej części, szczegóły zawsze >= 38 % szerokości
+    const arBox = ratio($("pvBox"), 0.75);
+    const arSnap = $("pvSnap").classList.contains("hidden") ? 0 : ratio($("pvSnap"), 4 / 3);
+    const gap = parseFloat(getComputedStyle(pv).columnGap) || 0;
+    const rowH = pv.clientHeight * 0.56;
+    const fit = (pv.clientWidth * 0.62 - gap) / (arBox + arSnap);
+    const h = Math.max(60, Math.min(rowH, fit));
+    pv.style.setProperty("--ph-h", `${h}px`);
+    // szerokości kolumn wprost — bez tego siatka bierze naturalną szerokość pliku obrazka
+    pv.style.setProperty("--ph-bw", `${h * arBox}px`);
+    pv.style.setProperty("--ph-sw", `${h * arSnap}px`);
+    return;
+  }
+  const css = getComputedStyle(document.documentElement).getPropertyValue("--media-h").trim();
+  const mediaH = css.endsWith("vh") ? (parseFloat(css) * window.innerHeight) / 100 : parseFloat(css) || 300;
   const arBox = ratio($("pvBox"), 0.75);                     // bez okładki: miejsce na napis 3:4
   const arSnap = $("pvSnap").classList.contains("hidden") ? 0 : ratio($("pvSnap"), 4 / 3);
   const gap = parseFloat(getComputedStyle(pv).columnGap) || 0;
@@ -1215,6 +1229,9 @@ if (new URLSearchParams(location.search).has("dev")) {
 
 
 // aplikacja na Androida: most do Kotlina (EmuAndroid) zamiast pywebview
+// układ dla telefonu (app.css: body.phone) — aplikacja na Androida; ?phone — podgląd w przeglądarce
+if (["android", "phone"].some((k) => new URLSearchParams(location.search).has(k))) document.body.classList.add("phone");
+
 if (new URLSearchParams(location.search).has("android") && window.EmuAndroid) {
   const pending = new Map();
   let seq = 0;
