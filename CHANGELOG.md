@@ -4,6 +4,15 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 [Keep a Changelog](https://keepachangelog.com/pl/1.1.0/), wersje według
 [SemVer](https://semver.org/lang/pl/).
 
+## [Nieopublikowane]
+
+Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
+
+### Dodane
+- `ROADMAP.md` — plan przejścia na serwer EmuStart (gry, zapisy, profile, biblioteka)
+  z pomiarami prędkości SMB i HTTP.
+- `tools/httpbench.py` — pomiar odczytu z serwera EmuStart.
+
 ## [0.22.6] — 2026-10-09
 
 ### Zmienione
