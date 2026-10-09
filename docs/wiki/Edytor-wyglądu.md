@@ -17,11 +17,11 @@ liście gier.
 
 ## Co można ustawić
 
-**Logo** — wysokość i szerokość logo tytułu na liście, logo w podglądzie, wielkość
-logo systemów w karuzeli i odstęp między nimi, logo systemu nad listą gier.
+**Logo** — wysokość i szerokość logo tytułu na liście, wielkość logo systemów
+w karuzeli i odstęp między nimi, logo systemu i zaznaczonej gry nad listą gier.
 
 **Lista i podgląd** — wysokość wiersza listy gier, wysokość wiersza w ustawieniach,
-szerokość listy, wysokość okładki i zrzutu, szerokość kolumny okładki, liczba linii opisu.
+szerokość listy, wysokość okładki i zrzutu (zawsze równe), liczba linii opisu.
 
 **Wielkość czcionek** (osobno) — cały interfejs, lista gier, tytuł gry, metadane,
 opis gry, nazwa systemu, informacje o systemie, menu/okna/ustawienia, pasek

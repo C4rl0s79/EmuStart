@@ -320,3 +320,26 @@ img.glow { filter: drop-shadow(0 0 1px rgba(255,255,255,.9)) drop-shadow(0 0 6px
 .lkrow .ch { color: rgba(255,255,255,.55); }
 .lkrow.chg .lk::after { content: " •"; color: var(--warn); }
 .lookpanel .hints { flex-wrap: wrap; gap: .4em 1.2em; margin-top: 1em; font-size: .85em; }
+
+/* ── 0.20: logo zaznaczonej gry obok logo platformy; podgląd okładka | szczegóły | zrzut ── */
+.listhead { gap: 1.2vw; }
+#listGameLogo { height: var(--listlogo-h); max-width: 22vw; object-fit: contain; object-position: left center;
+  filter: drop-shadow(0 1px 3px rgba(0,0,0,.8)); flex-shrink: 1; min-width: 0; }
+.listhead .lhtext { margin-left: auto; text-align: right; flex-shrink: 0; }
+/* góra obrazków na wysokości górnej krawędzi logo platformy (logo wyśrodkowane w nagłówku) */
+.preview.pv3 { display: grid; grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-rows: var(--media-h) minmax(0, 1fr); gap: 2.5vh 1.6vw;
+  padding-top: 1.25vh; overflow: hidden; }
+.pv3 .box { width: auto; height: var(--media-h); max-height: none; align-self: start; }
+.pv3 .box img { height: var(--media-h); width: auto; max-width: 30vw; max-height: none; object-fit: contain; }
+.pv3 .noart { height: var(--media-h); width: calc(var(--media-h) * 0.75); max-height: none; }
+.pv3 .snap { height: var(--media-h); width: auto; max-width: calc(var(--media-h) * 4 / 3); max-height: none;
+  aspect-ratio: auto; align-self: start; background: transparent; box-shadow: none; }
+.pv3 .snap img { height: var(--media-h); width: auto; max-width: calc(var(--media-h) * 4 / 3); object-fit: contain;
+  border-radius: 12px; box-shadow: 0 20px 60px rgba(0,0,0,.5); background: #000; }
+.pv3 .meta { min-width: 0; height: var(--media-h); overflow: hidden; }
+.pv3 .meta h1 { font-size: calc(1.45em * var(--fs-title)); margin-top: -.15em; }
+.pv3 .meta .tags { font-size: calc(1em * var(--fs-meta)); }
+.pv3 .meta dl { grid-template-columns: auto minmax(0, 1fr); font-size: calc(.92em * var(--fs-meta)); }
+.pv3 .desc { grid-column: 1 / -1; margin-top: 0; max-height: none; -webkit-line-clamp: var(--desc-lines);
+  font-size: calc(.95em * var(--fs-desc)); }

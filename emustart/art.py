@@ -35,8 +35,14 @@ def media_path(es: str, name: str, kind: str) -> Path:
 
 
 def media_url(es: str, name: str, kind: str) -> str:
+    """Adres grafiki z wersją (czas modyfikacji pliku): po ręcznej zmianie okładki
+    adres jest nowy, więc przeglądarka nie pokaże starej z pamięci podręcznej."""
     rel = f"{es}/{systems.thumb_name(name)}.{kind}.png"
-    return "/media/" + urllib.parse.quote(rel)
+    try:
+        v = int(os.stat(paths.MEDIA / rel).st_mtime)
+    except OSError:
+        v = 0
+    return "/media/" + urllib.parse.quote(rel) + (f"?v={v}" if v else "")
 
 
 MIN_FREE = 2 * 1024 ** 3          # zapas wolnego miejsca, poniżej którego nie zapisujemy
@@ -134,6 +140,7 @@ class Fetcher:
 
     def __init__(self, workers: int = 4, logos=lambda: False):
         self._logos = logos          # czy pobierać też logo gier (ustawienie)
+        self._logo_wanted: set = set()   # logo tej gry potrzebne niezależnie od ustawienia
         self._heap: list = []
         self._queued: set = set()
         self._cv = threading.Condition()
@@ -142,6 +149,11 @@ class Fetcher:
         self.done = 0
         for i in range(workers):
             threading.Thread(target=self._work, daemon=True, name=f"art{i}").start()
+
+    def request_logo(self, gid: int) -> None:
+        """Logo zaznaczonej gry (nagłówek listy) — zawsze, nie tylko z „tytułami jako logo”."""
+        self._logo_wanted.add(int(gid))
+        self.request([gid])
 
     def request(self, game_ids, urgent: bool = True) -> None:
         with self._cv:
@@ -177,7 +189,9 @@ class Fetcher:
                                  (gid,)).fetchone()
         if not r:
             return
-        if self._logos() and not r["art_logo"]:
+        want_logo = self._logos() or gid in self._logo_wanted
+        self._logo_wanted.discard(gid)
+        if want_logo and not r["art_logo"]:
             if r["es"] == "amigawhddemos":
                 library.set_art(gid, "logo", MISSING)   # dema nie mają logo w bazach gier
             else:

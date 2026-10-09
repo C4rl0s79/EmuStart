@@ -4,6 +4,24 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 [Keep a Changelog](https://keepachangelog.com/pl/1.1.0/), wersje według
 [SemVer](https://semver.org/lang/pl/).
 
+## [0.20.0] — 2026-10-09
+
+### Naprawione
+- **Ręcznie zmieniona grafika (np. okładka) wracała do starej** po wyjściu z systemu
+  i powrocie: przeglądarka trzymała grafikę w pamięci podręcznej pod tym samym
+  adresem. Adres grafiki zawiera teraz wersję pliku — każda zmiana to nowy adres.
+
+### Zmienione
+- **Logo zaznaczonej gry zawsze w nagłówku listy**, obok logo platformy — niezależnie
+  od ustawienia „Tytuły gier jako logo” (brakujące logo jest dociągane dla zaznaczonej
+  gry).
+- **Podgląd gry: okładka | szczegóły | zrzut**, a pod spodem opis na całą szerokość.
+  Okładka i zrzut mają tę samą wysokość (wyrównane górą i dołem), a ich górna
+  krawędź jest na wysokości górnej krawędzi logo platformy.
+- Edytor wyglądu: „Logo systemu i gry nad listą” (wspólna wysokość); usunięte
+  suwaki, które w nowym układzie nic nie zmieniały (logo w podglądzie, szerokość
+  kolumny okładki).
+
 ## [0.19.2] — 2026-10-09
 
 ### Zmienione

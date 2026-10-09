@@ -42,23 +42,23 @@
   <div class="gamelist">
     <div class="listhead">
       <img id="listLogo" alt="">
-      <div>
+      <img id="listGameLogo" class="hidden" alt="">
+      <div class="lhtext">
         <h2 id="listTitle"></h2>
         <p id="listCount"></p>
       </div>
     </div>
     <div class="rows" id="rows"></div>
   </div>
-  <!-- podgląd 2×2: okładka | zrzut (do prawej) / metadane | opis -->
-  <div class="preview pv2">
+  <!-- podgląd: okładka | szczegóły | zrzut (równe wysokości), pod spodem opis na całą szerokość -->
+  <div class="preview pv3">
     <div class="box"><img id="pvBox" alt=""><div id="pvBoxEmpty" class="noart">brak okładki</div></div>
-    <div class="snap"><img id="pvSnap" alt=""></div>
     <div class="meta">
-      <img id="pvLogo" class="pvlogo hidden" alt="">
       <h1 id="pvTitle"></h1>
       <p id="pvTags" class="tags"></p>
       <dl id="pvMeta"></dl>
     </div>
+    <div class="snap"><img id="pvSnap" alt=""></div>
     <div id="pvDesc" class="desc"></div>
   </div>
 </section>

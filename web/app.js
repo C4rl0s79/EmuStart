@@ -402,8 +402,8 @@ async function updatePreview() {
   $("pvTitle").textContent = g.title;
   $("pvTags").textContent = g.tags;
   setArt(g);
-  if (!g.box || !g.snap || (S.state?.games_logo && !g.logo && !g.art_logo)) {
-    api().request_art([g.id]);
+  if (!g.box || !g.snap || (!g.logo && !g.art_logo)) {
+    api().request_art([g.id], !g.logo && !g.art_logo);   // logo zaznaczonej gry — zawsze
     let tries = 0;
     artPoll = setInterval(async () => {
       const r = (await api().art_for([g.id]))[g.id];
@@ -456,10 +456,10 @@ function renderDesc(m) {
   $("pvDesc").innerHTML = parts.join("<br><br>");
 }
 function setTitleArt(g, title) {
-  const useLogo = !!(S.state?.games_logo && g.logo);
-  $("pvLogo").classList.toggle("hidden", !useLogo);
-  $("pvTitle").classList.toggle("hidden", useLogo);
-  if (useLogo && $("pvLogo").getAttribute("src") !== g.logo) { $("pvLogo").src = g.logo; $("pvLogo").alt = title; }
+  // logo zaznaczonej gry zawsze w nagłówku listy, obok logo platformy
+  const el = $("listGameLogo");
+  el.classList.toggle("hidden", !g.logo);
+  if (g.logo && el.getAttribute("src") !== g.logo) { el.src = g.logo; el.alt = title; }
 }
 function setArt(g) {
   setTitleArt(g, g.title);

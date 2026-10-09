@@ -384,7 +384,9 @@ class Api:
             r["snap"] = art.media_url(es, r["name"], "snap") if r["art_snap"] == art.HAS else ""
         return rows
 
-    def request_art(self, game_ids: list) -> None:
+    def request_art(self, game_ids: list, logo: bool = False) -> None:
+        if logo and game_ids:
+            self._fetcher.request_logo(int(game_ids[0]))
         self._fetcher.request([int(g) for g in game_ids])
 
     def art_for(self, game_ids: list) -> dict:
@@ -707,7 +709,7 @@ class Api:
             return {"ok": False, "reason": "Nie udało się pobrać tej grafiki."}
         art.save(g["es"], g["name"], kind, data)
         library.set_art(g["id"], kind, art.HAS)
-        return {"ok": True, "url": art.media_url(g["es"], g["name"], kind) + f"?t={int(time.time())}"}
+        return {"ok": True, "url": art.media_url(g["es"], g["name"], kind)}   # z wersją pliku
 
     def art_clear(self, game_id: int, kind: str) -> dict:
         g = library.game(int(game_id))

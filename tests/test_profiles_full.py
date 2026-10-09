@@ -748,3 +748,16 @@ def test_partial_converts_old_4mb_map(tmp_path):
     assert sum(p.done) == 4 and p.blocks == 9
     p.run()
     assert dst.read_bytes() == data
+
+
+def test_media_url_changes_when_art_replaced(tmp_path, monkeypatch):
+    from emustart import art
+    monkeypatch.setattr(paths, "MEDIA", tmp_path / "media")
+    f = art.media_path("snes", "Gra (USA)", "box")
+    _write(f, b"stara")
+    os.utime(f, (1000, 1000))
+    u1 = art.media_url("snes", "Gra (USA)", "box")
+    _write(f, b"nowa")
+    os.utime(f, (2000, 2000))
+    u2 = art.media_url("snes", "Gra (USA)", "box")
+    assert u1 != u2 and u2.endswith("?v=2000")
