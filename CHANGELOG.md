@@ -8,6 +8,17 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.25.6] — 2026-10-09
+
+### Poprawione
+- Android: pierwsza synchronizacja pliku różnego od serwera (np. świeża karta pamięci
+  emulatora) **już przed grą** bierze wersję z serwera — wcześniej telefon zapamiętywał
+  tylko stan serwera i po grze mógł nadpisać kartę z komputera swoją. Wersja z telefonu
+  trafia do kopii zapasowej (na serwerze `_backup/…/konflikt`), z komunikatem.
+- Android: Ustawienia → Zapisy gier pokazują przy folderze liczbę plików i godzinę
+  ostatniej zmiany (i wszystkie znalezione foldery, gdy jest ich kilka) — widać, czy to
+  folder, do którego emulator naprawdę zapisuje.
+
 ## [0.25.5] — 2026-10-09
 
 ### Dodane

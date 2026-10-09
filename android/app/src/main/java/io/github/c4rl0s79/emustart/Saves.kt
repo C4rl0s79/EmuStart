@@ -198,18 +198,25 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
         return if (!d.name.equals(sub, true) && x.isDirectory) x else d
     }
 
-    /** Opis dla Ustawień: gdzie telefon szuka zapisów emulatora. */
+    /** Opis dla Ustawień: gdzie telefon szuka zapisów emulatora — z liczbą plików i godziną
+     *  ostatniej zmiany, żeby było widać, czy to folder, do którego emulator naprawdę zapisuje. */
     fun describe(f: Fam): String {
         val dirs = phoneDirs(f, null)
+        fun info(d: File): String {
+            val files = (d.listFiles() ?: emptyArray()).filter { it.isFile } +
+                (if (f.ra) (d.listFiles() ?: emptyArray()).filter { it.isDirectory }.flatMap { (it.listFiles() ?: emptyArray()).filter { x -> x.isFile } } else emptyList())
+            val last = files.maxOfOrNull { it.lastModified() } ?: 0L
+            val t = if (last > 0) SimpleDateFormat("d.MM HH:mm", Locale.ROOT).format(Date(last)) else "—"
+            return "${d.absolutePath} (${files.size} plików, ostatnia zmiana $t)"
+        }
         return when {
-            prefs.saveDir(f.id).isNotBlank() -> inner(f, File(prefs.saveDir(f.id))).absolutePath +
-                (if (dirs.isEmpty()) " (nie ma takiego folderu)" else "")
-            prefs.learnedDir(f.id).isNotBlank() && dirs.isNotEmpty() -> prefs.learnedDir(f.id) + " (wykryty)"
-            dirs.isNotEmpty() -> dirs.joinToString(", ") { it.absolutePath }
+            dirs.isNotEmpty() -> dirs.take(3).joinToString("; ") { info(it) } +
+                (if (prefs.saveDir(f.id).isEmpty() && prefs.learnedDir(f.dirs).isEmpty() && dirs.size > 1) " — kilka folderów, wskaż właściwy (A)" else "")
+            prefs.saveDir(f.id).isNotBlank() -> prefs.saveDir(f.id) + " (nie ma takiego folderu)"
             f.kind == Kind.BY_STEM || f.states -> "wykryje się po pierwszej grze"
             f.kind == Kind.PS1_CARDS -> "DuckStation na Androidzie trzyma dane w Android/data (niedostępne) — " +
                 "dla zapisów wspólnych z PC wybierz dla PS1 RetroArch (SwanStation)"
-            else -> "nie znaleziono — w emulatorze ustaw folder danych w pamięci telefonu (nie Android/data)"
+            else -> "nie znaleziono — wskaż folder danych emulatora (A)"
         }
     }
 
@@ -413,7 +420,15 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
             val x = phone[name]
             val download = when {
                 x == null -> true
-                m == null -> if (same(nSig, sig(x))) false else v[1] > x.lastModified() / 1000.0 + 2
+                // pierwsze spotkanie z plikiem, który różni się od serwera (np. świeża karta
+                // emulatora w telefonie): wygrywa serwer, wersja z telefonu — do kopii zapasowej
+                m == null -> if (same(nSig, sig(x))) false else {
+                    try { server.nasPut("$profile/_backup/${stamp()}-${safe(device)}/${f.nas}/konflikt/$rel",
+                                        x.readBytes(), x.lastModified() / 1000.0) } catch (e: Exception) { }
+                    conflicts += JSONObject().put("profile", profile).put("file",
+                        "$name (pierwsza synchronizacja: wersja z serwera; z telefonu w kopii zapasowej)")
+                    true
+                }
                 same(m.optJSONArray("n"), nSig) -> false                         // serwer bez zmian
                 same(m.optJSONArray("p"), sig(x)) -> true                         // zmienił się tylko serwer
                 else -> {                                                         // oba zmienione — konflikt
