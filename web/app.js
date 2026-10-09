@@ -653,6 +653,12 @@ function openMenu() {
     ["Skanuj kolekcję ponownie", () => startScan()],
     ["Wyjdź z EmuStart", () => api().quit()],
   ];
+  if (S.platform === "android") {
+    items.length = 0;
+    items.push(["Ustawienia", () => openSettings()], ["Wygląd (logo, czcionki, kolory)", () => openLook()],
+               ["Odśwież listę z serwera", async () => { await api().rescan(); await refreshState(); show("systems"); }],
+               ["Wyjdź z EmuStart", () => api().quit()]);
+  }
   if (S.screen === "settings") items.shift();
   S.menu = items; S.menuIdx = 0; S.modal = "menu";
   $("menu").classList.remove("hidden");
@@ -702,12 +708,42 @@ async function openSettings(first) {
   S.settings = await api().get_settings();
   S.setIdx = 0;
   $("setIntro").classList.toggle("hidden", !first);
+  if (S.platform === "android") $("setIntro").textContent =
+    "Pierwsze uruchomienie. Wpisz adres i klucz serwera EmuStart (komputer z grami), potem „Sprawdź połączenie”.";
   $("setTitle").textContent = first ? "Witaj w EmuStart" : "Ustawienia";
   buildSetRows();
   show("settings");
 }
 
+function buildSetRowsAndroid() {
+  const c = S.settings;
+  const rows = [];
+  rows.push({ head: "Serwer EmuStart (komputer z grami)" });
+  rows.push({ k: "Adres serwera", key: "server_url", type: "text", fmt: (v) => v || "np. http://100.85.254.31:8740" });
+  rows.push({ k: "Klucz serwera", key: "server_key", type: "text", fmt: (v) => (v ? "••••••" + v.slice(-4) : "brak — EmuStart.exe --server-key na serwerze") });
+  rows.push({ k: "Sprawdź połączenie", type: "action", run: async () => {
+    toast("Łączę z serwerem…", 10000); const r = await api().server_test();
+    toast(r.ok ? `Połączono: ${r.name} (EmuStart ${r.version}), ${r.systems} systemów` : `Błąd: ${r.reason}`, 6000);
+    if (r.ok) { await refreshState(); } } });
+  rows.push({ head: "Gry w telefonie" });
+  rows.push({ k: "Folder gier", key: "games_dir", type: "info", fmt: (v) => v });
+  rows.push({ k: "Trzymaj ostatnie gry", key: "cache_recent", type: "num", step: 1, min: 1, max: 100, fmt: (v) => `${v} + przypięte` });
+  rows.push({ k: "Pobieranie: strumieni naraz", key: "streams", type: "num", step: 1, min: 1, max: 8, fmt: (v) => `${v}` });
+  rows.push({ head: "Wygląd" });
+  rows.push({ k: "Edytor wyglądu", type: "action", run: () => openLook() });
+  rows.push({ k: "Tytuły gier jako logo", key: "games_logo", type: "bool", fmt: (v) => (v ? "tak" : "nie") });
+  rows.push({ head: "Emulatory  ·  ←/→ wybór (zainstalowane w telefonie)" });
+  for (const s of c.systems || []) {
+    rows.push({ k: s.display, key: `emu:${s.es}`, type: "enum", opts: s.options.map((o) => o.id),
+                fmt: (v) => (s.options.find((o) => o.id === v) || { label: "brak zainstalowanego emulatora" }).label });
+    c[`emu:${s.es}`] = s.emulator || (s.options[0] || {}).id || "";
+  }
+  S.setRows = rows;
+  if (S.setRows[S.setIdx]?.head) S.setIdx = 1;
+}
+
 function buildSetRows() {
+  if (S.platform === "android") return buildSetRowsAndroid();
   const c = S.settings;
   const rows = [];
   rows.push({ head: "Foldery z grami  ·  kolejność = pierwszeństwo przy duplikatach" });
@@ -856,6 +892,9 @@ async function settingsInput(a) {
   else if (a === "rb") { for (let k = 0; k < 8; k++) move(1); }
   else if (a === "b") { await refreshState(); return show("systems"); }
   else if (a === "start") return openMenu();
+  else if (r.type === "text" && a === "a") {
+    return oskOpen(r.k, S.settings[r.key] || "", async (v) => { await saveSetting(r.key, v.trim()); renderSettings(); });
+  }
   else if (r.type === "root" || r.type === "addroot") {
     const roots = [...(S.settings.rom_roots || [])];
     const at = r.type === "root" ? r.idx : roots.length;
@@ -1031,6 +1070,7 @@ async function artInput(a) {
 async function refreshState() {
   const st = await api().get_state();
   S.state = st;
+  S.platform = st.platform || "windows";
   const keep = S.systems[S.sysIdx]?.es;
   S.systems = st.systems;
   const i = S.systems.findIndex((s) => s.es === keep);
@@ -1118,5 +1158,30 @@ if (new URLSearchParams(location.search).has("dev")) {
                                                                  body: JSON.stringify(args) }).then((r) => r.json()),
     }),
   };
+  setTimeout(() => window.dispatchEvent(new Event("pywebviewready")), 0);
+}
+
+
+// aplikacja na Androida: most do Kotlina (EmuAndroid) zamiast pywebview
+if (new URLSearchParams(location.search).has("android") && window.EmuAndroid) {
+  const pending = new Map();
+  let seq = 0;
+  window.__emuResolve = (id, json) => {
+    const p = pending.get(id);
+    if (p) { pending.delete(id); p(json === undefined ? null : JSON.parse(json)); }
+  };
+  window.pywebview = {
+    api: new Proxy({}, {
+      get: (_t, name) => (...args) => new Promise((res) => {
+        const id = ++seq;
+        pending.set(id, res);
+        window.EmuAndroid.call(id, String(name), JSON.stringify(args));
+      }),
+    }),
+  };
+  // pad (GameSir itp.) obsługuje aktywność Androida: wciśnięcie / puszczenie
+  window.__emuPad = (a, up) => (up ? release(a) : press(a, true));
+  // powrót z emulatora do EmuStart
+  window.__emuResumed = () => { if (S.modal === "launch") updateLaunch(); };
   setTimeout(() => window.dispatchEvent(new Event("pywebviewready")), 0);
 }

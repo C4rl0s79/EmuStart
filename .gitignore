@@ -17,3 +17,11 @@ profiles/
 # binarka skopiowana do katalogu programu (build.ps1 -Deploy)
 /EmuStart.exe
 /_internal/
+
+# Android
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+*.keystore
+*.jks

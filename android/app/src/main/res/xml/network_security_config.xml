@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- serwer EmuStart w sieci prywatnej (Tailscale 100.x / LAN) przez HTTP; ruch Tailscale
+     jest szyfrowany przez sam tunel -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

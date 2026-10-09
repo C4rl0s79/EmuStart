@@ -86,8 +86,15 @@ def handle(handler) -> None:
         if parts == ["info"]:
             return _json(handler, {"name": socket.gethostname(), "version": __version__, "api": 1})
         if parts == ["systems"]:
-            return _json(handler, [{k: s.get(k) for k in ("es", "display", "games", "logo", "kind")}
-                                   for s in API.list_systems()])
+            from emustart import installer, systems
+            out = []
+            for s_ in API.list_systems():
+                d = {k: s_.get(k) for k in ("es", "display", "games", "logo", "kind")}
+                plat = systems.info(s_["es"])["plat"]
+                d["plat"] = plat
+                d["core"] = installer.CORES.get(plat, "")     # rdzeń RetroArcha (Android: *_libretro_android.so)
+                out.append(d)
+            return _json(handler, out)
         if len(parts) == 3 and parts[0] == "systems" and parts[2] == "games":
             return _json(handler, [_game_row(r) for r in API.list_games(parts[1])])
         if len(parts) == 2 and parts[0] == "games" and parts[1].isdigit():

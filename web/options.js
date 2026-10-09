@@ -81,6 +81,7 @@ const META_FIELDS = [["title", "Tytuł"], ["developer", "Producent"], ["publishe
   ["year", "Rok premiery"], ["genre", "Gatunek"], ["players", "Gracze"], ["description", "Opis"]];
 
 async function openGameOptions() {
+  if (S.platform === "android") return toast("Opcje gier i systemów są w EmuStart na komputerze z grami.");
   const g = S.games[S.gameIdx];
   if (!g) return;
   GO.id = g.id;
@@ -604,6 +605,7 @@ async function fbInput(a) {
 const SO = { es: "", d: null, page: "main", idx: 0, items: [], logos: null };
 
 async function openSystemOptions() {
+  if (S.platform === "android") return toast("Opcje gier i systemów są w EmuStart na komputerze z grami.");
   const s = S.systems[S.sysIdx];
   if (!s) return;
   SO.es = s.es;
