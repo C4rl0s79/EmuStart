@@ -100,7 +100,8 @@ def missing_bytes(cfg: dict, game: dict) -> int:
             from emustart import partial
             try:
                 m = mapf.read_bytes()
-                full = sum(m[:-1]) * partial.BLOCK + (size - (len(m) - 1) * partial.BLOCK if m and m[-1] else 0)
+                blk = partial.BLOCK if len(m) == -(-size // partial.BLOCK) else partial.OLD_BLOCK
+                full = sum(m[:-1]) * blk + (size - (len(m) - 1) * blk if m and m[-1] else 0)
                 total += max(0, size - full)
                 continue
             except OSError:

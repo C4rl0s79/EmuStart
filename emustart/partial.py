@@ -18,9 +18,13 @@ from pathlib import Path
 
 log = logging.getLogger("emustart.partial")
 
-BLOCK = 4 * 1024 * 1024
+BLOCK = 1024 * 1024            # 1 MB: gra czyta rozrzucone kawałki — większe bloki
+                               # to pobieranie niepotrzebnych danych (pomiar: ~8 s zamiast ~18 s)
+OLD_BLOCK = 4 * 1024 * 1024    # mapy zapisane przez 0.19.0–0.19.1
 STREAMS = 4
 READ_AHEAD = 8                 # tyle bloków za żądanym trafia na początek kolejki
+DEMAND_SPLIT = 4               # brakujący blok czytany na żądanie: tyle równoległych kawałków
+DEMAND_QUIET = 1.0             # przez tyle s po odczycie gry tło pobiera tylko to, czego gra potrzebuje
 MIN_SIZE = 32 * 1024 * 1024    # mniejsze pliki — jednym strumieniem, jak dotąd
 
 # pliki pobierane właśnie teraz (ścieżka docelowa → Partial) — dla wirtualnego dysku
@@ -42,8 +46,13 @@ class Partial:
         self.finished = False             # wszystkie bloki są
         self.final = False                # .part przemianowany na plik docelowy
         self._map_dirty = 0
-        self._dsrc = None                 # otwarty plik na NAS-ie dla odczytów na żądanie
+        # odczyty na żądanie: kilka otwartych uchwytów do pliku na NAS-ie (każde
+        # otwarcie to kilka wymian po ~40 ms) i pula wątków czytających kawałki bloku
+        self._handles = [None] * DEMAND_SPLIT
+        self._hlocks = [threading.Lock() for _ in range(DEMAND_SPLIT)]
+        self._pool = None
         self._dlock = threading.Lock()
+        self._last_demand = 0.0
         self._prepare()
 
     # ── stan na dysku ──
@@ -55,6 +64,9 @@ class Partial:
             m = self.mapf.read_bytes()
             if len(m) == self.blocks and have == self.size:
                 done = bytearray(m)
+            elif have == self.size and len(m) == -(-self.size // OLD_BLOCK) and OLD_BLOCK % BLOCK == 0:
+                k = OLD_BLOCK // BLOCK           # mapa w starym rozmiarze bloku — przeliczenie
+                done = bytearray(m[i // k] for i in range(self.blocks))
         elif have:
             # stary format: .part dopisywany po kolei — pełne bloki z początku są dobre
             for i in range(min(self.blocks, have // BLOCK)):
@@ -86,11 +98,14 @@ class Partial:
 
     # ── pobieranie ──
     def _next(self) -> int | None:
-        """Pod blokadą: blok do pobrania (najpierw chciane, potem kolejne od początku)."""
+        """Pod blokadą: blok do pobrania (najpierw chciane, potem kolejne od początku).
+        -1 = chwilowo nic: gra właśnie czyta, łącze zostaje dla jej bloków."""
         while self.prio:
             i = self.prio.pop(0)
             if not self.done[i] and i not in self.busy:
                 return i
+        if time.monotonic() - self._last_demand < DEMAND_QUIET:
+            return -1
         for i in range(self.blocks):
             if not self.done[i] and i not in self.busy:
                 return i
@@ -100,7 +115,11 @@ class Partial:
         off = i * BLOCK
         n = min(BLOCK, self.size - off)
         fsrc.seek(off)
-        data = fsrc.read(n)
+        return self._store(i, fsrc.read(n))
+
+    def _store(self, i: int, data: bytes) -> int:
+        off = i * BLOCK
+        n = min(BLOCK, self.size - off)
         if len(data) != n:
             raise OSError(f"krótki odczyt z NAS-a ({self.src.name}, blok {i})")
         with open(self.part, "r+b") as f:
@@ -130,6 +149,9 @@ class Partial:
                         i = self._next()
                         if i is None:
                             return
+                        if i < 0:
+                            self.lock.wait(0.1)   # gra czyta — czekamy na jej życzenia
+                            continue
                         self.busy.add(i)
                     try:
                         self._fetch(i, fsrc)
@@ -168,11 +190,54 @@ class Partial:
                 with _active_lock:
                     ACTIVE.pop(str(self.dst).lower(), None)
 
+    def _handle(self, k: int):
+        if self._handles[k] is None:
+            self._handles[k] = open(self.src, "rb", buffering=0)
+        return self._handles[k]
+
+    def _read_range(self, k: int, off: int, n: int) -> bytes:
+        with self._hlocks[k]:
+            h = self._handle(k)
+            h.seek(off)
+            return h.read(n)
+
+    def _executor(self):
+        with self._dlock:
+            if self._pool is None:
+                from concurrent.futures import ThreadPoolExecutor
+                self._pool = ThreadPoolExecutor(DEMAND_SPLIT, thread_name_prefix="na-zadanie")
+            return self._pool
+
+    def _fetch_parallel(self, i: int) -> int:
+        off = i * BLOCK
+        n = min(BLOCK, self.size - off)
+        step = max(64 * 1024, -(-n // DEMAND_SPLIT))
+        ranges = [(k, off + k * step, min(step, n - k * step)) for k in range(DEMAND_SPLIT) if k * step < n]
+        parts = list(self._executor().map(lambda r: self._read_range(*r), ranges))
+        return self._store(i, b"".join(parts))
+
+    def prewarm(self) -> None:
+        """Na start grania w trakcie pobierania: otwarcie uchwytów do pliku na NAS-ie
+        i pobranie początku pliku (nagłówek, mapa CHD), zanim emulator o nie poprosi."""
+        def go():
+            try:
+                list(self._executor().map(lambda k: self._read_range(k, 0, 0), range(DEMAND_SPLIT)))
+                self.want(0, 0)
+                self._ensure(0, time.monotonic() + 60)
+            except Exception as ex:
+                log.info("rozgrzewanie %s: %s", self.src.name, ex)
+        threading.Thread(target=go, daemon=True, name="rozgrzewanie").start()
+
     def close_demand(self) -> None:
         with self._dlock:
-            if self._dsrc is not None:
-                self._dsrc.close()
-                self._dsrc = None
+            pool, self._pool = self._pool, None
+        if pool:
+            pool.shutdown(wait=False)
+        for k in range(DEMAND_SPLIT):
+            with self._hlocks[k]:
+                if self._handles[k] is not None:
+                    self._handles[k].close()
+                    self._handles[k] = None
 
     def finalize(self) -> bool:
         """.part → plik docelowy. Gdy wirtualny dysk trzyma plik otwarty, przemianowanie
@@ -195,6 +260,7 @@ class Partial:
         if offset >= self.size or length <= 0:
             return b""
         length = min(length, self.size - offset)
+        self._last_demand = time.monotonic()
         first, last = offset // BLOCK, (offset + length - 1) // BLOCK
         self.want(first, last)
         end = time.monotonic() + timeout
@@ -209,6 +275,7 @@ class Partial:
         with self.lock:
             ahead = [i for i in range(first, min(self.blocks, last + 1 + READ_AHEAD)) if not self.done[i]]
             self.prio = ahead + [i for i in self.prio if i not in ahead]
+            self.lock.notify_all()            # obudź wątki tła czekające na życzenia gry
 
     def _ensure(self, i: int, end: float) -> None:
         with self.lock:
@@ -218,13 +285,10 @@ class Partial:
             if mine:
                 self.busy.add(i)
         if mine:
-            # czytający pobiera brakujący blok sam — bez czekania na kolejkę; plik na
-            # NAS-ie zostaje otwarty (każde otwarcie to kilka wymian po ~40 ms)
+            # czytający pobiera brakujący blok sam, bez czekania na kolejkę —
+            # kilkoma kawałkami naraz (blok 4 MB w ~1/4 czasu jednego strumienia)
             try:
-                with self._dlock:
-                    if self._dsrc is None:
-                        self._dsrc = open(self.src, "rb", buffering=0)
-                    self._fetch(i, self._dsrc)
+                self._fetch_parallel(i)
             except Exception:
                 with self.lock:
                     self.busy.discard(i)

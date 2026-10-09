@@ -4,6 +4,25 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 [Keep a Changelog](https://keepachangelog.com/pl/1.1.0/), wersje według
 [SemVer](https://semver.org/lang/pl/).
 
+## [0.19.2] — 2026-10-09
+
+### Zmienione
+- **Gra startuje od razu** — domyślnie zawsze granie w trakcie pobierania (próg
+  „…gdy pobieranie potrwa dłużej niż” = 0; można ustawić inaczej).
+- **Szybsze ładowanie w trakcie pobierania** (pomiar na grach PS2 z NAS-a > 1000 km,
+  typowe ładowanie: nagłówek + 30 odczytów w różnych miejscach): **ok. 8 s zamiast
+  ok. 18 s**:
+  - bloki 1 MB zamiast 4 MB — gra czyta rozrzucone kawałki, więc większe bloki
+    oznaczały pobieranie niepotrzebnych danych (ponad 2× mniej danych przy ładowaniu),
+  - brakujący blok pobierany kilkoma kawałkami naraz,
+  - gdy gra czyta, pobieranie w tle bierze tylko bloki, których gra potrzebuje
+    (i 8 następnych); resztę pliku dokańcza, gdy gra przestanie czytać,
+  - połączenia z plikiem na NAS-ie i początek pliku przygotowywane od razu, zanim
+    emulator o nie poprosi.
+- Pomiar sieci zapamiętywany na 30 min — bez 1,5 s czekania przy każdej grze.
+- Niedokończone pobierania z poprzedniej wersji (mapa bloków 4 MB) są przeliczane,
+  nie pobierane od nowa.
+
 ## [0.19.1] — 2026-10-09
 
 ### Zmienione

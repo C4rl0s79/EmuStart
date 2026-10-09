@@ -995,7 +995,7 @@ class Api:
                 "pad_backend": cfg.get("pad_backend", "python"),
                 "profile_settings": cfg.get("profile_settings", True),
                 "stream_play": cfg.get("stream_play", True),
-                "stream_min_seconds": cfg.get("stream_min_seconds", 45),
+                "stream_min_seconds": cfg.get("stream_min_seconds", 0),
                 "winfsp": self._winfsp,
                 "bios_dir": cfg.get("bios_dir", ""),
                 **{k: bool(cfg.get(k)) for k in self.HIDE_KEYS},

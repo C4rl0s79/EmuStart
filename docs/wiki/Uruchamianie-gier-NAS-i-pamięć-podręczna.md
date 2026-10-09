@@ -20,19 +20,19 @@ zawsze zdalnie).
 
 - **Pobieranie w 4 strumieniach naraz** (pliki od 32 MB) — na łączu przez Tailscale
   zmierzone 268 Mb/s zamiast 110 Mb/s jednym strumieniem. Plik pobierany jest
-  blokami po 4 MB, a mapa pobranych bloków (`.part.map`) pozwala wznowić przerwane
+  blokami po 1 MB, a mapa pobranych bloków (`.part.map`) pozwala wznowić przerwane
   pobieranie od brakujących bloków.
 - **Graj w trakcie pobierania (WinFsp)** — gdy zainstalowany jest
   [WinFsp](https://winfsp.dev), gra w trybie zdalnym startuje od razu z wirtualnego
   dysku EmuStart (wolna litera, np. `Y:`). Fragmenty już pobrane czytane są z dysku
-  lokalnego, brakujące pobierane natychmiast, przed resztą kolejki (ok. 0,25 s na
-  blok przy połączeniu z NAS-em oddalonym o ponad 1000 km), a pobieranie w tle
+  lokalnego, brakujące pobierane natychmiast, przed resztą kolejki (typowe ładowanie gry
+  PS2 z NAS-a oddalonego o ponad 1000 km: ok. 8 s), a pobieranie w tle
   kieruje się w miejsce, które gra właśnie czyta. Krótkie przycięcia są możliwe tylko
   przy pierwszym wejściu w niepobrany fragment. Po pobraniu całości gra jest w pamięci
   podręcznej jak zwykle.
-- Granie w trakcie pobierania włącza się tylko, gdy pobranie trwałoby dłużej niż próg
-  (Ustawienia → „…gdy pobieranie potrwa dłużej niż”, domyślnie 45 s). Mniejsze gry
-  szybciej po prostu pobrać w całości.
+- Domyślnie gra startuje od razu (granie w trakcie pobierania). W Ustawieniach →
+  „…gdy pobieranie potrwa dłużej niż” można ustawić próg: krótsze pobranie najpierw
+  w całości.
 - EmuStart sprawdza WinFsp przy starcie (wynik w logu i w Ustawieniach → „Graj
   w trakcie pobierania”). Bez WinFsp działa jak dotąd: ekran pobierania i „Graj teraz”
   wprost z NAS-a. Opcję można wyłączyć w Ustawieniach.

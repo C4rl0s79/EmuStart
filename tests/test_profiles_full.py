@@ -734,3 +734,17 @@ def test_streaming_only_for_long_downloads():
     s.cfg = {"stream_min_seconds": 0}
     s.prog = cache.Progress(100 * 1024 * 1024, 1)
     assert s._worth_streaming()
+
+
+def test_partial_converts_old_4mb_map(tmp_path):
+    from emustart import partial
+    data = bytes(range(256)) * (4096 * 9)                   # 9 MiB
+    src = tmp_path / "s.bin"; _write(src, data)
+    dst = tmp_path / "d.bin"
+    part = dst.with_name("d.bin.part")
+    _write(part, data[:4 * 1024 * 1024] + b"\0" * (len(data) - 4 * 1024 * 1024))
+    _write(dst.with_name("d.bin.part.map"), b"\1\0\0")       # stary format: bloki 4 MB
+    p = partial.Partial(src, dst, len(data), 1.0)
+    assert sum(p.done) == 4 and p.blocks == 9
+    p.run()
+    assert dst.read_bytes() == data

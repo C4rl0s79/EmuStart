@@ -31,6 +31,7 @@ log = logging.getLogger("emustart.launcher")
 
 PROBE_SECONDS = 1.5
 PROBE_BYTES = 24 * 1024 * 1024
+_PROBE: dict = {}                  # ostatni pomiar sieci {t, mode, mbps}
 
 
 class LaunchError(Exception):
@@ -201,7 +202,7 @@ class Session:
             return True
         left = max(0, self.prog.total - self.prog.done)
         est = left * 8 / (mbps * 1e6)
-        limit = float(self.cfg.get("stream_min_seconds", 45))
+        limit = float(self.cfg.get("stream_min_seconds", 0))
         log.info("pobieranie potrwa ok. %.0f s (próg grania w trakcie: %.0f s)", est, limit)
         return est > limit
 
@@ -225,6 +226,7 @@ class Session:
             src = rom_dir / rel
             if size >= partial.MIN_SIZE:
                 source = partial.open_partial(src, dst, size, mt)
+                source.prewarm()          # połączenia z NAS-em i początek pliku — zanim emulator zapyta
             else:
                 # małe pliki (.cue, .m3u) kopiują się jako pierwsze — czekamy chwilę
                 while not cache._fresh(dst, size, mt) and self.copy_thread.is_alive() \
@@ -277,6 +279,11 @@ class Session:
         forced = self.cfg.get("network_mode", "auto")
         if forced in ("lan", "remote"):
             return forced
+        # pomiar z ostatnich 30 min — bez 1,5 s czekania przy każdej grze
+        last = _PROBE.get("t", 0)
+        if time.monotonic() - last < 1800 and _PROBE.get("mode"):
+            self._mbps = _PROBE["mbps"]
+            return _PROBE["mode"]
         t0 = time.monotonic()
         while (time.monotonic() - t0 < PROBE_SECONDS and self.prog.done < PROBE_BYTES
                and self.copy_thread.is_alive()):
@@ -285,7 +292,10 @@ class Session:
         mbps = self.prog.done * 8 / elapsed / 1e6
         self._mbps = mbps
         log.info("pomiar sieci: %.0f Mb/s", mbps)
-        return "lan" if mbps >= float(self.cfg.get("lan_threshold_mbps", 200)) else "remote"
+        mode = "lan" if mbps >= float(self.cfg.get("lan_threshold_mbps", 200)) else "remote"
+        if self.prog.done >= PROBE_BYTES // 2:      # wiarygodny pomiar — zapamiętujemy
+            _PROBE.update(t=time.monotonic(), mode=mode, mbps=mbps)
+        return mode
 
     # ── przygotowanie pliku dla emulatora ──
     def _prepare(self, g: dict, info: dict, base: Path, exe: str) -> Path:
