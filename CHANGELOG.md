@@ -8,6 +8,15 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.25.2] — 2026-10-09
+
+### Dodane
+- Android: **stany gry (savestate) z telefonu na serwerze** — `<profil>/states/android/<emulator>/`,
+  osobno od stanów z PC. Przed grą stany tej gry z serwera, po grze zmienione na serwer
+  (z kopią zapasową poprzedniej wersji); przetrwają reinstalację i zmianę telefonu.
+  RetroArch (`<gra>.state*`), ArmSX2 i AetherSX2 (`.p2s` — nazwane numerem płyty, więc
+  przypisanie do gry EmuStart poznaje po pierwszym zapisie stanu i trzyma też na serwerze).
+
 ## [0.25.1] — 2026-10-09
 
 ### Dodane

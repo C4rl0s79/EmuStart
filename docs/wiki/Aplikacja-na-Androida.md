@@ -69,7 +69,9 @@ Zapisy z gry są **wspólne z komputerem**:
 - Profil gra na komputerze — telefon nie uruchomi gry na tym samym profilu (i odwrotnie).
 - Bez połączenia gra działa na zapisach z telefonu; wyślą się przy następnym
   połączeniu (Ustawienia → Zapisy gier → „Czekają na wysłanie”).
-- Stany gry (savestate) nie są wspólne — różne wersje emulatorów często ich nie wczytują.
+- **Stany gry (savestate)** z telefonu też są na serwerze — w `states\android\<emulator>`
+  profilu, osobno od stanów z PC (różne wersje emulatorów często ich nie wczytują). Przed grą
+  trafiają do telefonu, po grze wracają na serwer; przetrwają reinstalację i zmianę telefonu.
 
 **Foldery emulatorów.** EmuStart musi widzieć folder zapisów emulatora — w pamięci
 telefonu, nie w `Android/data` (tam Android nie wpuszcza innych aplikacji):
