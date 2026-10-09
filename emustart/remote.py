@@ -104,13 +104,14 @@ def handle(handler) -> None:
         if parts == ["find"]:
             return _find(handler)
         if parts == ["systems"]:
-            from emustart import installer, systems
+            from emustart import emulators, installer, systems
             out = []
             for s_ in API.list_systems():
                 d = {k: s_.get(k) for k in ("es", "display", "games", "logo", "logo_glow", "kind")}
                 plat = systems.info(s_["es"])["plat"]
                 d["plat"] = plat
                 d["core"] = installer.CORES.get(plat, "")     # rdzeń RetroArcha (Android: *_libretro_android.so)
+                d["cores"] = emulators.cores_for(plat)         # wszystkie pasujące — wybór na telefonie
                 out.append(d)
             return _json(handler, out)
         if len(parts) == 3 and parts[0] == "systems" and parts[2] == "games":

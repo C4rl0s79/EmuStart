@@ -8,6 +8,15 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.25.8] — 2026-10-09
+
+### Poprawione
+- Android: **wybór rdzenia RetroArcha** — Ustawienia → Emulatory pokazują osobno każdy rdzeń
+  pasujący do platformy (np. SNES: Snes9x, bsnes; NES: Nestopia, FCEUmm, Mesen; PS1:
+  SwanStation, Beetle PSX HW, PCSX ReARMed…), nie tylko domyślny. Serwer podaje pełną
+  listę rdzeni platformy. **Serwer trzeba zaktualizować.** Rdzeń trzeba mieć pobrany
+  w RetroArchu (Online Updater → Core Downloader).
+
 ## [0.25.7] — 2026-10-09
 
 ### Poprawione

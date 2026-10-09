@@ -67,3 +67,11 @@ def test_windows_only_list_is_current():
     assert not stale, f"WINDOWS_ONLY zawiera funkcje, których interfejs już nie woła: {stale}"
     both = sorted(WINDOWS_ONLY & _android())
     assert not both, f"obsłużone na Androidzie, a oznaczone jako tylko Windows: {both}"
+
+
+def test_server_lists_every_core_for_platform():
+    from emustart import emulators, installer
+    assert emulators.cores_for("SNES")[:2] == ["snes9x", "bsnes"]       # domyślny pierwszy
+    for plat, default in installer.CORES.items():
+        cores = emulators.cores_for(plat)
+        assert cores[0] == default and len(cores) == len(set(cores))

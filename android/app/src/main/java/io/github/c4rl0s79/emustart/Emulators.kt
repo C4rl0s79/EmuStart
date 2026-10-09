@@ -98,41 +98,55 @@ object Emulators {
         return (v.firstOrNull { it.pkg == pkg } ?: v.firstOrNull())?.component
     }
 
+    // identyfikator wyboru: emulator[@pakiet][#rdzeń] — pakiet przy kilku wersjach emulatora,
+    // rdzeń przy RetroArchu innym niż domyślny dla platformy
+    fun baseId(id: String) = id.substringBefore('#').substringBefore('@')
+    fun pkgOf(id: String) = id.substringBefore('#').substringAfter('@', "")
+    fun coreOf(id: String) = id.substringAfter('#', "")
+
     /** Zainstalowane emulatory dla systemu: [(id, opis)]. Gdy emulator jest w kilku
-     *  wersjach, każda osobno: id „emulator@pakiet”, opis z wersją i źródłem. */
-    fun options(ctx: Context, plat: String, core: String): List<Pair<String, String>> {
+     *  wersjach, każda osobno (z wersją i źródłem); RetroArch — osobno każdy rdzeń
+     *  pasujący do platformy (`cores` z serwera, pierwszy = domyślny). */
+    fun options(ctx: Context, plat: String, core: String, cores: List<String> = emptyList()): List<Pair<String, String>> {
         val out = mutableListOf<Pair<String, String>>()
-        fun add(e: Emu, suffix: String) {
+        fun add(e: Emu, coreList: List<String>) {
             val vs = variants(ctx, e)
             for (v in vs) {
-                val id = if (vs.size > 1) "${e.id}@${v.pkg}" else e.id
+                val base = if (vs.size > 1) "${e.id}@${v.pkg}" else e.id
                 val src = if (vs.size > 1) (if (v.store) ", Sklep Play" else ", spoza Sklepu Play") else ""
-                out += Pair(id, "${e.label} ${v.version}$src$suffix".replace("  ", " "))
+                if (coreList.isEmpty()) out += Pair(base, "${e.label} ${v.version}$src".replace("  ", " "))
+                coreList.forEachIndexed { i, c ->
+                    out += Pair(if (i == 0) base else "$base#$c", "${e.label} ${v.version}$src — rdzeń $c".replace("  ", " "))
+                }
             }
         }
-        for (id in STANDALONE[plat] ?: emptyList()) BY_ID[id]?.let { add(it, "") }
-        val c = retroCore(plat, core)
-        if (c.isNotEmpty()) add(BY_ID.getValue("retroarch"), " — rdzeń $c")
+        for (id in STANDALONE[plat] ?: emptyList()) BY_ID[id]?.let { add(it, emptyList()) }
+        val list = (listOf(core) + cores).map { retroCore(plat, it) }.filter { it.isNotEmpty() }.distinct()
+        if (list.isNotEmpty()) add(BY_ID.getValue("retroarch"), list)
         return out
     }
 
+    /** Nazwy rdzeni na Androidzie, gdy różnią się od wersji na Windows. */
+    private val ANDROID_CORE = mapOf("mupen64plus_next" to "mupen64plus_next_gles3")
+
     fun retroCore(plat: String, core: String): String = when {
         plat in CORE_ANDROID && (core.isEmpty() || core == "swanstation" || core == "ppsspp") -> CORE_ANDROID.getValue(plat)
-        else -> core
+        else -> ANDROID_CORE[core] ?: core
     }
 
-    fun label(id: String): String = BY_ID[id.substringBefore('@')]?.label ?: id
+    fun label(id: String): String =
+        (BY_ID[baseId(id)]?.label ?: id) + (coreOf(id).takeIf { it.isNotEmpty() }?.let { " ($it)" } ?: "")
 
     /** Intencja uruchamiająca grę `file` w emulatorze `id`. */
     fun intent(ctx: Context, id: String, file: File, plat: String, core: String): Intent {
-        val emu = BY_ID[id.substringBefore('@')] ?: throw IllegalStateException("nieznany emulator $id")
-        val comp = component(ctx, emu, id.substringAfter('@', "")) ?: throw IllegalStateException("${emu.label} nie jest zainstalowany")
+        val emu = BY_ID[baseId(id)] ?: throw IllegalStateException("nieznany emulator $id")
+        val comp = component(ctx, emu, pkgOf(id)) ?: throw IllegalStateException("${emu.label} nie jest zainstalowany")
         val pkg = comp.substringBefore('/')
         val i = Intent()
         i.component = ComponentName.unflattenFromString(comp)
         i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         if (emu.pass == Pass.RETROARCH) {
-            val c = retroCore(plat, core)
+            val c = retroCore(plat, coreOf(id).ifEmpty { core })
             i.action = Intent.ACTION_MAIN
             i.putExtra("ROM", file.absolutePath)
             i.putExtra("LIBRETRO", "/data/data/$pkg/cores/${c}_libretro_android.so")

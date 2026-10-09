@@ -43,7 +43,9 @@ i z pliku APK), w Ustawieniach widać każdą osobno, z wersją i źródłem; do
 najnowsza.
 
 RetroArch dostaje ścieżkę pliku, pozostałe emulatory — plik z uprawnieniem do odczytu.
-Rdzenie RetroArcha pobierz w samym RetroArchu (Online Updater → Core Downloader).
+Dla RetroArcha każdy rdzeń pasujący do platformy jest osobną pozycją (np. SNES: Snes9x
+albo bsnes) — pierwszy to domyślny. Rdzenie pobierz w samym RetroArchu (Online Updater →
+Core Downloader).
 
 ## Profile i zapisy gier
 

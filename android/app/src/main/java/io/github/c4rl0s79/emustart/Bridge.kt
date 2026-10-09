@@ -234,9 +234,15 @@ class Bridge(private val act: MainActivity) {
     }
 
     // ── ustawienia ──
+    /** Wszystkie rdzenie RetroArcha dla platformy (serwer 0.25.8+; starszy — tylko domyślny). */
+    private fun cores(s: JSONObject): List<String> {
+        val a = s.optJSONArray("cores") ?: return emptyList()
+        return (0 until a.length()).map { a.getString(it) }
+    }
+
     private fun chosenEmu(s: JSONObject): String {
         val es = s.optString("es")
-        val opts = Emulators.options(act, s.optString("plat"), s.optString("core"))
+        val opts = Emulators.options(act, s.optString("plat"), s.optString("core"), cores(s))
         val pick = prefs.emulator(es)
         return if (opts.any { it.first == pick }) pick else opts.firstOrNull()?.first ?: ""
     }
@@ -247,7 +253,7 @@ class Bridge(private val act: MainActivity) {
         for (i in 0 until arr.length()) {
             val s = arr.getJSONObject(i)
             val opts = JSONArray()
-            for ((oid, label) in Emulators.options(act, s.optString("plat"), s.optString("core"))) {
+            for ((oid, label) in Emulators.options(act, s.optString("plat"), s.optString("core"), cores(s))) {
                 opts.put(JSONObject().put("id", oid).put("label", label))
             }
             sys.put(JSONObject().put("es", s.optString("es")).put("display", s.optString("display"))
@@ -356,7 +362,8 @@ class Bridge(private val act: MainActivity) {
             if (prefs.profile.isNotEmpty() && Saves.famsFor(emu, l.sys.optString("plat")).isNotEmpty()) {
                 l.phase = "preparing"; l.message = "Zapisy profilu ${prefs.profile}…"
                 val sg = Saves.Game(es, g.optString("name"), main.nameWithoutExtension, main.parentFile ?: base,
-                                    Emulators.retroCore(l.sys.optString("plat"), l.sys.optString("core")),
+                                    Emulators.retroCore(l.sys.optString("plat"),
+                                        Emulators.coreOf(emu).ifEmpty { l.sys.optString("core") }),
                                     l.sys.optString("plat"))
                 try {
                     val msg = saves.before(prefs.profile, emu, sg, takeover)

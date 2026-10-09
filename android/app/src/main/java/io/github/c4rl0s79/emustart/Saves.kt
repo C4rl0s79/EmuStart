@@ -76,7 +76,7 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
 
         /** Zapisy i stany emulatora: [zapisy, stany]. */
         fun famsFor(emu: String, plat: String = ""): List<Fam> {
-            val id = emu.substringBefore('@')
+            val id = Emulators.baseId(emu)
             val save = famFor(emu, plat)
             val st = if (id in setOf("retroarch", "armsx2", "nethersx2")) byId(id + "_states") else null
             return listOfNotNull(save, st)
@@ -93,7 +93,7 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
         const val CARD_SIZE = 131072L
 
         fun famFor(emu: String, plat: String = ""): Fam? {
-            val id = emu.substringBefore('@')
+            val id = Emulators.baseId(emu)
             if (id == "retroarch" && plat == "PS1") return RA_PS1
             return FAMS.firstOrNull { it.id == id }
         }

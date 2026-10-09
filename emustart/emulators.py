@@ -71,6 +71,17 @@ CORE_PLATS: dict = {
     "o2em": "ODYSSEY2", "fuse": "ZX", "gw": "GW", "quasi88": "PC88", "np2kai": "PC98",
 }
 
+def cores_for(plat: str) -> list:
+    """Rdzenie RetroArcha dla platformy: najpierw domyślny (installer.CORES), potem
+    pozostałe pasujące (CORE_PLATS) — do wyboru w aplikacji na Androida."""
+    from emustart import installer
+    out = [installer.CORES[plat]] if plat in installer.CORES else []
+    for core, plats in CORE_PLATS.items():
+        if plat in plats.split() and core not in out:
+            out.append(core)
+    return out
+
+
 # emulatory czytające ZIP same — dla nich nie rozpakowujemy
 ZIP_NATIVE = ("retroarch", "mame", "snes9x", "mgba", "ares", "melonds",
               "fceux", "mesen", "project64")
