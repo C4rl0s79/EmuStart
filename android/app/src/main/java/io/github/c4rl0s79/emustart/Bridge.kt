@@ -225,7 +225,22 @@ class Bridge(private val act: MainActivity) {
             .put("systems", systems().length())
     } catch (e: Exception) {
         online = false
-        JSONObject().put("ok", false).put("reason", e.message ?: e.toString())
+        JSONObject().put("ok", false).put("reason", explain(e))
+    }
+
+    /** Zrozumiały powód błędu połączenia z serwerem. */
+    private fun explain(e: Exception): String {
+        val url = prefs.serverUrl.ifBlank { "(brak adresu)" }
+        return when (e) {
+            is Server.HttpError -> if (e.code == 401)
+                "Serwer $url odpowiada, ale klucz jest nieprawidłowy. Skopiuj klucz z komputera z grami (EmuStart.exe --server-key)."
+                else "Serwer $url odpowiedział błędem ${e.code}: ${e.message}"
+            is java.net.UnknownHostException -> "Nieznany adres serwera: $url. Wpisz adres Tailscale komputera z grami, np. 100.85.254.31."
+            is java.net.SocketTimeoutException, is java.net.ConnectException, is java.net.NoRouteToHostException ->
+                "Telefon nie łączy się z $url. Sprawdź, czy Tailscale na telefonie jest włączony (to samo konto co komputer z grami) i czy na komputerze działa serwer EmuStart."
+            is java.net.MalformedURLException -> "Niepoprawny adres serwera: $url"
+            else -> "${e.javaClass.simpleName}: ${e.message ?: ""} ($url)"
+        }
     }
 
     // ── gra ──
@@ -233,7 +248,7 @@ class Bridge(private val act: MainActivity) {
         val busy = launch?.phase.let { it == "preparing" || it == "downloading" }
         if (busy) return JSONObject().put("ok", false).put("reason", "Inna gra jest właśnie pobierana.")
         val g = try { server.game(id) } catch (e: Exception) {
-            return JSONObject().put("ok", false).put("reason", "Brak połączenia z serwerem: ${e.message}")
+            return JSONObject().put("ok", false).put("reason", explain(e))
         }
         val s = sysByEs(g.optString("es")) ?: return JSONObject().put("ok", false).put("reason", "Nieznany system.")
         val emu = chosenEmu(s)

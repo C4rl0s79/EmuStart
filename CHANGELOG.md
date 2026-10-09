@@ -4,6 +4,16 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 [Keep a Changelog](https://keepachangelog.com/pl/1.1.0/), wersje według
 [SemVer](https://semver.org/lang/pl/).
 
+## [0.22.3] — 2026-10-09
+
+### Zmienione
+- Android: **zrozumiałe komunikaty przy błędzie połączenia z serwerem** — zły klucz
+  (serwer odpowiada, klucz nie pasuje), telefon nie łączy się (Tailscale wyłączony,
+  serwer nie działa), nieznany albo niepoprawny adres; zawsze z adresem, którego
+  aplikacja użyła.
+- `EmuStart.exe --server-key` kopiuje klucz do schowka (do wklejenia i przesłania na
+  telefon zamiast przepisywania 32 znaków).
+
 ## [0.22.2] — 2026-10-09
 
 ### Dodane

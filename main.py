@@ -108,7 +108,18 @@ def _server_mode() -> None:
     token = remote.ensure_token(api._cfg)
     port = int(api._cfg.get("server_port") or remote.DEFAULT_PORT)
     if "--server-key" in sys.argv:
-        return _message(f"Adres: http://{socket.gethostname()}:{port}\nKlucz serwera:\n\n{token}")
+        copied = False
+        try:                              # klucz od razu w schowku — do wklejenia na telefonie
+            import subprocess
+            subprocess.run(["clip"], input=token.encode("utf-16-le"), check=True,
+                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            copied = True
+        except Exception:
+            pass
+        return _message(f"Adres: http://{socket.gethostname()}:{port}\n"
+                        "(w aplikacji na telefonie wpisz adres Tailscale tego komputera)\n\n"
+                        f"Klucz serwera:\n\n{token}"
+                        + ("\n\nKlucz jest w schowku (Ctrl+V)." if copied else ""))
     if "--install-server" in sys.argv:
         if not getattr(sys, "frozen", False):
             return _message("Autostart serwera instaluje się z EmuStart.exe (wersja zbudowana).")
