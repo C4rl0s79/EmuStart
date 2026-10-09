@@ -142,9 +142,17 @@ def test_remote_write_is_compressed_and_backed_up_on_server(env, monkeypatch):
     assert f.read_bytes() == card and abs(f.stat().st_mtime - 1000.0) < 1
     fs.write("Ania/save/pcsx2/memcards/Mcd001.ps2", b"nowa", 2000.0,
              backup="Ania/_backup/20260101-000000-pc/save/pcsx2/memcards/Mcd001.ps2")
-    assert (tmp / "nas" / "Ania" / "_backup" / "20260101-000000-pc" / "save" / "pcsx2" / "memcards" / "Mcd001.ps2").read_bytes() == card
+    bak = tmp / "nas" / "Ania" / "_backup" / "20260101-000000-pc" / "save" / "pcsx2" / "memcards" / "Mcd001.ps2.zst"
+    assert bak.stat().st_size < 10_000                              # pusta karta 8 MB w kopii: kilka KB
+    restored = tmp / "przywrocona.ps2"
+    nasfs.restore_backup(bak, restored)
+    assert restored.read_bytes() == card
+    # ta sama treść jeszcze raz — bez nowej kopii zapasowej, tylko data
+    fs.write("Ania/save/pcsx2/memcards/Mcd001.ps2", b"nowa", 3000.0,
+             backup="Ania/_backup/20260101-000001-pc/save/pcsx2/memcards/Mcd001.ps2")
+    assert not (tmp / "nas" / "Ania" / "_backup" / "20260101-000001-pc").exists()
     assert fs.read("Ania/save/pcsx2/memcards/Mcd001.ps2") == b"nowa"
-    assert fs.scan("Ania/save") == {"pcsx2/memcards/Mcd001.ps2": (4, 2000.0)}
+    assert fs.scan("Ania/save") == {"pcsx2/memcards/Mcd001.ps2": (4, 3000.0)}
 
 
 def test_remote_rejects_paths_outside_profiles(env, monkeypatch):

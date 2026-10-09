@@ -39,6 +39,11 @@ Nowy profil zaczyna od bieżących ustawień.
 nowsze lokalne → NAS (`Z:\emustart\Profiles\<profil>\`). Nadpisywane wersje trafiają
 do kopii zapasowych. Szczegóły: [Kilka komputerów, jeden NAS](Kilka-komputerów-jeden-NAS).
 
+**Kopie zapasowe** nadpisywanych plików są w `<profil>\_backup\<data>-<urządzenie>\` (ostatnie 10).
+Pliki, które się kompresują (np. karty pamięci), są tam spakowane zstd jako `<plik>.zst` —
+rozpakujesz je np. 7-Zipem albo `zstd -d`. Stany gry zostają bez zmian (emulatory już je
+kompresują).
+
 **Przez serwer EmuStart.** Gdy w Ustawieniach jest [serwer EmuStart](Serwer-dla-Androida)
 (i włączone „Zapisy i profile przez serwer”), zapisy, ustawienia, blokada profilu
 i stany wznowienia idą przez serwer zamiast przez SMB: pliki są skompresowane

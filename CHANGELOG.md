@@ -8,6 +8,22 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.25.10] — 2026-10-09
+
+### Zmienione
+- **Kopie zapasowe zapisów spakowane zstd (poziom 19)**, gdy plik się kompresuje — kopia
+  karty pamięci PS2 (8 MB, w większości pusta) zajmuje kilka KB (`<plik>.zst`; na NAS-ie
+  istniejące kopie spakowane: 87 MB → 11 MB). Stanów gry nie pakujemy — emulatory
+  (PCSX2, RetroArch, DuckStation) kompresują je same, zstd 19 dawało 0–1 %.
+- Serwer: zapis pliku o **tej samej treści** (np. emulator tylko otworzył kartę) nie tworzy
+  kopii zapasowej — tylko aktualizuje datę.
+- Kopie stanów robione przez PCSX2 (`.p2s.backup`) nie są już wysyłane na NAS.
+
+### Poprawione
+- Android: **folder kart innego emulatora nie jest przypisywany** — DuckStation i AetherSX2
+  pokazywały (i mogły używać) folderu ArmSX2, gdy własnego nie było. Teraz tylko folder
+  emulatora; DuckStation — wyjaśnienie o Android/data.
+
 ## [0.25.9] — 2026-10-09
 
 ### Dodane

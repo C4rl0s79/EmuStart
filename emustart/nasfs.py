@@ -91,10 +91,38 @@ def write_atomic(dst: Path, data: bytes, mtime: float | None = None) -> None:
     raise PermissionError(f"nie można zapisać {dst}")
 
 
+BACKUP_LEVEL = 19          # zstd, maksymalny zwykły poziom — kopie zapasowe czyta się rzadko
+
+
 def backup_copy(f: Path, bak: Path) -> None:
-    if f.is_file():
-        bak.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(f, bak)
+    """Kopia zapasowa nadpisywanego pliku. Gdy plik się kompresuje (karty pamięci są
+    w większości puste: 8 MB → kilka KB), zapisywana jako `<nazwa>.zst`; stany gry
+    emulatory kompresują same — te kopiujemy bez zmian (zstd nic by nie dało)."""
+    if not f.is_file():
+        return
+    bak.parent.mkdir(parents=True, exist_ok=True)
+    z = _zstd()
+    try:
+        size = f.stat().st_size
+        if z and size >= ZSTD_MIN:
+            data = f.read_bytes()
+            probe = data[:1 << 20]
+            if len(z.compress(probe, 3)) < 0.9 * len(probe):
+                out = bak.with_name(bak.name + ".zst")
+                out.write_bytes(z.compress(data, BACKUP_LEVEL))
+                shutil.copystat(f, out)
+                return
+    except OSError:
+        pass
+    shutil.copy2(f, bak)
+
+
+def restore_backup(src: Path, dst: Path) -> None:
+    """Przywrócenie kopii zapasowej (także spakowanej `.zst`)."""
+    if src.suffix == ".zst":
+        write_atomic(dst, _zstd().decompress(src.read_bytes()), src.stat().st_mtime)
+    else:
+        shutil.copy2(src, dst)
 
 
 def prune_backups(bdir: Path, keep: int = NAS_BACKUPS) -> None:

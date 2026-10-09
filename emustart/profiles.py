@@ -300,6 +300,7 @@ def _scan(root: Path) -> dict:
 
 
 SKIP = (".emustart-stamp",)
+SKIP_SUFFIX = (".p2s.backup",)    # poprzednia wersja stanu, którą PCSX2 trzyma sam — zbędna na NAS-ie
 PARALLEL = 4                # równoległe przesyłanie plików (przez serwer: osobne połączenia)
 
 
@@ -347,7 +348,7 @@ def _push(local: Path, fs, nrel: str, bak: str, man: dict | None = None, prefix:
     dst_files = None if dst_known else fs.scan(nrel)
     jobs = []
     for rel, (s_size, s_mtime) in src_files.items():
-        if rel.rsplit("/", 1)[-1] in SKIP:
+        if rel.rsplit("/", 1)[-1] in SKIP or rel.endswith(SKIP_SUFFIX):
             continue
         f = local / rel
         key = f"{prefix}/{rel}"
@@ -401,7 +402,7 @@ def _pull(fs, nrel: str, local: Path, bak: Path, man: dict | None = None, prefix
     dst_files = _scan(local) if local.is_dir() else {}
     jobs = []
     for rel, (s_size, s_mtime) in src_files.items():
-        if rel.rsplit("/", 1)[-1] in SKIP:
+        if rel.rsplit("/", 1)[-1] in SKIP or rel.endswith(SKIP_SUFFIX):
             continue
         d = local / rel
         key = f"{prefix}/{rel}"

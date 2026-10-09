@@ -181,11 +181,9 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
             // stany PS2 obok kart pamięci (ten sam folder danych emulatora)
             if (f.cards.isNotEmpty()) (prefs.saveDir(f.cards).ifEmpty { prefs.learnedDir(f.cards) })
                 .takeIf { it.isNotBlank() }?.let { File(it).parentFile?.let { d -> out += File(d, f.sub) } }
-            // foldery memcards / sstates w pamięci telefonu (do 3 poziomów); najpierw te
-            // w folderze o nazwie emulatora, gdy takich nie ma — wszystkie znalezione
-            val all = deepFind(f.sub)
-            val named = all.filter { d -> d.absolutePath.split('/').any { f.dirName.containsMatchIn(it) } }
-            out += named.ifEmpty { all }
+            // foldery memcards / sstates w pamięci telefonu (do 3 poziomów) — tylko w folderze
+            // o nazwie emulatora; cudzy folder (np. ArmSX2 dla DuckStation) pomieszałby zapisy
+            out += deepFind(f.sub).filter { d -> d.absolutePath.split('/').any { f.dirName.containsMatchIn(it) } }
         }
         return out.filter { it.isDirectory }
     }
@@ -214,6 +212,9 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
             return "${d.absolutePath} (${files.size} plików, ostatnia zmiana $t)"
         }
         return when {
+            f.kind == Kind.PS1_CARDS && prefs.saveDir(f.id).isEmpty() && prefs.learnedDir(f.dirs).isEmpty() && dirs.isEmpty() ->
+                "DuckStation na Androidzie trzyma dane w Android/data (niedostępne) — " +
+                "dla zapisów wspólnych z PC wybierz dla PS1 RetroArch (SwanStation)"
             dirs.isNotEmpty() -> dirs.take(3).joinToString("; ") { info(it) } +
                 (if (prefs.saveDir(f.id).isEmpty() && prefs.learnedDir(f.dirs).isEmpty() && dirs.size > 1) " — kilka folderów, wskaż właściwy (A)" else "")
             prefs.saveDir(f.id).isNotBlank() -> prefs.saveDir(f.id) + " (nie ma takiego folderu)"
@@ -230,7 +231,7 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
         Kind.PS1_CARDS -> name.endsWith(".mcd", true) && (name.startsWith(g.name + "_") || name.startsWith("shared_card", true))
         Kind.PS2_CARDS -> name.endsWith(".ps2", true)
         Kind.RA_STATES -> name.startsWith(g.stem + ".state")
-        Kind.PS2_STATES -> statePrefixes(f, g).any { name.startsWith("$it.") }
+        Kind.PS2_STATES -> !name.endsWith(".backup", true) && statePrefixes(f, g).any { name.startsWith("$it.") }
     }
 
     // stany PS2 nazywają się od numeru płyty, nie od nazwy gry — przedrostki poznane po grze

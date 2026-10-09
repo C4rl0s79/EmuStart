@@ -346,13 +346,20 @@ def _nas(handler, method: str, parts: list) -> None:
         if (handler.headers.get("Content-Encoding") or "") == "zstd":
             body = nasfs._zstd().decompress(body)
         backup = arg("backup")
+        mtime = float(arg("mtime") or 0) or _time.time()
+        try:
+            same = target.is_file() and target.stat().st_size == len(body) and target.read_bytes() == body
+        except OSError:
+            same = False
+        if same:                               # ta sama treść (np. emulator tylko otworzył kartę)
+            os.utime(target, (_time.time(), mtime))
+            return _json(handler, {"ok": True, "size": len(body), "same": True})
         if backup:
             brel = nasfs.clean_rel(backup)
             nasfs.backup_copy(target, NAS_ROOT / brel)
             broot = nasfs.backup_root(brel)
             if broot:
                 nasfs.prune_backups(NAS_ROOT / broot)
-        mtime = float(arg("mtime") or 0) or _time.time()
         nasfs.write_atomic(target, body, mtime)
         return _json(handler, {"ok": True, "size": len(body)})
     if method == "DELETE" and op == "file":
