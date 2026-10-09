@@ -305,7 +305,7 @@ class Bridge(private val act: MainActivity) {
             Cache.enforce(act, prefs.cacheRecent, key(es, g.optString("name")))
             val main = File(base, g.optString("file").ifEmpty { files.getJSONObject(0).getString("path") })
             // zapisy profilu: nowsze z serwera do folderu emulatora (wspólne z EmuStart na Windows)
-            if (prefs.profile.isNotEmpty() && Saves.famFor(emu, l.sys.optString("plat")) != null) {
+            if (prefs.profile.isNotEmpty() && Saves.famsFor(emu, l.sys.optString("plat")).isNotEmpty()) {
                 l.phase = "preparing"; l.message = "Zapisy profilu ${prefs.profile}…"
                 val sg = Saves.Game(es, g.optString("name"), main.nameWithoutExtension, main.parentFile ?: base,
                                     Emulators.retroCore(l.sys.optString("plat"), l.sys.optString("core")),
