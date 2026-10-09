@@ -23,7 +23,7 @@ class Prefs(ctx: Context) {
         set(v) = sp.edit().putInt("cache_recent", v.coerceIn(1, 100)).apply()
 
     var streams: Int
-        get() = sp.getInt("streams", 4)
+        get() = sp.getInt("streams", 8)
         set(v) = sp.edit().putInt("streams", v.coerceIn(1, 8)).apply()
 
     var gamesLogo: Boolean

@@ -4,6 +4,13 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 [Keep a Changelog](https://keepachangelog.com/pl/1.1.0/), wersje według
 [SemVer](https://semver.org/lang/pl/).
 
+## [0.22.6] — 2026-10-09
+
+### Zmienione
+- Android: domyślnie **8 strumieni pobierania** zamiast 4. Pomiar przez Tailscale
+  (ok. 1000 km, 33 ms) z serwerem 0.22.5: 8 strumieni ≈ 78 MB/s, 4 ≈ 21 MB/s.
+  Kto zmienił liczbę w Ustawieniach, zachowuje swoją wartość.
+
 ## [0.22.5] — 2026-10-09
 
 ### Poprawione
