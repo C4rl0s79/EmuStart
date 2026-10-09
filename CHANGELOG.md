@@ -4,6 +4,15 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 [Keep a Changelog](https://keepachangelog.com/pl/1.1.0/), wersje według
 [SemVer](https://semver.org/lang/pl/).
 
+## [0.22.4] — 2026-10-09
+
+### Zmienione
+- Android: **kilka wersji tego samego emulatora** (np. RetroArch ze Sklepu Play
+  i z pliku APK ze strony — różne pakiety) widać w Ustawieniach → Emulatory osobno,
+  z numerem wersji i źródłem („Sklep Play” / „spoza Sklepu Play”). Domyślnie
+  wybierana jest najnowsza.
+- AetherSX2 opisany jako „AetherSX2 / NetherSX2” (ten sam pakiet).
+
 ## [0.22.3] — 2026-10-09
 
 ### Zmienione

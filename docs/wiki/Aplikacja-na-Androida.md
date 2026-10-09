@@ -27,7 +27,7 @@ EmuStart wykrywa zainstalowane emulatory i uruchamia w nich grę:
 
 | System | Emulatory |
 |---|---|
-| PS2 | ArmSX2, NetherSX2 |
+| PS2 | ArmSX2, AetherSX2 / NetherSX2 |
 | PS1 | DuckStation, RetroArch (SwanStation) |
 | PSP | PPSSPP, RetroArch |
 | GameCube / Wii | Dolphin |
@@ -37,6 +37,10 @@ EmuStart wykrywa zainstalowane emulatory i uruchamia w nich grę:
 | N64 | M64Plus FZ, RetroArch (Mupen64Plus-Next) |
 | Switch | Eden |
 | pozostałe | RetroArch z rdzeniem jak na Windows |
+
+Gdy ten sam emulator jest zainstalowany w kilku wersjach (np. RetroArch ze Sklepu Play
+i z pliku APK), w Ustawieniach widać każdą osobno, z wersją i źródłem; domyślnie
+najnowsza.
 
 RetroArch dostaje ścieżkę pliku, pozostałe emulatory — plik z uprawnieniem do odczytu.
 Rdzenie RetroArcha pobierz w samym RetroArchu (Online Updater → Core Downloader).

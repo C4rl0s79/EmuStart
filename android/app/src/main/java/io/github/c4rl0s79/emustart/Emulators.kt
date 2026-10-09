@@ -32,7 +32,7 @@ object Emulators {
             "com.armsx2/com.armsx2.MainActivity",
             "com.armsx2.nightly/com.armsx2.MainActivity",
             "come.nanodata.armsx2/kr.co.iefriends.pcsx2.MainActivity"), Pass.DATA_VIEW),
-        Emu("nethersx2", "NetherSX2", listOf(
+        Emu("nethersx2", "AetherSX2 / NetherSX2", listOf(
             "xyz.aethersx2.android/xyz.aethersx2.android.EmulationActivity"), Pass.EXTRA_BOOTPATH),
         Emu("ppsspp", "PPSSPP", listOf(
             "org.ppsspp.ppssppgold/org.ppsspp.ppsspp.PpssppActivity",
@@ -74,23 +74,45 @@ object Emulators {
     private val CORE_ANDROID = mapOf("PS1" to "swanstation", "PSP" to "ppsspp", "NDS" to "melonds",
                                      "N64" to "mupen64plus_next_gles3", "DC" to "flycast", "SATURN" to "yabasanshiro")
 
-    private fun installed(ctx: Context, comp: String): Boolean = try {
-        ctx.packageManager.getPackageInfo(comp.substringBefore('/'), 0); true
-    } catch (e: PackageManager.NameNotFoundException) { false }
+    /** Zainstalowana wersja emulatora (ten sam emulator bywa w kilku pakietach:
+     *  Sklep Play i plik APK ze strony — np. com.retroarch i com.retroarch.aarch64). */
+    data class Variant(val pkg: String, val component: String, val version: String, val code: Long, val store: Boolean)
 
-    fun component(ctx: Context, emu: Emu): String? = emu.components.firstOrNull { installed(ctx, it) }
+    fun variants(ctx: Context, emu: Emu): List<Variant> {
+        val pm = ctx.packageManager
+        val out = mutableListOf<Variant>()
+        for (comp in emu.components) {
+            val pkg = comp.substringBefore('/')
+            if (out.any { it.pkg == pkg }) continue
+            val info = try { pm.getPackageInfo(pkg, 0) } catch (e: PackageManager.NameNotFoundException) { continue }
+            val store = try {
+                pm.getInstallSourceInfo(pkg).installingPackageName == "com.android.vending"
+            } catch (e: Exception) { false }
+            out += Variant(pkg, comp, info.versionName ?: "", info.longVersionCode, store)
+        }
+        return out.sortedByDescending { it.code }            // najnowsza pierwsza = domyślna
+    }
 
-    /** Zainstalowane emulatory dla systemu: [(id, opis)]. */
+    fun component(ctx: Context, emu: Emu, pkg: String = ""): String? {
+        val v = variants(ctx, emu)
+        return (v.firstOrNull { it.pkg == pkg } ?: v.firstOrNull())?.component
+    }
+
+    /** Zainstalowane emulatory dla systemu: [(id, opis)]. Gdy emulator jest w kilku
+     *  wersjach, każda osobno: id „emulator@pakiet”, opis z wersją i źródłem. */
     fun options(ctx: Context, plat: String, core: String): List<Pair<String, String>> {
         val out = mutableListOf<Pair<String, String>>()
-        for (id in STANDALONE[plat] ?: emptyList()) {
-            val e = BY_ID[id] ?: continue
-            if (component(ctx, e) != null) out += Pair(id, e.label)
+        fun add(e: Emu, suffix: String) {
+            val vs = variants(ctx, e)
+            for (v in vs) {
+                val id = if (vs.size > 1) "${e.id}@${v.pkg}" else e.id
+                val src = if (vs.size > 1) (if (v.store) ", Sklep Play" else ", spoza Sklepu Play") else ""
+                out += Pair(id, "${e.label} ${v.version}$src$suffix".replace("  ", " "))
+            }
         }
+        for (id in STANDALONE[plat] ?: emptyList()) BY_ID[id]?.let { add(it, "") }
         val c = retroCore(plat, core)
-        if (c.isNotEmpty() && component(ctx, BY_ID.getValue("retroarch")) != null) {
-            out += Pair("retroarch", "RetroArch: $c")
-        }
+        if (c.isNotEmpty()) add(BY_ID.getValue("retroarch"), " — rdzeń $c")
         return out
     }
 
@@ -99,12 +121,12 @@ object Emulators {
         else -> core
     }
 
-    fun label(id: String): String = BY_ID[id]?.label ?: id
+    fun label(id: String): String = BY_ID[id.substringBefore('@')]?.label ?: id
 
     /** Intencja uruchamiająca grę `file` w emulatorze `id`. */
     fun intent(ctx: Context, id: String, file: File, plat: String, core: String): Intent {
-        val emu = BY_ID[id] ?: throw IllegalStateException("nieznany emulator $id")
-        val comp = component(ctx, emu) ?: throw IllegalStateException("${emu.label} nie jest zainstalowany")
+        val emu = BY_ID[id.substringBefore('@')] ?: throw IllegalStateException("nieznany emulator $id")
+        val comp = component(ctx, emu, id.substringAfter('@', "")) ?: throw IllegalStateException("${emu.label} nie jest zainstalowany")
         val pkg = comp.substringBefore('/')
         val i = Intent()
         i.component = ComponentName.unflattenFromString(comp)
