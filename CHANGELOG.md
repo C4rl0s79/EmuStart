@@ -8,6 +8,12 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.25.3] — 2026-10-09
+
+### Poprawione
+- Android: na liście profili nie pojawia się folder pozostawiony po zmianie nazwy profilu
+  na komputerze (z plikiem `moved.json`).
+
 ## [0.25.2] — 2026-10-09
 
 ### Dodane

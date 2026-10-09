@@ -242,7 +242,10 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
 
     // ── profile na serwerze ──
     fun profiles(): List<String> = server.nasList("").filter { it.second && !it.first.startsWith(".") && !it.first.startsWith("_") }
-        .map { it.first }.sortedBy { it.lowercase() }
+        .map { it.first }
+        // folder po zmianie nazwy profilu (moved.json → nowa nazwa) to nie osobny profil
+        .filter { server.nasRead("$it/moved.json") == null }
+        .sortedBy { it.lowercase() }
 
     fun createProfile(name: String): String {
         val n = safe(name.trim().take(32))
