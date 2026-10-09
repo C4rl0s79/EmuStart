@@ -4,6 +4,20 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 [Keep a Changelog](https://keepachangelog.com/pl/1.1.0/), wersje według
 [SemVer](https://semver.org/lang/pl/).
 
+## [0.22.0] — 2026-10-09
+
+### Dodane
+- **EmuStart na Androida** (`EmuStart-<wersja>-android.apk` w wydaniach, budowany
+  automatycznie na GitHubie): ten sam interfejs co na Windows w WebView, sterowanie
+  padem (GameSir itp., gałka, spusty), lista systemów i gier z grafikami i opisami
+  z serwera EmuStart, pobieranie gry do telefonu w kilku strumieniach ze wznawianiem,
+  „ostatnie gry + przypięte” w telefonie, praca bez serwera na ostatniej liście.
+  Uruchamianie w emulatorach jak w ES-DE: ArmSX2/NetherSX2 (PS2), DuckStation, PPSSPP,
+  Dolphin, Azahar, melonDS/DraStic, Flycast/Redream, M64Plus FZ, Eden, RetroArch
+  z rdzeniem dla pozostałych systemów.
+- Serwer: lista systemów podaje kod platformy i rdzeń RetroArcha.
+- Wiki: „Aplikacja na Androida”.
+
 ## [0.21.1] — 2026-10-09
 
 ### Naprawione

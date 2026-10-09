@@ -25,6 +25,7 @@
 - [Pliki i dane](Pliki-i-dane)
 - [Bezpieczeństwo](Bezpieczeństwo-i-prywatność)
 - [Problemy](Rozwiązywanie-problemów)
+- [Aplikacja na Androida](Aplikacja-na-Androida)
 - [Serwer dla Androida](Serwer-dla-Androida)
 - [Budowa ze źródeł](Budowa-ze-źródeł)
 

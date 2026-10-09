@@ -20,6 +20,8 @@ samo w domu (LAN) i zdalnie (np. przez Tailscale), na kilku komputerach naraz.
 - **Kolejność padów** niezależna od tego, jak wykrył je Windows.
 - **Edytor wyglądu** na żywo: wielkość logo, czcionek, układ, kolory.
 - **Filtry i ukrywanie** wersji Beta/Proto/Demo/pirackich, ujednolicone gatunki.
+- **Aplikacja na Androida** (ten sam interfejs, pad) i **tryb serwera** na komputerze
+  z grami — zob. [Aplikacja na Androida](../../wiki/Aplikacja-na-Androida).
 
 Obsługiwane wprost (zapisy, stany, pady, RetroAchievements): **RetroArch, DuckStation,
 PCSX2**; zapisy i stany także Dolphin i PPSSPP, zapisy RPCS3. Pozostałe emulatory

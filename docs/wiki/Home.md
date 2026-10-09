@@ -36,6 +36,7 @@ na kilku komputerach korzystających z jednego NAS-a.
 - [Pliki i dane](Pliki-i-dane)
 - [Bezpieczeństwo i prywatność](Bezpieczeństwo-i-prywatność)
 - [Rozwiązywanie problemów](Rozwiązywanie-problemów)
+- [Aplikacja na Androida](Aplikacja-na-Androida)
 - [Serwer dla Androida](Serwer-dla-Androida)
 - [Budowa ze źródeł](Budowa-ze-źródeł)
 
