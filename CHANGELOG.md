@@ -8,6 +8,14 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.25.1] — 2026-10-09
+
+### Dodane
+- Android: **PS1 w RetroArchu (SwanStation, Beetle PSX) z kartami DuckStation z komputera** —
+  zapis `<gra>.srm` (surowa karta 128 KB) ↔ `<gra>_1.mcd` DuckStation na PC. DuckStation na
+  Androidzie trzyma dane w niedostępnym `Android/data` i nie pozwala zmienić folderu —
+  Ustawienia → Zapisy gier podpowiadają RetroArch dla PS1.
+
 ## [0.25.0] — 2026-10-09
 
 ### Dodane

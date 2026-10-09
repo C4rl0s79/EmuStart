@@ -57,6 +57,7 @@ Zapisy z gry są **wspólne z komputerem**:
 | Emulator w telefonie | Co jest synchronizowane | Na serwerze (wspólne z PC) |
 |---|---|---|
 | RetroArch | zapisy gry (`.srm`, `.sav`, …) | `save\retroarch\saves` |
+| RetroArch, PS1 (SwanStation, Beetle PSX) | `<gra>.srm` ↔ karta DuckStation `<gra>_1.mcd` (ten sam format, 128 KB) | `save\duckstation\memcards` |
 | DuckStation | karty pamięci gry (`<gra>_1.mcd`, `shared_card_*`) | `save\duckstation\memcards` |
 | ArmSX2, AetherSX2 / NetherSX2 | karty `Mcd001.ps2`, `Mcd002.ps2` | `save\pcsx2\memcards` (PCSX2) |
 
@@ -75,9 +76,12 @@ telefonu, nie w `Android/data` (tam Android nie wpuszcza innych aplikacji):
 
 - **RetroArch**: Ustawienia → Katalogi → *Zapisy gier* = `/storage/emulated/0/RetroArch/saves`
   (albo „obok gry”). EmuStart wykryje folder po pierwszej grze.
-- **DuckStation, ArmSX2, AetherSX2**: przy pierwszym uruchomieniu (albo w ustawieniach)
-  wybierz folder danych w pamięci telefonu, np. `/storage/emulated/0/DuckStation`,
-  `/storage/emulated/0/ArmSX2` — karty są w jego podfolderze `memcards`.
+- **ArmSX2, AetherSX2**: w ustawieniach emulatora wybierz folder danych w pamięci
+  telefonu, np. `/storage/emulated/0/ArmSX2` — karty są w jego podfolderze `memcards`.
+- **DuckStation** na Androidzie trzyma dane tylko w `Android/data` i nie ma opcji zmiany
+  folderu — EmuStart nie ma do nich dostępu. Dla zapisów PS1 wspólnych z PC wybierz dla PS1
+  **RetroArch** (rdzeń SwanStation — DuckStation w wersji dla RetroArcha): jego zapis `.srm`
+  to ta sama karta pamięci co `.mcd` DuckStation na komputerze.
 
 Ustawienia → **Zapisy gier** pokazują wykryte foldery; można też wpisać je ręcznie.
 

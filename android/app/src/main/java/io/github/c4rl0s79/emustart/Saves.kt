@@ -32,18 +32,23 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
     private val root = File(ctx.filesDir, "zapisy").apply { mkdirs() }
     val device: String = "Telefon " + Build.MODEL
 
-    enum class Kind { BY_STEM, PS1_CARDS, PS2_CARDS }
+    enum class Kind { BY_STEM, PS1_SRM, PS1_CARDS, PS2_CARDS }
     /** Emulator: id (ustawienia, manifest), folder na serwerze, sposób dobierania plików,
      *  nazwa folderu danych w pamięci telefonu (wykrywanie). */
-    data class Fam(val id: String, val label: String, val nas: String, val kind: Kind, val dirName: Regex)
+    data class Fam(val id: String, val label: String, val nas: String, val kind: Kind, val dirName: Regex,
+                   val dirs: String = id) {
+        /** Zapisy w folderze RetroArcha (dobierane po nazwie pliku gry). */
+        val ra: Boolean get() = kind == Kind.BY_STEM || kind == Kind.PS1_SRM
+    }
 
     /** Gra: nazwa (jak na serwerze), nazwa pliku bez rozszerzenia, folder gry w telefonie, rdzeń RetroArcha. */
-    data class Game(val es: String, val name: String, val stem: String, val dir: File, val core: String) {
+    data class Game(val es: String, val name: String, val stem: String, val dir: File, val core: String,
+                    val plat: String = "") {
         fun toJson(): JSONObject = JSONObject().put("es", es).put("name", name).put("stem", stem)
-            .put("dir", dir.absolutePath).put("core", core)
+            .put("dir", dir.absolutePath).put("core", core).put("plat", plat)
         companion object {
             fun of(o: JSONObject) = Game(o.getString("es"), o.getString("name"), o.getString("stem"),
-                                         File(o.getString("dir")), o.optString("core"))
+                                         File(o.getString("dir")), o.optString("core"), o.optString("plat"))
         }
     }
 
@@ -58,7 +63,18 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
             Fam("armsx2", "ArmSX2", "save/pcsx2/memcards", Kind.PS2_CARDS, rx("armsx2")),
             Fam("nethersx2", "AetherSX2 / NetherSX2", "save/pcsx2/memcards", Kind.PS2_CARDS, rx("aether|nether")))
 
-        fun famFor(emu: String): Fam? = FAMS.firstOrNull { it.id == emu.substringBefore('@') }
+        /** PS1 w RetroArchu (SwanStation, Beetle PSX): zapis `<gra>.srm` to surowa karta pamięci
+         *  128 KB — ta sama co karta DuckStation `<gra>_1.mcd` na komputerze. DuckStation na
+         *  Androidzie trzyma dane w Android/data, niedostępnym dla innych aplikacji. */
+        val RA_PS1 = Fam("retroarch_ps1", "RetroArch (PS1)", "save/duckstation/memcards", Kind.PS1_SRM,
+                         rx("^retroarch$"), dirs = "retroarch")
+        const val CARD_SIZE = 131072L
+
+        fun famFor(emu: String, plat: String = ""): Fam? {
+            val id = emu.substringBefore('@')
+            if (id == "retroarch" && plat == "PS1") return RA_PS1
+            return FAMS.firstOrNull { it.id == id }
+        }
 
         /** Pliki zapisów rdzeni RetroArcha (nie sama gra, nie stany, nie zrzuty). */
         private val SAVE_EXT = rx("""\.(srm|sav|rtc|eep|fla|mpk|sra|nv|mcr|bkr|bcr|brm|dsv|ram)$""")
@@ -106,14 +122,13 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
     /** Foldery zapisów emulatora: ustawiony ręcznie, wykryty po grze, typowe miejsca. */
     fun phoneDirs(f: Fam, g: Game?): List<File> {
         val out = LinkedHashSet<File>()
-        prefs.saveDir(f.id).takeIf { it.isNotBlank() }?.let { out += File(it) }
-        prefs.learnedDir(f.id).takeIf { it.isNotBlank() }?.let { out += File(it) }
-        when (f.kind) {
-            Kind.BY_STEM -> {
-                out += File(ext, "RetroArch/saves")
-                if (g != null) out += g.dir                       // „zapis obok gry” (domyślne w części wersji)
-            }
-            else -> topDirs().filter { f.dirName.containsMatchIn(it.name) }.forEach { out += File(it, "memcards") }
+        prefs.saveDir(f.dirs).takeIf { it.isNotBlank() }?.let { out += File(it) }
+        prefs.learnedDir(f.dirs).takeIf { it.isNotBlank() }?.let { out += File(it) }
+        if (f.ra) {
+            out += File(ext, "RetroArch/saves")
+            if (g != null) out += g.dir                           // „zapis obok gry” (domyślne w części wersji)
+        } else {
+            topDirs().filter { f.dirName.containsMatchIn(it.name) }.forEach { out += File(it, "memcards") }
         }
         return out.filter { it.isDirectory }
     }
@@ -126,28 +141,35 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
             prefs.learnedDir(f.id).isNotBlank() && dirs.isNotEmpty() -> prefs.learnedDir(f.id) + " (wykryty)"
             dirs.isNotEmpty() -> dirs.joinToString(", ") { it.absolutePath }
             f.kind == Kind.BY_STEM -> "wykryje się po pierwszej grze"
+            f.kind == Kind.PS1_CARDS -> "DuckStation na Androidzie trzyma dane w Android/data (niedostępne) — " +
+                "dla zapisów wspólnych z PC wybierz dla PS1 RetroArch (SwanStation)"
             else -> "nie znaleziono — w emulatorze ustaw folder danych w pamięci telefonu (nie Android/data)"
         }
     }
 
     private fun matches(f: Fam, g: Game, name: String): Boolean = when (f.kind) {
         Kind.BY_STEM -> name.startsWith(g.stem + ".") && SAVE_EXT.containsMatchIn(name)
+        Kind.PS1_SRM -> name == g.stem + ".srm" || name == g.name + "_1.mcd"
         Kind.PS1_CARDS -> name.endsWith(".mcd", true) && (name.startsWith(g.name + "_") || name.startsWith("shared_card", true))
         Kind.PS2_CARDS -> name.endsWith(".ps2", true)
     }
+
+    /** Nazwa pliku w telefonie dla pliku z serwera i odwrotnie (różne tylko dla PS1 w RetroArchu). */
+    private fun toPhone(f: Fam, g: Game, nasName: String) = if (f.kind == Kind.PS1_SRM) g.stem + ".srm" else nasName
+    private fun toNas(f: Fam, g: Game, phoneName: String) = if (f.kind == Kind.PS1_SRM) g.name + "_1.mcd" else phoneName
 
     /** Pliki gry w telefonie: nazwa pliku → plik (gdy w kilku miejscach — najnowszy). */
     private fun phoneFiles(f: Fam, g: Game, dirs: List<File>): MutableMap<String, File> {
         val out = HashMap<String, File>()
         fun take(x: File) {
-            if (x.isFile && matches(f, g, x.name)) {
+            if (x.isFile && matches(f, g, x.name) && !(f.kind == Kind.PS1_SRM && x.name.endsWith(".mcd"))) {
                 val cur = out[x.name]
                 if (cur == null || x.lastModified() > cur.lastModified()) out[x.name] = x
             }
         }
         for (d in dirs) {
             for (x in d.listFiles() ?: emptyArray()) {
-                if (x.isDirectory && f.kind == Kind.BY_STEM && d != g.dir) x.listFiles()?.forEach { take(it) }
+                if (x.isDirectory && f.ra && d != g.dir) x.listFiles()?.forEach { take(it) }
                 else take(x)
             }
         }
@@ -252,11 +274,11 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
     }
 
     private fun beforeLocked(profile: String, emu: String, g: Game): String {
-        val f = famFor(emu) ?: return ""
+        val f = famFor(emu, g.plat) ?: return ""
         if (prefs.phoneOwner.isEmpty()) prefs.phoneOwner = profile
         retryLocked()
         val dirs = phoneDirs(f, g)
-        if (dirs.isEmpty() && f.kind != Kind.BY_STEM)
+        if (dirs.isEmpty() && !f.ra)
             return "Nie znaleziono folderu kart pamięci ${f.label} — zapisy zostaną tylko w telefonie (Ustawienia → Zapisy gier)."
         val phone = phoneFiles(f, g, dirs)
         swapOwner(profile, f, g, phone)
@@ -275,11 +297,13 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
         for ((rel, v) in nas) {
             val n = rel.substringAfterLast('/')
             if (!matches(f, g, n)) continue
+            if (f.kind == Kind.PS1_SRM && (n != g.name + "_1.mcd" || v[0].toLong() != CARD_SIZE)) continue
             val cur = byName[n]
             if (cur == null || v[1] > nas.getValue(cur)[1]) byName[n] = rel
         }
         var n = 0
-        for ((name, rel) in byName) {
+        for ((nasName, rel) in byName) {
+            val name = toPhone(f, g, nasName)
             val v = nas.getValue(rel)
             val nSig = sig(v[0].toLong(), v[1])
             val key = "${f.id}/$name"
@@ -317,9 +341,9 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
 
     /** Gdzie położyć zapis, którego w telefonie jeszcze nie ma. */
     private fun newTargets(f: Fam, g: Game, dirs: List<File>, rel: String): List<File> {
-        val name = rel.substringAfterLast('/')
-        if (f.kind != Kind.BY_STEM) return listOfNotNull(dirs.firstOrNull()?.let { File(it, name) })
-        val learned = prefs.learnedDir(f.id).ifEmpty { prefs.saveDir(f.id) }
+        val name = toPhone(f, g, rel.substringAfterLast('/'))
+        if (!f.ra) return listOfNotNull(dirs.firstOrNull()?.let { File(it, name) })
+        val learned = prefs.learnedDir(f.dirs).ifEmpty { prefs.saveDir(f.dirs) }
         val pick = if (learned.isNotEmpty() && File(learned).isDirectory) listOf(File(learned)) else dirs
         return pick.map { d ->
             // RetroArch z sortowaniem wg rdzenia: ten sam podfolder co na serwerze
@@ -331,7 +355,7 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
 
     // ── po grze ──
     fun after(profile: String, emu: String, g: Game, startedAt: Long, title: String) {
-        val f = famFor(emu) ?: return
+        val f = famFor(emu, g.plat) ?: return
         busy = title
         try {
             synchronized(lock) {
@@ -352,12 +376,12 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
     private fun learn(f: Fam, g: Game, startedAt: Long) {
         val cands = LinkedHashSet<File>()
         cands += phoneDirs(f, g)
-        if (f.kind != Kind.BY_STEM) topDirs().forEach { cands += File(it, "memcards") }
+        if (!f.ra) topDirs().forEach { cands += File(it, "memcards") }
         for (d in cands.filter { it.isDirectory }) {
             val hit = phoneFiles(f, g, listOf(d)).values.firstOrNull { it.lastModified() >= startedAt - 2000 } ?: continue
-            val dir = if (f.kind == Kind.BY_STEM && hit.parentFile != d) d else hit.parentFile!!
-            if (prefs.learnedDir(f.id) != dir.absolutePath) {
-                prefs.setLearnedDir(f.id, dir.absolutePath)
+            val dir = if (f.ra && hit.parentFile != d) d else hit.parentFile!!
+            if (prefs.learnedDir(f.dirs) != dir.absolutePath) {
+                prefs.setLearnedDir(f.dirs, dir.absolutePath)
                 Log.i(tag, "folder zapisów ${f.id}: $dir")
             }
             return
@@ -387,8 +411,10 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
         val m = man.optJSONObject(key)
         val pSig = sig(x)
         if (m != null && same(m.optJSONArray("p"), pSig)) return false            // bez zmian w telefonie
+        if (f.kind == Kind.PS1_SRM && x.length() != CARD_SIZE) return false       // nie surowa karta 128 KB
+        val nasName = toNas(f, g, name)
         val rel = m?.optString("rel")?.takeIf { it.isNotEmpty() && nas.containsKey(it) }
-            ?: nas.keys.firstOrNull { it.substringAfterLast('/') == name }
+            ?: nas.keys.firstOrNull { it.substringAfterLast('/') == nasName }
             ?: newRel(f, g, x, nas)
         val v = nas[rel]
         val nSig = v?.let { sig(it[0].toLong(), it[1]) }
@@ -417,9 +443,10 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
 
     /** Ścieżka na serwerze dla nowego zapisu (RetroArch: podfolder rdzenia, gdy serwer je ma). */
     private fun newRel(f: Fam, g: Game, x: File, nas: Map<String, DoubleArray>): String {
+        if (f.kind == Kind.PS1_SRM) return toNas(f, g, x.name)
         if (f.kind != Kind.BY_STEM) return x.name
         val parent = x.parentFile
-        val learned = prefs.learnedDir(f.id)
+        val learned = prefs.learnedDir(f.dirs)
         if (parent != null && learned.isNotEmpty() && parent.parentFile?.absolutePath == learned) return parent.name + "/" + x.name
         val sorted = nas.keys.any { it.contains('/') }
         if (!sorted || g.core.isEmpty()) return x.name
@@ -456,9 +483,10 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
         var done = 0
         for (k in o.keys().asSequence().toList()) {
             val e = o.getJSONObject(k)
-            val f = famFor(e.getString("emu")) ?: continue
+            val gm = Game.of(e.getJSONObject("game"))
+            val f = famFor(e.getString("emu"), gm.plat) ?: continue
             try {
-                push(e.getString("profile"), f, Game.of(e.getJSONObject("game")))
+                push(e.getString("profile"), f, gm)
                 o.remove(k); done++
             } catch (ex: Exception) { Log.w(tag, "zaległe zapisy: $ex"); break }
         }
