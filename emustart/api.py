@@ -111,6 +111,8 @@ class Api:
         """Kto obsługuje pady w interfejsie: python (XInput) | browser (Gamepad API
         w WebView2) | none. Flaga startowa --pady=… wygrywa z ustawieniem."""
         import sys
+        if getattr(self, "browser_mode", False):
+            return "browser"              # interfejs w przeglądarce: pady przez Gamepad API
         for arg in sys.argv:
             if arg.startswith("--pady="):
                 v = arg.split("=", 1)[1].lower()
@@ -1160,6 +1162,14 @@ class Api:
             self._session.kill()
         if self._window:
             self._window.destroy()
+        elif getattr(self, "browser_mode", False):
+            # interfejs w przeglądarce (okno się nie uruchomiło) — koniec procesu
+            import os
+            import threading
+            def bye():
+                self._shutdown()
+                os._exit(0)
+            threading.Timer(0.3, bye).start()
 
     def now(self) -> float:
         return time.time()

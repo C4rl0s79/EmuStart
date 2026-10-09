@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import os
 import sys
+from pathlib import Path
 from logging.handlers import RotatingFileHandler
 
 import webview
@@ -51,7 +52,12 @@ def main() -> None:
     api.attach(window)
     logging.getLogger("emustart").info("start %s, obsługa padów w UI: %s",
                                        __import__("emustart").__version__, api.pad_backend())
-    webview.start(debug=debug, private_mode=False)
+    try:
+        webview.start(debug=debug, private_mode=False)
+    except Exception as ex:
+        # okno (pywebview + .NET + WebView2) nie wystartowało — interfejs w przeglądarce
+        logging.getLogger("emustart").exception("okno EmuStart nie wystartowało")
+        return _browser_fallback(api, ex)
     # okno zamknięte: przerywamy zadania w tle i kończymy proces od razu — wątki
     # robocze (np. pobieranie grafik) nie mogą trzymać programu przy życiu
     logging.getLogger("emustart").info("zamknięcie okna — koniec programu")
@@ -60,6 +66,25 @@ def main() -> None:
     finally:
         logging.shutdown()
         os._exit(0)
+
+
+def _browser_fallback(api, ex) -> None:
+    """EmuStart bez okna: ten sam interfejs w domyślnej przeglądarce (lokalnie)."""
+    import time
+    import webbrowser
+    api.browser_mode = True
+    base = server.start(0, dev_api=api)
+    url = f"{base}/index.html?dev"
+    webbrowser.open(url)
+    blocked = "Python.Runtime" in str(ex) or "pythonnet" in str(ex).lower()
+    fix = (f"Najczęstsza przyczyna: Windows zablokował pliki rozpakowane z pobranego zipa.\n"
+           f"Naprawa (PowerShell):\n"
+           f"Get-ChildItem -Recurse '{Path(sys.executable).parent}' | Unblock-File\n\n") if blocked else ""
+    _message(f"Okno EmuStart nie mogło się uruchomić, więc interfejs otworzył się w przeglądarce:\n{url}\n\n"
+             + fix + "Może też brakować .NET Framework 4.8 albo Microsoft Edge WebView2 Runtime.\n\n"
+             + f"Szczegóły: {str(ex)[:300]}", "EmuStart")
+    while True:
+        time.sleep(3600)
 
 
 def _message(text: str, title: str = "EmuStart Server") -> None:

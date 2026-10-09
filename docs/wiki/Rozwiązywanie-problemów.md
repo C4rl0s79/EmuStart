@@ -54,6 +54,16 @@ i zgłoś problem.
 **Brak miejsca na dysku** — Grafiki i metadane → „Zmniejsz zapisane grafiki”.
 Pobieranie samo zatrzymuje się przy mniej niż 2 GB wolnego miejsca.
 
+## Okno EmuStart się nie uruchamia
+
+Błąd „Failed to resolve Python.Runtime.Loader.Initialize … Python.Runtime.dll”: Windows
+zablokował pliki rozpakowane z pobranego zipa. W PowerShellu:
+```
+Get-ChildItem -Recurse '<folder EmuStart>' | Unblock-File
+```
+Od 0.22.1 EmuStart w takiej sytuacji otwiera interfejs w przeglądarce. Inne przyczyny:
+brak .NET Framework 4.8 albo Microsoft Edge WebView2 Runtime.
+
 ## Windows Defender
 
 Zobacz [Instalacja](Instalacja-i-pierwsze-uruchomienie#windows-defender).

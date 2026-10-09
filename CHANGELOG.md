@@ -4,6 +4,16 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 [Keep a Changelog](https://keepachangelog.com/pl/1.1.0/), wersje według
 [SemVer](https://semver.org/lang/pl/).
 
+## [0.22.1] — 2026-10-09
+
+### Naprawione
+- **Okno EmuStart nie startowało na innym komputerze** („Failed to resolve
+  Python.Runtime.Loader.Initialize”) — Windows blokuje pliki rozpakowane z pobranego
+  zipa, a .NET odmawia wczytania `Python.Runtime.dll`. EmuStart nie kończy się już
+  błędem: otwiera interfejs w przeglądarce (z padem przez Gamepad API) i pokazuje,
+  jak odblokować pliki (`Get-ChildItem -Recurse <folder> | Unblock-File`).
+  „Wyjdź z EmuStart” w tym trybie kończy program.
+
 ## [0.22.0] — 2026-10-09
 
 ### Dodane

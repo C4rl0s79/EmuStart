@@ -13,6 +13,13 @@ To ten sam program (`EmuStart.exe`), uruchamiany bez okna z parametrem `--server
 ## Instalacja na komputerze z grami
 
 1. Skopiuj EmuStart (rozpakowane wydanie) na komputer z grami, np. `C:\EmuStart`.
+   Jeśli zip był pobrany z internetu, odblokuj pliki (inaczej okno EmuStart się nie
+   uruchomi — błąd „Failed to resolve Python.Runtime.Loader.Initialize”):
+   ```
+   Get-ChildItem -Recurse 'C:\EmuStart' | Unblock-File
+   ```
+   (albo przed rozpakowaniem: Właściwości zipa → „Odblokuj”). Gdy okno mimo to się nie
+   uruchomi, EmuStart otworzy interfejs w przeglądarce — ustawienia działają tak samo.
 2. Uruchom raz zwykłe `EmuStart.exe`: w Ustawieniach wskaż **foldery z grami tak,
    jak widzi je ten komputer** (np. `D:\ROMS\No-Intro`), zeskanuj kolekcję i w Grafikach
    pobierz bazę LaunchBox, grafiki i opisy. Zamknij program.
