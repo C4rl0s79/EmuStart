@@ -43,6 +43,11 @@ i z pliku APK), w Ustawieniach widać każdą osobno, z wersją i źródłem; do
 najnowsza.
 
 RetroArch dostaje ścieżkę pliku, pozostałe emulatory — plik z uprawnieniem do odczytu.
+Przed startem gra jest przygotowana jak na Windows: ZIP z kilkoma plikami (np. **MSU-1**:
+ROM + `.msu` + `.pcm`, Amiga na kilku dyskietkach) zostaje rozpakowany w całości obok gry,
+gry na kilku płytach dostają playlistę `.m3u` (zmiana płyty w emulatorze). Platformy
+i foldery z grami są te same co na komputerze — EmuStart na Windows przekazuje serwerowi
+swoje foldery z grami (np. `WHDLoad`).
 Dla RetroArcha każdy rdzeń pasujący do platformy jest osobną pozycją (np. SNES: Snes9x
 albo bsnes) — pierwszy to domyślny. Rdzenie pobierz w samym RetroArchu (Online Updater →
 Core Downloader).

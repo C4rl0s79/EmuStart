@@ -8,6 +8,24 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.25.9] — 2026-10-09
+
+### Dodane
+- **Foldery z grami z komputera na serwerze** — EmuStart na Windows wysyła serwerowi swoją
+  listę folderów (względem udziału na NAS-ie, np. `WHDLoad`), serwer dopisuje brakujące
+  i je skanuje (przy starcie i po każdej zmianie folderów). Dzięki temu na telefonie są
+  platformy Amiga WHDLoad (gry i dema). **Serwer trzeba zaktualizować.**
+- Android: rdzenie RetroArcha, na których gra już działała na tym telefonie, są w Ustawieniach
+  oznaczone **✓** (RetroArch nie pokazuje innym aplikacjom, które rdzenie są pobrane).
+
+### Poprawione
+- Android: **przygotowanie gry jak na Windows** — ZIP z kilkoma plikami (**MSU-1**: ROM + `.msu`
+  + ścieżki `.pcm`; Amiga na kilku dyskietkach) albo dla emulatora, który ZIP-ów nie czyta,
+  jest rozpakowany w całości (raz, obok gry; usuwany razem z grą); gry na kilku płytach
+  dostają playlistę `.m3u` (zmiana płyty w emulatorze); playlista dla emulatora bez jej
+  obsługi — pierwsza płyta. Wcześniej gry MSU-1 startowały bez muzyki, a wielopłytowe
+  tylko z pierwszą płytą.
+
 ## [0.25.8] — 2026-10-09
 
 ### Poprawione

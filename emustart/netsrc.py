@@ -211,6 +211,54 @@ def sources(cfg: dict, g: dict) -> dict:
     return out
 
 
+def share_rel(path: str) -> str | None:
+    """Ścieżka względem udziału sieciowego: Z:\\WHDLoad (Z: = \\\\nas\\EMU_ROMS) → „WHDLoad”."""
+    p = str(path)
+    if len(p) >= 2 and p[1] == ":":
+        if not _unc_of_drive(p[:2]):
+            return None                      # dysk lokalny — serwer go nie zobaczy
+        rest = p[2:]
+    elif p.startswith("\\\\"):
+        parts = p[2:].split("\\", 2)
+        if len(parts) < 2:
+            return None
+        rest = parts[2] if len(parts) > 2 else ""
+    else:
+        return None
+    return rest.replace("\\", "/").strip("/")
+
+
+def push_roots(cfg: dict) -> list:
+    """Foldery z grami z tego komputera → serwer (dopisuje brakujące i skanuje). Zwraca dodane."""
+    from emustart import config
+    ep = endpoint(cfg)
+    if not ep:
+        return []
+    i = info(cfg)
+    if not i.get("ok") or "roots" not in i.get("features", []):
+        return []
+    rels = [r for r in (share_rel(x) for x in config.rom_roots(cfg)) if r is not None]
+    if not rels:
+        return []
+    body = json.dumps({"roots": rels}).encode("utf-8")
+    c = http.client.HTTPConnection(ep[0], ep[1], timeout=20)
+    try:
+        c.request("PUT", "/v1/roots", body=body, headers={"Authorization": f"Bearer {ep[2]}",
+                                                          "Content-Type": "application/json"})
+        r = c.getresponse()
+        d = json.loads(r.read() or b"{}")
+    except (OSError, http.client.HTTPException, ValueError) as ex:
+        log.info("foldery z grami na serwer: %s", ex)
+        return []
+    finally:
+        c.close()
+    if d.get("added"):
+        log.info("serwer dodał foldery z grami: %s", ", ".join(d["added"]))
+    if d.get("missing"):
+        log.info("serwer nie widzi folderów: %s", ", ".join(d["missing"]))
+    return d.get("added") or []
+
+
 def on_lan(cfg: dict) -> bool:
     i = info(cfg)
     return bool(i.get("ok")) and i.get("rtt", 1) < LAN_RTT

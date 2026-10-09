@@ -763,7 +763,7 @@ function buildSetRowsAndroid() {
   rows.push({ head: "Wygląd" });
   rows.push({ k: "Edytor wyglądu", type: "action", run: () => openLook() });
   rows.push({ k: "Tytuły gier jako logo", key: "games_logo", type: "bool", fmt: (v) => (v ? "tak" : "nie") });
-  rows.push({ head: "Emulatory  ·  ←/→ wybór (zainstalowane w telefonie)" });
+  rows.push({ head: "Emulatory  ·  ←/→ wybór  ·  ✓ rdzeń RetroArcha już działał na tym telefonie (pobierz brakujące w RetroArchu)" });
   for (const s of c.systems || []) {
     rows.push({ k: s.display, key: `emu:${s.es}`, type: "enum", opts: s.options.map((o) => o.id),
                 fmt: (v) => (s.options.find((o) => o.id === v) || { label: "brak zainstalowanego emulatora" }).label });

@@ -68,6 +68,8 @@ class Api:
         # pierwsze przejście na serwer); gra uruchomiona w tym czasie poczeka (post_busy)
         launcher.start_post(lambda: profiles.push_all(self._cfg), "zapisy profili")
         logos.push_later(self._cfg)       # wygląd systemów → serwer (Android pokazuje to samo)
+        threading.Thread(target=lambda: netsrc.push_roots(self._cfg), daemon=True,
+                         name="foldery-serwer").start()   # foldery z grami → serwer
         threading.Thread(target=self._profiles_bootstrap, daemon=True, name="profiles").start()
         threading.Thread(target=self._arcade_meta, daemon=True, name="arcade-meta").start()
         threading.Thread(target=self._platforms_meta, daemon=True, name="platforms").start()
@@ -1046,6 +1048,8 @@ class Api:
         if "rom_roots" in data:
             cfg["rom_roots"] = [str(r).strip() for r in data["rom_roots"] if str(r).strip()]
             cfg["rom_root"] = cfg["rom_roots"][0] if cfg["rom_roots"] else ""
+            threading.Thread(target=lambda: netsrc.push_roots(cfg), daemon=True,
+                             name="foldery-serwer").start()
         if "cache_dir" in data:
             cd = str(data["cache_dir"]).strip()
             cfg["cache_dir"] = "" if Path(cd) == paths.DEFAULT_CACHE else cd

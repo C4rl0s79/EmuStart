@@ -44,6 +44,14 @@ class Prefs(ctx: Context) {
         get() = sp.getString("phone_owner", "") ?: ""
         set(v) = sp.edit().putString("phone_owner", v).apply()
 
+    /** Rdzenie RetroArcha, które na tym telefonie uruchomiły grę (RetroArch nie pokazuje
+     *  innym aplikacjom, które rdzenie są pobrane). */
+    fun coreOk(core: String): Boolean = sp.getStringSet("cores_ok", emptySet())?.contains(core) == true
+    fun markCoreOk(core: String) {
+        val s = HashSet(sp.getStringSet("cores_ok", emptySet()) ?: emptySet())
+        if (s.add(core)) sp.edit().putStringSet("cores_ok", s).apply()
+    }
+
     fun saveDir(fam: String): String = sp.getString("save_dir:$fam", "") ?: ""
     fun setSaveDir(fam: String, v: String) = sp.edit().putString("save_dir:$fam", v.trim()).apply()
     fun learnedDir(fam: String): String = sp.getString("learned_dir:$fam", "") ?: ""

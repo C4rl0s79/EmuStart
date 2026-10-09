@@ -47,7 +47,7 @@ object Cache {
             .sortedByDescending { it.second.optDouble("last", 0.0) }.toList()
         for ((k, e) in games.drop(maxOf(0, recent - 1))) {
             val paths = e.optJSONArray("paths") ?: JSONArray()
-            for (i in 0 until paths.length()) File(paths.getString(i)).delete()
+            for (i in 0 until paths.length()) File(paths.getString(i)).deleteRecursively()   // także rozpakowane ZIP-y
             idx.remove(k)
         }
         save(ctx, idx)

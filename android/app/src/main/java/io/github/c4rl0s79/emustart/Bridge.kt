@@ -47,6 +47,7 @@ class Bridge(private val act: MainActivity) {
         var saveGame: Saves.Game? = null
         var profile = ""
         var lockedBy = ""
+        var emuId = ""
     }
     @Volatile private var launch: Launch? = null
 
@@ -254,7 +255,9 @@ class Bridge(private val act: MainActivity) {
             val s = arr.getJSONObject(i)
             val opts = JSONArray()
             for ((oid, label) in Emulators.options(act, s.optString("plat"), s.optString("core"), cores(s))) {
-                opts.put(JSONObject().put("id", oid).put("label", label))
+                val c = if (Emulators.baseId(oid) == "retroarch")
+                    Emulators.retroCore(s.optString("plat"), Emulators.coreOf(oid).ifEmpty { s.optString("core") }) else ""
+                opts.put(JSONObject().put("id", oid).put("label", label + if (c.isNotEmpty() && prefs.coreOk(c)) " ✓" else ""))
             }
             sys.put(JSONObject().put("es", s.optString("es")).put("display", s.optString("display"))
                 .put("options", opts).put("emulator", chosenEmu(s)))
@@ -334,6 +337,7 @@ class Bridge(private val act: MainActivity) {
     }
 
     private fun runLaunch(l: Launch, emu: String, takeover: Boolean = false) {
+        l.emuId = emu
         try {
             val g = l.game
             val es = g.optString("es")
@@ -354,10 +358,17 @@ class Bridge(private val act: MainActivity) {
                 prog.file = i + 1
                 dl.fetch(g.getInt("id"), f.getString("path"), File(base, f.getString("path")), f.getLong("size"), prog)
             }
-            Cache.complete(act, key(es, g.optString("name")), files.length().let { _ ->
-                (0 until files.length()).map { File(base, files.getJSONObject(it).getString("path")).absolutePath } })
+            val rels = (0 until files.length()).map { files.getJSONObject(it).getString("path") }
+            val main0 = File(base, g.optString("file").ifEmpty { rels[0] })
+            // jak na Windows: ZIP z MSU-1 / kilkoma dyskietkami rozpakowany, playlista płyt
+            val exts = g.optJSONArray("exts")?.let { a -> (0 until a.length()).map { a.getString(it) }.toSet() } ?: emptySet()
+            if (main0.extension.equals("zip", true)) { l.phase = "preparing"; l.message = "Rozpakowuję…" }
+            val prep = Prepare.prepare(emu, base, main0, rels, g.optString("name"), g.optBoolean("multidisc"),
+                                       g.optString("kind", l.sys.optString("kind")), exts)
+            val main = prep.rom
+            Cache.complete(act, key(es, g.optString("name")),
+                           rels.map { File(base, it).absolutePath } + prep.extra.map { it.absolutePath })
             Cache.enforce(act, prefs.cacheRecent, key(es, g.optString("name")))
-            val main = File(base, g.optString("file").ifEmpty { files.getJSONObject(0).getString("path") })
             // zapisy profilu: nowsze z serwera do folderu emulatora (wspólne z EmuStart na Windows)
             if (prefs.profile.isNotEmpty() && Saves.famsFor(emu, l.sys.optString("plat")).isNotEmpty()) {
                 l.phase = "preparing"; l.message = "Zapisy profilu ${prefs.profile}…"
@@ -408,6 +419,10 @@ class Bridge(private val act: MainActivity) {
         val l = launch ?: return
         if (l.phase == "running" && System.currentTimeMillis() - l.startedAt > 3000) {
             l.phase = "finished"
+            // rdzeń, na którym gra działała dłużej niż chwilę — w ustawieniach oznaczony ✓
+            if (System.currentTimeMillis() - l.startedAt > 30_000 && Emulators.baseId(l.emuId) == "retroarch")
+                prefs.markCoreOk(Emulators.retroCore(l.sys.optString("plat"),
+                    Emulators.coreOf(l.emuId).ifEmpty { l.sys.optString("core") }))
             val sg = l.saveGame
             if (sg != null) pool.execute {
                 try { saves.after(l.profile, l.emu, sg, l.startedAt, l.game.optString("title")) }

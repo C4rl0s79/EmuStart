@@ -96,7 +96,7 @@ def handle(handler) -> None:
     parts = [p for p in path.split("/") if p][1:]           # bez „v1”
     try:
         if parts == ["info"]:
-            feats = ["find", "system"] + (["nas"] if NAS_ROOT else [])
+            feats = ["find", "system"] + (["nas", "roots"] if NAS_ROOT else [])
             return _json(handler, {"name": socket.gethostname(), "version": __version__, "api": 1,
                                    "features": feats, "nas_id": NAS_ID})
         if parts and parts[0] == "nas":
@@ -124,6 +124,11 @@ def handle(handler) -> None:
             g = library.game(int(parts[1]))
             d["files"] = [{"path": rel, "size": size} for rel, size, _m in g["files"]]
             d["es"] = g["es"]
+            from emustart import systems
+            info = systems.info(g["es"])
+            d["multidisc"] = bool(g.get("multidisc"))          # playlista .m3u na telefonie
+            d["kind"] = info["kind"]
+            d["exts"] = sorted(systems.ext_set(info))          # ROM w rozpakowanym ZIP-ie
             return _json(handler, d)
         if len(parts) >= 4 and parts[0] == "games" and parts[1].isdigit() and parts[2] == "file":
             return _send_file(handler, int(parts[1]), "/".join(parts[3:]))
@@ -174,6 +179,8 @@ def handle_write(handler, method: str) -> None:
     parts = [p for p in path.split("/") if p][1:]
     if method == "PUT" and parts == ["system"]:
         return _system_put(handler)
+    if method == "PUT" and parts == ["roots"]:
+        return _roots_put(handler)
     if not parts or parts[0] != "nas":
         n = int(handler.headers.get("Content-Length") or 0)
         if n:
@@ -199,6 +206,50 @@ def handle_write(handler, method: str) -> None:
             _json(handler, {"error": str(ex)}, 500)
         except OSError:
             pass
+
+
+def _roots_put(handler) -> None:
+    """Foldery z grami z EmuStart na Windows (względem udziału na NAS-ie, np. „WHDLoad”):
+    brakujące w ustawieniach serwera dopisujemy i skanujemy — telefon widzi to samo co PC.
+    Udział = folder nad emustart\\Profiles (ten sam, który klienci mają np. jako Z:)."""
+    from emustart import nasfs
+    n = int(handler.headers.get("Content-Length") or 0)
+    if n > 65536:
+        handler.close_connection = True
+        return _json(handler, {"error": "za dużo danych"}, 413)
+    try:
+        rels = json.loads(handler.rfile.read(n) or b"{}").get("roots") or []
+    except ValueError:
+        return _json(handler, {"error": "zły JSON"}, 400)
+    if NAS_ROOT is None:
+        return _json(handler, {"error": "serwer nie zna swojego udziału (brak folderu profili)"}, 404)
+    share = NAS_ROOT.parent.parent
+    cfg = API._cfg
+    have = {os.path.normcase(os.path.normpath(r)) for r in config.rom_roots(cfg)}
+    added, missing = [], []
+    for rel in rels[:64]:
+        try:
+            r = nasfs.clean_rel(str(rel))
+        except ValueError:
+            continue
+        d = share / r if r else share
+        if not d.is_dir():
+            missing.append(r)
+            continue
+        key = os.path.normcase(os.path.normpath(str(d)))
+        if key not in have:
+            have.add(key)
+            added.append(str(d))
+    if added:
+        cfg["rom_roots"] = config.rom_roots(cfg) + added
+        cfg["rom_root"] = cfg["rom_roots"][0]
+        config.save(cfg)
+        log.info("foldery z grami od klienta: %s — skanowanie", ", ".join(added))
+        try:
+            API.rescan()
+        except Exception:
+            log.exception("skanowanie nowych folderów")
+    return _json(handler, {"ok": True, "added": added, "missing": missing})
 
 
 def _system_put(handler) -> None:
