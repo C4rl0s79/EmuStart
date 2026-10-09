@@ -4,6 +4,14 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 [Keep a Changelog](https://keepachangelog.com/pl/1.1.0/), wersje według
 [SemVer](https://semver.org/lang/pl/).
 
+## [0.22.5] — 2026-10-09
+
+### Poprawione
+- Serwer: **pobieranie gier z dalekiego serwera kilkukrotnie szybsze** — serwer
+  odpowiadał w HTTP/1.0 i zamykał połączenie po każdym bloku, więc każdy blok
+  zaczynał TCP od nowa. Teraz HTTP/1.1 z utrzymaniem połączenia (bezczynne
+  zamykane po 2 minutach).
+
 ## [0.22.4] — 2026-10-09
 
 ### Zmienione

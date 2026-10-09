@@ -44,6 +44,12 @@ def _host_ok(handler) -> bool:
 
 
 class _Handler(BaseHTTPRequestHandler):
+    # HTTP/1.1: połączenie zostaje otwarte między zapytaniami. Przy HTTP/1.0 każdy blok
+    # pobieranej gry zaczynał TCP od nowa (uzgodnienie + wolny start) — przy dalekim
+    # serwerze kilkukrotnie wolniej. Każda odpowiedź musi mieć Content-Length.
+    protocol_version = "HTTP/1.1"
+    timeout = 120                     # bezczynne połączenie zamykamy (wątek nie wisi)
+
     def log_message(self, *_a):
         pass
 

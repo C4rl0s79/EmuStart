@@ -148,6 +148,7 @@ def _send_file(handler, gid: int, rel: str) -> None:
         if start > end or start >= size:
             handler.send_response(416)
             handler.send_header("Content-Range", f"bytes */{size}")
+            handler.send_header("Content-Length", "0")
             handler.end_headers()
             return
     length = end - start + 1
@@ -163,7 +164,8 @@ def _send_file(handler, gid: int, rel: str) -> None:
         left = length
         while left > 0:
             buf = f.read(min(CHUNK, left))
-            if not buf:
+            if not buf:                       # plik się skrócił — odpowiedź niepełna, zamknij
+                handler.close_connection = True
                 break
             handler.wfile.write(buf)
             left -= len(buf)
