@@ -4,6 +4,14 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 [Keep a Changelog](https://keepachangelog.com/pl/1.1.0/), wersje według
 [SemVer](https://semver.org/lang/pl/).
 
+## [0.21.1] — 2026-10-09
+
+### Naprawione
+- **Kwadratowa (albo szeroka) okładka zasłaniała szczegóły gry** w podglądzie:
+  okładka i zrzut mają wspólną wysokość liczoną z proporcji obu obrazków tak, by
+  szczegóły zawsze miały co najmniej 30% szerokości. Górne i dolne krawędzie obrazków
+  dalej są równe, a ich góra — na wysokości logo platformy.
+
 ## [0.21.0] — 2026-10-09
 
 ### Dodane

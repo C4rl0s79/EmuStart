@@ -343,3 +343,11 @@ img.glow { filter: drop-shadow(0 0 1px rgba(255,255,255,.9)) drop-shadow(0 0 6px
 .pv3 .meta dl { grid-template-columns: auto minmax(0, 1fr); font-size: calc(.92em * var(--fs-meta)); }
 .pv3 .desc { grid-column: 1 / -1; margin-top: 0; max-height: none; -webkit-line-clamp: var(--desc-lines);
   font-size: calc(.95em * var(--fs-desc)); }
+
+/* 0.21.1: wspólna wysokość okładki i zrzutu liczona w JS (layoutPreview) — szczegóły
+   gry zawsze mają miejsce, także przy kwadratowej albo szerokiej okładce */
+.preview.pv3 { grid-template-rows: var(--pv-h, var(--media-h)) minmax(0, 1fr); }
+.pv3 .box, .pv3 .snap, .pv3 .meta { height: var(--pv-h, var(--media-h)); }
+.pv3 .box img, .pv3 .snap img { height: var(--pv-h, var(--media-h)); max-width: none; }
+.pv3 .noart { height: var(--pv-h, var(--media-h)); width: calc(var(--pv-h, var(--media-h)) * 0.75); }
+.pv3 .snap { max-width: none; }
