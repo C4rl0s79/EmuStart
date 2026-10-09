@@ -25,6 +25,7 @@
 - [Pliki i dane](Pliki-i-dane)
 - [Bezpieczeństwo](Bezpieczeństwo-i-prywatność)
 - [Problemy](Rozwiązywanie-problemów)
+- [Serwer dla Androida](Serwer-dla-Androida)
 - [Budowa ze źródeł](Budowa-ze-źródeł)
 
 [📦 Pobierz](https://github.com/C4rl0s79/EmuStart/releases)

@@ -4,6 +4,19 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 [Keep a Changelog](https://keepachangelog.com/pl/1.1.0/), wersje według
 [SemVer](https://semver.org/lang/pl/).
 
+## [0.21.0] — 2026-10-09
+
+### Dodane
+- **Tryb serwera dla aplikacji na Androida** (`EmuStart.exe --server`, bez okna):
+  na komputerze z grami udostępnia przez Tailscale listę systemów i gier
+  z metadanymi i grafikami oraz pliki gier z obsługą `Range` (pobieranie kilkoma
+  strumieniami, wznawianie). Dostęp z losowym kluczem serwera; interfejs
+  administracyjny (`http://127.0.0.1:8740/index.html?dev`) tylko lokalnie; serwer
+  wydaje wyłącznie pliki gier z biblioteki.
+- `--install-server` — autostart razem z Windows (Harmonogram zadań) i reguła
+  zapory; `--server-key` — adres i klucz serwera.
+- Wiki: strona „Serwer dla Androida” z instrukcją instalacji.
+
 ## [0.20.0] — 2026-10-09
 
 ### Naprawione

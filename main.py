@@ -35,6 +35,8 @@ def main() -> None:
     debug = "--debug" in sys.argv
     windowed = debug or "--window" in sys.argv
     cfg = config.load()
+    if any(a in sys.argv for a in ("--server", "--server-key", "--install-server")):
+        return _server_mode()
     api = api_mod.Api()
     if "--browser" in sys.argv:
         print(server.start(8765, dev_api=api) + "/index.html?dev")
@@ -58,6 +60,43 @@ def main() -> None:
     finally:
         logging.shutdown()
         os._exit(0)
+
+
+def _message(text: str, title: str = "EmuStart Server") -> None:
+    """Okienko z informacją (EmuStart.exe nie ma konsoli)."""
+    print(text)
+    try:
+        import ctypes
+        ctypes.windll.user32.MessageBoxW(None, text, title, 0x40)
+    except Exception:
+        pass
+
+
+def _server_mode() -> None:
+    """EmuStart jako serwer gier dla aplikacji na Androidzie (na komputerze z grami)."""
+    import socket
+    import time
+    from emustart import remote
+    log = logging.getLogger("emustart")
+    api = api_mod.Api()
+    remote.API = api
+    token = remote.ensure_token(api._cfg)
+    port = int(api._cfg.get("server_port") or remote.DEFAULT_PORT)
+    if "--server-key" in sys.argv:
+        return _message(f"Adres: http://{socket.gethostname()}:{port}\nKlucz serwera:\n\n{token}")
+    if "--install-server" in sys.argv:
+        if not getattr(sys, "frozen", False):
+            return _message("Autostart serwera instaluje się z EmuStart.exe (wersja zbudowana).")
+        res = remote.install_autostart(sys.executable, port)
+        ok = all(code == 0 for _c, code, _o in res)
+        lines = [f"{c}: {'OK' if code == 0 else 'błąd'} {o[:120]}" for c, code, o in res]
+        return _message(("Serwer będzie startował razem z Windows." if ok else
+                         "Nie wszystko się udało — uruchom jako administrator.") + "\n\n" + "\n".join(lines))
+    base = server.start(port, dev_api=api, bind="0.0.0.0")
+    log.info("serwer %s: API dla Androida na porcie %d; administracja: %s/index.html?dev",
+             __import__("emustart").__version__, port, base.replace("0.0.0.0", "127.0.0.1"))
+    while True:
+        time.sleep(3600)
 
 
 if __name__ == "__main__":

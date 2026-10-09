@@ -66,8 +66,14 @@ class _Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self):
+        raw = urllib.parse.urlsplit(self.path).path
+        if raw.startswith("/v1/"):
+            from emustart import remote      # API dla Androida — klucz zamiast sprawdzania Host
+            return remote.handle(self)
         if not _host_ok(self):
-            return self.send_error(403)
+            from emustart import remote      # grafiki dla aplikacji na Androida (z kluczem)
+            if not (raw.startswith(("/media/", "/assets/", "/local/")) and remote.authorized(self)):
+                return self.send_error(403)
         path = urllib.parse.unquote(urllib.parse.urlsplit(self.path).path)
         base, rel = paths.WEB, path.lstrip("/") or "index.html"
         for prefix, root in ROUTES.items():
@@ -99,10 +105,12 @@ class _Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
 
-def start(port: int = 0, dev_api=None) -> str:
+def start(port: int = 0, dev_api=None, bind: str = "127.0.0.1") -> str:
+    """bind 0.0.0.0 tylko w trybie serwera (--server): z zewnątrz dostępne wyłącznie
+    /v1/ i grafiki z kluczem; interfejs i API administracyjne — tylko lokalnie."""
     global DEV_API
     DEV_API = dev_api
-    srv = ThreadingHTTPServer(("127.0.0.1", port), _Handler)
+    srv = ThreadingHTTPServer((bind, port), _Handler)
     srv.daemon_threads = True
     threading.Thread(target=srv.serve_forever, daemon=True, name="http").start()
     return f"http://127.0.0.1:{srv.server_address[1]}"

@@ -761,3 +761,60 @@ def test_media_url_changes_when_art_replaced(tmp_path, monkeypatch):
     os.utime(f, (2000, 2000))
     u2 = art.media_url("snes", "Gra (USA)", "box")
     assert u1 != u2 and u2.endswith("?v=2000")
+
+
+# ── serwer dla Androida ──
+
+def test_remote_api_token_ranges_and_paths(env, tmp_path):
+    import json as _json
+    import urllib.error
+    import urllib.request
+    from emustart import library, remote, server
+    roms = tmp_path / "nas" / "psx"
+    data = bytes(range(256)) * 4000
+    _write(roms / "Gra (USA).chd", data)
+    _write(tmp_path / "nas" / "tajne.txt", b"X")
+    with library.db() as c:
+        c.execute("INSERT INTO games(es, rel, name, title, tags, files, size, seen, src) "
+                  "VALUES('psx','Gra (USA).chd','Gra (USA)','Gra','(USA)',?,?,0,?)",
+                  (_json.dumps([["Gra (USA).chd", len(data), 1.0]]), len(data), str(roms)))
+        gid = c.execute("SELECT id FROM games WHERE rel='Gra (USA).chd'").fetchone()[0]
+
+    class FakeApi:
+        _cfg = {"server_token": "KLUCZ"}
+        def list_systems(self):
+            return [{"es": "psx", "display": "PlayStation", "games": 1, "logo": "", "kind": "disc"}]
+        def list_games(self, es):
+            return [{"id": gid, "name": "Gra (USA)", "title": "Gra", "tags": "(USA)", "size": len(data)}]
+        def game_detail(self, i):
+            return {"id": i, "title": "Gra", "meta": {}}
+    remote.API = FakeApi()
+    base = server.start(0)
+    port = base.rsplit(":", 1)[1]
+
+    def get(path, key="KLUCZ", rng=None, host=None):
+        h = {"Authorization": f"Bearer {key}"} if key else {}
+        if rng:
+            h["Range"] = rng
+        h["Host"] = host or f"100.1.2.3:{port}"                 # jak z telefonu przez Tailscale
+        req = urllib.request.Request(base + path, headers=h)
+        try:
+            with urllib.request.urlopen(req, timeout=5) as r:
+                return r.status, r.read(), dict(r.headers)
+        except urllib.error.HTTPError as ex:
+            return ex.code, ex.read(), {}
+    try:
+        assert get("/v1/systems", key="")[0] == 401
+        assert get("/v1/systems", key="zly")[0] == 401
+        st, body, _h = get("/v1/systems")
+        assert st == 200 and _json.loads(body)[0]["es"] == "psx"
+        st, body, h = get(f"/v1/games/{gid}/file/Gra%20(USA).chd", rng="bytes=1000-1999")
+        assert st == 206 and body == data[1000:2000] and h["Content-Range"] == f"bytes 1000-1999/{len(data)}"
+        st, body, _h = get(f"/v1/games/{gid}/file/Gra%20(USA).chd")
+        assert st == 200 and body == data
+        assert get(f"/v1/games/{gid}/file/..%2Ftajne.txt")[0] == 404          # tylko pliki tej gry
+        assert get("/index.html")[0] == 403                                     # UI tylko lokalnie
+        st, body, _h = get(f"/v1/games/{gid}")
+        assert _json.loads(body)["files"][0]["size"] == len(data)
+    finally:
+        remote.API = None
