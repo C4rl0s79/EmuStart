@@ -789,7 +789,7 @@ def test_remote_api_token_ranges_and_paths(env, tmp_path):
             return [{"es": "psx", "display": "PlayStation", "games": 1, "logo": "", "kind": "disc"}]
         def list_games(self, es):
             return [{"id": gid, "name": "Gra (USA)", "title": "Gra", "tags": "(USA)", "size": len(data)}]
-        def game_detail(self, i):
+        def game_detail(self, i, use_variant=True):
             return {"id": i, "title": "Gra", "meta": {}}
     remote.API = FakeApi()
     base = server.start(0)

@@ -82,6 +82,7 @@ class Bridge(private val act: MainActivity) {
         "list_systems" -> systems()
         "list_games" -> games(a.getString(0))
         "game_detail" -> detail(a.getInt(0))
+        "set_variant" -> setVariant(a.getInt(0), a.optInt(1, 0))
         "get_settings" -> settings()
         "save_settings" -> { saveSettings(a.getJSONObject(0)); JSONObject().put("ok", true) }
         "server_test" -> serverTest()
@@ -240,8 +241,46 @@ class Bridge(private val act: MainActivity) {
         return arr
     }
 
+    // ── tłumaczenia: wersja gry wybrana w profilu (<profil>/variants.json na serwerze) ──
+    private fun variants(): JSONObject = try {
+        if (prefs.profile.isEmpty()) JSONObject()
+        else server.nasRead("${prefs.profile}/variants.json")?.let { JSONObject(String(it)) } ?: JSONObject()
+    } catch (e: Exception) { Log.w(tag, "wersje gier: $e"); JSONObject() }
+
+    private fun variantKey(d: JSONObject) = d.optString("es") + "/" + d.optString("rel").replace('\\', '/')
+
+    /** Wybrana wersja gry z listy `variants` szczegółów (null = oryginał). */
+    private fun chosenVariant(d: JSONObject): JSONObject? {
+        val list = d.optJSONArray("variants") ?: return null
+        if (list.length() == 0) return null
+        val want = variants().optString(variantKey(d))
+        if (want.isEmpty()) return null
+        return (0 until list.length()).map { list.getJSONObject(it) }.firstOrNull { it.optString("rel") == want }
+    }
+
+    private fun setVariant(id: Int, vid: Int): JSONObject {
+        if (prefs.profile.isEmpty()) return JSONObject().put("ok", false)
+            .put("reason", "Wybierz profil gracza — wersja gry należy do profilu.")
+        return try {
+            val d = server.game(id)
+            val list = d.optJSONArray("variants") ?: JSONArray()
+            val v = (0 until list.length()).map { list.getJSONObject(it) }.firstOrNull { it.optInt("id") == vid }
+            if (vid != 0 && v == null) return JSONObject().put("ok", false).put("reason", "Nie ma takiej wersji gry.")
+            val data = variants()
+            if (v != null) data.put(variantKey(d), v.optString("rel")) else data.remove(variantKey(d))
+            server.nasPut("${prefs.profile}/variants.json", data.toString(1).toByteArray(), System.currentTimeMillis() / 1000.0)
+            JSONObject().put("ok", true).put("variant", v?.optInt("id") ?: 0).put("label", v?.optString("label") ?: "Oryginał")
+        } catch (e: Exception) { JSONObject().put("ok", false).put("reason", explain(e)) }
+    }
+
     private fun detail(id: Int): JSONObject {
-        val d = server.game(id)
+        val orig = server.game(id)
+        val chosen = chosenVariant(orig)
+        // stan w telefonie, rozmiar i pliki — wybranej wersji (tę się pobiera i uruchamia)
+        val d = if (chosen != null) server.game(chosen.optInt("id")).also { v ->
+            for (k in listOf("id", "title", "meta", "box", "snap", "logo", "es", "rel", "variants")) if (orig.has(k)) v.put(k, orig.get(k))
+        } else orig
+        d.put("variant", chosen?.optInt("id") ?: 0).put("variant_label", chosen?.optString("label") ?: "")
         val files = d.optJSONArray("files") ?: JSONArray()
         d.put("filelist", files).put("files", files.length())
         val e = Cache.index(act).optJSONObject(key(d.optString("es"), d.optString("name")))

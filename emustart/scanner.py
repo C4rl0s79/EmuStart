@@ -17,7 +17,7 @@ import re
 import time
 from pathlib import Path
 
-from emustart import arcade, config, library, systems
+from emustart import arcade, config, library, systems, translations
 
 _DISC_RE = re.compile(r"\s*\((?:disc|disk|cd)\s*\d+[^)]*\)", re.I)
 _TAG_SPLIT = re.compile(r"\s+(?=[(\[])")
@@ -185,7 +185,7 @@ def scan_system(es: str, rom_dirs, progress=None) -> int:
         arc = arcade.lookup(Path(g["rel"]).stem for g in found)
 
     now = time.time()
-    rows = []
+    games = []
     for g in found:
         stem = Path(g["rel"]).stem if not g.get("is_dir") else g["rel"]
         parent, hidden = "", 0
@@ -202,21 +202,30 @@ def scan_system(es: str, rom_dirs, progress=None) -> int:
             name = f"{title} {tags}".strip()
         else:
             title, tags = split_title(name)
-        rows.append((es, g["rel"], name, title or name, tags,
-                     json.dumps(g["files"]), sum(f[1] for f in g["files"]),
-                     1 if g.get("is_dir") else 0, 1 if g["multidisc"] else 0,
-                     parent, hidden, now, g["src"]))
+        games.append({"g": g, "name": name, "title": title or name, "tags": tags,
+                      "parent": parent, "hidden": hidden, "src": g["src"],
+                      "trans": "", "tbase": ""})
+    if info["kind"] != "arcade":
+        # tłumaczenia z folderów kolekcji „[T-En] …” — wersje gier, nie osobne pozycje
+        pools = {str(d): (d.name, d.parent.name) for d in rom_dirs
+                 if translations.is_pool(d.name, d.parent.name)}
+        translations.mark(games, pools)
+    rows = [(es, x["g"]["rel"], x["name"], x["title"], x["tags"],
+             json.dumps(x["g"]["files"]), sum(f[1] for f in x["g"]["files"]),
+             1 if x["g"].get("is_dir") else 0, 1 if x["g"]["multidisc"] else 0,
+             x["parent"], x["hidden"], now, x["src"], x["trans"], x["tbase"]) for x in games]
 
     with library.db() as c:
         c.executemany("""
             INSERT INTO games(es, rel, name, title, tags, files, size, is_dir,
-                              multidisc, parent, hidden, seen, src)
-            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
+                              multidisc, parent, hidden, seen, src, trans, tbase)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(es, rel) DO UPDATE SET
               name=excluded.name, title=excluded.title, tags=excluded.tags,
               files=excluded.files, size=excluded.size, is_dir=excluded.is_dir,
               multidisc=excluded.multidisc, parent=excluded.parent,
-              hidden=excluded.hidden, seen=excluded.seen, src=excluded.src""", rows)
+              hidden=excluded.hidden, seen=excluded.seen, src=excluded.src,
+              trans=excluded.trans, tbase=excluded.tbase""", rows)
         gone = [r["id"] for r in c.execute(
             "SELECT id FROM games WHERE es=? AND seen<?", (es, now))]
         for i in range(0, len(gone), 500):
@@ -244,10 +253,21 @@ def collect_systems(cfg: dict) -> tuple:
                              key=lambda p: p.name.lower())
         except OSError:
             continue
-        for d in subdirs:
+        pools = []
+        for d in list(subdirs):
+            # kolekcja tłumaczeń w folderze z grami: „[T-En] Collection\<system>\”
+            if translations.is_pool(d.name) and not systems.match_folder(translations.strip_pool_tag(d.name)):
+                try:
+                    pools += sorted((x for x in d.iterdir() if x.is_dir()), key=lambda p: p.name.lower())
+                except OSError:
+                    pass
+                subdirs.remove(d)
+        for d in subdirs + pools:
             # „Games”/„Demos” same w sobie nic nie mówią — w folderze „WHDLoad”
             # znaczą WHDLoad, stąd druga próba z nazwą folderu nadrzędnego
             es = systems.match_folder(d.name) or systems.match_folder(f"{Path(root).name} {d.name}")
+            if not es and translations.is_pool(d.name):     # „Nintendo - SNES [T-En]”
+                es = systems.match_folder(translations.strip_pool_tag(d.name))
             if not es:
                 unknown.append(d)
                 if (syscfg.get(d.name) or {}).get("enabled") is not True:

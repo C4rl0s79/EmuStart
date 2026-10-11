@@ -82,6 +82,33 @@ strzałki działają jak na oryginale); skróty RetroArcha są na ten czas wył�
 Wyjście z gry: menu EmuStart (A + Y na padzie) albo Scroll Lock (przywraca skróty
 RetroArcha) i Esc.
 
+## Tłumaczenia (wersje gier)
+
+Fanowskie tłumaczenia trzymaj w osobnym folderze kolekcji — EmuStart pokazuje je jako
+**wersje** oryginału, nie jako osobne gry. Rozpoznawane są:
+
+- folder kolekcji w folderze z grami albo jako osobny folder z grami: nazwa z tagiem
+  `[T-…]` albo słowem „Translations”/„Tłumaczenia”, w środku foldery systemów —
+  np. `Gry\[T-En] Collection\Nintendo - Super Nintendo Entertainment System\`,
+- folder systemu z tagiem: `Nintendo - Super Nintendo Entertainment System [T-En]`,
+- plik z tagiem `[T-En]`, `[T+Pol by …]` w nazwie (także obok oryginałów).
+
+Tłumaczenie łączy się z oryginałem po tytule bez tagów (`Seiken Densetsu 3 (Japan)
+[T-En by Neill Corlett]` → `Seiken Densetsu 3`). Język z tagu `[T-…]` w nazwie pliku,
+a gdy go nie ma — z nazwy kolekcji. Tłumaczenie bez oryginału w bibliotece jest zwykłą
+grą na liście.
+
+Wybór: przytrzymaj A na grze → **Wersja** → oryginał albo tłumaczenie. Wybrana wersja
+pobiera się, uruchamia i ma swoje zapisy (inny plik gry — zapisy i stany oryginału
+zostają przy oryginale). Wybór należy do profilu gracza i jest wspólny dla komputera
+i telefonu (`variants.json` w folderze profilu). Pliki na dysku zostają nietknięte —
+kolekcję porządkuje RomHelper. Emulator wybrany dla oryginału (opcje gry → Emulator)
+obowiązuje też tłumaczenia.
+
+Po dodaniu kolekcji odśwież bibliotekę (Ustawienia → Skanuj). Plik tłumaczenia o tej
+samej nazwie co oryginał (język tylko w nazwie kolekcji) jest pomijany — nadaj mu tag
+`[T-…]` w nazwie.
+
 ## Ukrycie systemu
 
 Przytrzymane A na logo systemu → **Ukryj system**, albo w Ustawieniach → Systemy

@@ -36,7 +36,7 @@ CREATE TABLE IF NOT EXISTS games (
     is_dir    INTEGER NOT NULL DEFAULT 0,
     multidisc INTEGER NOT NULL DEFAULT 0, -- kilka płyt bez .m3u
     parent    TEXT NOT NULL DEFAULT '',  -- arcade: set rodzica (klon)
-    hidden    INTEGER NOT NULL DEFAULT 0, -- arcade: BIOS/urządzenie
+    hidden    INTEGER NOT NULL DEFAULT 0, -- 1 arcade: BIOS/urządzenie, 2 tłumaczenie pod oryginałem
     seen      REAL NOT NULL DEFAULT 0,
     art_box   INTEGER NOT NULL DEFAULT 0, -- 0 nie sprawdzano, 1 jest, 2 brak
     art_snap  INTEGER NOT NULL DEFAULT 0,
@@ -119,6 +119,10 @@ def db() -> sqlite3.Connection:
         if "art_logo" not in cols:  # logo gry (Clear Logo) — od 0.9.0
             con.execute("ALTER TABLE games ADD COLUMN art_logo INTEGER NOT NULL DEFAULT 0")
             con.commit()
+        if "trans" not in cols:     # tłumaczenia jako wersje gier — od 0.30.0
+            con.execute("ALTER TABLE games ADD COLUMN trans TEXT NOT NULL DEFAULT ''")
+            con.execute("ALTER TABLE games ADD COLUMN tbase TEXT NOT NULL DEFAULT ''")
+            con.commit()
         if not con.execute("SELECT 1 FROM profiles").fetchone():
             con.execute("INSERT INTO profiles(name) VALUES('Gracz')")
             con.commit()
@@ -145,6 +149,17 @@ def game(game_id: int) -> dict | None:
     g = dict(r)
     g["files"] = json.loads(g["files"])
     return g
+
+
+def game_emu(g: dict):
+    """Emulator wybrany dla tej gry; tłumaczenie bez własnego bierze wybór oryginału."""
+    con = db()
+    own = con.execute("SELECT * FROM game_emu WHERE game_id=?", (g["id"],)).fetchone()
+    if own or not g.get("trans"):
+        return own
+    return con.execute("""SELECT e.* FROM game_emu e JOIN games o ON o.id=e.game_id
+                          WHERE o.es=? AND o.tbase=? AND o.trans='' LIMIT 1""",
+                       (g["es"], g.get("tbase", ""))).fetchone()
 
 
 def system_dirs(es: str) -> list:

@@ -135,7 +135,7 @@ class Session:
         es = g["es"]
         info = systems.info(es)
         emu = (self.cfg.get("systems") or {}).get(es) or {}
-        own = library.db().execute("SELECT * FROM game_emu WHERE game_id=?", (g["id"],)).fetchone()
+        own = library.game_emu(g)
         if own and Path(own["exe"]).is_file():
             emu = {"exe": own["exe"], "args": own["args"], "label": own["label"]}
         exe = emu.get("exe") or ""
