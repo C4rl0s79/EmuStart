@@ -130,7 +130,7 @@ def handle(handler) -> None:
         if len(parts) == 3 and parts[0] == "systems" and parts[2] == "games":
             return _json(handler, [_game_row(r) for r in API.list_games(parts[1])])
         if len(parts) == 2 and parts[0] == "games" and parts[1].isdigit():
-            d = API.game_detail(int(parts[1]))
+            d = API.game_detail(int(parts[1]), use_variant=False)
             if not d:
                 return _json(handler, {"error": "nie ma takiej gry"}, 404)
             from emustart import library

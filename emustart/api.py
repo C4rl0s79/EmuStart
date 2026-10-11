@@ -17,7 +17,7 @@ import urllib.error
 import time
 from pathlib import Path
 
-from emustart import (__version__, art, bios, art_sources, cache, ingame, installer, launchbox, logos, sysinfo, metadata, pads, profiles, uipad, config, emulators, launcher, library,
+from emustart import (__version__, art, bios, art_sources, cache, ingame, installer, launchbox, logos, sysinfo, metadata, pads, profiles, translations, uipad, config, emulators, launcher, library,
                       nasfs, netsrc, paths, scanner, systems, winutil)
 
 log = logging.getLogger("emustart.api")
@@ -415,17 +415,61 @@ class Api:
                     "checked": bool(r["art_box"] and r["art_snap"])}
         return out
 
-    def game_detail(self, game_id: int) -> dict:
+    # ── tłumaczenia: wersje gry (emustart/translations.py) ──
+    def _variants(self, g: dict) -> list:
+        """Tłumaczenia schowane pod grą: [{id, rel, label, lang}]."""
+        if g.get("trans") or not g.get("tbase"):
+            return []
+        rows = library.db().execute(
+            "SELECT id, rel, name, trans FROM games WHERE es=? AND tbase=? AND trans!='' ORDER BY name",
+            (g["es"], g["tbase"])).fetchall()
+        return [{"id": r["id"], "rel": r["rel"].replace("\\", "/"), "lang": r["trans"],
+                 "label": translations.label(r["name"], r["trans"] if r["trans"] != "?" else "")} for r in rows]
+
+    @staticmethod
+    def _variant_key(g: dict) -> str:
+        return g["es"] + "/" + g["rel"].replace("\\", "/")
+
+    def _variant_choice(self, g: dict, variants: list | None = None) -> dict | None:
+        """Wersja wybrana w profilu gracza (None = oryginał)."""
+        variants = self._variants(g) if variants is None else variants
+        if not variants:
+            return None
+        want = (profiles.json_get(self._cfg, self._profile, translations.FILE) or {}).get(self._variant_key(g))
+        return next((v for v in variants if v["rel"] == want), None)
+
+    def set_variant(self, game_id: int, variant_id: int = 0) -> dict:
+        """Wersja gry dla profilu gracza: id tłumaczenia albo 0 = oryginał."""
+        g = library.game(int(game_id))
+        if not g:
+            return {"ok": False, "reason": "Nie ma takiej gry."}
+        data = dict(profiles.json_get(self._cfg, self._profile, translations.FILE) or {})
+        v = next((x for x in self._variants(g) if x["id"] == int(variant_id or 0)), None)
+        if variant_id and not v:
+            return {"ok": False, "reason": "Nie ma takiej wersji gry."}
+        if v:
+            data[self._variant_key(g)] = v["rel"]
+        else:
+            data.pop(self._variant_key(g), None)
+        profiles.json_set(self._cfg, self._profile, translations.FILE, data)
+        return {"ok": True, "variant": v["id"] if v else 0, "label": v["label"] if v else "Oryginał"}
+
+    def game_detail(self, game_id: int, use_variant: bool = True) -> dict:
+        """use_variant=False — serwer dla telefonu: wersję wybiera profil na telefonie."""
         g = library.game(int(game_id))
         if not g:
             return {}
         info = systems.info(g["es"])
+        variants = self._variants(g)
+        chosen = self._variant_choice(g, variants) if use_variant else None
+        # stan „lokalnie” i czas gry — wybranej wersji (tę się pobiera i uruchamia)
+        pg = (library.game(chosen["id"]) or g) if chosen else g
         row = library.db().execute(
-            "SELECT * FROM cache WHERE game_id=?", (g["id"],)).fetchone()
+            "SELECT * FROM cache WHERE game_id=?", (pg["id"],)).fetchone()
         play = library.db().execute(
             "SELECT * FROM play WHERE game_id=? AND profile_id=?",
-            (g["id"], self._profile)).fetchone()
-        cached = self._sync_cached(g, row)
+            (pg["id"], self._profile)).fetchone()
+        cached = self._sync_cached(pg, row)
         meta = metadata.ensure_local(self._cfg, g)
         meta = {k: v for k, v in meta.items() if not k.startswith("_")}
         if meta.get("genre"):
@@ -434,14 +478,17 @@ class Api:
                 "name": g["name"], "meta": meta,
                 "meta_online": bool(metadata.get(g["id"]).get("_online")),
                 "meta_edits": metadata.get(g["id"]).get("_edits", {}),
-                "system": info["display"], "size": g["size"], "files": len(g["files"]),
-                "file": g["rel"], "cached": cached,
-                "local": g["size"] if cached else max(0, g["size"] - cache.missing_bytes(self._cfg, g)),
+                "system": info["display"], "size": pg["size"], "files": len(pg["files"]),
+                "file": pg["rel"], "cached": cached,
+                "local": pg["size"] if cached else max(0, pg["size"] - cache.missing_bytes(self._cfg, pg)),
                 "pinned": bool(row and row["pinned"]),
                 "plays": play["plays"] if play else 0,
                 "seconds": play["seconds"] if play else 0,
                 "last": play["last"] if play else 0,
-                "copying": g["id"] in self._copying()}
+                "copying": pg["id"] in self._copying(),
+                "es": g["es"], "rel": g["rel"].replace("\\", "/"),
+                "variants": variants, "variant": chosen["id"] if chosen else 0,
+                "variant_label": chosen["label"] if chosen else ""}
 
     def _sync_cached(self, g: dict, row) -> bool:
         """Stan „lokalnie” z plików w cache, nie tylko z bazy: plik dokończony później
@@ -724,7 +771,7 @@ class Api:
 
     # ── opcje gry (przytrzymane A) ──
     def _effective_emu(self, g: dict) -> dict:
-        own = library.db().execute("SELECT * FROM game_emu WHERE game_id=?", (g["id"],)).fetchone()
+        own = library.game_emu(g)
         if own:
             return {"label": own["label"], "exe": own["exe"], "args": own["args"], "own": True}
         sc = (self._cfg.get("systems") or {}).get(g["es"]) or {}

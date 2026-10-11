@@ -431,6 +431,7 @@ async function updatePreview() {
   }
   const d = await api().game_detail(g.id);
   if (S.games[S.gameIdx] !== g || !d.id) return;
+  setVariant(g, d);
   const status = d.copying ? '<span class="st-n">kopiowanie do pamięci podręcznej…</span>'
     : d.pinned && d.cached ? '<span class="st-p">przypięta, lokalnie</span>'
     : d.pinned ? '<span class="st-p">przypięta (pobierze się)</span>'
@@ -442,7 +443,7 @@ async function updatePreview() {
     metaRows(d.meta) +
     `<dt>Ostatnio</dt><dd>${fmtDate(d.last)}</dd>` +
     `<dt>Czas gry</dt><dd>${fmtPlay(d.seconds)}</dd>`;
-  $("pvTitle").textContent = d.title;
+  $("pvTitle").textContent = d.title + (d.variant_label ? `  ${d.variant_label}` : "");
   renderDesc(d.meta);
   // opis z sieci dla gry, przy której użytkownik się zatrzymał (bez TheGamesDB —
   // ma limit miesięczny; pełne pobranie jest w opcjach gry)
@@ -521,9 +522,13 @@ function setArt(g) {
   layoutPreview();
 }
 
+// tłumaczenie wybrane w opcjach gry („Wersja”): pobiera się, uruchamia i ma zapisy zamiast oryginału
+function setVariant(g, d) { g.vid = d.variant || 0; g.vlabel = d.variant_label || ""; }
+function playId(g) { return g.vid || g.id; }
+
 async function togglePin() {
   const g = S.games[S.gameIdx];
-  const r = await api().toggle_pin(g.id);
+  const r = await api().toggle_pin(playId(g));
   if (!r.ok) return;
   g.pinned = r.pinned ? 1 : 0;
   toast(r.pinned ? `Przypięto: ${g.title}. Zostanie na dysku na stałe.` : `Odpięto: ${g.title}`);
@@ -535,7 +540,8 @@ async function togglePin() {
 let launchPoll;
 async function launch(state = "", takeover = false, configure = false) {
   const g = S.games[S.gameIdx];
-  const r = configure ? await api().configure_emulator(g.id) : await api().launch(g.id, state, takeover);
+  if (g.vid === undefined) setVariant(g, await api().game_detail(g.id));   // A przed wczytaniem podglądu
+  const r = configure ? await api().configure_emulator(playId(g)) : await api().launch(playId(g), state, takeover);
   if (r.need_install) return askInstallForGame(r.need_install);
   if (r.profile_pin) { toast(r.reason, 5000); return openProfiles(true); }
   if (!r.ok) return toast(r.reason);
@@ -544,7 +550,7 @@ async function launch(state = "", takeover = false, configure = false) {
   S.modal = "launch";
   $("launch").classList.remove("hidden");
   $("lSystem").textContent = "";
-  $("lTitle").textContent = g.title;
+  $("lTitle").textContent = g.title + (g.vid && g.vlabel ? `  ${g.vlabel}` : "");
   $("lHead").textContent = "Przygotowuję…";
   $("lProgress").classList.add("hidden");
   $("lMsg").textContent = "";

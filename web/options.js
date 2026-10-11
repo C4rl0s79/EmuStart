@@ -87,9 +87,10 @@ async function openGameOptions() {
   GO.confirmDel = false;
   // telefon: tylko granie, przypięcie i usunięcie z telefonu — emulatory, zapisy
   // i metadane ustawia się w EmuStart na komputerze z grami
-  [GO.data, GO.detail] = S.platform === "android"
-    ? [null, await api().game_detail(g.id)]
-    : await Promise.all([api().game_options(g.id), api().game_detail(g.id)]);
+  GO.detail = await api().game_detail(g.id);
+  setVariant(g, GO.detail);
+  GO.pid = playId(g);                       // wybrana wersja (tłumaczenie) albo sama gra
+  GO.data = S.platform === "android" ? null : await api().game_options(GO.pid);
   GO.page = "main"; GO.idx = 0;
   S.modal = "gopt";
   $("gopt").classList.remove("hidden");
@@ -110,7 +111,7 @@ function removeItem() {
     act: async () => {
       if (!GO.confirmDel) { GO.confirmDel = true; return renderGopt(); }
       GO.confirmDel = false;
-      const r = await api().remove_local(GO.id);
+      const r = await api().remove_local(GO.pid);
       if (!r || !r.ok) { toast(r?.reason || "Nie udało się usunąć."); return renderGopt(); }
       const gg = S.games.find((x) => x.id === GO.id);
       if (gg) { gg.pinned = 0; gg.cached = 0; }
@@ -121,10 +122,17 @@ function removeItem() {
     },
   }];
 }
+function variantItem() {
+  const det = GO.detail || {};
+  if (!det.variants || !det.variants.length) return [];
+  return [{ label: "Wersja", value: det.variant ? det.variant_label : `oryginał · ${det.variants.length} ${plural(det.variants.length, "tłumaczenie", "tłumaczenia", "tłumaczeń")}`,
+    act: () => goPage("variants") }];
+}
 function goptItems() {
   const d = GO.data, det = GO.detail, g = S.games[S.gameIdx] || {};
   if (GO.page === "main" && S.platform === "android") return [
     { label: "Graj", act: () => { closeGopt(); launch(); } },
+    ...variantItem(),
     { label: "Zapisy i stany", value: "z komputera i telefonu", act: openSaveManager },
     { label: "Ustawienia emulatora", value: "tylko na tym telefonie", act: () => { closeGopt(); launch("", false, true); } },
     { label: g.pinned ? "Odepnij (pozwól usunąć z telefonu)" : "Przypnij (trzymaj w telefonie)", act: async () => { await togglePin(); closeGopt(); } },
@@ -132,6 +140,7 @@ function goptItems() {
   ];
   if (GO.page === "main") return [
     { label: "Graj", act: () => { closeGopt(); launch(); } },
+    ...variantItem(),
     { label: "Emulator", value: d.emulator.label + (d.emulator.own ? "  (tylko ta gra)" : ""), act: () => goPage("emus") },
     { label: "Ustawienia emulatora", value: "obraz, dźwięk, sterowanie — w Twoim profilu",
       act: () => { closeGopt(); launch("", false, true); } },
@@ -147,6 +156,24 @@ function goptItems() {
     { label: g.pinned ? "Odepnij (pozwól usunąć z dysku)" : "Przypnij (trzymaj na dysku)", act: async () => { await togglePin(); closeGopt(); } },
     ...removeItem(),
   ];
+  if (GO.page === "variants") {
+    const pick = async (v) => {
+      const r = await api().set_variant(GO.id, v ? v.id : 0);
+      if (!r || !r.ok) return toast(r?.reason || "Nie udało się zmienić wersji.");
+      toast(v ? `Grasz w: ${v.label}. Zapisy tej wersji są osobne od oryginału.` : "Grasz w oryginał.", 5000);
+      GO.detail = await api().game_detail(GO.id);
+      const g = S.games.find((x) => x.id === GO.id);
+      if (g) setVariant(g, GO.detail);
+      GO.pid = g ? playId(g) : GO.id;
+      if (S.platform !== "android") GO.data = await api().game_options(GO.pid);
+      goPage("main");
+      schedulePreview();
+    };
+    const cur = det.variant || 0;
+    return [{ label: "Oryginał", value: cur ? "" : "✓", act: () => pick(null) },
+      ...det.variants.map((v) => ({ label: v.label, value: (v.lang && v.lang !== "?" ? v.lang.toUpperCase() + " " : "") + (cur === v.id ? "✓" : ""),
+        act: () => pick(v) }))];
+  }
   if (GO.page === "emus") {
     const cur = d.emulator;
     const sys = { label: "Domyślny dla systemu", value: cur.own ? "" : "✓", act: async () => { await api().set_game_emulator(GO.id, null); await reloadGo("main"); toast("Gra używa emulatora systemu."); } };
@@ -183,7 +210,7 @@ const SM_PLAT = { windows: "Komputer", android: "Telefon" };
 async function openSaveManager() {
   GO.sm = null;
   goPage("saves");
-  const r = await api().save_manager(GO.id);
+  const r = await api().save_manager(GO.pid);
   if (GO.page !== "saves") return;
   if (!r || !r.ok) { toast(r?.reason || "Nie udało się odczytać zapisów."); return goPage("main"); }
   GO.sm = r;
@@ -236,9 +263,9 @@ function stateActItems() {
     act: async () => {
       if (hereT.ok === false && GO.confirmCopy !== hereT) { GO.confirmCopy = hereT; return toast("Ten stan raczej się nie wczyta (" + hereT.note + "). A jeszcze raz — spróbuj mimo to."); }
       GO.confirmCopy = null;
-      const res = await api().save_copy(GO.id, st.rel, hereT.platform, hereT.emu);
+      const res = await api().save_copy(GO.pid, st.rel, hereT.platform, hereT.emu);
       if (!res?.ok) return toast(res?.reason || "Nie udało się skopiować.");
-      GO.data = await api().game_options(GO.id);
+      GO.data = await api().game_options(GO.pid);
       const copied = (res.rel || "").split("/").pop() || st.name;   // nazwa u celu (autosave → resume)
       const local = (GO.data?.states || []).find((x) => x.name === copied);
       if (!local) return toast("Skopiowano, ale emulator tej gry nie widzi stanu — sprawdź emulator w opcjach gry.", 6000);
@@ -251,13 +278,13 @@ function stateActItems() {
     act: async () => {
       if (t.ok === false && GO.confirmCopy !== t) { GO.confirmCopy = t; return toast("Ten stan raczej się nie wczyta (" + t.note + "). A jeszcze raz — skopiuj mimo to."); }
       GO.confirmCopy = null;
-      const res = await api().save_copy(GO.id, st.rel, t.platform, t.emu);
+      const res = await api().save_copy(GO.pid, st.rel, t.platform, t.emu);
       if (!res?.ok) return toast(res?.reason || "Nie udało się skopiować.");
       const where = t.platform === r.here
         ? (res.local ? "Jest już w „Wczytaj zapis”." : "Pobierze się przy następnej grze.")
         : `${SM_PLAT[t.platform]} pobierze go przy następnym uruchomieniu gry.`;
       toast(res.same ? "Ten stan już tam jest." : `Skopiowano (${smSlot(st)}). ${where}`, 6000);
-      if (res.local) GO.data = await api().game_options(GO.id);
+      if (res.local) GO.data = await api().game_options(GO.pid);
       openSaveManager();
     },
   });
@@ -270,11 +297,11 @@ async function refreshGoDetail() {
   if (S.modal === "gopt") renderGopt();
   schedulePreview();
 }
-async function reloadGo(page) { GO.data = await api().game_options(GO.id); goPage(page); }
+async function reloadGo(page) { GO.data = await api().game_options(GO.pid); goPage(page); }
 function goPage(page) { GO.page = page; GO.idx = 0; renderGopt(); }
 
 function renderGopt() {
-  const titles = { main: "Opcje gry", emus: "Emulator dla tej gry", states: "Wczytaj zapis", meta: "Metadane",
+  const titles = { main: "Opcje gry", variants: "Wersja gry", emus: "Emulator dla tej gry", states: "Wczytaj zapis", meta: "Metadane",
                    saves: "Zapisy i stany", stateAct: "Stan gry",
                    art: { snap: "Zrzut ekranu", logo: "Logo gry", box: "Okładka" }[GO.art?.kind] || "Okładka" };
   $("goTitle").textContent = GO.detail?.title || "";

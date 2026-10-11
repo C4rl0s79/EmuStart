@@ -8,6 +8,18 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.30.0] — 2026-10-11
+
+### Dodane
+- **Tłumaczenia jako wersje gier** — fanowskie tłumaczenia z folderu kolekcji (`[T-En]
+  Collection\<system>\`, folder systemu z tagiem `[T-…]` albo pliki z `[T-…]` w nazwie)
+  są schowane pod oryginałem: na liście jedna gra, a w opcjach gry (przytrzymaj A)
+  **Wersja** — oryginał albo tłumaczenie (język i autor z tagu). Wybrana wersja pobiera
+  się, uruchamia i ma swoje zapisy; wybór należy do profilu gracza i jest wspólny dla
+  komputera i telefonu (`<profil>/variants.json`). Pliki na dysku zostają nietknięte.
+  Rozpoznawanie języka i tytułu bazowego przeniesione z RomHelpera. Tłumaczenie bez
+  własnego emulatora używa emulatora wybranego dla oryginału.
+
 ## [0.29.0] — 2026-10-11
 
 ### Dodane
