@@ -8,6 +8,13 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.27.1] — 2026-10-11
+
+### Poprawione
+- **Menedżer zapisów pokazywał karty pamięci innych platform** — np. gra SNES widziała
+  karty PS2 (`Mcd001.ps2`) i wspólną kartę PS1. Karty i stany PS1/PS2 są teraz tylko przy
+  grach swojej platformy. Listę liczy serwer — **zaktualizuj serwer**.
+
 ## [0.27.0] — 2026-10-11
 
 ### Dodane
