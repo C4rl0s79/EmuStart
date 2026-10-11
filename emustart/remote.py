@@ -135,9 +135,12 @@ def handle(handler) -> None:
                 return _json(handler, {"error": "nie ma takiej gry"}, 404)
             from emustart import library
             g = library.game(int(parts[1]))
-            d["files"] = [{"path": rel, "size": size} for rel, size, _m in g["files"]]
+            # ścieżki z „/” — Android traktuje „\\” jako znak w nazwie pliku (EPERM)
+            d["files"] = [{"path": rel.replace("\\", "/"), "size": size} for rel, size, _m in g["files"]]
             # arcade: rodzic i BIOS (np. neogeo.zip) obok gry — jak na Windows
-            d["files"] += [{"path": rel, "size": size, "dep": True} for rel, _p, size in _arcade_deps(g)]
+            d["files"] += [{"path": rel.replace("\\", "/"), "size": size, "dep": True}
+                           for rel, _p, size in _arcade_deps(g)]
+            d["file"] = str(d.get("file") or "").replace("\\", "/")
             d["es"] = g["es"]
             from emustart import systems
             info = systems.info(g["es"])
@@ -519,7 +522,7 @@ def _find(handler) -> None:
     rows = library.db().execute("SELECT id, rel, files FROM games WHERE es=?", (es,)).fetchall()
     for r in rows:
         if r["rel"].replace("\\", "/") == rel:
-            files = [{"path": f, "size": size} for f, size, _m in json.loads(r["files"])]
+            files = [{"path": f.replace("\\", "/"), "size": size} for f, size, _m in json.loads(r["files"])]
             return _json(handler, {"id": r["id"], "files": files})
     return _json(handler, {"error": "nie ma takiej gry"}, 404)
 
@@ -695,7 +698,7 @@ def _send_file(handler, gid: int, rel: str) -> None:
     if rel in deps:
         path = deps[rel]
     else:
-        path = base / g["rel"] if rel == g["rel"].replace("\\", "/") and not g.get("is_dir") else base / rel
+        path = base / rel                       # „/” działa i na Windows
     try:
         size = path.stat().st_size
     except OSError:

@@ -8,6 +8,18 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.30.6] — 2026-10-11
+
+Zakres: ścieżki plików gier wysyłane telefonowi (`emustart/remote.py`) i ich odczyt na
+Androidzie (`Server.game()`). Bez zmian: lista gier, menu, sterowanie, tłumaczenia, Windows.
+
+### Naprawione
+- **Android: gry z podfolderów (np. kolekcja `[T-En]Collection`) nie startowały** —
+  „open failed: EPERM” dla `…\NEC - PC-9801 [T-En] Collection\Gra.zip.part`. Serwer na
+  Windows wysyłał ścieżki z `\`, a Android traktuje `\` jako znak w nazwie pliku.
+  Serwer wysyła teraz ścieżki z `/`, a telefon zamienia `\` na `/` także dla starszego
+  serwera.
+
 ## [0.30.5] — 2026-10-11
 
 Zakres: poprawki z przeglądu kodu 0.30.4 — `emustart/launchbox.py`, fokus okna
