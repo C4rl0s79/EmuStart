@@ -14,6 +14,7 @@ wszystko działa bez sieci (sieć tylko po wybraną grafikę).
 from __future__ import annotations
 
 import io
+import os
 import logging
 import re
 import sqlite3
@@ -150,8 +151,7 @@ class Updater:
             tmp = db_path().with_suffix(".new")
             tmp.unlink(missing_ok=True)
             self.result = build(zp, tmp, self._progress, self.cancel)
-            db_path().unlink(missing_ok=True)
-            tmp.replace(db_path())
+            _install(tmp)
             self.text = "Gotowe"
         except Exception as ex:
             log.exception("launchbox")
@@ -363,15 +363,45 @@ def platform(es: str) -> dict | None:
 # ── zapytania ──
 
 _local = threading.local()
+# Połączenia tylko-do-odczytu wszystkich wątków. Windows nie podmieni pliku bazy, gdy
+# któreś jest otwarte (WinError 32 przy „Aktualizuj bazę LaunchBox”) — przy podmianie
+# zamykamy je, a wątki otwierają bazę na nowo (nowa generacja).
+_open_lock = threading.Lock()
+_open: list = []
+_gen = 0
 
 
 def _con():
     con = getattr(_local, "con", None)
-    if con is None or getattr(_local, "path", None) != db_path():
-        con = sqlite3.connect(f"file:{db_path()}?mode=ro", uri=True, check_same_thread=False)
-        con.row_factory = sqlite3.Row
-        _local.con, _local.path = con, db_path()
+    if con is None or getattr(_local, "path", None) != db_path() or getattr(_local, "gen", -1) != _gen:
+        with _open_lock:
+            con = sqlite3.connect(f"file:{db_path()}?mode=ro", uri=True, check_same_thread=False)
+            con.row_factory = sqlite3.Row
+            _open.append(con)
+            _local.con, _local.path, _local.gen = con, db_path(), _gen
     return con
+
+
+def _install(tmp: Path) -> None:
+    """Nowa baza na miejsce starej: zamknięcie połączeń innych wątków, podmiana
+    (z ponowieniem, gdy plik chwilowo trzyma np. antywirus)."""
+    global _gen
+    with _open_lock:
+        _gen += 1
+        for c in _open:
+            try:
+                c.close()
+            except sqlite3.Error:
+                pass
+        _open.clear()
+        for i in range(20):
+            try:
+                os.replace(tmp, db_path())
+                return
+            except PermissionError:
+                if i == 19:
+                    raise
+                time.sleep(0.5)
 
 
 def find_game(es: str, name: str, setname: str = "") -> dict | None:

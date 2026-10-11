@@ -6,7 +6,7 @@
 # Portable: config.json / data/ / cache/ / logs/ powstają OBOK exe (paths.app_dir),
 # a web/ i assets/ leżą w _internal/ (sys._MEIPASS).
 
-from PyInstaller.utils.hooks import collect_all, collect_submodules
+from PyInstaller.utils.hooks import collect_all, collect_submodules, copy_metadata
 
 import re
 from PyInstaller.utils.win32.versioninfo import (
@@ -48,6 +48,13 @@ for pkg in ("webview", "clr_loader", "pythonnet"):
         datas += d
         binaries += b
         hiddenimports += h
+    except Exception:
+        pass
+
+# metadane wersji — EmuStart zapisuje w logu wersje pywebview/pythonnet (diagnostyka okna)
+for dist in ("pywebview", "pythonnet", "clr_loader"):
+    try:
+        datas += copy_metadata(dist)
     except Exception:
         pass
 
