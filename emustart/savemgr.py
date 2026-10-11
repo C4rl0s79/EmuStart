@@ -48,7 +48,9 @@ SOURCES = [
 PLATFORM = {"windows": "Komputer", "android": "Telefon"}
 
 _RA_STATE = re.compile(r"^(?P<stem>.+)\.state(?P<slot>\d*)(?P<auto>\.auto)?$", re.I)
-_P2S = re.compile(r"^(?P<prefix>.+)\.(?P<slot>\d{2}|resume)\.p2s$", re.I)
+# sloty 00–09, stan wznowienia PCSX2 (.resume) i autozapis ARMSX2 przy wyjściu
+# (.autosave.p2s, starsze: .autosave.2–5.p2s)
+_P2S = re.compile(r"^(?P<prefix>.+)\.(?P<slot>\d{2}|resume|autosave(?:\.\d)?)\.p2s$", re.I)
 P2S_VERSION = "PCSX2 Savestate Version.id"
 INDEX = ".emustart-index.json"          # przedrostki stanów PS2 telefonu (Saves.kt)
 
@@ -211,7 +213,7 @@ def copy(fs, nas: str, src_rel: str, platform: str, emu: str, es: str, name: str
     data = fs.read(f"{nas}/{src_rel}")
     if data is None:
         return {"ok": False, "reason": "Nie ma już tego stanu."}
-    fname = PurePosixPath(src_rel).name
+    fname = _equivalent_name(PurePosixPath(src_rel).name, platform)
     _p, _e, label, base, kind = target
     sub = _dest_dir(fs, nas, base, kind, src_rel)
     dst = f"{base}/{sub}{fname}" if sub else f"{base}/{fname}"
@@ -234,6 +236,21 @@ def copy(fs, nas: str, src_rel: str, platform: str, emu: str, es: str, name: str
                  f"{time.time():.3f}-{device or socket.gethostname()}-menedzer".encode("utf-8"))
     log.info("menedżer zapisów: %s → %s", src_rel, dst)
     return {"ok": True, "rel": dst, "label": label}
+
+
+def _equivalent_name(fname: str, platform: str) -> str:
+    """Stan „przy wyjściu” ma inną nazwę w każdym emulatorze: PCSX2 — `.resume.p2s`
+    (Wznów grę), ARMSX2 — `.autosave.p2s` (wczytywany sam przy starcie). Kopia trafia pod
+    nazwę, której emulator docelowy używa; starsze autozapisy (.autosave.2–5) zostają."""
+    m = _P2S.match(fname)
+    if not m:
+        return fname
+    slot = m.group("slot").lower()
+    if platform == "windows" and slot == "autosave":
+        return f"{m.group('prefix')}.resume.p2s"
+    if platform == "android" and slot == "resume":
+        return f"{m.group('prefix')}.autosave.p2s"
+    return fname
 
 
 def _dest_dir(fs, nas: str, base: str, kind: str, src_rel: str) -> str:

@@ -87,7 +87,8 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
         }
 
         /** Nazwa stanu PCSX2/ArmSX2 → przedrostek gry („SLUS-21115 (ABCD1234)”). */
-        private val P2S = Regex("""^(.*)\.(\d{2}|resume)\.p2s""", RegexOption.IGNORE_CASE)
+        /** Sloty 00–09, wznowienie PCSX2 (.resume) i autozapis ArmSX2 (.autosave, .autosave.2–5). */
+        private val P2S = Regex("""^(.*)\.(\d{2}|resume|autosave(?:\.\d)?)\.p2s$""", RegexOption.IGNORE_CASE)
 
         /** PS1 w RetroArchu (SwanStation, Beetle PSX): zapis `<gra>.srm` to surowa karta pamięci
          *  128 KB — ta sama co karta DuckStation `<gra>_1.mcd` na komputerze. DuckStation na
