@@ -529,6 +529,12 @@ class RetroArch(Adapter):
         stems = {Path(game["rel"]).stem, game["name"]}
         return [f"{s}.state*" for s in stems]
 
+    def prefix_of(self, filename: str) -> str:
+        """„Chrono_Trigger_(USA)_(MSU1).state1” → „Chrono_Trigger_(USA)_(MSU1).state” — nazwa
+        od ROM-u w środku ZIP-a bywa inna niż gry; poznana po grze, lista stanów ją zna."""
+        m = re.match(r"^(.+\.state)\d*(\.auto)?$", filename)
+        return m.group(1) if m else ""
+
     def start_state_args(self, run_dir: Path, state: Path, pad_order: list | None = None) -> list:
         name = state.name
         if name.endswith(".auto"):

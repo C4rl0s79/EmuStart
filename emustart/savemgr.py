@@ -58,6 +58,30 @@ INDEX = ".emustart-index.json"          # przedrostki stanów PS2 telefonu (Save
 _SAVE_EXT = re.compile(r"\.(srm|sav|rtc|eep|fla|mpk|sra|nv|mcr|bkr|bcr|brm|dsv|ram)$", re.I)
 
 
+def norm_stem(s: str) -> str:
+    """Porównanie nazw stanów RetroArcha bez różnic „_” / spacja i wielkości liter
+    (ZIP „Chrono Trigger (USA) (MSU1)” — ROM w środku „Chrono_Trigger_(USA)_(MSU1)”)."""
+    return re.sub(r"[\s_]+", " ", s).strip().lower()
+
+
+def zip_stems(path) -> list:
+    """Nazwy plików gry w archiwum (bez rozszerzeń i plików towarzyszących): RetroArch
+    nazywa stan i zapis od pliku w środku archiwum, nie od samego ZIP-a."""
+    from emustart.launcher import COMPANION_EXTS
+    try:
+        with zipfile.ZipFile(path) as z:
+            names = [n for n in z.namelist() if not n.endswith("/")]
+    except (OSError, zipfile.BadZipFile):
+        return []
+    out = []
+    for n in names:
+        base = PurePosixPath(n.replace("\\", "/")).name
+        stem, _, ext = base.rpartition(".")
+        if stem and ext.lower() not in COMPANION_EXTS:
+            out.append(stem)
+    return out
+
+
 def _src(platform: str, emu: str):
     return next((s for s in SOURCES if s[0] == platform and s[1] == emu), None)
 
@@ -96,7 +120,7 @@ def _game_prefixes(fs, nas: str, es: str, name: str, serial: str, learned: list)
 def catalog(fs, nas: str, es: str, name: str, stems: list, serial: str = "",
             learned: list | None = None) -> dict:
     """Stany tej gry z obu platform (najnowsze pierwsze) + zapisy w grze (wspólne)."""
-    stems = {s for s in stems if s}
+    stems = {norm_stem(s) for s in stems if s}
     plat = _plat(es)
     prefixes = _game_prefixes(fs, nas, es, name, serial, learned or []) if plat in ("PS2", "") else set()
     states, latest_ver = [], {}
@@ -109,7 +133,7 @@ def catalog(fs, nas: str, es: str, name: str, stems: list, serial: str = "",
             fname = rel.rsplit("/", 1)[-1]
             if kind == "ra":
                 m = _RA_STATE.match(fname)
-                if not m or m.group("stem") not in stems:
+                if not m or norm_stem(m.group("stem")) not in stems:
                     continue
                 slot = "auto" if m.group("auto") else (m.group("slot") or "0")
                 shot = rel + ".png" if rel + ".png" in files else ""
@@ -184,7 +208,7 @@ def _saves(fs, nas: str, name: str, stems: set, plat: str = "") -> list:
     Karty pamięci tylko przy grach swojej platformy: PS1 (DuckStation, SwanStation) i PS2
     (PCSX2, ARMSX2) — gra SNES nie pokazuje kart PlayStation."""
     out = []
-    srcs = [("save/retroarch", lambda f: _SAVE_EXT.search(f) and f.rsplit(".", 1)[0] in stems)]
+    srcs = [("save/retroarch", lambda f: _SAVE_EXT.search(f) and norm_stem(f.rsplit(".", 1)[0]) in stems)]
     if plat == "PS1":
         srcs.append(("save/duckstation/memcards", lambda f: f.lower().endswith(".mcd")
                      and (f.startswith(name + "_") or f.lower().startswith("shared_card"))))

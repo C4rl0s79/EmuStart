@@ -8,6 +8,19 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.27.3] — 2026-10-11
+
+### Poprawione
+- **Stany RetroArcha (SNES, MSU-1 i inne) niewidoczne w menedżerze zapisów** — RetroArch
+  nazywa stan od pliku gry **w środku ZIP-a** (MSU-1: `Chrono_Trigger_(USA)_(MSU1).state`),
+  a EmuStart szukał go po nazwie ZIP-a (`Chrono Trigger (USA) (MSU1)`). Teraz stany i zapisy
+  dobierane są także po nazwach plików w archiwum, bez różnicy „_” / spacja (serwer, komputer,
+  telefon), a komputer zapamiętuje nazwy stanów po grze („Wczytaj zapis”).
+- Telefon wysyła stany RetroArcha **z podfolderem rdzenia** (`RetroArch/states/bsnes/…` →
+  `states/android/retroarch/bsnes/…`): menedżer pokazuje rdzeń, a kopia na komputer trafia
+  do folderu tego rdzenia, w którym RetroArch jej szuka.
+  **Zaktualizuj serwer, telefon i komputer.**
+
 ## [0.27.2] — 2026-10-11
 
 ### Poprawione

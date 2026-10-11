@@ -181,3 +181,38 @@ def test_armsx2_autosave_listed_and_copied_as_resume(tmp_path):
     two = savemgr.copy(fs, "Jezus", "states/android/armsx2/SLUS-20851 (39B574F0).autosave.2.p2s",
                        "windows", "pcsx2", "ps2", "Ace Combat 5 (USA)")
     assert two["rel"].endswith(".autosave.2.p2s")                     # starsze autozapisy bez zmiany nazwy
+
+
+def test_ra_state_named_after_rom_inside_zip(tmp_path):
+    """RetroArch nazywa stan od ROM-u w ZIP-ie (MSU-1: „Chrono_Trigger_(USA)_(MSU1).state”),
+    nie od nazwy gry — menedżer dobiera go po nazwach z archiwum (i bez różnicy „_”/spacja)."""
+    fs = _nas(tmp_path)
+    z = tmp_path / "roms" / "Chrono Trigger (USA) (MSU1).zip"
+    z.parent.mkdir()
+    with zipfile.ZipFile(z, "w") as zf:
+        zf.writestr("Chrono_Trigger_(USA)_(MSU1).sfc", b"rom")
+        zf.writestr("Chrono_Trigger_(USA)_(MSU1)-1.pcm", b"pcm")
+        zf.writestr("Chrono_Trigger_(USA)_(MSU1).msu", b"msu")
+    assert savemgr.zip_stems(z) == ["Chrono_Trigger_(USA)_(MSU1)"]
+    tel = tmp_path / "nas/Jezus/states/android/retroarch/bsnes"
+    _w(tel / "Chrono_Trigger_(USA)_(MSU1).state", b"t")
+    _w(tel / "Chrono_Trigger_(USA)_(MSU1).state.png", b"p")
+    name = "Chrono Trigger (USA) (MSU1)"
+    assert savemgr.catalog(fs, "Jezus", "SNESMSU1", name, [name])["states"]   # „_” = spacja
+    cat = savemgr.catalog(fs, "Jezus", "SNESMSU1", name, [name] + savemgr.zip_stems(z))
+    (st,) = cat["states"]
+    assert st["platform"] == "android" and st["core"] == "bsnes" and st["shot"].endswith(".png")
+    # bez różnicy „_” / spacja (nazwa gry vs nazwa pliku)
+    assert savemgr.catalog(fs, "Jezus", "SNESMSU1", name, ["chrono trigger (usa) (msu1)"])["states"]
+    # kopia na komputer — do podfolderu rdzenia
+    _w(tmp_path / "nas/Jezus/save/retroarch/states/bsnes/Inna.state1", b"x")
+    r = savemgr.copy(fs, "Jezus", st["rel"], "windows", "retroarch", "SNESMSU1", name)
+    assert r["rel"] == "save/retroarch/states/bsnes/Chrono_Trigger_(USA)_(MSU1).state"
+
+
+def test_retroarch_learns_state_prefix():
+    from emustart import ingame
+    ra = ingame.RetroArch.__new__(ingame.RetroArch)
+    assert ra.prefix_of("Chrono_Trigger_(USA)_(MSU1).state1") == "Chrono_Trigger_(USA)_(MSU1).state"
+    assert ra.prefix_of("Gra.state.auto") == "Gra.state"
+    assert ra.prefix_of("Gra.state1.png") == ""

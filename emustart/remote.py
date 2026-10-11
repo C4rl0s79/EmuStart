@@ -527,7 +527,7 @@ def _savemgr_args(handler) -> dict:
 
 def _savemgr_game(es: str, name: str) -> tuple[list, str]:
     """Nazwy plików i numer płyty gry z biblioteki serwera (gdy klient ich nie podał)."""
-    from emustart import ingame, library, metadata
+    from emustart import ingame, library, metadata, savemgr
     r = library.db().execute("SELECT id, rel FROM games WHERE es=? AND name=?", (es, name)).fetchone()
     if not r:
         return [name], ""
@@ -535,7 +535,11 @@ def _savemgr_game(es: str, name: str) -> tuple[list, str]:
         serial = ingame._serial(metadata.get(r["id"]))
     except Exception:
         serial = ""
-    return [Path(r["rel"].replace("\\", "/")).stem, name], serial
+    stems = [Path(r["rel"].replace("\\", "/")).stem, name]
+    if r["rel"].lower().endswith(".zip"):
+        g = library.game(r["id"]) or {}
+        stems += savemgr.zip_stems(Path(g.get("src") or "") / r["rel"])   # ROM w środku ZIP-a
+    return stems, serial
 
 
 def _savemgr_catalog(handler) -> None:

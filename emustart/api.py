@@ -771,8 +771,13 @@ class Api:
         meta = metadata.get(g["id"])
         serial = ingame._serial(meta)
         stems = [Path(g["rel"]).stem, g["name"]]
+        if g["rel"].lower().endswith(".zip"):
+            # RetroArch nazywa stan od ROM-u w środku ZIP-a — z kopii lokalnej, inaczej z NAS-a
+            local = cache.local_path(self._cfg, g)
+            stems += savemgr.zip_stems(local if local.is_file() else library.game_dir(g) / g["rel"])
         learned = [r["prefix"] for r in library.db().execute(
             "SELECT prefix FROM states WHERE game_id=?", (g["id"],))]
+        stems += [p[:-len(".state")] for p in learned if p.endswith(".state")]
         try:
             if isinstance(fs, nasfs.RemoteFs):
                 out = fs.savemgr_catalog({"profile": nas, "es": g["es"], "name": g["name"],
