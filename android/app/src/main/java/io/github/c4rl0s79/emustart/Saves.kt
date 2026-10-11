@@ -47,16 +47,18 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
 
     /** Gra: nazwa (jak na serwerze), nazwa pliku bez rozszerzenia, folder gry w telefonie, rdzeń RetroArcha. */
     data class Game(val es: String, val name: String, val stem: String, val dir: File, val core: String,
-                    val plat: String = "", val serial: String = "") {
+                    val plat: String = "", val serial: String = "", val alts: String = "") {
         fun toJson(): JSONObject = JSONObject().put("es", es).put("name", name).put("stem", stem)
-            .put("dir", dir.absolutePath).put("core", core).put("plat", plat).put("serial", serial)
+            .put("dir", dir.absolutePath).put("core", core).put("plat", plat).put("serial", serial).put("alts", alts)
+        /** Nazwy, od których RetroArch nazywa zapisy i stany: plik gry i ROM w środku ZIP-a. */
+        val stems: List<String> get() = listOf(stem) + alts.split('|').filter { it.isNotEmpty() && it != stem }
         /** Przedrostek stanów PCSX2/ArmSX2 z numeru płyty: „SLUS-21346 (” (jak na komputerze). */
         val serialPrefix: String get() =
             Regex("[A-Z]{4}-\\d{3,5}").find(serial.uppercase())?.value?.let { "$it (" } ?: ""
         companion object {
             fun of(o: JSONObject) = Game(o.getString("es"), o.getString("name"), o.getString("stem"),
                                          File(o.getString("dir")), o.optString("core"), o.optString("plat"),
-                                         o.optString("serial"))
+                                         o.optString("serial"), o.optString("alts"))
         }
     }
 
@@ -231,11 +233,11 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
     }
 
     private fun matches(f: Fam, g: Game, name: String): Boolean = when (f.kind) {
-        Kind.BY_STEM -> name.startsWith(g.stem + ".") && SAVE_EXT.containsMatchIn(name)
+        Kind.BY_STEM -> g.stems.any { name.startsWith("$it.") } && SAVE_EXT.containsMatchIn(name)
         Kind.PS1_SRM -> name == g.stem + ".srm" || name == g.name + "_1.mcd"
         Kind.PS1_CARDS -> name.endsWith(".mcd", true) && (name.startsWith(g.name + "_") || name.startsWith("shared_card", true))
         Kind.PS2_CARDS -> name.endsWith(".ps2", true)
-        Kind.RA_STATES -> name.startsWith(g.stem + ".state")
+        Kind.RA_STATES -> g.stems.any { name.startsWith("$it.state") } && !name.endsWith(".png", true)
         // po przedrostku poznanym w grze albo po numerze płyty z metadanych — stan wznowienia
         // ArmSX2 zapisuje przy wyjściu, często już po synchronizacji, więc samo „poznanie
         // w trakcie gry” go nie łapało i stany nie szły na serwer
@@ -640,6 +642,12 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
     /** Ścieżka na serwerze dla nowego zapisu (RetroArch: podfolder rdzenia, gdy serwer je ma). */
     private fun newRel(f: Fam, g: Game, x: File, nas: Map<String, DoubleArray>): String {
         if (f.kind == Kind.PS1_SRM) return toNas(f, g, x.name)
+        if (f.kind == Kind.RA_STATES) {
+            // stany RetroArcha w podfolderze rdzenia (RetroArch/states/bsnes/…) — z nim na serwer,
+            // żeby kopia na komputer trafiła do folderu, w którym RetroArch jej szuka
+            val parent = x.parentFile
+            return if (parent != null && !parent.name.equals("states", true)) parent.name + "/" + x.name else x.name
+        }
         if (f.kind != Kind.BY_STEM) return x.name
         val parent = x.parentFile
         val learned = prefs.learnedDir(f.dirs)

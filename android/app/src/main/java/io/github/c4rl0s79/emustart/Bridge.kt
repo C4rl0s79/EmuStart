@@ -396,7 +396,8 @@ class Bridge(private val act: MainActivity) {
                 val sg = Saves.Game(es, g.optString("name"), main.nameWithoutExtension, main.parentFile ?: base,
                                     Emulators.retroCore(l.sys.optString("plat"),
                                         Emulators.coreOf(emu).ifEmpty { l.sys.optString("core") }),
-                                    l.sys.optString("plat"), g.optJSONObject("meta")?.optString("serial") ?: "")
+                                    l.sys.optString("plat"), g.optJSONObject("meta")?.optString("serial") ?: "",
+                                    zipStems(main0).joinToString("|"))
                 try {
                     val msg = saves.before(prefs.profile, emu, sg, takeover)
                     l.message = msg
@@ -595,6 +596,13 @@ class Bridge(private val act: MainActivity) {
             JSONObject().put("ok", false).put("reason", "Nie udało się otworzyć emulatora: ${e.message}")
         }
     }
+
+    /** Pliki gry w ZIP-ie (bez rozszerzeń): RetroArch nazywa od nich stany i zapisy. */
+    private fun zipStems(f: File): List<String> = if (!f.extension.equals("zip", true)) emptyList() else try {
+        java.util.zip.ZipFile(f).use { z ->
+            z.entries().asSequence().filter { !it.isDirectory }.map { File(it.name).nameWithoutExtension }.toList()
+        }
+    } catch (e: Exception) { emptyList() }
 
     /** Usuwa grę z telefonu (pliki, niedokończone pobieranie, rozpakowany ZIP, przypięcie). */
     private fun removeLocal(id: Int): JSONObject {
