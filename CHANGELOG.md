@@ -11,9 +11,9 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 ## [0.30.3] — 2026-10-11
 
 ### Naprawione
-- **Czytelna lista gier z tłumaczeniami** — na liście oznaczenia kończą się na języku
-  tłumaczenia: „Bahamut Lagoon (Japan) [T-En]” zamiast „… [T-En by DeJap v1.2]”. Pełne
-  oznaczenia (autor, wersja) są w szczegółach gry obok listy.
+- **Czytelna lista gier z tłumaczeniami** — na liście bez dopisku tłumaczenia:
+  „Bahamut Lagoon (Japan)” zamiast „… [T-En by DeJap v1.2]”. Pełne oznaczenia (język,
+  autor, wersja) są w szczegółach gry obok listy.
 
 ## [0.30.2] — 2026-10-11
 

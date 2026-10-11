@@ -414,13 +414,11 @@ function jumpLetter(dir) {
   S.gameIdx = i;
 }
 
-// Lista gier: oznaczenia tylko do języka tłumaczenia — „(Japan) [T-En by DeJap v1.2] [b]”
-// → „(Japan) [T-En]”. Pełne oznaczenia są w szczegółach gry (podgląd obok listy).
+// Lista gier: oznaczenia bez dopisku tłumaczenia — „(Japan) [T-En by DeJap v1.2] [b]”
+// → „(Japan)”. Pełne oznaczenia są w szczegółach gry (podgląd obok listy).
 function listTags(tags) {
   const m = /[\[(]\s*T\s*[-+]\s*[A-Za-z]+/i.exec(tags || "");
-  if (!m) return tags || "";
-  const close = m[0][0] === "(" ? ")" : "]";
-  return (tags.slice(0, m.index) + m[0].replace(/\s+/g, "") + close).trim();
+  return m ? tags.slice(0, m.index).trim() : (tags || "");
 }
 function gamesInput(a) {
   const n = S.games.length;
