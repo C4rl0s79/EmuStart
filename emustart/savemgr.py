@@ -95,9 +95,12 @@ def catalog(fs, nas: str, es: str, name: str, stems: list, serial: str = "",
             learned: list | None = None) -> dict:
     """Stany tej gry z obu platform (najnowsze pierwsze) + zapisy w grze (wspólne)."""
     stems = {s for s in stems if s}
-    prefixes = _game_prefixes(fs, nas, es, name, serial, learned or [])
+    plat = _plat(es)
+    prefixes = _game_prefixes(fs, nas, es, name, serial, learned or []) if plat in ("PS2", "") else set()
     states, latest_ver = [], {}
     for platform, emu, label, base, kind in SOURCES:
+        if kind == "ps2" and plat not in ("PS2", ""):
+            continue                       # stany PCSX2/ARMSX2 tylko przy grach PS2
         files = fs.scan(f"{nas}/{base}")
         newest = None
         for rel, (size, mtime) in files.items():
@@ -129,7 +132,7 @@ def catalog(fs, nas: str, es: str, name: str, stems: list, serial: str = "",
             st["version"] = _version(fs, f"{nas}/{st['rel']}")
         st["targets"] = _targets(st, latest_ver)
     states.sort(key=lambda s: -s["mtime"])
-    return {"states": states, "saves": _saves(fs, nas, name, stems),
+    return {"states": states, "saves": _saves(fs, nas, name, stems, plat),
             "versions": {f"{p}/{e}": fmt_version(v) for (p, e), v in latest_ver.items()}}
 
 
@@ -165,14 +168,27 @@ def _targets(st: dict, latest_ver: dict) -> list:
     return out
 
 
-def _saves(fs, nas: str, name: str, stems: set) -> list:
-    """Zapisy w grze — wspólne dla komputera i telefonu (synchronizują się same)."""
+def _plat(es: str) -> str:
+    """Platforma systemu (PS1, PS2, SNES…); '' = nieznana."""
+    from emustart import systems
+    try:
+        return systems.info(es)["plat"] if es else ""
+    except Exception:
+        return ""
+
+
+def _saves(fs, nas: str, name: str, stems: set, plat: str = "") -> list:
+    """Zapisy w grze — wspólne dla komputera i telefonu (synchronizują się same).
+    Karty pamięci tylko przy grach swojej platformy: PS1 (DuckStation, SwanStation) i PS2
+    (PCSX2, ARMSX2) — gra SNES nie pokazuje kart PlayStation."""
     out = []
-    for base, test in (
-            ("save/retroarch", lambda f: _SAVE_EXT.search(f) and f.rsplit(".", 1)[0] in stems),
-            ("save/duckstation/memcards", lambda f: f.lower().endswith(".mcd")
-             and (f.startswith(name + "_") or f.lower().startswith("shared_card"))),
-            ("save/pcsx2/memcards", lambda f: f.lower().endswith(".ps2"))):
+    srcs = [("save/retroarch", lambda f: _SAVE_EXT.search(f) and f.rsplit(".", 1)[0] in stems)]
+    if plat == "PS1":
+        srcs.append(("save/duckstation/memcards", lambda f: f.lower().endswith(".mcd")
+                     and (f.startswith(name + "_") or f.lower().startswith("shared_card"))))
+    if plat == "PS2":
+        srcs.append(("save/pcsx2/memcards", lambda f: f.lower().endswith(".ps2")))
+    for base, test in srcs:
         for rel, (size, mtime) in fs.scan(f"{nas}/{base}").items():
             fname = rel.rsplit("/", 1)[-1]
             if test(fname):

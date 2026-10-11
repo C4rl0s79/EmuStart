@@ -8,6 +8,23 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.27.1] — 2026-10-11
+
+### Poprawione
+- **Menedżer zapisów pokazywał karty pamięci innych platform** — np. gra SNES widziała
+  karty PS2 (`Mcd001.ps2`) i wspólną kartę PS1. Karty i stany PS1/PS2 są teraz tylko przy
+  grach swojej platformy. Listę liczy serwer — **zaktualizuj serwer**.
+- **Stany ARMSX2 / AetherSX2 z telefonu nie trafiały na serwer** (menedżer zapisów ich nie
+  pokazywał): telefon rozpoznawał stany PS2 tylko po przedrostku poznanym z pliku zmienionego
+  w trakcie gry, a stan wznowienia (`.resume.p2s`) ARMSX2 zapisuje przy wyjściu — często już
+  po synchronizacji. Teraz telefon rozpoznaje stany także po numerze płyty z metadanych gry
+  (jak PCSX2 na komputerze), bez względu na czas zapisu; zaległe wyślą się po następnej grze.
+  **Zaktualizuj aplikację na telefonie.**
+
+### Dodane
+- Menedżer zapisów na komputerze: **Kopiuj tutaj i graj** — stan z telefonu (np. wznowienie
+  z ARMSX2) od razu na ten komputer i start gry od niego w PCSX2.
+
 ## [0.27.0] — 2026-10-11
 
 ### Dodane

@@ -47,12 +47,16 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
 
     /** Gra: nazwa (jak na serwerze), nazwa pliku bez rozszerzenia, folder gry w telefonie, rdzeń RetroArcha. */
     data class Game(val es: String, val name: String, val stem: String, val dir: File, val core: String,
-                    val plat: String = "") {
+                    val plat: String = "", val serial: String = "") {
         fun toJson(): JSONObject = JSONObject().put("es", es).put("name", name).put("stem", stem)
-            .put("dir", dir.absolutePath).put("core", core).put("plat", plat)
+            .put("dir", dir.absolutePath).put("core", core).put("plat", plat).put("serial", serial)
+        /** Przedrostek stanów PCSX2/ArmSX2 z numeru płyty: „SLUS-21346 (” (jak na komputerze). */
+        val serialPrefix: String get() =
+            Regex("[A-Z]{4}-\\d{3,5}").find(serial.uppercase())?.value?.let { "$it (" } ?: ""
         companion object {
             fun of(o: JSONObject) = Game(o.getString("es"), o.getString("name"), o.getString("stem"),
-                                         File(o.getString("dir")), o.optString("core"), o.optString("plat"))
+                                         File(o.getString("dir")), o.optString("core"), o.optString("plat"),
+                                         o.optString("serial"))
         }
     }
 
@@ -231,7 +235,12 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
         Kind.PS1_CARDS -> name.endsWith(".mcd", true) && (name.startsWith(g.name + "_") || name.startsWith("shared_card", true))
         Kind.PS2_CARDS -> name.endsWith(".ps2", true)
         Kind.RA_STATES -> name.startsWith(g.stem + ".state")
-        Kind.PS2_STATES -> !name.endsWith(".backup", true) && statePrefixes(f, g).any { name.startsWith("$it.") }
+        // po przedrostku poznanym w grze albo po numerze płyty z metadanych — stan wznowienia
+        // ArmSX2 zapisuje przy wyjściu, często już po synchronizacji, więc samo „poznanie
+        // w trakcie gry” go nie łapało i stany nie szły na serwer
+        Kind.PS2_STATES -> !name.endsWith(".backup", true) && P2S.containsMatchIn(name) &&
+            (statePrefixes(f, g).any { name.startsWith("$it.") } ||
+             (g.serialPrefix.isNotEmpty() && name.startsWith(g.serialPrefix)))
     }
 
     // stany PS2 nazywają się od numeru płyty, nie od nazwy gry — przedrostki poznane po grze
@@ -534,13 +543,19 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
         if (f.kind == Kind.PS2_STATES) {
             // stany zapisane w trakcie tej gry → przedrostek gry (także na serwer, dla innych telefonów)
             val found = LinkedHashSet<String>()
+            val sp = g.serialPrefix
             for (d in cands.filter { it.isDirectory })
-                for (x in d.listFiles() ?: emptyArray())
-                    if (x.isFile && x.lastModified() >= startedAt - 2000) P2S.find(x.name)?.let {
+                for (x in d.listFiles() ?: emptyArray()) {
+                    if (!x.isFile) continue
+                    val fresh = x.lastModified() >= startedAt - 2000
+                    // zmieniony w tej grze albo (bez względu na czas) z numerem płyty tej gry
+                    if (fresh || (sp.isNotEmpty() && x.name.startsWith(sp))) P2S.find(x.name)?.let {
                         found += it.groupValues[1]
-                        if (prefs.learnedDir(f.dirs) != d.absolutePath) prefs.setLearnedDir(f.dirs, d.absolutePath)
+                        if (fresh && prefs.learnedDir(f.dirs) != d.absolutePath) prefs.setLearnedDir(f.dirs, d.absolutePath)
                     }
-            if (found.isNotEmpty()) {
+                }
+            val known = statePrefixes(f, g).toSet()
+            if (found.isNotEmpty() && !known.containsAll(found)) {
                 mergePrefixes(f, JSONObject().put(g.es + "/" + g.name, JSONArray(found.toList())))
                 pendingIndex += f.id
             }

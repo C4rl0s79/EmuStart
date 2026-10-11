@@ -224,6 +224,22 @@ function stateActItems() {
     const local = (GO.data?.states || []).find((x) => x.name === st.name);
     if (local) items.push({ label: "Graj od tego stanu", value: fmtDate(local.time), act: () => { closeGopt(); launch(local.path); } });
   }
+  // stan z drugiej platformy na ten komputer: kopia i od razu gra od niego
+  const hereT = st.targets.find((t) => t.platform === r.here);
+  if (hereT && S.platform !== "android") items.push({
+    label: "Kopiuj tutaj i graj", value: `${smMark(hereT)} ${hereT.note}`,
+    act: async () => {
+      if (hereT.ok === false && GO.confirmCopy !== hereT) { GO.confirmCopy = hereT; return toast("Ten stan raczej się nie wczyta (" + hereT.note + "). A jeszcze raz — spróbuj mimo to."); }
+      GO.confirmCopy = null;
+      const res = await api().save_copy(GO.id, st.rel, hereT.platform, hereT.emu);
+      if (!res?.ok) return toast(res?.reason || "Nie udało się skopiować.");
+      GO.data = await api().game_options(GO.id);
+      const local = (GO.data?.states || []).find((x) => x.name === st.name);
+      if (!local) return toast("Skopiowano, ale emulator tej gry nie widzi stanu — sprawdź emulator w opcjach gry.", 6000);
+      closeGopt();
+      launch(local.path);
+    },
+  });
   for (const t of st.targets) items.push({
     label: `Kopiuj na: ${t.label}`, value: `${smMark(t)} ${t.note}`,
     act: async () => {

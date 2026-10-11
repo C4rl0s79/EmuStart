@@ -143,3 +143,19 @@ def test_server_endpoints(tmp_path, monkeypatch):
         assert False
     except urllib.error.HTTPError as ex:
         assert ex.code == 400
+
+
+def test_saves_only_for_own_platform(tmp_path):
+    """Gra SNES nie widzi kart ani stanów PlayStation; gra PS1 — kart PS2."""
+    fs = _nas(tmp_path)
+    _w(tmp_path / "nas/Jezus/save/duckstation/memcards/shared_card_1.mcd", b"m" * 10)
+    _w(tmp_path / "nas/Jezus/save/retroarch/saves/Snes9x/Chrono Trigger (USA).srm", b"s")
+    snes = savemgr.catalog(fs, "Jezus", "snes", "Chrono Trigger (USA)", ["Chrono Trigger (USA)"],
+                           serial="SLUS-20431")
+    assert [s["name"] for s in snes["saves"]] == ["Chrono Trigger (USA).srm"]
+    assert not any(s["kind"] == "ps2" for s in snes["states"])
+    psx = savemgr.catalog(fs, "Jezus", "psx", "Crash (USA)", ["Crash (USA)"])
+    names = {s["name"] for s in psx["saves"]}
+    assert "shared_card_1.mcd" in names and not any(n.endswith(".ps2") for n in names)
+    ps2 = savemgr.catalog(fs, "Jezus", "ps2", "Okage (USA)", [], serial="SLUS-20431")
+    assert {s["name"] for s in ps2["saves"]} == {"Mcd001.ps2"}
