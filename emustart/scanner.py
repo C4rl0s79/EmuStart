@@ -169,15 +169,24 @@ def scan_system(es: str, rom_dirs, progress=None) -> int:
         rom_dirs = [rom_dirs]
     rom_dirs = [Path(d) for d in rom_dirs]
     info = systems.info(es)
+    es_kind = info["kind"]
     exts = systems.ext_set(info)
     found, seen = [], set()
     for d in rom_dirs:
+        # kolekcja tłumaczeń: ścieżka liczona od folderu nadrzędnego („snes\\Gra.sfc”), bo
+        # tłumaczenie często ma tę samą nazwę pliku co oryginał (język tylko w nazwie kolekcji)
+        pool = es_kind != "arcade" and translations.is_pool(d.name, d.parent.name)
+        ptrans = translations.pool_trans(d.name, d.parent.name, systems.match_folder) if pool else None
         for g in _scan_dir(d, exts):
+            g["pool"] = ptrans
+            if pool:
+                g["rel"] = os.path.join(d.name, g["rel"])
+                g["files"] = [(os.path.join(d.name, f[0]), *f[1:]) for f in g["files"]]
             key = g["rel"].lower()
             if key in seen:
                 continue
             seen.add(key)
-            g["src"] = str(d)
+            g["src"] = str(d.parent if pool else d)
             found.append(g)
 
     arc = {}
@@ -204,12 +213,10 @@ def scan_system(es: str, rom_dirs, progress=None) -> int:
             title, tags = split_title(name)
         games.append({"g": g, "name": name, "title": title or name, "tags": tags,
                       "parent": parent, "hidden": hidden, "src": g["src"],
-                      "trans": "", "tbase": ""})
+                      "trans": "", "tbase": "", "pool": g.get("pool")})
     if info["kind"] != "arcade":
-        # tłumaczenia z folderów kolekcji „[T-En] …” — wersje gier, nie osobne pozycje
-        pools = {str(d): (d.name, d.parent.name) for d in rom_dirs
-                 if translations.is_pool(d.name, d.parent.name)}
-        translations.mark(games, pools)
+        # tłumaczenia (kolekcja „[T-En] …”, tag w nazwie) — wersje gier, nie osobne pozycje
+        translations.mark(games)
     rows = [(es, x["g"]["rel"], x["name"], x["title"], x["tags"],
              json.dumps(x["g"]["files"]), sum(f[1] for f in x["g"]["files"]),
              1 if x["g"].get("is_dir") else 0, 1 if x["g"]["multidisc"] else 0,
@@ -266,8 +273,9 @@ def collect_systems(cfg: dict) -> tuple:
             # „Games”/„Demos” same w sobie nic nie mówią — w folderze „WHDLoad”
             # znaczą WHDLoad, stąd druga próba z nazwą folderu nadrzędnego
             es = systems.match_folder(d.name) or systems.match_folder(f"{Path(root).name} {d.name}")
-            if not es and translations.is_pool(d.name):     # „Nintendo - SNES [T-En]”
-                es = systems.match_folder(translations.strip_pool_tag(d.name))
+            if not es and translations.is_pool(d.name, d.parent.name):
+                # „Nintendo - Super Famicom [T-En] Collection”, „… - Speed Hacks”
+                es = translations.split_system(d.name, systems.match_folder)[0]
             if not es:
                 unknown.append(d)
                 if (syscfg.get(d.name) or {}).get("enabled") is not True:
