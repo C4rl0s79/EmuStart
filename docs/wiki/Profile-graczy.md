@@ -45,6 +45,28 @@ Nowy profil zaczyna od bieżących ustawień.
   telefon ma własne — na telefonie **Ustawienia emulatora** otwiera emulator na tym
   urządzeniu. Wspólne są tylko zapisy (save'y).
 
+**PIN profilu.** Każdy profil ma PIN (4–8 cyfr). Nazwy profili są unikalne (bez względu
+na wielkość liter): zakładając profil o zajętej nazwie podajesz PIN istniejącego — dobry
+PIN dodaje Twój profil na to urządzenie, zły oznacza, że to inny gracz i trzeba wybrać
+inną nazwę. PIN podajesz raz na każdym urządzeniu; **Start** na karcie profilu → **Zmień
+PIN** / **Wyloguj z tego urządzenia**. Profile sprzed wersji 0.27 przy pierwszym wyborze
+proszą o ustawienie PIN-u. Serwer EmuStart wydaje pliki profilu z PIN-em tylko
+urządzeniu, które podało PIN (po złych próbach — coraz dłuższe czekanie); przy samym SMB
+PIN tylko rozróżnia konta.
+
+**Menedżer zapisów** (opcje gry → **Zapisy i stany**, na komputerze i telefonie):
+stany tej gry z komputera i z telefonu oraz wspólne zapisy w grze. Stan z jednej platformy
+można skopiować na drugą (pobierze się przy następnej grze). Zgodność:
+
+| Emulatory | Zgodność stanów |
+|---|---|
+| PCSX2 (PC) ↔ ARMSX2 / AetherSX2 (telefon) | ten sam format pliku `.p2s` → ✓ (sprawdzane z wersji zapisanej w stanie) |
+| RetroArch ↔ RetroArch | ten sam rdzeń (np. SwanStation) → zwykle działa |
+| DuckStation (PC) ↔ SwanStation (telefon) | ✗ — różne emulatory; wspólna jest karta pamięci |
+
+Zapisy w grze (save'y RetroArcha, karty pamięci PS1/PS2) są wspólne dla obu platform
+i synchronizują się same przy każdej grze — menedżer je tylko pokazuje.
+
 **Synchronizacja z NAS-em.** Przed grą nowsze pliki z NAS-a → lokalnie, po grze
 nowsze lokalne → NAS (`Z:\emustart\Profiles\<profil>\`). Nadpisywane wersje trafiają
 do kopii zapasowych. Szczegóły: [Kilka komputerów, jeden NAS](Kilka-komputerów-jeden-NAS).

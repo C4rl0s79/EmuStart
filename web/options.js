@@ -125,6 +125,7 @@ function goptItems() {
   const d = GO.data, det = GO.detail, g = S.games[S.gameIdx] || {};
   if (GO.page === "main" && S.platform === "android") return [
     { label: "Graj", act: () => { closeGopt(); launch(); } },
+    { label: "Zapisy i stany", value: "z komputera i telefonu", act: openSaveManager },
     { label: "Ustawienia emulatora", value: "tylko na tym telefonie", act: () => { closeGopt(); launch("", false, true); } },
     { label: g.pinned ? "Odepnij (pozwól usunąć z telefonu)" : "Przypnij (trzymaj w telefonie)", act: async () => { await togglePin(); closeGopt(); } },
     ...removeItem(),
@@ -136,6 +137,7 @@ function goptItems() {
       act: () => { closeGopt(); launch("", false, true); } },
     { label: "Wczytaj zapis", value: d.states.length ? `${d.states.length} ${plural(d.states.length, "zapis", "zapisy", "zapisów")}` : "brak zapisów",
       act: () => d.states.length ? goPage("states") : toast("Ten emulator nie ma zapisów tej gry.") },
+    { label: "Zapisy i stany", value: "z komputera i telefonu", act: openSaveManager },
     { label: "Metadane i opis", value: [det.meta.developer, det.meta.year].filter(Boolean).join(" · "), act: () => goPage("meta") },
     { label: "Okładka", value: g.box ? "jest" : "brak", act: () => openArtPicker("box") },
     { label: "Zrzut ekranu", value: g.snap ? "jest" : "brak", act: () => openArtPicker("snap") },
@@ -157,6 +159,8 @@ function goptItems() {
     label: st.resume ? "★ " + st.name : st.name, value: fmtDate(st.time),
     act: () => { closeGopt(); launch(st.path); },
   }));
+  if (GO.page === "saves") return saveManagerItems();
+  if (GO.page === "stateAct") return stateActItems();
   if (GO.page === "meta") {
     const m = det.meta, ed = det.meta_edits || {};
     const items = META_FIELDS.map(([k, label]) => ({
@@ -174,6 +178,71 @@ function goptItems() {
   }
   return [];
 }
+/* ── menedżer zapisów: stany z komputera i telefonu, kopiowanie między nimi ── */
+const SM_PLAT = { windows: "Komputer", android: "Telefon" };
+async function openSaveManager() {
+  GO.sm = null;
+  goPage("saves");
+  const r = await api().save_manager(GO.id);
+  if (GO.page !== "saves") return;
+  if (!r || !r.ok) { toast(r?.reason || "Nie udało się odczytać zapisów."); return goPage("main"); }
+  GO.sm = r;
+  renderGopt();
+}
+function smSlot(st) {
+  return st.slot === "auto" ? "autozapis" : st.slot === "resume" ? "wznowienie" : `slot ${+st.slot}`;
+}
+function smMark(t) { return t.ok === true ? "✓" : t.ok === false ? "✗" : "?"; }
+function saveManagerItems() {
+  const r = GO.sm;
+  if (!r) return [{ label: "Wczytuję zapisy z serwera…", value: "", act: () => {} }];
+  const items = [];
+  if (!r.states.length) items.push({ label: "Brak stanów tej gry", value: "na komputerze i telefonie", act: () => {} });
+  for (const st of r.states) {
+    const here = st.platform === r.here;
+    const t = st.targets.map((x) => `${smMark(x)} ${SM_PLAT[x.platform]}`).join(" ");
+    items.push({
+      label: `${here ? "● " : ""}${SM_PLAT[st.platform]} · ${st.label.replace(/ na (komputerze|telefonie)$/, "")} · ${smSlot(st)}`,
+      value: `${fmtDate(st.mtime)} · ${fmtBytes(st.size)}${t ? " · " + t : ""}`,
+      act: () => { GO.cur = st; goPage("stateAct"); },
+    });
+  }
+  if (r.saves.length) {
+    items.push({ label: "— Zapisy w grze (wspólne, synchronizują się same) —", value: "", act: () => {} });
+    for (const sv of r.saves.slice(0, 12)) items.push({
+      label: sv.name + (sv.shared ? "  (karta wspólna dla gier)" : ""), value: `${fmtDate(sv.mtime)} · ${fmtBytes(sv.size)}`,
+      act: () => toast("Zapisy w grze są wspólne dla komputera i telefonu — synchronizują się przy każdej grze."),
+    });
+  }
+  return items;
+}
+function stateActItems() {
+  const st = GO.cur, r = GO.sm;
+  if (!st || !r) return [];
+  const items = [];
+  if (st.platform === r.here && S.platform !== "android") {
+    const local = (GO.data?.states || []).find((x) => x.name === st.name);
+    if (local) items.push({ label: "Graj od tego stanu", value: fmtDate(local.time), act: () => { closeGopt(); launch(local.path); } });
+  }
+  for (const t of st.targets) items.push({
+    label: `Kopiuj na: ${t.label}`, value: `${smMark(t)} ${t.note}`,
+    act: async () => {
+      if (t.ok === false && GO.confirmCopy !== t) { GO.confirmCopy = t; return toast("Ten stan raczej się nie wczyta (" + t.note + "). A jeszcze raz — skopiuj mimo to."); }
+      GO.confirmCopy = null;
+      const res = await api().save_copy(GO.id, st.rel, t.platform, t.emu);
+      if (!res?.ok) return toast(res?.reason || "Nie udało się skopiować.");
+      const where = t.platform === r.here
+        ? (res.local ? "Jest już w „Wczytaj zapis”." : "Pobierze się przy następnej grze.")
+        : `${SM_PLAT[t.platform]} pobierze go przy następnym uruchomieniu gry.`;
+      toast(res.same ? "Ten stan już tam jest." : `Skopiowano (${smSlot(st)}). ${where}`, 6000);
+      if (res.local) GO.data = await api().game_options(GO.id);
+      openSaveManager();
+    },
+  });
+  if (!st.targets.length) items.push({ label: "Nie ma dokąd skopiować", value: "brak tego emulatora na drugiej platformie", act: () => {} });
+  return items;
+}
+
 async function refreshGoDetail() {
   GO.detail = await api().game_detail(GO.id);
   if (S.modal === "gopt") renderGopt();
@@ -184,6 +253,7 @@ function goPage(page) { GO.page = page; GO.idx = 0; renderGopt(); }
 
 function renderGopt() {
   const titles = { main: "Opcje gry", emus: "Emulator dla tej gry", states: "Wczytaj zapis", meta: "Metadane",
+                   saves: "Zapisy i stany", stateAct: "Stan gry",
                    art: { snap: "Zrzut ekranu", logo: "Logo gry", box: "Okładka" }[GO.art?.kind] || "Okładka" };
   $("goTitle").textContent = GO.detail?.title || "";
   $("goPage").textContent = titles[GO.page];
@@ -208,6 +278,7 @@ function goptInput(a) {
   else if (a === "lb") GO.idx = Math.max(0, GO.idx - 8);
   else if (a === "rb") GO.idx = Math.min(n - 1, GO.idx + 8);
   else if (a === "b" && GO.confirmDel) GO.confirmDel = false;
+  else if (a === "b" && GO.page === "stateAct") return goPage("saves");
   else if (a === "b") return GO.page === "main" ? closeGopt() : goPage("main");
   else if (a === "a") return GO.items[GO.idx]?.act();
   renderGopt();
@@ -383,13 +454,14 @@ function renderProfiles() {
         "RetroAchievements zastane w emulatorach na tym komputerze. Później zmienisz to w Ustawieniach → Profile.") : "";
   const cards = PR.list.map((p, i) =>
     `<div class="pcard${i === PR.idx ? " sel" : ""}${p.id === PR.current ? " cur" : ""}" data-i="${i}">` +
-    `<div class="pav">${esc((p.name[0] || "?").toUpperCase())}</div><div class="pname">${esc(p.name)}</div></div>`).join("") +
+    `<div class="pav">${esc((p.name[0] || "?").toUpperCase())}</div><div class="pname">${esc(p.name)}` +
+    `${p.pin === "need_pin" ? " 🔒" : p.pin === "set_pin" ? " ⚠" : ""}</div></div>`).join("") +
     `<div class="pcard add${PR.idx === PR.list.length ? " sel" : ""}" data-i="${PR.list.length}"><div class="pav">+</div><div class="pname">Nowy profil</div></div>`;
   $("profCards").innerHTML = cards;
   $("profCards").querySelectorAll(".pcard").forEach((el) => el.addEventListener("click", () => { PR.idx = +el.dataset.i; profilesInput("a"); }));
   const onProfile = PR.idx < PR.list.length;
   if (setup) return setHints([["a", onProfile ? "To mój profil" : "Utwórz"], ["y", `Pytaj przy starcie: ${PR.ask ? "tak" : "nie"}`]]);
-  if (S.platform === "android") return setHints(onProfile ? [["a", "Graj jako"], ["b", "Wstecz"]] : [["a", "Utwórz"], ["b", "Wstecz"]]);
+  if (S.platform === "android") return setHints(onProfile ? [["a", "Graj jako"], ["start", "PIN / wyloguj"], ["b", "Wstecz"]] : [["a", "Utwórz"], ["b", "Wstecz"]]);
   setHints(onProfile ? [["a", "Graj jako"], ["start", "Opcje profilu"], ["y", "Zmień nazwę"], ["x", "Usuń"], ["b", "Wstecz"]] : [["a", "Utwórz"], ["b", "Wstecz"]]);
 }
 async function profilesInput(a) {
@@ -400,7 +472,8 @@ async function profilesInput(a) {
   else if (a === "right" || a === "down") PR.idx = (PR.idx + 1) % n;
   else if (setup && a === "y") PR.ask = !PR.ask;
   else if (setup && a === "a" && p) {
-    await api().profile_setup(p.id, PR.ask);
+    const r0 = await api().profile_setup(p.id, PR.ask);
+    if (r0 && r0.need) return pinFlow(p, r0.need, () => profilesInput("a"));
     const st = await refreshState();
     applyLook(st.look || {}, true);
     toast(`Ten komputer: ${p.name}`);
@@ -408,20 +481,31 @@ async function profilesInput(a) {
   } else if (setup && !["a"].includes(a)) return;   // wybór jest wymagany
   else if (a === "b") { await refreshState(); return show("systems"); }
   else if (a === "a" && !p) {
-    return oskOpen("Nazwa nowego profilu", "", async (name) => {
-      const r = await api().profile_create(name);
-      if (!r.ok) return toast(r.reason);
-      toast(`Utworzono profil: ${r.profile.name}`);
-      openProfiles(PR.startup);
+    return oskOpen("Nazwa nowego profilu", "", (name) => {
+      if (!name.trim()) return;
+      setTimeout(() => askPin(`PIN profilu „${name.trim()}” (4–8 cyfr)`, async (pin) => {
+        const r = await api().profile_create(name, pin);
+        if (r.exists) return joinExisting(r.exists);
+        if (!r.ok) return toast(r.reason);
+        toast(`Utworzono profil: ${r.profile.name}. Zapamiętaj PIN — będzie potrzebny na innych urządzeniach.`, 6000);
+        openProfiles(PR.startup);
+      }, true), 50);
     });
   } else if (a === "a") {
-    await api().profile_select(p.id);
+    const r0 = await api().profile_select(p.id);
+    if (r0 && r0.need) return pinFlow(p, r0.need, () => profilesInput("a"));
     const st = await refreshState();
     applyLook(st.look || {}, true);         // wygląd zapisany w profilu
     toast(`Gra: ${p.name}`);
     return show("systems");
   } else if (a === "start" && p && S.platform !== "android") {
     return profileMenu(p);
+  } else if (a === "start" && p) {
+    const items = [];
+    pinMenuItems(p, items);
+    S.menu = items; S.menuIdx = 0; S.modal = "menu";
+    $("menu").classList.remove("hidden");
+    return renderMenu();
   } else if (a === "y" && p) {
     return oskOpen("Nowa nazwa profilu", p.name, async (name) => {
       const r = await api().profile_rename(p.id, name);
@@ -439,6 +523,46 @@ async function profilesInput(a) {
   renderProfiles();
 }
 
+
+// PIN profilu: raz na urządzeniu (emustart/pinauth.py)
+function askPin(title, onPin, twice = false) {
+  oskOpen(title, "", (pin) => {
+    pin = (pin || "").trim();
+    if (!/^\d{4,8}$/.test(pin)) return toast("PIN to 4–8 cyfr.");
+    if (!twice) return onPin(pin);
+    setTimeout(() => oskOpen("Powtórz PIN", "", (again) => {
+      if ((again || "").trim() !== pin) return toast("PIN-y się różnią — spróbuj jeszcze raz.");
+      onPin(pin);
+    }, false, true), 50);
+  }, false, true);
+}
+/** Profil zablokowany na tym urządzeniu: podanie PIN-u albo ustawienie (stary profil). */
+function pinFlow(p, need, then) {
+  if (need === "set_pin") {
+    toast(`Profil „${p.name}” nie ma jeszcze PIN-u — ustaw go (będzie potrzebny raz na każdym urządzeniu).`, 6000);
+    return askPin(`Nowy PIN profilu „${p.name}” (4–8 cyfr)`, async (pin) => {
+      const r = await api().profile_set_pin(p.id, pin, "");
+      if (!r.ok) return toast(r.reason);
+      toast(`PIN profilu „${p.name}” ustawiony.`);
+      then();
+    }, true);
+  }
+  askPin(`PIN profilu „${p.name}”`, async (pin) => {
+    const r = await api().profile_unlock(p.id, pin);
+    if (!r.ok) return toast(r.reason || "Zły PIN.", 5000);
+    then();
+  });
+}
+/** Nazwa zajęta: PIN tego profilu (to Ty z innego urządzenia) albo inna nazwa. */
+function joinExisting(name) {
+  toast(`Profil „${name}” już istnieje. Jeśli to Twój — podaj jego PIN; inaczej (B) wybierz inną nazwę.`, 7000);
+  setTimeout(() => askPin(`PIN profilu „${name}”`, async (pin) => {
+    const r = await api().profile_join(name, pin);
+    if (!r.ok) return toast((r.reason || "Zły PIN.") + " Wybierz inną nazwę profilu.", 6000);
+    toast(`Profil „${r.profile.name}” jest teraz na tym urządzeniu.`);
+    openProfiles(PR.startup);
+  }), 50);
+}
 
 // opcje profilu (Start na karcie): RetroAchievements
 const RA_FAM = { retroarch: "RetroArch", duckstation: "DuckStation", pcsx2: "PCSX2" };
@@ -471,9 +595,23 @@ async function profileMenu(p) {
     toast(`Profil tego komputera: ${p.name}`);
   }]);
   items.push(["Zmień nazwę", () => profilesInput("y")]);
+  pinMenuItems(p, items);
   S.menu = items; S.menuIdx = 0; S.modal = "menu";
   $("menu").classList.remove("hidden");
   renderMenu();
+}
+function pinMenuItems(p, items) {
+  if (p.pin === "set_pin") items.push(["Ustaw PIN profilu", () => pinFlow(p, "set_pin", () => openProfiles(PR.startup))]);
+  else items.push(["Zmień PIN", () => askPin(`Dotychczasowy PIN „${p.name}”`, (old) => setTimeout(() =>
+    askPin("Nowy PIN (4–8 cyfr)", async (pin) => {
+      const r = await api().profile_set_pin(p.id, pin, old);
+      toast(r.ok ? "PIN zmieniony. Inne urządzenia zapytają o nowy." : r.reason, 5000);
+    }, true), 50))]);
+  items.push(["Wyloguj z tego urządzenia", async () => {
+    await api().profile_logout(p.id);
+    toast(`Profil „${p.name}” wylogowany — następnym razem PIN.`);
+    openProfiles(PR.startup);
+  }]);
 }
 function raLogin(p) {
   oskOpen(`RetroAchievements — nazwa użytkownika (${p.name})`, "", (user) => {

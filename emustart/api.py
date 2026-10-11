@@ -11,6 +11,7 @@ import json
 import logging
 import math
 import re
+import socket
 import threading
 import urllib.error
 import time
@@ -198,6 +199,9 @@ class Api:
         """Pierwsze uruchomienie na tym komputerze: kto tu gra."""
         if not profiles.get(int(pid)):
             return {"ok": False, "reason": "Nie ma takiego profilu."}
+        block = self._pin_block(pid)
+        if block:
+            return block
         profiles.finish_setup(int(pid), bool(ask))
         self.profile_select(int(pid))
         threading.Thread(target=self._ra_adopt, daemon=True).start()
@@ -460,6 +464,9 @@ class Api:
         if self._session and self._session.phase in ("preparing", "downloading",
                                                      "extracting", "running"):
             return {"ok": False, "reason": "Inna gra jest właśnie uruchamiana."}
+        block = self._pin_block(self._profile)
+        if block:
+            return {**block, "profile_pin": True}
         g = library.game(int(game_id))
         if g:
             emu = self._effective_emu(g)
@@ -745,6 +752,69 @@ class Api:
         return {"id": g["id"], "title": g["title"], "emulator": emu, "options": opts,
                 "states": states[:30]}
 
+    # ── menedżer zapisów (opcje gry → Zapisy i stany) ──
+    def _savemgr_ctx(self, g: dict):
+        prof = profiles.get(self._profile) or {}
+        if not prof.get("nas_name") or not profiles.nas_online(self._cfg):
+            return None, None, "Menedżer zapisów działa z profilem na NAS-ie / serwerze — NAS niedostępny."
+        return nasfs.backend(self._cfg), prof["nas_name"], ""
+
+    def save_manager(self, game_id: int) -> dict:
+        """Stany gry z komputera i telefonu (ze zgodnością) i wspólne zapisy w grze."""
+        from emustart import savemgr
+        g = library.game(int(game_id))
+        if not g:
+            return {"ok": False, "reason": "Nie ma takiej gry."}
+        fs, nas, why = self._savemgr_ctx(g)
+        if not fs:
+            return {"ok": False, "reason": why}
+        meta = metadata.get(g["id"])
+        serial = ingame._serial(meta)
+        stems = [Path(g["rel"]).stem, g["name"]]
+        learned = [r["prefix"] for r in library.db().execute(
+            "SELECT prefix FROM states WHERE game_id=?", (g["id"],))]
+        try:
+            if isinstance(fs, nasfs.RemoteFs):
+                out = fs.savemgr_catalog({"profile": nas, "es": g["es"], "name": g["name"],
+                                          "stems": "|".join(stems), "serial": serial,
+                                          "learned": "|".join(learned)})
+            else:
+                out = savemgr.catalog(fs, nas, g["es"], g["name"], stems, serial, learned)
+        except OSError as ex:
+            return {"ok": False, "reason": f"Nie udało się odczytać zapisów: {ex}"}
+        out["ok"] = True
+        out["here"] = "windows"
+        return out
+
+    def save_copy(self, game_id: int, rel: str, platform: str, emu: str) -> dict:
+        """Kopia stanu na drugą platformę; na ten komputer — od razu do folderu emulatora."""
+        from emustart import savemgr
+        g = library.game(int(game_id))
+        if not g:
+            return {"ok": False, "reason": "Nie ma takiej gry."}
+        fs, nas, why = self._savemgr_ctx(g)
+        if not fs:
+            return {"ok": False, "reason": why}
+        try:
+            if isinstance(fs, nasfs.RemoteFs):
+                out = fs.savemgr_copy({"profile": nas, "src": rel, "platform": platform, "emu": emu,
+                                       "es": g["es"], "name": g["name"], "device": socket.gethostname()})
+            else:
+                out = savemgr.copy(fs, nas, rel, platform, emu, g["es"], g["name"], socket.gethostname())
+        except OSError as ex:
+            return {"ok": False, "reason": f"Nie udało się skopiować: {ex}"}
+        if out.get("ok") and platform == "windows":
+            # od razu u siebie: pobranie folderu stanów emulatora z NAS-a
+            emu_cfg = self._effective_emu(g)
+            ad = ingame.adapter_for(emu_cfg["exe"]) if emu_cfg["exe"] else None
+            if ad and ad.family == emu:
+                try:
+                    profiles.sync_down(self._cfg, self._profile, emu, [d.name for d in ad.save_dirs()])
+                    out["local"] = True
+                except Exception:
+                    log.exception("menedżer zapisów: pobranie stanów")
+        return out
+
     def set_game_emulator(self, game_id: int, opt: dict | None) -> dict:
         with library.db() as c:
             if not opt:
@@ -915,7 +985,39 @@ class Api:
         lst = profiles.all_profiles()
         for p in lst:
             p["nas_wanted"] = profiles.nas_wanted(p)
+            p["pin"] = profiles.pin_state(self._cfg, p["id"])
+            p.pop("pin_token", None)            # token zostaje w programie, nie w UI
         return {"profiles": lst, "current": self._profile}
+
+    def _pin_block(self, pid: int) -> dict | None:
+        st = profiles.pin_state(self._cfg, int(pid), fresh=True)
+        if st == "ok":
+            return None
+        prof = profiles.get(int(pid)) or {}
+        return {"ok": False, "need": st, "name": prof.get("name", ""),
+                "reason": f"Profil „{prof.get('name', '')}” — " +
+                          ("podaj PIN." if st == "need_pin" else "ustaw PIN profilu.")}
+
+    def profile_pin_check(self) -> dict:
+        """Przy starcie: czy bieżący profil jest odblokowany na tym urządzeniu."""
+        prof = profiles.get(self._profile) or {}
+        return {"state": profiles.pin_state(self._cfg, self._profile), "name": prof.get("name", "")}
+
+    def profile_unlock(self, pid: int, pin: str) -> dict:
+        ok, why = profiles.pin_unlock(self._cfg, int(pid), str(pin))
+        return {"ok": ok, "reason": why}
+
+    def profile_set_pin(self, pid: int, pin: str, old: str = "") -> dict:
+        ok, why = profiles.pin_set(self._cfg, int(pid), str(pin), str(old or ""))
+        return {"ok": ok, "reason": why}
+
+    def profile_logout(self, pid: int) -> dict:
+        profiles.pin_logout(int(pid))
+        return {"ok": True}
+
+    def profile_join(self, name: str, pin: str) -> dict:
+        prof, why = profiles.pin_join(self._cfg, str(name), str(pin))
+        return {"ok": bool(prof), "reason": why, "profile": prof and {k: v for k, v in prof.items() if k != "pin_token"}}
 
     def profile_nas_rename(self, pid: int) -> dict:
         reason = profiles.nas_rename(self._cfg, int(pid))
@@ -924,16 +1026,24 @@ class Api:
     def profile_select(self, pid: int) -> dict:
         if not profiles.get(int(pid)):
             return {"ok": False}
+        block = self._pin_block(pid)
+        if block:
+            return block
         self._profile = int(pid)
         library.meta_set("last_profile", str(self._profile))
         self._user_load(self._profile)
         return {"ok": True}
 
-    def profile_create(self, name: str) -> dict:
+    def profile_create(self, name: str, pin: str = "") -> dict:
+        """Nowy profil z PIN-em. Nazwa zajęta (bez względu na wielkość liter) → exists:
+        UI prosi o PIN tego profilu (profile_join) albo o inną nazwę."""
         try:
-            p = profiles.create(name)
-        except ValueError as ex:
+            p = profiles.create(name, cfg=self._cfg, pin=str(pin or ""))
+        except profiles.ProfileExists as ex:
+            return {"ok": False, "exists": ex.name, "reason": str(ex)}
+        except (ValueError, OSError) as ex:
             return {"ok": False, "reason": str(ex)}
+        p.pop("pin_token", None)
         return {"ok": True, "profile": p}
 
     def profile_rename(self, pid: int, name: str) -> dict:

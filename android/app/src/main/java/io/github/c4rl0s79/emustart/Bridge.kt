@@ -23,6 +23,7 @@ class Bridge(private val act: MainActivity) {
     private val pool = Executors.newFixedThreadPool(6)
     private val tag = "EmuStart"
     @Volatile private var profList: List<String> = emptyList()
+    @Volatile private var profPin: Map<String, Boolean> = emptyMap()      // profil → ma PIN (serwer 0.27+)
 
     init {
         pool.execute {
@@ -90,6 +91,8 @@ class Bridge(private val act: MainActivity) {
         "toggle_pin" -> togglePin(a.getInt(0))
         "remove_local" -> removeLocal(a.getInt(0))
         "configure_emulator" -> configureEmulator(a.getInt(0))
+        "save_manager" -> saveManager(a.getInt(0))
+        "save_copy" -> saveCopy(a.getInt(0), a.getString(1), a.getString(2), a.getString(3))
         "look_save" -> { prefs.look = a.getJSONObject(0); JSONObject().put("ok", true) }
         "quit" -> { act.runOnUiThread { act.finishAndRemoveTask() }; null }
         "copy_status" -> JSONArray()
@@ -99,7 +102,12 @@ class Bridge(private val act: MainActivity) {
         "system_info" -> JSONObject()
         "profiles_list" -> profilesList()
         "profile_select", "profile_setup" -> selectProfile(a.getInt(0))
-        "profile_create" -> createProfile(a.getString(0))
+        "profile_create" -> createProfile(a.getString(0), a.optString(1, ""))
+        "profile_join" -> joinProfile(a.getString(0), a.getString(1))
+        "profile_unlock" -> unlockProfile(a.getInt(0), a.getString(1))
+        "profile_set_pin" -> setPin(a.getInt(0), a.getString(1), a.optString(2, ""))
+        "profile_logout" -> { profList.getOrNull(a.getInt(0) - 1)?.let { prefs.setToken(it, "") }; JSONObject().put("ok", true) }
+        "profile_pin_check" -> JSONObject().put("state", pinState(prefs.profile)).put("name", prefs.profile)
         "profile_rename", "profile_delete", "profile_nas_rename" -> JSONObject().put("ok", false)
             .put("reason", "Nazwę i folder profilu zmienia się w EmuStart na komputerze.")
         "pad_backend" -> "android"
@@ -152,7 +160,7 @@ class Bridge(private val act: MainActivity) {
     // ── stan i listy ──
     private fun state(): JSONObject {
         val sys = try { systems() } catch (e: Exception) { JSONArray() }
-        if (profList.isEmpty() && online) try { profList = saves.profiles() } catch (e: Exception) { }
+        if (profList.isEmpty() && online) try { loadProfiles() } catch (e: Exception) { }
         return JSONObject()
             .put("version", BuildConfig.VERSION_NAME).put("platform", "android")
             .put("configured", prefs.configured).put("rom_online", online)
@@ -342,6 +350,7 @@ class Bridge(private val act: MainActivity) {
         val emu = chosenEmu(s)
         if (emu.isEmpty()) return JSONObject().put("ok", false)
             .put("reason", "Brak emulatora dla ${s.optString("display")} — zainstaluj go i wybierz w Ustawieniach.")
+        pinBlock(prefs.profile)?.let { return it.put("profile_pin", true) }
         val l = Launch(g, s)
         launch = l
         pool.execute { runLaunch(l, emu, takeover) }
@@ -448,26 +457,85 @@ class Bridge(private val act: MainActivity) {
     // ── profile (foldery profili na serwerze, te same co w EmuStart na Windows) ──
     private fun profileId(): Int = profList.indexOfFirst { it == prefs.profile }.let { if (it < 0) 0 else it + 1 }
 
+    private fun loadProfiles() {
+        val withPin = server.profiles()
+        if (withPin != null) {
+            profList = withPin.map { it.first }
+            profPin = withPin.toMap()
+        } else {
+            profList = saves.profiles()              // starszy serwer: bez PIN-ów
+            profPin = emptyMap()
+        }
+    }
+
+    /** ok | need_pin (PIN raz na tym telefonie) | set_pin (profil jeszcze bez PIN-u). */
+    private fun pinState(n: String): String = when {
+        n.isEmpty() || n !in profPin -> "ok"
+        profPin[n] != true -> "set_pin"
+        prefs.token(n).isEmpty() -> "need_pin"
+        else -> "ok"
+    }
+
     private fun profilesList(): JSONObject {
-        try { profList = saves.profiles() } catch (e: Exception) { Log.w(tag, "profile: $e") }
+        try { loadProfiles() } catch (e: Exception) { Log.w(tag, "profile: $e") }
         val arr = JSONArray()
-        profList.forEachIndexed { i, n -> arr.put(JSONObject().put("id", i + 1).put("name", n).put("nas_name", n)) }
+        profList.forEachIndexed { i, n ->
+            arr.put(JSONObject().put("id", i + 1).put("name", n).put("nas_name", n).put("pin", pinState(n)))
+        }
         return JSONObject().put("profiles", arr).put("current", profileId())
+    }
+
+    private fun pinBlock(n: String): JSONObject? {
+        val st = pinState(n)
+        if (st == "ok") return null
+        return JSONObject().put("ok", false).put("need", st).put("name", n)
+            .put("reason", "Profil „$n” — " + if (st == "need_pin") "podaj PIN." else "ustaw PIN profilu.")
     }
 
     private fun selectProfile(id: Int): JSONObject {
         val n = profList.getOrNull(id - 1) ?: return JSONObject().put("ok", false)
+        pinBlock(n)?.let { return it }
         prefs.profile = n
         if (prefs.phoneOwner.isEmpty()) prefs.phoneOwner = n
         return JSONObject().put("ok", true)
     }
 
-    private fun createProfile(name: String): JSONObject = try {
-        val n = saves.createProfile(name)
-        profList = saves.profiles()
-        JSONObject().put("ok", true).put("profile", JSONObject().put("id", profList.indexOf(n) + 1).put("name", n))
+    private fun opResult(n: String, r: JSONObject): JSONObject {
+        if (!r.optBoolean("ok")) return JSONObject().put("ok", false)
+            .put("reason", r.optString("error", "Nie udało się.")).put("exists", if (r.optBoolean("exists")) r.optString("name", n) else "")
+        if (r.optBoolean("needs_pin")) return JSONObject().put("ok", false).put("need", "set_pin")
+            .put("reason", "Ten profil nie ma jeszcze PIN-u — ustaw go.")
+        val name = r.optString("name", n)
+        prefs.setToken(name, r.optString("token"))
+        try { loadProfiles() } catch (e: Exception) { }
+        return JSONObject().put("ok", true).put("profile", JSONObject().put("id", profList.indexOf(name) + 1).put("name", name))
+    }
+
+    private fun createProfile(name: String, pin: String): JSONObject = try {
+        if (profPin.isEmpty() && server.profiles() == null) {
+            // starszy serwer: profil bez PIN-u, jak dotąd
+            val n = saves.createProfile(name)
+            profList = saves.profiles()
+            JSONObject().put("ok", true).put("profile", JSONObject().put("id", profList.indexOf(n) + 1).put("name", n))
+        } else opResult(name, server.profileOp("create", mapOf("name" to name, "pin" to pin)))
     } catch (e: Exception) {
         JSONObject().put("ok", false).put("reason", if (e is IllegalArgumentException) e.message else explain(e))
+    }
+
+    private fun joinProfile(name: String, pin: String): JSONObject = try {
+        opResult(name, server.profileOp("login", mapOf("name" to name, "pin" to pin)))
+    } catch (e: Exception) { JSONObject().put("ok", false).put("reason", explain(e)) }
+
+    private fun unlockProfile(id: Int, pin: String): JSONObject {
+        val n = profList.getOrNull(id - 1) ?: return JSONObject().put("ok", false).put("reason", "Nie ma takiego profilu.")
+        return joinProfile(n, pin)
+    }
+
+    private fun setPin(id: Int, pin: String, old: String): JSONObject {
+        val n = profList.getOrNull(id - 1) ?: return JSONObject().put("ok", false).put("reason", "Nie ma takiego profilu.")
+        return try {
+            opResult(n, server.profileOp("pin", mapOf("name" to n, "pin" to pin, "old" to old)))
+        } catch (e: Exception) { JSONObject().put("ok", false).put("reason", explain(e)) }
     }
 
     private fun drainConflicts(): JSONArray {
@@ -481,6 +549,33 @@ class Bridge(private val act: MainActivity) {
         val pinned = Cache.togglePin(act, key(g.optString("es"), g.optString("name")))
         synchronized(gamesCache) { gamesCache.clear() }
         return JSONObject().put("ok", true).put("pinned", pinned)
+    }
+
+    /** Menedżer zapisów: stany tej gry z komputera i telefonu, wspólne zapisy w grze. */
+    private fun saveManager(id: Int): JSONObject {
+        if (prefs.profile.isEmpty()) return JSONObject().put("ok", false)
+            .put("reason", "Wybierz profil gracza — zapisy i stany należą do profilu.")
+        return try {
+            val g = server.game(id)
+            val file = g.optString("file")
+            val stems = listOf(File(file).nameWithoutExtension, g.optString("name")).filter { it.isNotEmpty() }
+            server.saveCatalog(mapOf("profile" to prefs.profile, "es" to g.optString("es"),
+                                     "name" to g.optString("name"), "stems" to stems.joinToString("|")))
+                .put("ok", true).put("here", "android")
+        } catch (e: Server.HttpError) {
+            JSONObject().put("ok", false).put("reason", if (e.code == 404)
+                "Serwer nie ma menedżera zapisów — zaktualizuj EmuStart na komputerze z grami." else explain(e))
+        } catch (e: Exception) {
+            JSONObject().put("ok", false).put("reason", explain(e))
+        }
+    }
+
+    private fun saveCopy(id: Int, rel: String, platform: String, emu: String): JSONObject = try {
+        val g = server.game(id)
+        server.saveCopy(mapOf("profile" to prefs.profile, "src" to rel, "platform" to platform, "emu" to emu,
+                              "es" to g.optString("es"), "name" to g.optString("name"), "device" to android.os.Build.MODEL))
+    } catch (e: Exception) {
+        JSONObject().put("ok", false).put("reason", explain(e))
     }
 
     /** Emulator gry bez gry — ustawienia na tym telefonie (osobne od Windows). */

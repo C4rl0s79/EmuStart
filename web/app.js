@@ -537,6 +537,7 @@ async function launch(state = "", takeover = false, configure = false) {
   const g = S.games[S.gameIdx];
   const r = configure ? await api().configure_emulator(g.id) : await api().launch(g.id, state, takeover);
   if (r.need_install) return askInstallForGame(r.need_install);
+  if (r.profile_pin) { toast(r.reason, 5000); return openProfiles(true); }
   if (!r.ok) return toast(r.reason);
   if (r.android) return toast(`${r.label}: zmień ustawienia i wróć do EmuStart. Ustawienia telefonu są osobne od komputera.`, 6000);
   if (r.warning) toast(r.warning, 7000);
@@ -1217,6 +1218,13 @@ window.addEventListener("pywebviewready", async () => {
   else if (st.setup_needed) openProfiles("setup");      // nowy komputer: kto tu gra
   else if (st.ask_profile) openProfiles(true);
   else show("systems");
+  // profil zablokowany na tym urządzeniu (PIN zmieniony gdzie indziej / wylogowany)
+  api().profile_pin_check().then((pc) => {
+    if (pc && pc.state && pc.state !== "ok" && S.screen === "systems") {
+      toast(pc.state === "need_pin" ? `Profil „${pc.name}” — podaj PIN.` : `Ustaw PIN profilu „${pc.name}”.`, 5000);
+      openProfiles(true);
+    }
+  }).catch(() => {});
 });
 
 // tryb deweloperski: UI w zwykłej przeglądarce (main.py --browser)

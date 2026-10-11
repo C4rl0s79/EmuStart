@@ -103,13 +103,17 @@ def handle(handler) -> None:
     parts = [p for p in path.split("/") if p][1:]           # bez „v1”
     try:
         if parts == ["info"]:
-            feats = ["find", "system"] + (["nas", "roots"] if NAS_ROOT else [])
+            feats = ["find", "system"] + (["nas", "roots", "savemgr", "profiles"] if NAS_ROOT else [])
             return _json(handler, {"name": socket.gethostname(), "version": __version__, "api": 1,
                                    "features": feats, "nas_id": NAS_ID})
         if parts and parts[0] == "nas":
             return _nas(handler, "GET", parts[1:])
         if parts == ["find"]:
             return _find(handler)
+        if parts == ["savemgr", "catalog"]:
+            return _savemgr_catalog(handler)
+        if parts == ["profiles"]:
+            return _profiles_get(handler)
         if parts == ["systems"]:
             from emustart import emulators, installer, systems
             out = []
@@ -189,6 +193,10 @@ def handle_write(handler, method: str) -> None:
         return _system_put(handler)
     if method == "PUT" and parts == ["roots"]:
         return _roots_put(handler)
+    if method == "PUT" and parts == ["savemgr", "copy"]:
+        return _savemgr_copy(handler)
+    if method == "PUT" and len(parts) == 2 and parts[0] == "profiles":
+        return _profiles_put(handler, parts[1])
     if not parts or parts[0] != "nas":
         n = int(handler.headers.get("Content-Length") or 0)
         if n:
@@ -298,7 +306,7 @@ def _system_put(handler) -> None:
 
 
 def _nas(handler, method: str, parts: list) -> None:
-    from emustart import nasfs
+    from emustart import nasfs, pinauth
     import time as _time
     q = urllib.parse.parse_qs(urllib.parse.urlsplit(handler.path).query)
     arg = lambda k: (q.get(k) or [""])[0]      # noqa: E731
@@ -310,11 +318,21 @@ def _nas(handler, method: str, parts: list) -> None:
         return _json(handler, {"error": str(ex)}, 400)
     target = NAS_ROOT / rel if rel else NAS_ROOT
     op = parts[0] if parts else ""
+    # PIN profilu: skrót PIN-u nigdy nie wychodzi z serwera, pliki profilu z PIN-em —
+    # tylko z tokenem tego profilu (emustart/pinauth.py)
+    if _is_auth(rel) or (arg("backup") and _is_auth(arg("backup"))):
+        return _json(handler, {"error": "niedostępne"}, 403)
+    if not rel and op == "scan":
+        return _json(handler, {"error": "cały folder profili jest niedostępny"}, 403)
+    for r in (rel, arg("backup")):
+        if r and not _profile_ok(handler, r.replace("\\", "/").split("/")[0]):
+            return _json(handler, {"error": "profil wymaga PIN-u", "pin": True}, 403)
     if method == "GET" and op == "scan":
-        return _json(handler, {"files": {k: list(v) for k, v in nasfs.scan_dir(target).items()}})
+        files = {k: list(v) for k, v in nasfs.scan_dir(target).items() if not _is_auth(k)}
+        return _json(handler, {"files": files})
     if method == "GET" and op == "list":
         try:
-            ents = [[e.name, e.is_dir()] for e in os.scandir(target)]
+            ents = [[e.name, e.is_dir()] for e in os.scandir(target) if e.name != pinauth.AUTH]
         except OSError:
             return _json(handler, {"error": "nie ma"}, 404)
         return _json(handler, {"entries": ents})
@@ -377,6 +395,115 @@ def _nas(handler, method: str, parts: list) -> None:
     return _json(handler, {"error": "nieznana operacja"}, 404)
 
 
+# ── profile z PIN-em ──
+
+def _is_auth(rel: str) -> bool:
+    from emustart import pinauth
+    return rel.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1] == pinauth.AUTH
+
+
+def _secret() -> str:
+    cfg = API._cfg
+    if not cfg.get("profile_secret"):
+        cfg["profile_secret"] = secrets.token_urlsafe(32)
+        config.save(cfg)
+    return cfg["profile_secret"]
+
+
+def _profile_ok(handler, profile: str) -> bool:
+    """Profil bez PIN-u — dostępny (stare profile, do czasu ustawienia PIN-u);
+    z PIN-em — tylko z tokenem tego profilu."""
+    from emustart import nasfs, pinauth
+    if not profile or profile.startswith((".", "_")) or NAS_ROOT is None:
+        return True
+    rec = pinauth.read(nasfs.SmbFs(NAS_ROOT), profile)
+    if rec is None:
+        return True
+    return pinauth.token_ok(_secret(), profile, rec, handler.headers.get("X-Profile-Token") or "")
+
+
+def profile_names() -> list:
+    """Profile w folderze profili (bez przeniesionych po zmianie nazwy)."""
+    try:
+        ents = [e for e in os.scandir(NAS_ROOT) if e.is_dir() and not e.name.startswith((".", "_"))]
+    except OSError:
+        return []
+    marks = ("save", "settings", "emustart.json", "retroachievements.json", ".auth.json")
+    return sorted((e.name for e in ents if not os.path.exists(os.path.join(e.path, "moved.json"))
+                   and any(os.path.exists(os.path.join(e.path, m)) for m in marks)), key=str.lower)
+
+
+def _profiles_get(handler) -> None:
+    """GET /v1/profiles — [{name, pin}]: nazwy profili i czy mają PIN."""
+    from emustart import nasfs, pinauth
+    if NAS_ROOT is None:
+        return _json(handler, {"error": "serwer nie ma folderu profili"}, 404)
+    fs = nasfs.SmbFs(NAS_ROOT)
+    return _json(handler, {"profiles": [{"name": n, "pin": pinauth.read(fs, n) is not None}
+                                        for n in profile_names()]})
+
+
+def _profiles_put(handler, op: str) -> None:
+    """PUT /v1/profiles/login|create|pin?name=&pin=[&old=]
+
+    login  — PIN istniejącego profilu → token (profil bez PIN-u: needs_pin)
+    create — nowy profil z PIN-em; nazwa zajęta (bez względu na wielkość liter) → 409
+    pin    — ustawienie PIN-u (profil bez PIN-u) albo zmiana (z dotychczasowym `old`)
+    """
+    from emustart import nasfs, pinauth
+    n = int(handler.headers.get("Content-Length") or 0)
+    if n:
+        handler.rfile.read(min(n, 1 << 16))
+    if NAS_ROOT is None:
+        return _json(handler, {"error": "serwer nie ma folderu profili"}, 404)
+    a = _savemgr_args(handler)
+    fs = nasfs.SmbFs(NAS_ROOT)
+    wanted, pin = (a.get("name") or "").strip(), a.get("pin") or ""
+    existing = pinauth.find(profile_names(), wanted)
+    if op == "create":
+        if existing:
+            return _json(handler, {"error": f"Profil „{existing}” już istnieje.", "exists": True,
+                                   "name": existing}, 409)
+        name = _safe_profile_name(wanted)
+        if not name:
+            return _json(handler, {"error": "Zła nazwa profilu."}, 400)
+        if not pinauth.valid_pin(pin):
+            return _json(handler, {"error": "PIN to 4–8 cyfr."}, 400)
+        rec = pinauth.make(pin)
+        pinauth.write(fs, name, rec)
+        fs.write(f"{name}/emustart.json", b"{}")
+        log.info("nowy profil %s (z PIN-em)", name)
+        return _json(handler, {"ok": True, "name": name, "token": pinauth.token(_secret(), name, rec)})
+    if not existing:
+        return _json(handler, {"error": f"Nie ma profilu „{wanted}”."}, 404)
+    if op == "login":
+        ok, why, wait = pinauth.verify(fs, existing, pin)
+        if why == "brak":
+            return _json(handler, {"ok": True, "name": existing, "token": "", "needs_pin": True})
+        if not ok:
+            return _json(handler, {"error": why, "retry_after": wait}, 429 if wait and "Za dużo" in why else 403)
+        rec = pinauth.read(fs, existing)
+        return _json(handler, {"ok": True, "name": existing, "token": pinauth.token(_secret(), existing, rec)})
+    if op == "pin":
+        if not pinauth.valid_pin(pin):
+            return _json(handler, {"error": "PIN to 4–8 cyfr."}, 400)
+        if pinauth.read(fs, existing) is not None:
+            ok, why, wait = pinauth.verify(fs, existing, a.get("old") or "")
+            if not ok:
+                return _json(handler, {"error": "Zły dotychczasowy PIN." if why == "Zły PIN." else why,
+                                       "retry_after": wait}, 403)
+        rec = pinauth.make(pin)
+        pinauth.write(fs, existing, rec)
+        log.info("PIN profilu %s ustawiony", existing)
+        return _json(handler, {"ok": True, "name": existing, "token": pinauth.token(_secret(), existing, rec)})
+    return _json(handler, {"error": "nieznana operacja"}, 404)
+
+
+def _safe_profile_name(name: str) -> str:
+    n = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "_", name).strip(" .")[:32]
+    return "" if not n or n.startswith(("_", ".")) else n
+
+
 def _find(handler) -> None:
     """Gra po (system, ścieżka względna) — EmuStart na Windows pobiera ją stąd zamiast
     przez SMB. Odpowiedź: id i pliki (ścieżka, rozmiar); pobieranie jak dla Androida."""
@@ -391,6 +518,70 @@ def _find(handler) -> None:
             files = [{"path": f, "size": size} for f, size, _m in json.loads(r["files"])]
             return _json(handler, {"id": r["id"], "files": files})
     return _json(handler, {"error": "nie ma takiej gry"}, 404)
+
+
+def _savemgr_args(handler) -> dict:
+    q = urllib.parse.parse_qs(urllib.parse.urlsplit(handler.path).query)
+    return {k: (v or [""])[0] for k, v in q.items()}
+
+
+def _savemgr_game(es: str, name: str) -> tuple[list, str]:
+    """Nazwy plików i numer płyty gry z biblioteki serwera (gdy klient ich nie podał)."""
+    from emustart import ingame, library, metadata
+    r = library.db().execute("SELECT id, rel FROM games WHERE es=? AND name=?", (es, name)).fetchone()
+    if not r:
+        return [name], ""
+    try:
+        serial = ingame._serial(metadata.get(r["id"]))
+    except Exception:
+        serial = ""
+    return [Path(r["rel"].replace("\\", "/")).stem, name], serial
+
+
+def _savemgr_catalog(handler) -> None:
+    """GET /v1/savemgr/catalog?profile=&es=&name=[&stems=a|b][&serial=][&learned=x|y]
+    — stany tej gry z komputera i telefonu, ze zgodnością (emustart/savemgr.py)."""
+    from emustart import nasfs, savemgr
+    a = _savemgr_args(handler)
+    if NAS_ROOT is None:
+        return _json(handler, {"error": "serwer nie ma folderu profili"}, 404)
+    try:
+        prof = nasfs.clean_rel(a.get("profile", ""))
+    except ValueError as ex:
+        return _json(handler, {"error": str(ex)}, 400)
+    if not prof or "/" in prof or not a.get("es") or not a.get("name"):
+        return _json(handler, {"error": "brak profile/es/name"}, 400)
+    if not _profile_ok(handler, prof):
+        return _json(handler, {"error": "profil wymaga PIN-u", "pin": True}, 403)
+    stems, serial = _savemgr_game(a["es"], a["name"])
+    stems += [s for s in a.get("stems", "").split("|") if s]
+    out = savemgr.catalog(nasfs.SmbFs(NAS_ROOT), prof, a["es"], a["name"], stems,
+                          a.get("serial") or serial, [p for p in a.get("learned", "").split("|") if p])
+    return _json(handler, out)
+
+
+def _savemgr_copy(handler) -> None:
+    """PUT /v1/savemgr/copy?profile=&src=&platform=&emu=&es=&name=&device= — kopia stanu
+    na drugą platformę (w folderze profili; urządzenie pobierze go przy następnej grze)."""
+    from emustart import nasfs, savemgr
+    n = int(handler.headers.get("Content-Length") or 0)
+    if n:
+        handler.rfile.read(min(n, 1 << 16))
+    a = _savemgr_args(handler)
+    if NAS_ROOT is None:
+        return _json(handler, {"error": "serwer nie ma folderu profili"}, 404)
+    try:
+        prof = nasfs.clean_rel(a.get("profile", ""))
+        src = nasfs.clean_rel(a.get("src", ""))
+    except ValueError as ex:
+        return _json(handler, {"error": str(ex)}, 400)
+    if not prof or "/" in prof:
+        return _json(handler, {"error": "brak profile"}, 400)
+    if not _profile_ok(handler, prof):
+        return _json(handler, {"error": "profil wymaga PIN-u", "pin": True}, 403)
+    out = savemgr.copy(nasfs.SmbFs(NAS_ROOT), prof, src, a.get("platform", ""), a.get("emu", ""),
+                       a.get("es", ""), a.get("name", ""), a.get("device", ""))
+    return _json(handler, out)
 
 
 def _send_file(handler, gid: int, rel: str) -> None:
