@@ -100,7 +100,7 @@ def test_settings_per_profile_keep_machine_values(prof_env):
     names = s._profile_prepare(ad)
     ingame.ini_set(ini, {("GPU", "Renderer"): "D3D12"})
     s._profile_finish(ad, names)
-    assert (Path(cfg["profiles_nas"]) / "Ola" / "settings" / "duckstation" / "settings.ini").is_file()
+    assert (Path(cfg["profiles_nas"]) / "Ola" / "settings" / "windows" / "duckstation" / "settings.ini").is_file()
 
     # pierwszy profil zapisuje swoje (Vulkan) …
     ingame.ini_set(ini, {("GPU", "Renderer"): "Vulkan"})
@@ -158,7 +158,7 @@ def test_retroarch_session_cfg_has_dirs_and_account(tmp_path):
     ad = ingame.RetroArch(str(home / "retroarch.exe"))
     ad.cheevos = {"user": "ola", "token": "TOK", "hardcore": False}
     args = ad.launch_args(tmp_path / "run", False)
-    text = Path(args[1]).read_text(encoding="utf-8")
+    text = _append(args).read_text(encoding="utf-8")
     assert f'savefile_directory = "{home / "saves"}"' in text       # nigdy obok gry
     assert 'cheevos_enable = "true"' in text and 'cheevos_token = "TOK"' in text
     assert 'cheevos_hardcore_mode_enable = "false"' in text
@@ -395,7 +395,7 @@ def test_settings_copy_has_no_secrets_but_machine_keeps_them(prof_env):
     s = _session(cfg, pid)
     s._profile_finish(ra, s._profile_prepare(ra))
     for f in [profiles.LOCAL / str(pid) / "settings" / "retroarch" / "retroarch.cfg",
-              Path(cfg["profiles_nas"]) / "Gracz" / "settings" / "retroarch" / "retroarch.cfg"]:
+              Path(cfg["profiles_nas"]) / "Gracz" / "settings" / "windows" / "retroarch" / "retroarch.cfg"]:
         t = f.read_text(encoding="utf-8")
         assert "SEKRET123" not in t and "haslo" not in t and 'netplay_show_passworded = "true"' in t
     # kolejna gra: kopia profilu wgrana, sekrety komputera zostają
@@ -570,10 +570,10 @@ def test_retroarch_keyboard_for_computer_systems(tmp_path):
     home = tmp_path / "RetroArch"
     _write(home / "retroarch.cfg", b'input_player1_select = "rshift"\n')
     ad = ingame.RetroArch(str(home / "retroarch.exe"))
-    text = Path(ad.launch_args(tmp_path / "run1", False)[1]).read_text(encoding="utf-8")
+    text = _append(ad.launch_args(tmp_path / "run1", False)).read_text(encoding="utf-8")
     assert "input_auto_game_focus" not in text
     ad.keyboard_game = True
-    text = Path(ad.launch_args(tmp_path / "run2", False)[1]).read_text(encoding="utf-8")
+    text = _append(ad.launch_args(tmp_path / "run2", False)).read_text(encoding="utf-8")
     assert 'input_auto_game_focus = "1"' in text
     assert 'input_player1_select = "nul"' in text and 'input_player1_up = "nul"' in text
 
@@ -821,3 +821,8 @@ def test_remote_api_token_ranges_and_paths(env, tmp_path):
         assert _json.loads(body)["files"][0]["size"] == len(data)
     finally:
         remote.API = None
+
+
+def _append(args: list) -> Path:
+    """Plik --appendconfig z parametrów RetroArcha (przed nim bywa --config kopii sesji)."""
+    return Path(args[args.index("--appendconfig") + 1])

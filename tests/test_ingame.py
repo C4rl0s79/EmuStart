@@ -36,10 +36,10 @@ def test_ppsspp_android_keycodes(tmp_path):
 def test_retroarch_appendconfig(tmp_path):
     a = ingame.adapter_for(str(tmp_path / "retroarch.exe"))
     args = a.launch_args(tmp_path / "run", resume=True)
-    text = Path(args[1]).read_text()
-    assert args[0] == "--appendconfig"
+    text = Path(args[args.index("--appendconfig") + 1]).read_text()
     assert 'network_cmd_enable = "true"' in text and 'savestate_auto_load = "true"' in text
-    assert 'config_save_on_exit = "false"' in text
+    # bez retroarch.cfg nie ma kopii sesji — RetroArch działa na swoim pliku
+    assert "--config" not in args
 
 
 class FakeAdapter(ingame.Adapter):

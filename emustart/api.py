@@ -509,6 +509,24 @@ class Api:
         self._session.start()
         return {"ok": True, "warning": warning}
 
+    def configure_emulator(self, game_id: int) -> dict:
+        """Emulator tej gry bez gry — zmiana ustawień w profilu gracza (obraz, dźwięk,
+        sterowanie). Po zamknięciu emulatora ustawienia wracają do profilu i na NAS."""
+        if self._session and self._session.phase in ("preparing", "downloading",
+                                                     "extracting", "running"):
+            return {"ok": False, "reason": "Gra jest właśnie uruchomiona."}
+        g = library.game(int(game_id))
+        if not g:
+            return {"ok": False, "reason": "Nie ma takiej gry."}
+        emu = self._effective_emu(g)
+        if not emu["exe"] or not Path(emu["exe"]).is_file():
+            return {"ok": False, "reason": "Ta gra nie ma jeszcze emulatora — uruchom ją raz albo wybierz emulator."}
+        self._session = launcher.Session(self._cfg, int(game_id), self._profile,
+                                         on_running=self._on_running, on_finished=self._on_finished,
+                                         ui=None, configure=True)
+        self._session.start()
+        return {"ok": True, "label": emu["label"] or Path(emu["exe"]).stem}
+
     def launch_status(self) -> dict:
         return self._session.status() if self._session else {"phase": "idle"}
 

@@ -125,12 +125,15 @@ function goptItems() {
   const d = GO.data, det = GO.detail, g = S.games[S.gameIdx] || {};
   if (GO.page === "main" && S.platform === "android") return [
     { label: "Graj", act: () => { closeGopt(); launch(); } },
+    { label: "Ustawienia emulatora", value: "tylko na tym telefonie", act: () => { closeGopt(); launch("", false, true); } },
     { label: g.pinned ? "Odepnij (pozwól usunąć z telefonu)" : "Przypnij (trzymaj w telefonie)", act: async () => { await togglePin(); closeGopt(); } },
     ...removeItem(),
   ];
   if (GO.page === "main") return [
     { label: "Graj", act: () => { closeGopt(); launch(); } },
     { label: "Emulator", value: d.emulator.label + (d.emulator.own ? "  (tylko ta gra)" : ""), act: () => goPage("emus") },
+    { label: "Ustawienia emulatora", value: "obraz, dźwięk, sterowanie — w Twoim profilu",
+      act: () => { closeGopt(); launch("", false, true); } },
     { label: "Wczytaj zapis", value: d.states.length ? `${d.states.length} ${plural(d.states.length, "zapis", "zapisy", "zapisów")}` : "brak zapisów",
       act: () => d.states.length ? goPage("states") : toast("Ten emulator nie ma zapisów tej gry.") },
     { label: "Metadane i opis", value: [det.meta.developer, det.meta.year].filter(Boolean).join(" · "), act: () => goPage("meta") },

@@ -137,6 +137,22 @@ object Emulators {
     fun label(id: String): String =
         (BY_ID[baseId(id)]?.label ?: id) + (coreOf(id).takeIf { it.isNotEmpty() }?.let { " ($it)" } ?: "")
 
+    /** Sam emulator (bez gry) — jego własne ustawienia na tym telefonie. RetroArch:
+     *  menu z wybranym rdzeniem i plikiem ustawień telefonu (osobnym od Windows). */
+    fun settingsIntent(ctx: Context, id: String, plat: String, core: String): Intent {
+        val emu = BY_ID[baseId(id)] ?: throw IllegalStateException("nieznany emulator $id")
+        val comp = component(ctx, emu, pkgOf(id)) ?: throw IllegalStateException("${emu.label} nie jest zainstalowany")
+        val pkg = comp.substringBefore('/')
+        val i = Intent()
+        i.component = ComponentName.unflattenFromString(comp)
+        i.action = Intent.ACTION_MAIN
+        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+        if (emu.pass == Pass.RETROARCH) {
+            i.putExtra("CONFIGFILE", "${Environment.getExternalStorageDirectory()}/Android/data/$pkg/files/retroarch.cfg")
+        }
+        return i
+    }
+
     /** Intencja uruchamiająca grę `file` w emulatorze `id`. */
     fun intent(ctx: Context, id: String, file: File, plat: String, core: String): Intent {
         val emu = BY_ID[baseId(id)] ?: throw IllegalStateException("nieznany emulator $id")

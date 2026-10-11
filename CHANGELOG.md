@@ -21,7 +21,17 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   **Pokaż klucz**, **Folder logów**. Gdy serwer nie działa, panel go uruchamia. Działa tylko
   na komputerze z serwerem (127.0.0.1).
 
+- **Ustawienia emulatora z EmuStart** — opcje gry → **Ustawienia emulatora**: emulator
+  gry bez gry (RetroArch w menu), z ustawieniami profilu; po zamknięciu zmiany trafiają
+  do profilu i na NAS. Na telefonie otwiera emulator (ustawienia tego telefonu).
+
 ### Poprawione
+- **Ustawienia RetroArcha wracały po każdej grze** (np. obraz w SwanStation): na czas gry
+  RetroArch miał wyłączony zapis ustawień przy wyjściu, więc zmiany z menu (proporcje,
+  skalowanie, shadery…) ginęły, a profil wgrywał stare. Teraz RetroArch pracuje na kopii
+  `retroarch.cfg` i przy wyjściu ją zapisuje; zmienione wartości wracają do `retroarch.cfg`
+  (i do profilu) — bez ustawień sesji EmuStart (komendy, foldery profilu, konto
+  RetroAchievements, kolejność padów). Opcje rdzeni i nadpisania zapisywały się już wcześniej.
 - **Przypięta gra nie kończyła pobierania** (zostawał pełny plik `.part`, status „przypięta
   (pobierze się)”): błąd jednego ze strumieni przerywał całe pobieranie, nawet gdy pozostałe
   pobrały już wszystkie bloki. Teraz chwilowe błędy sieci są ponawiane (5 prób na strumień),
@@ -39,6 +49,9 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 - Status „lokalnie” liczony z plików w pamięci podręcznej, nie tylko z bazy.
 
 ### Zmienione
+- **Ustawienia emulatorów z Windows na NAS-ie w `<profil>\settings\windows\<emulator>`** —
+  osobno od Androida (inne wersje emulatorów i rdzeni). Dotychczasowe `settings\<emulator>`
+  są kopiowane tam przy pierwszej synchronizacji (stary folder zostaje).
 - `--install-server`: zadanie Harmonogramu bez limitu 72 h pracy (schtasks zatrzymywał
   serwer po 3 dniach) i z ponownym uruchomieniem po awarii. **Uruchom `--install-server`
   ponownie** (jako administrator).

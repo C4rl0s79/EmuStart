@@ -533,11 +533,12 @@ async function togglePin() {
 
 /* ───────────── uruchamianie ───────────── */
 let launchPoll;
-async function launch(state = "", takeover = false) {
+async function launch(state = "", takeover = false, configure = false) {
   const g = S.games[S.gameIdx];
-  const r = await api().launch(g.id, state, takeover);
+  const r = configure ? await api().configure_emulator(g.id) : await api().launch(g.id, state, takeover);
   if (r.need_install) return askInstallForGame(r.need_install);
   if (!r.ok) return toast(r.reason);
+  if (r.android) return toast(`${r.label}: zmień ustawienia i wróć do EmuStart. Ustawienia telefonu są osobne od komputera.`, 6000);
   if (r.warning) toast(r.warning, 7000);
   S.modal = "launch";
   $("launch").classList.remove("hidden");
@@ -567,8 +568,8 @@ async function updateLaunch() {
       : st.mode === "remote" ? "Pobieranie z NAS (połączenie zdalne)"
       : st.mode === "lan" ? "Kopiowanie z NAS" : "Kopiowanie do pamięci podręcznej",
     extracting: "Rozpakowuję do pamięci…",
-    running: "Gra uruchomiona",
-    finished: "Koniec gry",
+    running: st.mode === "config" ? "Ustawienia emulatora — zamknij emulator, aby zapisać w profilu" : "Gra uruchomiona",
+    finished: st.mode === "config" ? "Ustawienia zapisane w profilu" : "Koniec gry",
     error: "Nie udało się uruchomić gry",
     cancelled: "Pobieranie przerwane",
   }[st.phase] || "";

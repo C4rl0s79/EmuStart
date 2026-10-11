@@ -189,7 +189,7 @@ def test_push_all_sends_existing_local_saves(env, monkeypatch):
     assert profiles.push_all(cfg) == 2
     nas = tmp / "nas" / profiles.get(pid)["nas_name"]
     assert (nas / "save" / "duckstation" / "memcards" / "a.mcd").read_bytes() == b"A" * 5000
-    assert (nas / "settings" / "duckstation" / "settings.ini").is_file()
+    assert (nas / "settings" / "windows" / "duckstation" / "settings.ini").is_file()
     assert profiles.push_all(cfg) == 0                             # drugi raz nic do wysłania
 
 

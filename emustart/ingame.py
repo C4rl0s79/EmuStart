@@ -39,6 +39,20 @@ def _ini_value(path: Path, key: str) -> str:
     return m.group(1).strip().strip('"') if m else ""
 
 
+def _cfg_map(path: Path) -> dict:
+    """retroarch.cfg → {klucz: surowa wartość (z cudzysłowami)}; ostatnie wystąpienie wygrywa."""
+    out = {}
+    try:
+        text = path.read_text(encoding="utf-8-sig", errors="replace")
+    except OSError:
+        return out
+    for line in text.splitlines():
+        m = re.match(r"^\s*([^=#;\s\[]+)\s*=\s*(.*?)\s*$", line)
+        if m:
+            out[m.group(1)] = m.group(2)
+    return out
+
+
 def _qt_key(binding: str) -> str:
     """'Keyboard/F2' (DuckStation/PCSX2) → 'F2'; 'Keyboard/Shift & F1' → 'SHIFT+F1'."""
     if not binding.lower().startswith("keyboard/"):
@@ -306,6 +320,15 @@ class Adapter:
         """Pliki/foldery ustawień (względem settings_base), które należą do profilu."""
         return []
 
+    def config_args(self, run_dir: Path) -> list:
+        """Parametry uruchomienia samego emulatora (bez gry) — do zmiany ustawień."""
+        return []
+
+    def after_session(self) -> int:
+        """Po zamknięciu emulatora (przed zapisem ustawień do profilu): dokończenie
+        ustawień zmienionych w trakcie. Zwraca liczbę przeniesionych wartości."""
+        return 0
+
     def machine_keys(self) -> dict:
         """{plik: [(regex sekcji, regex klucza)]} — wartości zależne od komputera
         (ścieżki, karta grafiki, urządzenie audio), których profil nie nadpisuje."""
@@ -389,12 +412,9 @@ class RetroArch(Adapter):
     def launch_args(self, run_dir: Path, resume: bool, pad_order: list | None = None) -> list:
         run_dir.mkdir(parents=True, exist_ok=True)
         cfg = run_dir / "emustart_ra.cfg"
-        # config_save_on_exit=false: RetroArch nie zapisze tych ustawień sesji
-        # do Twojego retroarch.cfg
         lines = [
             'network_cmd_enable = "true"',
             f'network_cmd_port = "{RA_PORT}"',
-            'config_save_on_exit = "false"',
             'savestate_auto_save = "true"',
             f'savestate_auto_load = "{"true" if resume else "false"}"',
             # save'y zawsze w podpiętym folderze — także gdy retroarch.cfg każe
@@ -426,7 +446,58 @@ class RetroArch(Adapter):
         for p, slot in enumerate((pad_order or [])[:4]):
             lines.append(f'input_player{p + 1}_joypad_index = "{slot}"')
         cfg.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        return ["--appendconfig", str(cfg)]
+        return self._session_config(run_dir, lines) + ["--appendconfig", str(cfg)]
+
+    def config_args(self, run_dir: Path) -> list:
+        """RetroArch bez gry, w menu — ustawienia (obraz, dźwięk, sterowanie) zmienione
+        tu trafiają do profilu tak jak zmiany w trakcie gry."""
+        run_dir.mkdir(parents=True, exist_ok=True)
+        cfg = run_dir / "emustart_ra.cfg"
+        lines = [f'network_cmd_port = "{RA_PORT}"']
+        cfg.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        return self._session_config(run_dir, lines) + ["--appendconfig", str(cfg), "--menu"]
+
+    # Ustawienia zmienione w menu RetroArcha w trakcie gry. Na czas sesji RetroArch
+    # czyta kopię retroarch.cfg (--config) i zapisuje ją przy wyjściu; po wyjściu
+    # zmienione wartości wracają do prawdziwego retroarch.cfg — bez ustawień sesji
+    # EmuStart (komendy sieciowe, foldery profilu, konto RA, kolejność padów).
+    # Wcześniej (config_save_on_exit=false) zmiany ginęły przy każdym wyjściu.
+    _SESSION_KEYS = re.compile(r"config_save_on_exit|cheevos_.*|input_player\d+_joypad_index")
+
+    def _session_config(self, run_dir: Path, lines: list) -> list:
+        self._session = None
+        main = self.home / "retroarch.cfg"
+        if not main.is_file():
+            return []
+        start, sess = run_dir / "retroarch_start.cfg", run_dir / "retroarch_session.cfg"
+        shutil.copyfile(main, start)
+        shutil.copyfile(main, sess)
+        # foldery względem retroarch.exe, nie względem kopii w folderze tymczasowym
+        dirs = [f'rgui_config_directory = "{self._cfg_dir("rgui_config_directory", "config")}"',
+                'config_save_on_exit = "true"']
+        if _ini_value(main, "global_core_options") == "true" and not _ini_value(main, "core_options_path"):
+            # wspólne opcje rdzeni leżą obok retroarch.cfg — bez tego trafiłyby do kopii
+            dirs.append(f'core_options_path = "{self.home / "retroarch-core-options.cfg"}"')
+        with open(sess, "a", encoding="utf-8") as f:
+            f.write("\n" + "\n".join(dirs) + "\n")
+        appended = {m.group(1) for m in (re.match(r"\s*([^=\s]+)\s*=", ln) for ln in lines + dirs) if m}
+        self._session = (start, sess, appended)
+        return ["--config", str(sess)]
+
+    def after_session(self) -> int:
+        st = getattr(self, "_session", None)
+        self._session = None
+        if not st:
+            return 0
+        start, sess, appended = st
+        before, after = _cfg_map(start), _cfg_map(sess)
+        changes = {(None, k): v for k, v in after.items()
+                   if k not in appended and not self._SESSION_KEYS.fullmatch(k) and before.get(k) != v}
+        if changes:
+            ini_set(self.home / "retroarch.cfg", changes)
+            log.info("RetroArch: %d ustawień zmienionych w trakcie sesji → retroarch.cfg (%s)",
+                     len(changes), ", ".join(sorted(k for _s, k in changes))[:300])
+        return len(changes)
 
     def _cfg_dir(self, key: str, default: str) -> Path:
         d = _ini_value(self.home / "retroarch.cfg", key)

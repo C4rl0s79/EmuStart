@@ -35,6 +35,16 @@ po grze zbierane z powrotem. Wartości zależne od komputera (ścieżki, BIOS, k
 graficzna, urządzenie audio) oraz hasła i tokeny zostają z danego komputera.
 Nowy profil zaczyna od bieżących ustawień.
 
+- **Zmiana ustawień**: przytrzymaj A na grze → **Ustawienia emulatora** — emulator tej gry
+  uruchamia się bez gry (RetroArch w menu), z ustawieniami Twojego profilu; po jego
+  zamknięciu zmiany zapisują się w profilu i na NAS-ie. Zmiany zrobione w trakcie gry
+  (RetroArch: menu F1 → Ustawienia, Opcje rdzenia, nadpisania) też zostają — RetroArch
+  musi zostać zamknięty normalnie (menu EmuStart → Wyjdź, albo z menu RetroArcha).
+- **Windows i Android mają osobne ustawienia** (inne wersje emulatorów i rdzeni, inne
+  ścieżki): na NAS-ie ustawienia z Windows są w `<profil>\settings\windows\<emulator>\`,
+  telefon ma własne — na telefonie **Ustawienia emulatora** otwiera emulator na tym
+  urządzeniu. Wspólne są tylko zapisy (save'y).
+
 **Synchronizacja z NAS-em.** Przed grą nowsze pliki z NAS-a → lokalnie, po grze
 nowsze lokalne → NAS (`Z:\emustart\Profiles\<profil>\`). Nadpisywane wersje trafiają
 do kopii zapasowych. Szczegóły: [Kilka komputerów, jeden NAS](Kilka-komputerów-jeden-NAS).

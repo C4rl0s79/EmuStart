@@ -51,8 +51,9 @@ class Session:
 
     def __init__(self, cfg: dict, game_id: int, profile_id: int,
                  on_running=None, on_finished=None, ui=None, start_state: str = "",
-                 takeover: bool = False):
+                 takeover: bool = False, configure: bool = False):
         self.cfg = cfg
+        self.configure = configure        # sam emulator, bez gry — zmiana ustawień profilu
         self.takeover = takeover          # przejęcie profilu zablokowanego przez inne urządzenie
         self.locked_by = ""
         self._t_created = time.monotonic()
@@ -141,6 +142,8 @@ class Session:
         if not exe or not Path(exe).is_file():
             raise LaunchError(f"Brak emulatora dla systemu {info['display']}. "
                               "Wybierz go w ustawieniach (Start → Ustawienia).")
+        if self.configure:
+            return self._configure(exe, emu.get("label") or Path(exe).stem)
         rom_dir = library.game_dir(g)
         cache_dir = cache.root(self.cfg) / es
 
@@ -437,6 +440,10 @@ class Session:
         try:
             self._run_process(g, exe, cmd, adapter)
         finally:
+            try:
+                adapter.after_session()          # ustawienia zmienione w trakcie gry zostają
+            except Exception:
+                log.exception("ustawienia po sesji")
             if restore_pads:
                 try:
                     restore_pads()
@@ -454,6 +461,41 @@ class Session:
                 except Exception:
                     log.exception("po grze")
             start_post(post, g["title"])
+        self.phase = "finished"
+
+    def _configure(self, exe: str, label: str) -> None:
+        """Emulator bez gry, z ustawieniami profilu: zmiany (obraz, dźwięk, sterowanie)
+        po zamknięciu wracają do profilu — jak zmiany w trakcie gry."""
+        adapter = ingame.adapter_for(exe)
+        self.mode = "config"
+        self.message = f"Ustawienia: {label}"
+        save_names = self._profile_prepare(adapter)
+        try:
+            cmd = [exe] + adapter.config_args(self.run_dir)
+        except BaseException:
+            if save_names:
+                profiles.unlock(self.cfg, self.profile_id)
+            raise
+        log.info("ustawienia emulatora: %s", cmd)
+        self.phase = "running"
+        try:
+            try:
+                self.proc = subprocess.Popen(cmd, cwd=str(Path(exe).parent))
+            except OSError as ex:
+                raise LaunchError(f"Nie udało się uruchomić emulatora: {ex}")
+            if self.on_running:
+                try:
+                    self.on_running(self)
+                except Exception:
+                    log.exception("on_running")
+            self.proc.wait()
+        finally:
+            try:
+                adapter.after_session()
+            except Exception:
+                log.exception("ustawienia po sesji")
+            if save_names:
+                start_post(lambda: self._profile_finish(adapter, save_names), "ustawienia " + label)
         self.phase = "finished"
 
     # ── profile: save'y emulatora na czas gry należą do profilu ──

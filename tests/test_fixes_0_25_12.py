@@ -210,3 +210,56 @@ def test_admin_panel_endpoints_local_only(env, monkeypatch):
     with urllib.request.urlopen(urllib.request.Request(base + "/server.js", headers={"Host": local}), timeout=5) as r:
         assert b"/admin/" in r.read()
     server.DEV_API = None
+
+
+def test_retroarch_menu_changes_survive_session(tmp_path):
+    """Zmiana w menu RetroArcha w trakcie gry (np. proporcje obrazu) zostaje
+    w retroarch.cfg; ustawienia sesji EmuStart (komendy, foldery, konto RA) — nie."""
+    from emustart import ingame
+    home = tmp_path / "RetroArch"
+    _write(home / "retroarch.cfg", b'video_aspect_ratio_index = "22"\nvideo_scale_integer = "false"\n'
+                                   b'savefile_directory = ":\\\\saves"\nnetwork_cmd_enable = "false"\n')
+    ra = ingame.RetroArch.__new__(ingame.RetroArch)
+    ra.home, ra.keyboard_game = home, False
+    ra.cheevos = {"user": "u", "token": "SEKRET"}
+    run = tmp_path / "run"
+    args = ra.launch_args(run, False, [1, 0])
+    assert args[0] == "--config" and "--appendconfig" in args
+    sess = Path(args[1])
+    assert 'config_save_on_exit = "true"' in sess.read_text()
+    # RetroArch przy wyjściu zapisuje całość (z wartościami sesji) do kopii
+    sess.write_text('video_aspect_ratio_index = "1"\nvideo_scale_integer = "true"\n'
+                    'savefile_directory = "C:\\\\profil\\\\saves"\nnetwork_cmd_enable = "true"\n'
+                    'cheevos_token = "SEKRET"\ninput_player1_joypad_index = "1"\n'
+                    'config_save_on_exit = "true"\nvideo_shader_enable = "true"\n')
+    assert ra.after_session() == 3
+    cfg = (home / "retroarch.cfg").read_text()
+    assert 'video_aspect_ratio_index = "1"' in cfg and 'video_scale_integer = "true"' in cfg
+    assert 'video_shader_enable = "true"' in cfg
+    assert 'network_cmd_enable = "false"' in cfg and "SEKRET" not in cfg and "profil" not in cfg
+    assert "joypad_index" not in cfg and "config_save_on_exit" not in cfg
+    assert ra.after_session() == 0                     # jednorazowo
+
+
+def test_retroarch_config_mode_opens_menu(tmp_path):
+    from emustart import ingame
+    home = tmp_path / "RetroArch"
+    _write(home / "retroarch.cfg", b'video_fullscreen = "true"\n')
+    ra = ingame.RetroArch.__new__(ingame.RetroArch)
+    ra.home, ra.keyboard_game, ra.cheevos = home, False, None
+    args = ra.config_args(tmp_path / "run")
+    assert "--menu" in args and args[0] == "--config"
+    Path(args[1]).write_text('video_fullscreen = "false"\nconfig_save_on_exit = "true"\n')
+    assert ra.after_session() == 1
+    assert 'video_fullscreen = "false"' in (home / "retroarch.cfg").read_text()
+
+
+def test_settings_on_nas_separate_for_windows(tmp_path, monkeypatch):
+    """Ustawienia z Windows w settings/windows/<emulator>; stare settings/<emulator> przeniesione."""
+    from emustart import nasfs, profiles
+    nas = tmp_path / "nas"
+    _write(nas / "Jezus" / "settings" / "retroarch" / "retroarch.cfg", b'video_smooth = "true"\n')
+    fs = nasfs.SmbFs(nas)
+    assert profiles._migrate_settings(fs, {"nas_name": "Jezus"}, "retroarch") >= 1
+    assert (nas / "Jezus" / "settings" / "windows" / "retroarch" / "retroarch.cfg").read_bytes() == b'video_smooth = "true"\n'
+    assert profiles._migrate_settings(fs, {"nas_name": "Jezus"}, "retroarch") == 0   # już jest

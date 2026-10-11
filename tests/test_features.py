@@ -111,7 +111,7 @@ def test_pad_order_modes():
 def test_retroarch_pad_indexes(tmp_path):
     a = ingame.adapter_for(str(tmp_path / "retroarch.exe"))
     args = a.launch_args(tmp_path / "run", False, [1, 0])
-    text = Path(args[1]).read_text()
+    text = Path(args[args.index("--appendconfig") + 1]).read_text()
     assert 'input_player1_joypad_index = "1"' in text and 'input_player2_joypad_index = "0"' in text
 
 

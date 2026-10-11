@@ -89,6 +89,7 @@ class Bridge(private val act: MainActivity) {
         "launch_play_now" -> null
         "toggle_pin" -> togglePin(a.getInt(0))
         "remove_local" -> removeLocal(a.getInt(0))
+        "configure_emulator" -> configureEmulator(a.getInt(0))
         "look_save" -> { prefs.look = a.getJSONObject(0); JSONObject().put("ok", true) }
         "quit" -> { act.runOnUiThread { act.finishAndRemoveTask() }; null }
         "copy_status" -> JSONArray()
@@ -480,6 +481,24 @@ class Bridge(private val act: MainActivity) {
         val pinned = Cache.togglePin(act, key(g.optString("es"), g.optString("name")))
         synchronized(gamesCache) { gamesCache.clear() }
         return JSONObject().put("ok", true).put("pinned", pinned)
+    }
+
+    /** Emulator gry bez gry — ustawienia na tym telefonie (osobne od Windows). */
+    private fun configureEmulator(id: Int): JSONObject {
+        val g = try { server.game(id) } catch (e: Exception) {
+            return JSONObject().put("ok", false).put("reason", explain(e))
+        }
+        val s = sysByEs(g.optString("es")) ?: return JSONObject().put("ok", false).put("reason", "Nieznany system.")
+        val emu = chosenEmu(s)
+        if (emu.isEmpty()) return JSONObject().put("ok", false)
+            .put("reason", "Brak emulatora dla ${s.optString("display")} — zainstaluj go i wybierz w Ustawieniach.")
+        return try {
+            val intent = Emulators.settingsIntent(act, emu, s.optString("plat"), s.optString("core"))
+            act.runOnUiThread { act.startActivity(intent) }
+            JSONObject().put("ok", true).put("android", true).put("label", Emulators.label(emu))
+        } catch (e: Exception) {
+            JSONObject().put("ok", false).put("reason", "Nie udało się otworzyć emulatora: ${e.message}")
+        }
     }
 
     /** Usuwa grę z telefonu (pliki, niedokończone pobieranie, rozpakowany ZIP, przypięcie). */
