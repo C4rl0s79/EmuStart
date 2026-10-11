@@ -24,6 +24,7 @@ class Bridge(private val act: MainActivity) {
     private val tag = "EmuStart"
     @Volatile private var profList: List<String> = emptyList()
     @Volatile private var profPin: Map<String, Boolean> = emptyMap()
+    private val installer by lazy { Installer(act) }
     private val emuProfile by lazy { EmuProfile(server, prefs) }      // profil → ma PIN (serwer 0.27+)
 
     init {
@@ -44,6 +45,7 @@ class Bridge(private val act: MainActivity) {
         @Volatile var message = ""
         @Volatile var progress: Progress? = null
         @Volatile var startedAt = 0L
+        @Volatile var missingCore = ""
         var downloader: Downloader? = null
         var emu = ""
         var saveGame: Saves.Game? = null
@@ -92,6 +94,10 @@ class Bridge(private val act: MainActivity) {
         "toggle_pin" -> togglePin(a.getInt(0))
         "remove_local" -> removeLocal(a.getInt(0))
         "configure_emulator" -> configureEmulator(a.getInt(0))
+        "install_missing" -> installMissing()
+        "install_start" -> installStart(a.getJSONArray(0))
+        "install_status" -> installer.status()
+        "install_cancel" -> { installer.cancel.set(true); null }
         "save_manager" -> saveManager(a.getInt(0))
         "save_copy" -> saveCopy(a.getInt(0), a.getString(1), a.getString(2), a.getString(3))
         "look_save" -> { prefs.look = a.getJSONObject(0); JSONObject().put("ok", true) }
@@ -349,8 +355,13 @@ class Bridge(private val act: MainActivity) {
         }
         val s = sysByEs(g.optString("es")) ?: return JSONObject().put("ok", false).put("reason", "Nieznany system.")
         val emu = chosenEmu(s)
-        if (emu.isEmpty()) return JSONObject().put("ok", false)
-            .put("reason", "Brak emulatora dla ${s.optString("display")} — zainstaluj go i wybierz w Ustawieniach.")
+        if (emu.isEmpty()) {
+            val steps = installSteps(s)
+            if (steps.length() > 0) return JSONObject().put("ok", false).put("need_install", JSONObject()
+                .put("es", s.optString("es")).put("system", s.optString("display")).put("steps", steps))
+            return JSONObject().put("ok", false)
+                .put("reason", "Brak emulatora dla ${s.optString("display")} — zainstaluj go i wybierz w Ustawieniach.")
+        }
         pinBlock(prefs.profile)?.let { return it.put("profile_pin", true) }
         val l = Launch(g, s)
         launch = l
@@ -451,13 +462,27 @@ class Bridge(private val act: MainActivity) {
             .put("title", l.game.optString("title")).put("tags", l.game.optString("tags"))
             .put("system", l.sys.optString("display")).put("game_id", l.game.optInt("id"))
             .put("can_play_now", false).put("copying", false).put("locked_by", l.lockedBy)
+            .put("missing_core", l.missingCore)
         l.progress?.let { o.put("progress", JSONObject(it.snapshot())) }
         return o
     }
 
     /** Powrót z emulatora: gra skończona. */
     fun onResumed() {
+        installer.next()                                  // następny instalator z kolejki
         val l = launch ?: return
+        val core = Emulators.retroCore(l.sys.optString("plat"), Emulators.coreOf(l.emuId).ifEmpty { l.sys.optString("core") })
+        if (l.phase == "running" && Emulators.baseId(l.emuId) == "retroarch" && !prefs.coreOk(core)
+            && System.currentTimeMillis() - l.startedAt < 8000) {
+            // RetroArch wrócił od razu, a ten rdzeń jeszcze nigdy nie uruchomił gry — najpewniej
+            // nie jest pobrany (EmuStart nie widzi rdzeni RetroArcha, nie może ich też wgrać)
+            l.phase = "error"; l.missingCore = core
+            l.message = "RetroArch nie uruchomił gry — prawdopodobnie brakuje rdzenia „$core”. " +
+                "Pobierz go w RetroArchu: Główne menu → Online Updater → Core Downloader → $core, potem uruchom grę ponownie."
+            val sg = l.saveGame
+            if (sg != null) pool.execute { try { saves.after(l.profile, l.emu, sg, l.startedAt, l.game.optString("title")) } catch (e: Exception) { } }
+            return
+        }
         if (l.phase == "running" && System.currentTimeMillis() - l.startedAt > 3000) {
             l.phase = "finished"
             // rdzeń, na którym gra działała dłużej niż chwilę — w ustawieniach oznaczony ✓
@@ -573,6 +598,42 @@ class Bridge(private val act: MainActivity) {
         val pinned = Cache.togglePin(act, key(g.optString("es"), g.optString("name")))
         synchronized(gamesCache) { gamesCache.clear() }
         return JSONObject().put("ok", true).put("pinned", pinned)
+    }
+
+    // ── instalacja emulatorów (APK / Google Play) ──
+    /** Emulator do zainstalowania dla systemu: najpierw te z bezpośrednim APK, potem ze sklepu. */
+    private fun installPick(s: JSONObject): String? {
+        val c = Emulators.candidates(s.optString("plat"), s.optString("core")).filter { it in Installer.SOURCES }
+        return c.sortedBy { if (Installer.SOURCES[it] is Installer.Src.Play) 1 else 0 }.firstOrNull()
+    }
+
+    private fun installSteps(s: JSONObject): JSONArray {
+        val id = installPick(s) ?: return JSONArray()
+        val core = Emulators.retroCore(s.optString("plat"), s.optString("core"))
+        val label = Emulators.labelOf(id) + (if (id == "retroarch" && core.isNotEmpty()) " (potem rdzeń $core w RetroArchu)" else "")
+        return JSONArray().put(JSONObject().put("label", label).put("version", Installer.describe(id)).put("id", id))
+    }
+
+    private fun installMissing(): JSONArray {
+        val out = JSONArray()
+        val list = try { systems() } catch (e: Exception) { JSONArray() }
+        for (i in 0 until list.length()) {
+            val s = list.getJSONObject(i)
+            if (chosenEmu(s).isNotEmpty()) continue
+            out.put(JSONObject().put("es", s.optString("es")).put("system", s.optString("display")).put("steps", installSteps(s)))
+        }
+        return out
+    }
+
+    private fun installStart(es: JSONArray): JSONObject {
+        val ids = LinkedHashMap<String, String>()
+        for (i in 0 until es.length()) {
+            val s = sysByEs(es.getString(i)) ?: continue
+            installPick(s)?.let { ids[it] = Emulators.labelOf(it) }
+        }
+        if (ids.isEmpty()) return JSONObject().put("ok", false).put("reason", "Nie ma czego instalować.")
+        installer.start(ids.keys.toList(), ids)
+        return JSONObject().put("ok", true)
     }
 
     /** Menedżer zapisów: stany tej gry z komputera i telefonu, wspólne zapisy w grze. */

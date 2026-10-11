@@ -3,6 +3,8 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- instalacja emulatorów z pobranego APK (gracz potwierdza w instalatorze systemu) -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- gry w publicznym folderze /storage/emulated/0/EmuStart — emulatory (RetroArch,
          DuckStation…) muszą móc je czytać; instalacja z pliku APK, nie z Google Play -->
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"

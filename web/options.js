@@ -725,6 +725,15 @@ async function instTick() {
     setHints([["a", "Zamknij"]], $("inHints"));
     return;
   }
+  if (st.android_pending) {
+    // telefon: APK pobrane — instalację potwierdza się w oknie systemu (albo w Google Play)
+    $("inMsg").className = "lmsg";
+    $("inMsg").textContent = "Potwierdź instalację w oknie systemu (za pierwszym razem: zgoda na instalowanie " +
+      "z EmuStart). Po instalacji uruchom grę ponownie" + (st.installed.some((x) => /RetroArch/.test(x))
+      ? " — RetroArch poprosi o pobranie rdzenia (Online Updater → Core Downloader)." : ".");
+    setHints([["a", "Zamknij"]], $("inHints"));
+    return;
+  }
   const after = INST.after;
   instClose();
   await refreshState();

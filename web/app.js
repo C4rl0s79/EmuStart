@@ -601,6 +601,7 @@ async function updateLaunch() {
     hints.push(["b", "Anuluj"]);
   } else if (["error", "cancelled"].includes(st.phase)) {
     if (st.locked_by) hints.push(["y", "Przejmij profil i graj"]);
+    if (st.missing_core) hints.push(["y", "Otwórz RetroArch"]);
     hints.push(["a", "Zamknij"]);
   }
   setHints(hints, $("lHints"));
@@ -619,6 +620,11 @@ function launchInput(a) {
   const ph = lastLaunch.phase;
   if (ph === "downloading" && a === "b") api().launch_cancel();
   else if (ph === "downloading" && a === "x" && lastLaunch.can_play_now) api().launch_play_now();
+  else if (ph === "error" && a === "y" && lastLaunch.missing_core) {
+    // telefon: RetroArch bez rdzenia — otwarcie RetroArcha (Online Updater → Core Downloader)
+    const gid = lastLaunch.game_id;
+    (async () => { await closeLaunch(); api().configure_emulator(gid); })();
+  }
   else if (ph === "error" && a === "y" && lastLaunch.locked_by) {
     // profil zablokowany przez urządzenie, na którym już nie grasz — przejęcie
     (async () => { await closeLaunch(); launch("", true); })();
@@ -782,6 +788,8 @@ function buildSetRowsAndroid() {
   rows.push({ k: "Edytor wyglądu", type: "action", run: () => openLook() });
   rows.push({ k: "Tytuły gier jako logo", key: "games_logo", type: "bool", fmt: (v) => (v ? "tak" : "nie") });
   rows.push({ head: "Emulatory  ·  ←/→ wybór  ·  ✓ rdzeń RetroArcha już działał na tym telefonie (pobierz brakujące w RetroArchu)" });
+  if ((c.systems || []).some((s) => !s.options.length))
+    rows.push({ k: "Pobierz brakujące emulatory", type: "action", fmt: () => "APK z oficjalnych wydań / Google Play", run: () => askInstallMissing() });
   for (const s of c.systems || []) {
     rows.push({ k: s.display, key: `emu:${s.es}`, type: "enum", opts: s.options.map((o) => o.id),
                 fmt: (v) => (s.options.find((o) => o.id === v) || { label: "brak zainstalowanego emulatora" }).label });
