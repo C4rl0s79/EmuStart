@@ -56,7 +56,16 @@ class Server(private val prefs: Prefs) {
     fun info(): JSONObject = JSONObject(text("/v1/info"))
     fun systems(): JSONArray = JSONArray(text("/v1/systems"))
     fun games(es: String): JSONArray = JSONArray(text("/v1/systems/" + enc(es) + "/games"))
-    fun game(id: Int): JSONObject = JSONObject(text("/v1/games/$id"))
+    /** Szczegóły gry; ścieżki plików zawsze z „/” (serwer na Windows sprzed 0.30.6 wysyłał „\\”,
+     *  a na Androidzie „\\” to znak w nazwie pliku — EPERM w pamięci telefonu). */
+    fun game(id: Int): JSONObject {
+        val d = JSONObject(text("/v1/games/$id"))
+        for (k in listOf("file", "rel")) if (d.has(k)) d.put(k, d.optString(k).replace('\\', '/'))
+        d.optJSONArray("files")?.let { a ->
+            for (i in 0 until a.length()) a.optJSONObject(i)?.let { f -> f.put("path", f.optString("path").replace('\\', '/')) }
+        }
+        return d
+    }
 
     fun fileUrlPath(id: Int, rel: String): String =
         "/v1/games/$id/file/" + rel.split('/', '\\').joinToString("/") { enc(it) }

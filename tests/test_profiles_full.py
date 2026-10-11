@@ -819,6 +819,18 @@ def test_remote_api_token_ranges_and_paths(env, tmp_path):
         assert get("/index.html")[0] == 403                                     # UI tylko lokalnie
         st, body, _h = get(f"/v1/games/{gid}")
         assert _json.loads(body)["files"][0]["size"] == len(data)
+        # gra z podfolderu (kolekcja tłumaczeń) zapisana przez Windows ze „\\” — telefon
+        # dostaje „/” (Android: „\\” to znak w nazwie pliku, EPERM) i pobiera plik
+        _write(roms / "T-En" / "Gra2.chd", b"T" * 10)
+        with library.db() as c:
+            c.execute("INSERT INTO games(es, rel, name, title, tags, files, size, seen, src) "
+                      "VALUES('psx','T-En\\Gra2.chd','Gra2','Gra2','',?,10,0,?)",
+                      (_json.dumps([["T-En\\Gra2.chd", 10, 1.0]]), str(roms)))
+            gid2 = c.execute("SELECT id FROM games WHERE name='Gra2'").fetchone()[0]
+        st, body, _h = get(f"/v1/games/{gid2}")
+        assert _json.loads(body)["files"][0]["path"] == "T-En/Gra2.chd"
+        st, body, _h = get(f"/v1/games/{gid2}/file/T-En/Gra2.chd")
+        assert st == 200 and body == b"T" * 10
     finally:
         remote.API = None
 
