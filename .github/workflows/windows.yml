@@ -1,0 +1,84 @@
+name: Windows
+
+# Binarka Windows (PyInstaller, wersja katalogowa) — to samo co build.ps1 na komputerze.
+# Push na main i PR: ZIP jako artefakt przebiegu. Tag v*: ZIP dołączany do wydania
+# (wydanie zakładane, gdy jeszcze go nie ma — APK z android.yml trafia do tego samego).
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+    paths:
+      - "emustart/**"
+      - "web/**"
+      - "assets/**"
+      - "main.py"
+      - "emustart.spec"
+      - "build.ps1"
+      - "requirements.txt"
+      - "tests/**"
+      - ".github/workflows/windows.yml"
+  pull_request:                  # sprawdzenie budowy przed scaleniem (artefakt do pobrania)
+    paths:
+      - "emustart/**"
+      - "web/**"
+      - "main.py"
+      - "emustart.spec"
+      - "build.ps1"
+      - "requirements.txt"
+      - "tests/**"
+      - ".github/workflows/windows.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  exe:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"     # compression.zstd (kompresja zapisów) jest od 3.14
+          cache: pip
+
+      - name: Zależności
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pyinstaller pillow
+
+      - name: Testy i budowa (build.ps1)
+        shell: pwsh
+        run: ./build.ps1
+
+      - name: Nazwa pliku
+        id: zip
+        shell: pwsh
+        run: |
+          $ver = (Select-String -Path "emustart\__init__.py" -Pattern '__version__ = "(.+)"').Matches[0].Groups[1].Value
+          "file=EmuStart-$ver-win64.zip" >> $env:GITHUB_OUTPUT
+          "ver=$ver" >> $env:GITHUB_OUTPUT
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.zip.outputs.file }}
+          path: dist/${{ steps.zip.outputs.file }}
+
+      - name: Dołączenie do wydania
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            # opis wydania: sekcja tej wersji z CHANGELOG.md
+            awk -v v="${{ steps.zip.outputs.ver }}" '
+              $0 ~ "^## \\[" v "\\]" {on=1; next}
+              on && /^## \[/ {exit}
+              on {print}' CHANGELOG.md > notes.md
+            gh release create "$GITHUB_REF_NAME" --title "EmuStart $GITHUB_REF_NAME" --notes-file notes.md \
+              || gh release view "$GITHUB_REF_NAME" >/dev/null   # równolegle założył je ktoś inny
+          fi
+          gh release upload "$GITHUB_REF_NAME" "dist/${{ steps.zip.outputs.file }}" --clobber

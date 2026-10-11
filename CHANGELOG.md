@@ -49,6 +49,9 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 - Status „lokalnie” liczony z plików w pamięci podręcznej, nie tylko z bazy.
 
 ### Zmienione
+- **Binarka Windows budowana w GitHub Actions** (`.github/workflows/windows.yml`, to samo
+  co `build.ps1`): przy każdym pushu na `main` i PR — ZIP jako artefakt przebiegu; przy tagu
+  `v*` ZIP trafia do wydania (wydanie zakładane z opisem z CHANGELOG, APK obok).
 - **Ustawienia emulatorów z Windows na NAS-ie w `<profil>\settings\windows\<emulator>`** —
   osobno od Androida (inne wersje emulatorów i rdzeni). Dotychczasowe `settings\<emulator>`
   są kopiowane tam przy pierwszej synchronizacji (stary folder zostaje).
