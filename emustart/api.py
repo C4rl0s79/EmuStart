@@ -423,8 +423,15 @@ class Api:
         rows = library.db().execute(
             "SELECT id, rel, name, trans FROM games WHERE es=? AND tbase=? AND trans!='' ORDER BY name",
             (g["es"], g["tbase"])).fetchall()
-        return [{"id": r["id"], "rel": r["rel"].replace("\\", "/"), "lang": r["trans"],
-                 "label": translations.label(r["name"], r["trans"])} for r in rows]
+        out = [{"id": r["id"], "rel": r["rel"].replace("\\", "/"), "lang": r["trans"],
+                "label": translations.label(r["name"], r["trans"]), "name": r["name"]} for r in rows]
+        # kilka wersji o tej samej etykiecie (pliki bez tagu [T-…]) — dopisek z nazwy pliku
+        labels = [v["label"] for v in out]
+        for v in out:
+            if labels.count(v["label"]) > 1:
+                extra = scanner.split_title(v["name"])[1]
+                v["label"] = f"{v['label']} · {extra or Path(v['rel']).stem}"
+        return out
 
     @staticmethod
     def _variant_key(g: dict) -> str:

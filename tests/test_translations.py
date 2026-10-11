@@ -156,3 +156,21 @@ def test_romvault_t_en_collection_layout(env):
     md = library.db().execute("SELECT * FROM games WHERE es='megadrive' AND trans=''").fetchone()
     assert [v["label"] for v in a._variants(library.game(md["id"]))] == ["MSU-MD"]
     assert [g["name"] for g in library.list_games("snes", 1, False)] == ["Bahamut Lagoon (Japan)", "Gradius III (USA)"]
+
+
+def test_several_translations_same_game(env):
+    roms = env / "roms"
+    _write(roms / "snes" / "Mother 3 (Japan).sfc")
+    pool = roms / "T-Eng" / "snes"
+    _write(pool / "Mother 3 (Japan) [T-En by Tomato v1.3].sfc")
+    _write(pool / "Mother 3 (Japan) [T-En by Other v1.0].sfc")
+    _write(pool / "Mother 3 (Japan) (Rev 1).sfc")
+    _write(pool / "Mother 3 (Japan) (Rev 2).sfc")
+    found, _u = scanner.collect_systems({"rom_root": str(roms), "systems": {}})
+    scanner.scan_system("snes", found["snes"])
+    a = api_mod.Api.__new__(api_mod.Api)
+    a._cfg, a._profile = {}, 1
+    org = library.db().execute("SELECT id FROM games WHERE trans=''").fetchone()["id"]
+    labels = sorted(v["label"] for v in a._variants(library.game(org)))
+    assert labels == ["Tłumaczenie (EN) · (Japan) (Rev 1)", "Tłumaczenie (EN) · (Japan) (Rev 2)",
+                      "[T-En by Other v1.0]", "[T-En by Tomato v1.3]"]
