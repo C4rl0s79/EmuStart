@@ -88,29 +88,68 @@ def is_pool(*folder_names: str) -> bool:
 
 
 def strip_pool_tag(folder: str) -> str:
-    """„Nintendo - SNES [T-En]” / „Nintendo - SNES T-Eng” → „Nintendo - SNES” (rozpoznanie systemu)."""
-    out = re.sub(r"\s*[\[(]\s*T[-+][^\])]*[\])]", "", folder or "")
-    return re.sub(r"\s*(?:^|\s)T\s*[-+]\s*[A-Za-z]{2,}\s*$", "", out, flags=re.I).strip(" -_")
+    """Nazwa systemu z nazwy folderu kolekcji (do rozpoznania systemu):
+    „Nintendo - Super Nintendo Entertainment System [T-En] Collection (20240101)”,
+    „Nintendo - SNES T-Eng”, „[T-En] Collection” → „Nintendo - …” / „Nintendo - SNES” / „”."""
+    out = _BRACKETS.sub(" ", folder or "")                         # [T-En], (20240101), (Translated)
+    out = _FOLDER_T.sub(" ", out)                                   # T-Eng, T+Pol
+    out = re.sub(r"\b(collection|translations?|translated|t[łl]umaczenia|kolekcja)\b", " ", out, flags=re.I)
+    return re.sub(r"\s+", " ", out).strip(" -_")
+
+
+def split_system(folder: str, match) -> tuple:
+    """(system, dopisek) folderu z kolekcji: „Nintendo - Super Famicom - Speed Hacks”
+    → ("snes", "Speed Hacks"); „Nintendo - Super Famicom [T-En] Collection” → ("snes", "").
+    `match` — systems.match_folder."""
+    base = strip_pool_tag(folder)
+    if not base:
+        return None, ""
+    es = match(base)
+    if es:
+        return es, ""
+    parts = base.split(" - ")
+    for k in range(len(parts) - 1, 0, -1):
+        es = match(" - ".join(parts[:k]))
+        if es:
+            prefix = " - ".join(parts[:k])
+            rest = folder[len(prefix):] if folder.startswith(prefix) else " - ".join(parts[k:])
+            return es, rest.strip(" -_")
+    return None, ""
+
+
+def pool_trans(folder: str, parent: str, match) -> str:
+    """Wartość games.trans dla gier z folderu kolekcji: kod języka (z `[T-En]` w nazwie
+    folderu), „+dopisek” dla wersji innych niż tłumaczenie (Speed Hacks, MSU1 — folder
+    bez tagu w kolekcji) albo język kolekcji / „?”."""
+    lang = lang_of(folder)
+    if lang:
+        return lang
+    _es, rest = split_system(folder, match)
+    if rest and not is_pool(folder):
+        return "+" + rest
+    return lang_of(parent) or "?"
 
 
 def label(name: str, lang: str) -> str:
-    """Etykieta wersji: tag `[T-…]` z nazwy (autor, wersja) albo język."""
+    """Etykieta wersji: tag `[T-…]` z nazwy (autor, wersja), dopisek folderu albo język."""
     m = _T_LABEL.search(name or "")
     if m:
         return m.group(0)
-    return f"Tłumaczenie ({lang.upper()})" if lang else "Tłumaczenie"
+    if lang.startswith("+"):
+        return lang[1:]
+    return f"Tłumaczenie ({lang.upper()})" if lang and lang != "?" else "Tłumaczenie"
 
 
-def mark(rows: list, pool_of: dict) -> None:
-    """Skan systemu: oznacza tłumaczenia w wierszach gier (słowniki z kluczami
-    name, src, hidden; dopisuje trans i tbase). `pool_of[src]` — czy folder jest
-    kolekcją tłumaczeń (i jego nazwy, z których można odczytać język)."""
+def mark(rows: list) -> None:
+    """Skan systemu: oznacza wersje w wierszach gier (słowniki z kluczami name, hidden
+    i pool — trans folderu kolekcji albo None; dopisuje trans i tbase). Wersja (z kolekcji
+    albo z tagiem `[T-…]` w nazwie) z oryginałem w bibliotece chowa się pod nim."""
     originals = set()
     for r in rows:
-        pool = pool_of.get(r["src"])
         r["tbase"] = base_title(r["name"])
+        pool = r.get("pool")
         if pool is not None or is_translation(r["name"]):
-            r["trans"] = lang_of(r["name"], *(pool or ())) or "?"
+            r["trans"] = lang_of(r["name"]) or pool or "?"
         else:
             r["trans"] = ""
             originals.add(r["tbase"])

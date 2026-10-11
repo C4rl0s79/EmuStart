@@ -195,6 +195,12 @@ FOLDER_ALIASES = {
     "Sega - PICO": "pico", "Sinclair - ZX Spectrum +3": "zxspectrum",
     "Tiger - Game.com": "gamecom", "Watara - Supervision": "supervision",
     "Welback - Mega Duck": "megaduck",
+    # nazwy japońskie / skrócone (np. kolekcje tłumaczeń „Nintendo - Super Famicom [T-En] Collection”)
+    "Nintendo - Famicom": "nes", "Nintendo - Super Famicom": "snes", "Sega - Mega Drive": "megadrive",
+    "Sega - Genesis": "megadrive", "Sega - Master System": "mastersystem", "NEC - PC Engine": "pcengine",
+    "NEC - TurboGrafx-16": "pcengine", "NEC - PC-8001": "pc88", "NEC - PC-8801": "pc88",
+    "NEC - PC-9801": "pc98", "Nintendo - Nintendo DSi": "nds", "Nintendo - Nintendo DS": "nds",
+    "Nintendo - Family Computer Disk System": "fds", "Nintendo - Nintendo 64": "n64",
 }
 _ALIAS_NORM = {}
 

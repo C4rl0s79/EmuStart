@@ -424,7 +424,7 @@ class Api:
             "SELECT id, rel, name, trans FROM games WHERE es=? AND tbase=? AND trans!='' ORDER BY name",
             (g["es"], g["tbase"])).fetchall()
         return [{"id": r["id"], "rel": r["rel"].replace("\\", "/"), "lang": r["trans"],
-                 "label": translations.label(r["name"], r["trans"] if r["trans"] != "?" else "")} for r in rows]
+                 "label": translations.label(r["name"], r["trans"])} for r in rows]
 
     @staticmethod
     def _variant_key(g: dict) -> str:

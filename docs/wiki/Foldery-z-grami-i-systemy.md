@@ -90,7 +90,9 @@ Fanowskie tłumaczenia trzymaj w osobnym folderze kolekcji — EmuStart pokazuje
 - folder kolekcji w folderze z grami albo dodany w Ustawieniach jako osobny folder z grami:
   w nazwie `T-Eng`, `T-En`, `T+Pol`, `[T-En]` albo słowo „Translations”/„Tłumaczenia”,
   w środku foldery systemów — np. `Z:\ROMS\T-Eng\Nintendo - Super Nintendo Entertainment System\`.
-  Nic nie trzeba oznaczać — wystarczy nazwa,
+  Nic nie trzeba oznaczać — wystarczy nazwa. Pasuje układ kolekcji z RomVaulta:
+  `ROMS\[T-En]Collection\Nintendo - Super Famicom [T-En] Collection\`. Foldery bez tagu
+  w kolekcji (`… - Speed Hacks`, `… - MSU-MD`) to dodatkowe wersje gry z etykietą folderu,
 - folder systemu z tagiem: `Nintendo - Super Nintendo Entertainment System [T-En]`,
 - plik z tagiem `[T-En]`, `[T+Pol by …]` w nazwie (także obok oryginałów).
 

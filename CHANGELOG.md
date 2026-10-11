@@ -14,6 +14,11 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 - **Kolekcja tłumaczeń „T-Eng” nie była rozpoznawana** — folder z `T-Eng`, `T-En`, `T+Pol`
   w nazwie (bez nawiasów) jest teraz kolekcją tłumaczeń, także dodany jako osobny folder
   z grami; język z nazwy folderu.
+- **Kolekcja `[T-En]Collection` z RomVaulta** — foldery systemów w rodzaju „Nintendo -
+  Super Famicom [T-En] Collection” są rozpoznawane (nazwy Famicom, Super Famicom, Mega
+  Drive, Master System, PC Engine, PC-8801, PC-9801, DSi). Foldery bez tagu w kolekcji
+  („… - Speed Hacks”, „… - MSU1 [roms only]”, „… - MSU-MD”) to dodatkowe wersje gry
+  z etykietą folderu.
 - **Tłumaczenia o tych samych nazwach plików co oryginały znikały** — liczyły się jako ta
   sama gra z drugiego folderu. Gry kolekcji tłumaczeń mają teraz ścieżkę z folderem
   systemu (`snes\Gra.sfc`) i są osobnymi wersjami.

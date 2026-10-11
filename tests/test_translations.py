@@ -128,3 +128,31 @@ def test_bare_t_eng_folder_same_names(env):
     a = api_mod.Api.__new__(api_mod.Api)
     a._cfg, a._profile = {}, 1
     assert len(a._variants(library.game(rows[0]["id"]))) == 2
+
+
+def test_romvault_t_en_collection_layout(env):
+    """Układ z RomVaulta: ROMS\\[T-En]Collection\\<System> [T-En] Collection\\ plus foldery
+    bez tagu (Speed Hacks, MSU1) — wersje gry z etykietą folderu."""
+    roms = env / "ROMS"
+    _write(roms / "Nintendo - Super Nintendo Entertainment System" / "Bahamut Lagoon (Japan).sfc")
+    _write(roms / "Nintendo - Super Nintendo Entertainment System" / "Gradius III (USA).sfc")
+    _write(roms / "Sega - Mega Drive - Genesis" / "Sonic CD (USA).md")
+    pool = roms / "[T-En]Collection"
+    _write(pool / "Nintendo - Super Famicom [T-En] Collection" / "Bahamut Lagoon (Japan) [T-En by DeJap v1.2].sfc")
+    _write(pool / "Nintendo - Super Famicom - Speed Hacks" / "Gradius III (USA) (Speed Hack).sfc")
+    _write(pool / "Sega - Mega Drive - MSU-MD" / "Sonic CD (USA).md")
+    _write(pool / "NEC - PC-6001 [T-En] Collection" / "Gra.zip")                 # system nieznany
+    found, unknown = scanner.collect_systems({"rom_root": str(roms), "systems": {}})
+    assert [d.name for d in unknown] == ["NEC - PC-6001 [T-En] Collection"]
+    assert len(found["snes"]) == 3 and len(found["megadrive"]) == 2
+    for es in ("snes", "megadrive"):
+        scanner.scan_system(es, found[es])
+    rows = {r["name"]: dict(r) for r in library.db().execute("SELECT * FROM games")}
+    assert rows["Bahamut Lagoon (Japan) [T-En by DeJap v1.2]"]["trans"] == "en"
+    assert rows["Gradius III (USA) (Speed Hack)"]["trans"] == "+Speed Hacks"
+    assert all(r["hidden"] == translations.HIDDEN for r in rows.values() if r["trans"])
+    a = api_mod.Api.__new__(api_mod.Api)
+    a._cfg, a._profile = {}, 1
+    md = library.db().execute("SELECT * FROM games WHERE es='megadrive' AND trans=''").fetchone()
+    assert [v["label"] for v in a._variants(library.game(md["id"]))] == ["MSU-MD"]
+    assert [g["name"] for g in library.list_games("snes", 1, False)] == ["Bahamut Lagoon (Japan)", "Gradius III (USA)"]

@@ -125,7 +125,7 @@ function removeItem() {
 function variantItem() {
   const det = GO.detail || {};
   if (!det.variants || !det.variants.length) return [];
-  return [{ label: "Wersja", value: det.variant ? det.variant_label : `oryginał · ${det.variants.length} ${plural(det.variants.length, "tłumaczenie", "tłumaczenia", "tłumaczeń")}`,
+  return [{ label: "Wersja", value: det.variant ? det.variant_label : `oryginał · ${det.variants.length} ${plural(det.variants.length, "inna wersja", "inne wersje", "innych wersji")}`,
     act: () => goPage("variants") }];
 }
 function goptItems() {
@@ -171,7 +171,7 @@ function goptItems() {
     };
     const cur = det.variant || 0;
     return [{ label: "Oryginał", value: cur ? "" : "✓", act: () => pick(null) },
-      ...det.variants.map((v) => ({ label: v.label, value: (v.lang && v.lang !== "?" ? v.lang.toUpperCase() + " " : "") + (cur === v.id ? "✓" : ""),
+      ...det.variants.map((v) => ({ label: v.label, value: (/^[a-z]{2}$/.test(v.lang || "") ? v.lang.toUpperCase() + " " : "") + (cur === v.id ? "✓" : ""),
         act: () => pick(v) }))];
   }
   if (GO.page === "emus") {
