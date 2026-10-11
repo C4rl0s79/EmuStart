@@ -8,6 +8,25 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.26.0] — 2026-10-11
+
+### Dodane
+- **Menedżer zapisów** — opcje gry (przytrzymane A) → **Zapisy i stany**, na komputerze
+  i telefonie: stany tej gry z obu platform (emulator, slot, data, rozmiar) i wspólne zapisy
+  w grze. Wybrany stan można **skopiować na drugą platformę** — trafia do jej folderu
+  w profilu na NAS-ie i pobiera się przy następnej grze (na ten komputer od razu, jest
+  w „Wczytaj zapis”; stamtąd też „Graj od tego stanu”). Nadpisywany stan idzie do kopii
+  zapasowej profilu.
+  - **PCSX2 ↔ ARMSX2 / AetherSX2**: zgodność sprawdzana z pliku — stan `.p2s` zapisuje
+    wersję formatu, a ARMSX2 ma ten sam format co PCSX2 2.x (`9A59`, czyta też starsze).
+    Ta sama wersja = ✓; inna = ✗ (kopiowanie dalej możliwe, z ostrzeżeniem). Telefon
+    rozpoznaje skopiowany stan po numerze płyty (indeks przedrostków na serwerze).
+  - **RetroArch**: stan należy do rdzenia — ten sam rdzeń na obu urządzeniach (np.
+    SwanStation, Snes9x, mGBA) zwykle się wczyta. Na komputerze stan trafia do podfolderu
+    rdzenia, gdy RetroArch sortuje stany wg rdzenia.
+  - Serwer: `GET /v1/savemgr/catalog`, `PUT /v1/savemgr/copy` (z kluczem). EmuStart na
+    komputerze bez serwera robi to samo przez SMB. **Serwer trzeba zaktualizować.**
+
 ## [0.25.13] — 2026-10-11
 
 ### Poprawione

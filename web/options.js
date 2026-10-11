@@ -125,6 +125,7 @@ function goptItems() {
   const d = GO.data, det = GO.detail, g = S.games[S.gameIdx] || {};
   if (GO.page === "main" && S.platform === "android") return [
     { label: "Graj", act: () => { closeGopt(); launch(); } },
+    { label: "Zapisy i stany", value: "z komputera i telefonu", act: openSaveManager },
     { label: "Ustawienia emulatora", value: "tylko na tym telefonie", act: () => { closeGopt(); launch("", false, true); } },
     { label: g.pinned ? "Odepnij (pozwól usunąć z telefonu)" : "Przypnij (trzymaj w telefonie)", act: async () => { await togglePin(); closeGopt(); } },
     ...removeItem(),
@@ -136,6 +137,7 @@ function goptItems() {
       act: () => { closeGopt(); launch("", false, true); } },
     { label: "Wczytaj zapis", value: d.states.length ? `${d.states.length} ${plural(d.states.length, "zapis", "zapisy", "zapisów")}` : "brak zapisów",
       act: () => d.states.length ? goPage("states") : toast("Ten emulator nie ma zapisów tej gry.") },
+    { label: "Zapisy i stany", value: "z komputera i telefonu", act: openSaveManager },
     { label: "Metadane i opis", value: [det.meta.developer, det.meta.year].filter(Boolean).join(" · "), act: () => goPage("meta") },
     { label: "Okładka", value: g.box ? "jest" : "brak", act: () => openArtPicker("box") },
     { label: "Zrzut ekranu", value: g.snap ? "jest" : "brak", act: () => openArtPicker("snap") },
@@ -157,6 +159,8 @@ function goptItems() {
     label: st.resume ? "★ " + st.name : st.name, value: fmtDate(st.time),
     act: () => { closeGopt(); launch(st.path); },
   }));
+  if (GO.page === "saves") return saveManagerItems();
+  if (GO.page === "stateAct") return stateActItems();
   if (GO.page === "meta") {
     const m = det.meta, ed = det.meta_edits || {};
     const items = META_FIELDS.map(([k, label]) => ({
@@ -174,6 +178,71 @@ function goptItems() {
   }
   return [];
 }
+/* ── menedżer zapisów: stany z komputera i telefonu, kopiowanie między nimi ── */
+const SM_PLAT = { windows: "Komputer", android: "Telefon" };
+async function openSaveManager() {
+  GO.sm = null;
+  goPage("saves");
+  const r = await api().save_manager(GO.id);
+  if (GO.page !== "saves") return;
+  if (!r || !r.ok) { toast(r?.reason || "Nie udało się odczytać zapisów."); return goPage("main"); }
+  GO.sm = r;
+  renderGopt();
+}
+function smSlot(st) {
+  return st.slot === "auto" ? "autozapis" : st.slot === "resume" ? "wznowienie" : `slot ${+st.slot}`;
+}
+function smMark(t) { return t.ok === true ? "✓" : t.ok === false ? "✗" : "?"; }
+function saveManagerItems() {
+  const r = GO.sm;
+  if (!r) return [{ label: "Wczytuję zapisy z serwera…", value: "", act: () => {} }];
+  const items = [];
+  if (!r.states.length) items.push({ label: "Brak stanów tej gry", value: "na komputerze i telefonie", act: () => {} });
+  for (const st of r.states) {
+    const here = st.platform === r.here;
+    const t = st.targets.map((x) => `${smMark(x)} ${SM_PLAT[x.platform]}`).join(" ");
+    items.push({
+      label: `${here ? "● " : ""}${SM_PLAT[st.platform]} · ${st.label.replace(/ na (komputerze|telefonie)$/, "")} · ${smSlot(st)}`,
+      value: `${fmtDate(st.mtime)} · ${fmtBytes(st.size)}${t ? " · " + t : ""}`,
+      act: () => { GO.cur = st; goPage("stateAct"); },
+    });
+  }
+  if (r.saves.length) {
+    items.push({ label: "— Zapisy w grze (wspólne, synchronizują się same) —", value: "", act: () => {} });
+    for (const sv of r.saves.slice(0, 12)) items.push({
+      label: sv.name + (sv.shared ? "  (karta wspólna dla gier)" : ""), value: `${fmtDate(sv.mtime)} · ${fmtBytes(sv.size)}`,
+      act: () => toast("Zapisy w grze są wspólne dla komputera i telefonu — synchronizują się przy każdej grze."),
+    });
+  }
+  return items;
+}
+function stateActItems() {
+  const st = GO.cur, r = GO.sm;
+  if (!st || !r) return [];
+  const items = [];
+  if (st.platform === r.here && S.platform !== "android") {
+    const local = (GO.data?.states || []).find((x) => x.name === st.name);
+    if (local) items.push({ label: "Graj od tego stanu", value: fmtDate(local.time), act: () => { closeGopt(); launch(local.path); } });
+  }
+  for (const t of st.targets) items.push({
+    label: `Kopiuj na: ${t.label}`, value: `${smMark(t)} ${t.note}`,
+    act: async () => {
+      if (t.ok === false && GO.confirmCopy !== t) { GO.confirmCopy = t; return toast("Ten stan raczej się nie wczyta (" + t.note + "). A jeszcze raz — skopiuj mimo to."); }
+      GO.confirmCopy = null;
+      const res = await api().save_copy(GO.id, st.rel, t.platform, t.emu);
+      if (!res?.ok) return toast(res?.reason || "Nie udało się skopiować.");
+      const where = t.platform === r.here
+        ? (res.local ? "Jest już w „Wczytaj zapis”." : "Pobierze się przy następnej grze.")
+        : `${SM_PLAT[t.platform]} pobierze go przy następnym uruchomieniu gry.`;
+      toast(res.same ? "Ten stan już tam jest." : `Skopiowano (${smSlot(st)}). ${where}`, 6000);
+      if (res.local) GO.data = await api().game_options(GO.id);
+      openSaveManager();
+    },
+  });
+  if (!st.targets.length) items.push({ label: "Nie ma dokąd skopiować", value: "brak tego emulatora na drugiej platformie", act: () => {} });
+  return items;
+}
+
 async function refreshGoDetail() {
   GO.detail = await api().game_detail(GO.id);
   if (S.modal === "gopt") renderGopt();
@@ -184,6 +253,7 @@ function goPage(page) { GO.page = page; GO.idx = 0; renderGopt(); }
 
 function renderGopt() {
   const titles = { main: "Opcje gry", emus: "Emulator dla tej gry", states: "Wczytaj zapis", meta: "Metadane",
+                   saves: "Zapisy i stany", stateAct: "Stan gry",
                    art: { snap: "Zrzut ekranu", logo: "Logo gry", box: "Okładka" }[GO.art?.kind] || "Okładka" };
   $("goTitle").textContent = GO.detail?.title || "";
   $("goPage").textContent = titles[GO.page];
@@ -208,6 +278,7 @@ function goptInput(a) {
   else if (a === "lb") GO.idx = Math.max(0, GO.idx - 8);
   else if (a === "rb") GO.idx = Math.min(n - 1, GO.idx + 8);
   else if (a === "b" && GO.confirmDel) GO.confirmDel = false;
+  else if (a === "b" && GO.page === "stateAct") return goPage("saves");
   else if (a === "b") return GO.page === "main" ? closeGopt() : goPage("main");
   else if (a === "a") return GO.items[GO.idx]?.act();
   renderGopt();

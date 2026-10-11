@@ -90,6 +90,8 @@ class Bridge(private val act: MainActivity) {
         "toggle_pin" -> togglePin(a.getInt(0))
         "remove_local" -> removeLocal(a.getInt(0))
         "configure_emulator" -> configureEmulator(a.getInt(0))
+        "save_manager" -> saveManager(a.getInt(0))
+        "save_copy" -> saveCopy(a.getInt(0), a.getString(1), a.getString(2), a.getString(3))
         "look_save" -> { prefs.look = a.getJSONObject(0); JSONObject().put("ok", true) }
         "quit" -> { act.runOnUiThread { act.finishAndRemoveTask() }; null }
         "copy_status" -> JSONArray()
@@ -481,6 +483,33 @@ class Bridge(private val act: MainActivity) {
         val pinned = Cache.togglePin(act, key(g.optString("es"), g.optString("name")))
         synchronized(gamesCache) { gamesCache.clear() }
         return JSONObject().put("ok", true).put("pinned", pinned)
+    }
+
+    /** Menedżer zapisów: stany tej gry z komputera i telefonu, wspólne zapisy w grze. */
+    private fun saveManager(id: Int): JSONObject {
+        if (prefs.profile.isEmpty()) return JSONObject().put("ok", false)
+            .put("reason", "Wybierz profil gracza — zapisy i stany należą do profilu.")
+        return try {
+            val g = server.game(id)
+            val file = g.optString("file")
+            val stems = listOf(File(file).nameWithoutExtension, g.optString("name")).filter { it.isNotEmpty() }
+            server.saveCatalog(mapOf("profile" to prefs.profile, "es" to g.optString("es"),
+                                     "name" to g.optString("name"), "stems" to stems.joinToString("|")))
+                .put("ok", true).put("here", "android")
+        } catch (e: Server.HttpError) {
+            JSONObject().put("ok", false).put("reason", if (e.code == 404)
+                "Serwer nie ma menedżera zapisów — zaktualizuj EmuStart na komputerze z grami." else explain(e))
+        } catch (e: Exception) {
+            JSONObject().put("ok", false).put("reason", explain(e))
+        }
+    }
+
+    private fun saveCopy(id: Int, rel: String, platform: String, emu: String): JSONObject = try {
+        val g = server.game(id)
+        server.saveCopy(mapOf("profile" to prefs.profile, "src" to rel, "platform" to platform, "emu" to emu,
+                              "es" to g.optString("es"), "name" to g.optString("name"), "device" to android.os.Build.MODEL))
+    } catch (e: Exception) {
+        JSONObject().put("ok", false).put("reason", explain(e))
     }
 
     /** Emulator gry bez gry — ustawienia na tym telefonie (osobne od Windows). */

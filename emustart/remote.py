@@ -103,13 +103,15 @@ def handle(handler) -> None:
     parts = [p for p in path.split("/") if p][1:]           # bez „v1”
     try:
         if parts == ["info"]:
-            feats = ["find", "system"] + (["nas", "roots"] if NAS_ROOT else [])
+            feats = ["find", "system"] + (["nas", "roots", "savemgr"] if NAS_ROOT else [])
             return _json(handler, {"name": socket.gethostname(), "version": __version__, "api": 1,
                                    "features": feats, "nas_id": NAS_ID})
         if parts and parts[0] == "nas":
             return _nas(handler, "GET", parts[1:])
         if parts == ["find"]:
             return _find(handler)
+        if parts == ["savemgr", "catalog"]:
+            return _savemgr_catalog(handler)
         if parts == ["systems"]:
             from emustart import emulators, installer, systems
             out = []
@@ -189,6 +191,8 @@ def handle_write(handler, method: str) -> None:
         return _system_put(handler)
     if method == "PUT" and parts == ["roots"]:
         return _roots_put(handler)
+    if method == "PUT" and parts == ["savemgr", "copy"]:
+        return _savemgr_copy(handler)
     if not parts or parts[0] != "nas":
         n = int(handler.headers.get("Content-Length") or 0)
         if n:
@@ -391,6 +395,66 @@ def _find(handler) -> None:
             files = [{"path": f, "size": size} for f, size, _m in json.loads(r["files"])]
             return _json(handler, {"id": r["id"], "files": files})
     return _json(handler, {"error": "nie ma takiej gry"}, 404)
+
+
+def _savemgr_args(handler) -> dict:
+    q = urllib.parse.parse_qs(urllib.parse.urlsplit(handler.path).query)
+    return {k: (v or [""])[0] for k, v in q.items()}
+
+
+def _savemgr_game(es: str, name: str) -> tuple[list, str]:
+    """Nazwy plików i numer płyty gry z biblioteki serwera (gdy klient ich nie podał)."""
+    from emustart import ingame, library, metadata
+    r = library.db().execute("SELECT id, rel FROM games WHERE es=? AND name=?", (es, name)).fetchone()
+    if not r:
+        return [name], ""
+    try:
+        serial = ingame._serial(metadata.get(r["id"]))
+    except Exception:
+        serial = ""
+    return [Path(r["rel"].replace("\\", "/")).stem, name], serial
+
+
+def _savemgr_catalog(handler) -> None:
+    """GET /v1/savemgr/catalog?profile=&es=&name=[&stems=a|b][&serial=][&learned=x|y]
+    — stany tej gry z komputera i telefonu, ze zgodnością (emustart/savemgr.py)."""
+    from emustart import nasfs, savemgr
+    a = _savemgr_args(handler)
+    if NAS_ROOT is None:
+        return _json(handler, {"error": "serwer nie ma folderu profili"}, 404)
+    try:
+        prof = nasfs.clean_rel(a.get("profile", ""))
+    except ValueError as ex:
+        return _json(handler, {"error": str(ex)}, 400)
+    if not prof or "/" in prof or not a.get("es") or not a.get("name"):
+        return _json(handler, {"error": "brak profile/es/name"}, 400)
+    stems, serial = _savemgr_game(a["es"], a["name"])
+    stems += [s for s in a.get("stems", "").split("|") if s]
+    out = savemgr.catalog(nasfs.SmbFs(NAS_ROOT), prof, a["es"], a["name"], stems,
+                          a.get("serial") or serial, [p for p in a.get("learned", "").split("|") if p])
+    return _json(handler, out)
+
+
+def _savemgr_copy(handler) -> None:
+    """PUT /v1/savemgr/copy?profile=&src=&platform=&emu=&es=&name=&device= — kopia stanu
+    na drugą platformę (w folderze profili; urządzenie pobierze go przy następnej grze)."""
+    from emustart import nasfs, savemgr
+    n = int(handler.headers.get("Content-Length") or 0)
+    if n:
+        handler.rfile.read(min(n, 1 << 16))
+    a = _savemgr_args(handler)
+    if NAS_ROOT is None:
+        return _json(handler, {"error": "serwer nie ma folderu profili"}, 404)
+    try:
+        prof = nasfs.clean_rel(a.get("profile", ""))
+        src = nasfs.clean_rel(a.get("src", ""))
+    except ValueError as ex:
+        return _json(handler, {"error": str(ex)}, 400)
+    if not prof or "/" in prof:
+        return _json(handler, {"error": "brak profile"}, 400)
+    out = savemgr.copy(nasfs.SmbFs(NAS_ROOT), prof, src, a.get("platform", ""), a.get("emu", ""),
+                       a.get("es", ""), a.get("name", ""), a.get("device", ""))
+    return _json(handler, out)
 
 
 def _send_file(handler, gid: int, rel: str) -> None:

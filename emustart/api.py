@@ -11,6 +11,7 @@ import json
 import logging
 import math
 import re
+import socket
 import threading
 import urllib.error
 import time
@@ -744,6 +745,69 @@ class Api:
                                   "time": res["created"], "resume": True})
         return {"id": g["id"], "title": g["title"], "emulator": emu, "options": opts,
                 "states": states[:30]}
+
+    # ── menedżer zapisów (opcje gry → Zapisy i stany) ──
+    def _savemgr_ctx(self, g: dict):
+        prof = profiles.get(self._profile) or {}
+        if not prof.get("nas_name") or not profiles.nas_online(self._cfg):
+            return None, None, "Menedżer zapisów działa z profilem na NAS-ie / serwerze — NAS niedostępny."
+        return nasfs.backend(self._cfg), prof["nas_name"], ""
+
+    def save_manager(self, game_id: int) -> dict:
+        """Stany gry z komputera i telefonu (ze zgodnością) i wspólne zapisy w grze."""
+        from emustart import savemgr
+        g = library.game(int(game_id))
+        if not g:
+            return {"ok": False, "reason": "Nie ma takiej gry."}
+        fs, nas, why = self._savemgr_ctx(g)
+        if not fs:
+            return {"ok": False, "reason": why}
+        meta = metadata.get(g["id"])
+        serial = ingame._serial(meta)
+        stems = [Path(g["rel"]).stem, g["name"]]
+        learned = [r["prefix"] for r in library.db().execute(
+            "SELECT prefix FROM states WHERE game_id=?", (g["id"],))]
+        try:
+            if isinstance(fs, nasfs.RemoteFs):
+                out = fs.savemgr_catalog({"profile": nas, "es": g["es"], "name": g["name"],
+                                          "stems": "|".join(stems), "serial": serial,
+                                          "learned": "|".join(learned)})
+            else:
+                out = savemgr.catalog(fs, nas, g["es"], g["name"], stems, serial, learned)
+        except OSError as ex:
+            return {"ok": False, "reason": f"Nie udało się odczytać zapisów: {ex}"}
+        out["ok"] = True
+        out["here"] = "windows"
+        return out
+
+    def save_copy(self, game_id: int, rel: str, platform: str, emu: str) -> dict:
+        """Kopia stanu na drugą platformę; na ten komputer — od razu do folderu emulatora."""
+        from emustart import savemgr
+        g = library.game(int(game_id))
+        if not g:
+            return {"ok": False, "reason": "Nie ma takiej gry."}
+        fs, nas, why = self._savemgr_ctx(g)
+        if not fs:
+            return {"ok": False, "reason": why}
+        try:
+            if isinstance(fs, nasfs.RemoteFs):
+                out = fs.savemgr_copy({"profile": nas, "src": rel, "platform": platform, "emu": emu,
+                                       "es": g["es"], "name": g["name"], "device": socket.gethostname()})
+            else:
+                out = savemgr.copy(fs, nas, rel, platform, emu, g["es"], g["name"], socket.gethostname())
+        except OSError as ex:
+            return {"ok": False, "reason": f"Nie udało się skopiować: {ex}"}
+        if out.get("ok") and platform == "windows":
+            # od razu u siebie: pobranie folderu stanów emulatora z NAS-a
+            emu_cfg = self._effective_emu(g)
+            ad = ingame.adapter_for(emu_cfg["exe"]) if emu_cfg["exe"] else None
+            if ad and ad.family == emu:
+                try:
+                    profiles.sync_down(self._cfg, self._profile, emu, [d.name for d in ad.save_dirs()])
+                    out["local"] = True
+                except Exception:
+                    log.exception("menedżer zapisów: pobranie stanów")
+        return out
 
     def set_game_emulator(self, game_id: int, opt: dict | None) -> dict:
         with library.db() as c:

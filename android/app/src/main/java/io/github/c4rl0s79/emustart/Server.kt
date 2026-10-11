@@ -110,6 +110,29 @@ class Server(private val prefs: Prefs) {
         } finally { c.disconnect() }
     }
 
+    // ── menedżer zapisów (emustart/savemgr.py na serwerze) ──
+    private fun query(q: Map<String, String>) = q.entries.joinToString("&") { enc(it.key) + "=" + enc(it.value) }
+
+    /** Stany gry z komputera i telefonu (ze zgodnością) i wspólne zapisy w grze. */
+    fun saveCatalog(q: Map<String, String>): JSONObject = JSONObject(text("/v1/savemgr/catalog?" + query(q)))
+
+    /** Kopia stanu na drugą platformę (w folderze profili na serwerze). */
+    fun saveCopy(q: Map<String, String>): JSONObject {
+        val c = URL(prefs.serverUrl + "/v1/savemgr/copy?" + query(q)).openConnection() as HttpURLConnection
+        try {
+            c.connectTimeout = 8000
+            c.readTimeout = 120000
+            c.requestMethod = "PUT"
+            c.doOutput = true
+            c.setFixedLengthStreamingMode(0)
+            c.setRequestProperty("Authorization", "Bearer " + prefs.serverKey)
+            c.outputStream.close()
+            val code = c.responseCode
+            if (code != 200) throw HttpError(code, "kopia stanu na serwerze: $code")
+            return JSONObject(c.inputStream.bufferedReader(Charsets.UTF_8).readText())
+        } finally { c.disconnect() }
+    }
+
     fun nasDelete(p: String) {
         val c = URL(prefs.serverUrl + nasPath("file", p)).openConnection() as HttpURLConnection
         try {

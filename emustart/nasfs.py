@@ -248,7 +248,7 @@ class RemoteFs:
 
     def _req(self, method: str, path: str, q: dict, body: bytes | None = None,
              headers: dict | None = None) -> tuple[int, bytes, dict]:
-        url = f"/v1/nas/{path}?" + urllib.parse.urlencode(q)
+        url = (path if path.startswith("/v1/") else f"/v1/nas/{path}") + "?" + urllib.parse.urlencode(q)
         h = {"Authorization": f"Bearer {self.key}", **(headers or {})}
         last = None
         for attempt in range(3):
@@ -347,6 +347,19 @@ class RemoteFs:
 
     def prune(self, rel: str) -> None:
         pass                    # serwer przycina kopie zapasowe sam po każdym zapisie z kopią
+
+    # menedżer zapisów (emustart/savemgr.py) — liczony na serwerze, przy plikach
+    def savemgr_catalog(self, q: dict) -> dict:
+        st, data, _h = self._req("GET", "/v1/savemgr/catalog", q)
+        if st != 200:
+            raise OSError(f"serwer: menedżer zapisów {st} {data[:200]!r}")
+        return json.loads(data)
+
+    def savemgr_copy(self, q: dict) -> dict:
+        st, data, _h = self._req("PUT", "/v1/savemgr/copy", q, body=b"")
+        if st != 200:
+            raise OSError(f"serwer: kopia stanu {st} {data[:200]!r}")
+        return json.loads(data)
 
 
 # ── wybór: serwer albo SMB ──
