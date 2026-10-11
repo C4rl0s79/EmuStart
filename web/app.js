@@ -5,6 +5,21 @@
 const $ = (id) => document.getElementById(id);
 const api = () => window.pywebview.api;
 
+// błąd w interfejsie: na ekran i do logu (logs/emustart.log), zamiast cichej, martwej klawiatury
+let uiErrors = 0;
+function reportUiError(msg) {
+  if (uiErrors++ > 20) return;
+  let where = "";
+  try { where = ` [ekran ${S.screen}, okno ${S.modal || "-"}]`; } catch (e) { /* błąd przed startem UI */ }
+  try { if (window.pywebview && window.pywebview.api) window.pywebview.api.ui_log("BŁĄD JS: " + msg + where); } catch (e) { /* most niedostępny */ }
+  try { toast("Błąd interfejsu: " + msg, 8000); } catch (e) { /* toast jeszcze nie gotowy */ }
+}
+window.addEventListener("error", (e) => reportUiError(`${e.message} (${(e.filename || "").split("/").pop()}:${e.lineno})`));
+window.addEventListener("unhandledrejection", (e) => {
+  const r = e.reason;
+  reportUiError(r && r.message ? `${r.message} ${(r.stack || "").split("\n")[1] || ""}`.trim() : String(r));
+});
+
 const S = {
   screen: "systems",
   systems: [], sysIdx: 0,
@@ -137,8 +152,23 @@ for (const type of ["keydown", "keyup", "keypress"]) {
 }
 window.addEventListener("blur", () => { if (window.pywebview && !S.modal?.startsWith?.("launch")) api().ui_log(`okno straciło fokus (ekran ${S.screen}, okno ${S.modal || "-"})`); });
 
-document.addEventListener("keyup", (e) => { const a = KEYS[e.key]; if (a && e.target.tagName !== "INPUT" && e.target.tagName !== "TEXTAREA") release(a); });
+// Pole tekstowe z fokusem, w którym nikt nie pisze (ukryte okno, zamknięta edycja) — fokus
+// zostaje w nim w WebView2 i klawiatura „umiera” (pad działa, bo idzie przez Pythona).
+let staleLogged = 0;
+function staleField(t) {
+  if (!t || (t.tagName !== "INPUT" && t.tagName !== "TEXTAREA")) return false;
+  const live = t.offsetParent !== null && ((S.modal === "osk" && t === oskField()) || (editing && t.closest("#setList")));
+  if (live) return false;
+  if (staleLogged++ < 3 && window.pywebview) api().ui_log(`klawiatura: fokus w nieaktywnym polu ${t.tagName}#${t.id || "-"} — zdejmuję`);
+  t.blur();
+  return true;
+}
+document.addEventListener("keyup", (e) => {
+  const a = KEYS[e.key];
+  if (a && (staleField(e.target) || (e.target.tagName !== "INPUT" && e.target.tagName !== "TEXTAREA"))) release(a);
+});
 document.addEventListener("keydown", (e) => {
+  if (staleField(e.target)) { const a = KEYS[e.key]; if (a) { e.preventDefault(); press(a, false); } return; }
   if (S.modal === "osk" && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA")) {
     if (e.key === "Escape") { e.preventDefault(); oskClose(false); }
     else if (e.key === "Enter" && (!OSK.multiline || e.ctrlKey)) { e.preventDefault(); oskClose(true); }
