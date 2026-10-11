@@ -14,6 +14,9 @@ import java.util.zip.ZipFile
  */
 object Prepare {
     private val DISK_EXTS = setOf("ipf", "adf", "adz", "dms", "fdi", "d64", "st", "msa", "dsk")
+    /** Pliki towarzyszące w archiwum — nigdy nie są grą (jak COMPANION_EXTS w launcher.py). */
+    private val COMPANION_EXTS = setOf("msu", "pcm", "bps", "ips", "ups", "xdelta", "bml", "xml", "txt", "nfo",
+        "diz", "md", "pdf", "jpg", "jpeg", "png", "sha1", "md5", "sfv", "cfg", "ini", "sav", "srm", "m3u")
     /** Emulatory, które same czytają ZIP z pojedynczym ROM-em. */
     private val ZIP_NATIVE = setOf("retroarch", "melonds", "drastic", "ppsspp")
     /** Emulatory obsługujące playlisty .m3u. */
@@ -86,7 +89,10 @@ object Prepare {
         val files = dir.listFiles()?.filter { it.isFile && it.name != ".zrodlo" && !it.name.endsWith(".m3u") } ?: emptyList()
         if (files.isEmpty()) throw IllegalStateException("Archiwum ZIP jest puste.")
         val wanted = exts - setOf("zip", "7z")
+        // ROM z rozszerzeniem systemu; bez listy rozszerzeń (serwer starszy niż 0.25.9)
+        // albo gdy żaden nie pasuje — wszystko poza plikami towarzyszącymi
         val pick = files.filter { it.extension.lowercase() in wanted }
+            .ifEmpty { files.filter { it.extension.lowercase() !in COMPANION_EXTS } }
         if (pick.isEmpty() && files.size > 1)
             throw IllegalStateException("W archiwum nie ma pliku gry — są tylko pliki dodatkowe (np. muzyka MSU-1).")
         val disks = pick.filter { it.extension.lowercase() in DISK_EXTS }.sortedWith(compareBy({ diskOrder(it).first }, { diskOrder(it).second }))

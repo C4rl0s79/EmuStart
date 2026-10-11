@@ -4,6 +4,8 @@
     python main.py --window  w oknie
     python main.py --debug   w oknie + DevTools
     python main.py --browser serwer UI na http://127.0.0.1:8765/?dev (bez okna)
+    python main.py --server  serwer gier dla telefonu (bez okna)
+    python main.py --server-panel  okno serwera: stan, klienci, przeładowanie gier, restart
 """
 
 from __future__ import annotations
@@ -19,9 +21,9 @@ import webview
 from emustart import api as api_mod, config, paths, server
 
 
-def _logging() -> None:
+def _logging(name: str = "emustart.log") -> None:
     paths.ensure_dirs()
-    h = RotatingFileHandler(paths.LOGS / "emustart.log", maxBytes=2_000_000,
+    h = RotatingFileHandler(paths.LOGS / name, maxBytes=2_000_000,
                             backupCount=3, encoding="utf-8")
     h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
     logging.basicConfig(level=logging.INFO, handlers=[h])
@@ -32,6 +34,9 @@ def _logging() -> None:
 
 
 def main() -> None:
+    if "--server-panel" in sys.argv:
+        _logging("panel.log")             # osobny log — serwer pisze do emustart.log
+        return _server_panel()
     _logging()
     debug = "--debug" in sys.argv
     windowed = debug or "--window" in sys.argv
@@ -129,11 +134,44 @@ def _server_mode() -> None:
         return _message(("Serwer będzie startował razem z Windows." if ok else
                          "Nie wszystko się udało — uruchom jako administrator.") + "\n\n" + "\n".join(lines))
     remote.init_nas(api._cfg)             # folder profili (zapisy klientów przez serwer)
-    base = server.start(port, dev_api=api, bind="0.0.0.0")
+    from emustart import srvadmin
+    srvadmin.ENABLED = True
+    # po restarcie z panelu poprzedni proces zwalnia port po chwili — czekamy na niego
+    end = time.monotonic() + (30 if "--restarted" in sys.argv else 0)
+    while True:
+        try:
+            base = server.start(port, dev_api=api, bind="0.0.0.0")
+            break
+        except OSError:
+            if time.monotonic() >= end:
+                raise
+            time.sleep(0.5)
     log.info("serwer %s: API dla Androida na porcie %d; administracja: %s/index.html?dev",
              __import__("emustart").__version__, port, base.replace("0.0.0.0", "127.0.0.1"))
     while True:
         time.sleep(3600)
+
+
+def _server_panel() -> None:
+    """Małe okno serwera: stan, urządzenia, pobierane gry, przeładowanie listy gier,
+    restart. Serwer zwykle działa bez okna (zadanie Harmonogramu, konto SYSTEM) —
+    panel łączy się z nim przez 127.0.0.1; gdy nie odpowiada, uruchamia go."""
+    from emustart import remote, srvadmin
+    cfg = config.load()
+    port = int(cfg.get("server_port") or remote.DEFAULT_PORT)
+    if not srvadmin.ping(port):
+        if not srvadmin.start_server(port):
+            return _message(f"Serwer EmuStart nie odpowiada na porcie {port} i nie udało się go "
+                            "uruchomić.\n\nSprawdź logs\\emustart.log obok EmuStart.exe.")
+    class PanelApi:
+        def open_logs(self):
+            # tu, nie w serwerze: serwer na koncie SYSTEM otworzyłby Eksplorator niewidocznie
+            os.startfile(str(paths.LOGS))      # type: ignore[attr-defined]
+            return {"ok": True}
+
+    webview.create_window("EmuStart Server", f"http://127.0.0.1:{port}/server.html", js_api=PanelApi(),
+                          width=760, height=640, min_size=(560, 480), background_color="#0b0d12")
+    webview.start(private_mode=False)
 
 
 if __name__ == "__main__":

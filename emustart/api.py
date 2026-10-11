@@ -20,6 +20,7 @@ from emustart import (__version__, art, bios, art_sources, cache, ingame, instal
                       nasfs, netsrc, paths, scanner, systems, winutil)
 
 log = logging.getLogger("emustart.api")
+PIN_RETRY = 300                 # s — wznowienie pobierania przypiętej gry najwyżej tak często
 
 _REGIONS = {"USA": "USA", "Europe": "Europa", "Japan": "Japonia", "World": "Świat",
             "Germany": "Niemcy", "France": "Francja", "Spain": "Hiszpania", "Italy": "Włochy",
@@ -420,6 +421,7 @@ class Api:
         play = library.db().execute(
             "SELECT * FROM play WHERE game_id=? AND profile_id=?",
             (g["id"], self._profile)).fetchone()
+        cached = self._sync_cached(g, row)
         meta = metadata.ensure_local(self._cfg, g)
         meta = {k: v for k, v in meta.items() if not k.startswith("_")}
         if meta.get("genre"):
@@ -429,12 +431,29 @@ class Api:
                 "meta_online": bool(metadata.get(g["id"]).get("_online")),
                 "meta_edits": metadata.get(g["id"]).get("_edits", {}),
                 "system": info["display"], "size": g["size"], "files": len(g["files"]),
-                "file": g["rel"], "cached": bool(row and row["complete"]),
+                "file": g["rel"], "cached": cached,
+                "local": g["size"] if cached else max(0, g["size"] - cache.missing_bytes(self._cfg, g)),
                 "pinned": bool(row and row["pinned"]),
                 "plays": play["plays"] if play else 0,
                 "seconds": play["seconds"] if play else 0,
                 "last": play["last"] if play else 0,
                 "copying": g["id"] in self._copying()}
+
+    def _sync_cached(self, g: dict, row) -> bool:
+        """Stan „lokalnie” z plików w cache, nie tylko z bazy: plik dokończony później
+        (był w użyciu) albo usunięty ręcznie. Przypięta, niepełna gra bez kopiowania
+        w toku — pobieranie wznawia się samo."""
+        if not row:
+            return False
+        ok = cache.is_complete(self._cfg, g)
+        if ok != bool(row["complete"]):
+            with library.db() as c:
+                c.execute("UPDATE cache SET complete=?, size=? WHERE game_id=?",
+                          (int(ok), g["size"] if ok else 0, g["id"]))
+        if row["pinned"] and not ok and g["id"] not in self._copying() \
+                and not (self._session and self._session.game_id == g["id"]):
+            self._start_pin_copy(g, auto=True)
+        return ok
 
     # ── uruchamianie ──
     def launch(self, game_id: int, state: str = "", takeover: bool = False) -> dict:
@@ -489,6 +508,24 @@ class Api:
                                          start_state=state or "", takeover=bool(takeover))
         self._session.start()
         return {"ok": True, "warning": warning}
+
+    def configure_emulator(self, game_id: int) -> dict:
+        """Emulator tej gry bez gry — zmiana ustawień w profilu gracza (obraz, dźwięk,
+        sterowanie). Po zamknięciu emulatora ustawienia wracają do profilu i na NAS."""
+        if self._session and self._session.phase in ("preparing", "downloading",
+                                                     "extracting", "running"):
+            return {"ok": False, "reason": "Gra jest właśnie uruchomiona."}
+        g = library.game(int(game_id))
+        if not g:
+            return {"ok": False, "reason": "Nie ma takiej gry."}
+        emu = self._effective_emu(g)
+        if not emu["exe"] or not Path(emu["exe"]).is_file():
+            return {"ok": False, "reason": "Ta gra nie ma jeszcze emulatora — uruchom ją raz albo wybierz emulator."}
+        self._session = launcher.Session(self._cfg, int(game_id), self._profile,
+                                         on_running=self._on_running, on_finished=self._on_finished,
+                                         ui=None, configure=True)
+        self._session.start()
+        return {"ok": True, "label": emu["label"] or Path(emu["exe"]).stem}
 
     def launch_status(self) -> dict:
         return self._session.status() if self._session else {"phase": "idle"}
@@ -624,15 +661,21 @@ class Api:
             cache.enforce_limit(self._cfg)
         return {"ok": True, "pinned": pinned}
 
-    def _start_pin_copy(self, g: dict) -> None:
+    def _start_pin_copy(self, g: dict, auto: bool = False) -> None:
+        """`auto` — wznowienie bez prośby (podgląd gry): najwyżej raz na PIN_RETRY s."""
+        now = time.monotonic()
+        tries = self.__dict__.setdefault("_pin_tries", {})
+        if auto and now - tries.get(g["id"], -1e9) < PIN_RETRY:
+            return
+        tries[g["id"]] = now
         rom_dir = library.game_dir(g)
-        if not (rom_dir / g["rel"]).exists():
-            return    # offline — dociągniemy przy następnym uruchomieniu gry
         prog = cache.Progress(cache.missing_bytes(self._cfg, g), len(g["files"]))
         cancel = threading.Event()
 
         def run():
             try:
+                if not (rom_dir / g["rel"]).exists():
+                    return    # offline — dociągniemy przy następnym uruchomieniu gry
                 cache.copy_game(self._cfg, g, rom_dir, prog, cancel)
             except cache.Cancelled:
                 pass
@@ -642,6 +685,35 @@ class Api:
         self._pin_jobs[g["id"]] = {"thread": t, "prog": prog, "cancel": cancel,
                                    "title": g["title"]}
         t.start()
+
+    def remove_local(self, game_id: int) -> dict:
+        """Usuwa lokalną kopię gry (cache, także niedokończoną i przypiętą — przypięcie
+        znika). Gra zostaje na NAS-ie/serwerze; przy następnym uruchomieniu pobierze się."""
+        g = library.game(int(game_id))
+        if not g:
+            return {"ok": False, "reason": "Nie ma takiej gry."}
+        s = self._session
+        if s and s.game_id == g["id"] and s.phase in ("preparing", "downloading", "extracting", "running"):
+            return {"ok": False, "reason": "Ta gra jest właśnie uruchomiona — zamknij ją najpierw."}
+        job = self._pin_jobs.pop(g["id"], None)
+        if job:
+            job["cancel"].set()
+            job["thread"].join(10)
+        for b in self._background:
+            if b.game_id == g["id"] and b.copy_thread and b.copy_thread.is_alive():
+                b.cancel.set()
+                b.copy_thread.join(10)
+        row = library.db().execute("SELECT size FROM cache WHERE game_id=?", (g["id"],)).fetchone()
+        cache.remove(self._cfg, g)
+        with library.db() as c:
+            c.execute("UPDATE cache SET pinned=0, last_used=0 WHERE game_id=?", (g["id"],))
+        left = [rel for rel, _s, _m in g["files"]
+                if (cache.root(self._cfg) / g["es"] / rel).exists()]
+        if left:
+            return {"ok": False, "reason": f"Nie udało się usunąć: {', '.join(left[:3])} "
+                                           "(plik w użyciu?)."}
+        log.info("usunięto lokalną kopię: %s", g["title"])
+        return {"ok": True, "freed": (row["size"] if row else 0) or g["size"]}
 
     # ── opcje gry (przytrzymane A) ──
     def _effective_emu(self, g: dict) -> dict:

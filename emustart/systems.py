@@ -120,9 +120,12 @@ JUNK_EXTS = {"txt", "nfo", "jpg", "jpeg", "png", "gif", "xml", "dat", "db",
              "sbi", "bak", "part", "tmp", "ds_store", "sub", "bin", "img"}
 
 
+_LOWER: dict = {}      # klucz małymi literami → opis (folder „snesmsu1” = „SNESMSU1”)
+
+
 def info(es_name: str) -> dict:
     """Opis systemu; nieznany folder dostaje rozsądne domyślne wartości."""
-    hit = SYSTEMS.get(es_name) or SYSTEMS.get(es_name.lower())
+    hit = SYSTEMS.get(es_name) or SYSTEMS.get(es_name.lower()) or _LOWER.get(es_name.lower())
     if hit:
         return dict(hit, es=es_name)
     return {"es": es_name, "display": es_name, "plat": _plat_guess(es_name),
@@ -260,3 +263,6 @@ def whd_title(stem: str, demo: bool = False) -> tuple:
 # klawiatura idzie wtedy w całości do emulowanego komputera (launcher/ingame).
 COMPUTER_PLATS = {"AMIGA", "C64", "VIC20", "PLUS4", "MSX", "MSX2", "ATARIST", "ATARI800",
                   "ZX", "PC88", "PC98"}
+
+
+_LOWER.update({k.lower(): v for k, v in SYSTEMS.items()})

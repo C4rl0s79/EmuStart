@@ -58,8 +58,9 @@ class Progress:
 
     def snapshot(self) -> dict:
         sp = self.speed()
-        left = max(0, self.total - self.done)
-        return {"done": self.done, "total": self.total, "left": left,
+        total = max(self.total, self.done)    # niedoszacowany rozmiar nie da > 100 %
+        left = max(0, total - self.done)
+        return {"done": self.done, "total": total, "left": left,
                 "speed": sp, "eta": (left / sp) if sp > 0 else None,
                 "file": self.file_index, "files": self.files}
 
@@ -96,7 +97,10 @@ def missing_bytes(cfg: dict, game: dict) -> int:
             continue
         part = _local_file(cfg, game, rel).with_name(Path(rel).name + ".part")
         mapf = part.with_name(part.name + ".map")
-        if mapf.exists():                  # pobieranie blokami: brakujące bloki z mapy
+        # mapa bez pliku .part (np. po usunięciu gry z cache) nic nie znaczy — pobieranie
+        # zacznie od zera; wcześniej liczyliśmy z niej „prawie wszystko jest” i postęp
+        # pokazywał dziesiątki tysięcy procent
+        if mapf.exists() and part.exists():   # pobieranie blokami: brakujące bloki z mapy
             from emustart import partial
             try:
                 m = mapf.read_bytes()
@@ -179,8 +183,14 @@ def set_pinned(game_id: int, pinned: bool) -> None:
 
 def remove(cfg: dict, game: dict) -> None:
     base = root(cfg) / game["es"]
+    from emustart import partial
     for rel, _s, _m in game["files"]:
-        for p in (base / rel, base / (rel + ".part")):
+        with partial._active_lock:          # stara mapa bloków w pamięci też do kosza
+            p = partial.ACTIVE.pop(str(base / rel).lower(), None)
+        if p:
+            p.close_demand()
+        for p in (base / rel, base / (rel + ".part"), base / (rel + ".part.map"),
+                  base / (rel + ".part.map.tmp")):
             try:
                 p.unlink()
             except OSError:

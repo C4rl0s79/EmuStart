@@ -28,6 +28,9 @@ READ_AHEAD = 8                 # tyle bloków za żądanym trafia na początek k
 DEMAND_SPLIT = 4               # brakujący blok czytany na żądanie: tyle równoległych kawałków
 DEMAND_QUIET = 1.0             # przez tyle s po odczycie gry tło pobiera tylko to, czego gra potrzebuje
 MIN_SIZE = 32 * 1024 * 1024    # mniejsze pliki — jednym strumieniem, jak dotąd
+RETRIES = 5                    # tyle błędów pod rząd w jednym strumieniu = błąd pobierania
+RETRY_WAIT = 2.0               # s przed ponowieniem (rośnie z każdą próbą)
+FINALIZE_RETRY = 5.0           # s między próbami przemianowania pliku trzymanego przez kogoś
 
 # pliki pobierane właśnie teraz (ścieżka docelowa → Partial) — dla wirtualnego dysku
 ACTIVE: dict = {}
@@ -52,6 +55,7 @@ class Partial:
         self.finished = False             # wszystkie bloki są
         self.final = False                # .part przemianowany na plik docelowy
         self._map_dirty = 0
+        self._retrying = False
         # odczyty na żądanie: kilka otwartych uchwytów do pliku na NAS-ie (każde
         # otwarcie to kilka wymian po ~40 ms) i pula wątków czytających kawałki bloku
         self._handles = [None] * DEMAND_SPLIT
@@ -150,34 +154,48 @@ class Partial:
         return n
 
     def _worker(self, progress, cancel) -> None:
-        try:
-            with netsrc.open_src(self.src) as fsrc:
-                while not (cancel and cancel.is_set()):
-                    with self.lock:
-                        if self.error or self.finished:
-                            return
-                        i = self._next()
-                        if i is None:
-                            return
-                        if i < 0:
-                            self.lock.wait(0.1)   # gra czyta — czekamy na jej życzenia
-                            continue
-                        self.busy.add(i)
-                        run = 1                   # dołączamy kolejne brakujące, wolne bloki
-                        while (run < self.coalesce and i + run < self.blocks
-                               and not self.done[i + run] and i + run not in self.busy):
-                            self.busy.add(i + run)
-                            run += 1
-                    try:
-                        self._fetch(i, fsrc, run)
-                    except Exception:
+        # chwilowy błąd sieci (Tailscale, NAS) nie przerywa pobierania: ponowne otwarcie
+        # źródła i dalej od brakujących bloków; dopiero RETRIES błędów pod rząd to błąd
+        fails = 0
+        while not (cancel and cancel.is_set()):
+            try:
+                with netsrc.open_src(self.src) as fsrc:
+                    while not (cancel and cancel.is_set()):
                         with self.lock:
-                            self.busy.difference_update(range(i, i + run))
-                        raise
-        except Exception as ex:
-            with self.lock:
-                self.error = self.error or ex
-                self.lock.notify_all()
+                            if self.error or self.finished:
+                                return
+                            i = self._next()
+                            if i is None:
+                                return
+                            if i < 0:
+                                self.lock.wait(0.1)   # gra czyta — czekamy na jej życzenia
+                                continue
+                            self.busy.add(i)
+                            run = 1                   # dołączamy kolejne brakujące, wolne bloki
+                            while (run < self.coalesce and i + run < self.blocks
+                                   and not self.done[i + run] and i + run not in self.busy):
+                                self.busy.add(i + run)
+                                run += 1
+                        try:
+                            self._fetch(i, fsrc, run)
+                            fails = 0
+                        except Exception:
+                            with self.lock:
+                                self.busy.difference_update(range(i, i + run))
+                            raise
+                return
+            except Exception as ex:
+                fails += 1
+                if fails >= RETRIES:
+                    with self.lock:
+                        self.error = self.error or ex
+                        self.lock.notify_all()
+                    return
+                log.info("pobieranie %s: %s — ponawiam (%d/%d)", self.src.name, ex, fails, RETRIES)
+                if cancel:
+                    cancel.wait(RETRY_WAIT * fails)
+                else:
+                    time.sleep(RETRY_WAIT * fails)
 
     def run(self, progress=None, cancel=None, streams: int = 0) -> None:
         """Pobiera brakujące bloki (STREAMS wątków, z serwera netsrc.STREAMS); po wszystkim plik docelowy."""
@@ -195,6 +213,12 @@ class Partial:
                 t.join()
             with self.lock:
                 self._save_map()
+            if self.finished:
+                # wszystkie bloki są — błąd jednego ze strumieni już nie ma znaczenia
+                # (wcześniej plik zostawał jako .part mimo pełnego pobrania)
+                self.error = None
+                self.finalize(retry=True)
+                return
             if self.error:
                 raise self.error
             if cancel and cancel.is_set():
@@ -204,7 +228,8 @@ class Partial:
         finally:
             if self.final or self.error or (cancel and cancel.is_set()):
                 with _active_lock:
-                    ACTIVE.pop(str(self.dst).lower(), None)
+                    if ACTIVE.get(str(self.dst).lower()) is self:
+                        ACTIVE.pop(str(self.dst).lower(), None)
 
     def _handle(self, k: int):
         if self._handles[k] is None:
@@ -255,21 +280,35 @@ class Partial:
                     self._handles[k].close()
                     self._handles[k] = None
 
-    def finalize(self) -> bool:
-        """.part → plik docelowy. Gdy wirtualny dysk trzyma plik otwarty, przemianowanie
-        się nie uda — wtedy później (vfs zwalnia plik i woła finalize ponownie)."""
-        if self.final or not self.finished:
-            return self.final
-        try:
-            os.replace(self.part, self.dst)
-            os.utime(self.dst, (time.time(), self.mtime))
-            self.mapf.unlink(missing_ok=True)
-            self.final = True
-            with _active_lock:
-                ACTIVE.pop(str(self.dst).lower(), None)
-        except PermissionError:
-            log.info("plik %s w użyciu — dokończenie po grze", self.dst.name)
+    def finalize(self, retry: bool = False) -> bool:
+        """.part → plik docelowy. Gdy wirtualny dysk (albo inny program) trzyma plik
+        otwarty, przemianowanie się nie uda — `retry`: próby w tle co kilka sekund,
+        aż się uda (vfs po grze też woła finalize)."""
+        with self.lock:
+            if self.final or not self.finished:
+                return self.final
+            try:
+                os.replace(self.part, self.dst)
+                os.utime(self.dst, (time.time(), self.mtime))
+                self.mapf.unlink(missing_ok=True)
+                self.final = True
+                with _active_lock:
+                    if ACTIVE.get(str(self.dst).lower()) is self:
+                        ACTIVE.pop(str(self.dst).lower(), None)
+            except PermissionError:
+                log.info("plik %s w użyciu — dokończenie później", self.dst.name)
+        if not self.final and retry and not self._retrying:
+            self._retrying = True
+            threading.Thread(target=self._finalize_later, daemon=True, name="dokonczenie").start()
         return self.final
+
+    def _finalize_later(self) -> None:
+        try:
+            while not self.final and self.part.exists():
+                time.sleep(FINALIZE_RETRY)
+                self.finalize()
+        finally:
+            self._retrying = False
 
     # ── czytanie na żądanie (wirtualny dysk) ──
     def read(self, offset: int, length: int, timeout: float = 120) -> bytes:

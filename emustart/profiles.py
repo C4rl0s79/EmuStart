@@ -473,6 +473,28 @@ def pop_conflicts() -> list:
     return data
 
 
+def _migrate_settings(fs, prof: dict, family: str) -> int:
+    """Ustawienia sprzed 0.25.12 (`settings/<emulator>`) → `settings/windows/<emulator>`,
+    gdy nowego folderu jeszcze nie ma. Stary zostaje (kopia)."""
+    old, new = f"{prof['nas_name']}/settings/{family}", f"{prof['nas_name']}/settings/windows/{family}"
+    try:
+        if family in ("windows", "android") or fs.exists(new) or not fs.exists(old):
+            return 0
+        files = fs.scan(old)
+        n = 0
+        for rel, meta in files.items():
+            data = fs.read(f"{old}/{rel}")
+            if data is None:
+                continue
+            fs.write(f"{new}/{rel}", data, meta[1] if isinstance(meta, (list, tuple)) and len(meta) > 1 else None)
+            n += 1
+        log.info("ustawienia %s przeniesione do settings/windows: %d plików", family, n)
+        return n
+    except OSError as ex:
+        log.warning("przenoszenie ustawień %s: %s", family, ex)
+        return 0
+
+
 def _sync(cfg: dict, pid: int, kind: str, family: str, names: list, up: bool) -> int:
     r"""kind: save | settings. Lokalnie ↔ NAS (przez serwer EmuStart albo SMB), z manifestem
     i kopiami zapasowymi: w dół — nadpisywane pliki lokalne do profiles\<id>\_backup,
@@ -483,7 +505,12 @@ def _sync(cfg: dict, pid: int, kind: str, family: str, names: list, up: bool) ->
     mf, man = _manifest(pid)
     fam_key = f"{kind}/{family}"
     fam_man = man.setdefault(fam_key, {})
-    base = f"{prof['nas_name']}/{kind}/{family}"
+    # ustawienia osobno dla Windows i Androida (inne wersje emulatorów, inne ścieżki,
+    # inne opcje rdzeni) — save'y wspólne
+    base = f"{prof['nas_name']}/{kind}/windows/{family}" if kind == "settings" else f"{prof['nas_name']}/{kind}/{family}"
+    if kind == "settings" and not man.get("_settings_windows", {}).get(family):
+        _migrate_settings(fs, prof, family)
+        man.setdefault("_settings_windows", {})[family] = 1
     # znacznik zmian na NAS: nowy przy każdym wysłaniu. Ten sam co przy naszej
     # ostatniej synchronizacji = nikt inny nic nie wysłał — NAS-a nie listujemy
     # (raz na dobę i tak pełne porównanie)

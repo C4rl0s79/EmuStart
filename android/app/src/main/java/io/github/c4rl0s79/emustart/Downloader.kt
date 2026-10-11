@@ -32,8 +32,9 @@ class Progress(val total: Long, val files: Int) {
 
     fun snapshot(): Map<String, Any?> {
         val sp = speed()
-        val left = maxOf(0L, total - done.get())
-        return mapOf("done" to done.get(), "total" to total, "left" to left, "speed" to sp,
+        val tot = maxOf(total, done.get())          // niedoszacowany rozmiar nie da > 100 %
+        val left = maxOf(0L, tot - done.get())
+        return mapOf("done" to done.get(), "total" to tot, "left" to left, "speed" to sp,
                      "eta" to (if (sp > 0) left / sp else null), "file" to file, "files" to files)
     }
 }
@@ -48,7 +49,8 @@ class Downloader(private val server: Server, private val streams: Int) {
         if (dst.isFile && dst.length() == size) return 0
         val map = File(dst.path + ".part.map")
         val blocks = ((size + BLOCK - 1) / BLOCK).toInt()
-        if (!map.isFile || map.length() != blocks.toLong()) return size
+        // mapa bez pliku .part (gra usunięta) nic nie znaczy — jak na Windows (cache.py)
+        if (!map.isFile || map.length() != blocks.toLong() || !File(dst.path + ".part").isFile) return size
         val m = map.readBytes()
         var have = 0L
         for (i in m.indices) if (m[i].toInt() == 1) have += minOf(BLOCK, size - i * BLOCK)
