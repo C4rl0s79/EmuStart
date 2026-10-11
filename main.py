@@ -12,7 +12,9 @@ from __future__ import annotations
 
 import logging
 import os
+import subprocess
 import sys
+import threading
 from pathlib import Path
 from logging.handlers import RotatingFileHandler
 
@@ -214,6 +216,22 @@ def _server_panel() -> None:
         def open_logs(self):
             # tu, nie w serwerze: serwer na koncie SYSTEM otworzyłby Eksplorator niewidocznie
             os.startfile(str(paths.LOGS))      # type: ignore[attr-defined]
+            return {"ok": True}
+
+        def close_for_update(self, version: str):
+            """Aktualizacja: okno panelu (ten sam exe) zwalnia pliki programu, a osobny
+            proces na koncie użytkownika otwiera panel, gdy wstanie serwer w nowej wersji."""
+            exe = sys.executable if getattr(sys, "frozen", False) else ""
+            if exe and os.name == "nt":
+                ps = ("$end=(Get-Date).AddMinutes(5); while((Get-Date) -lt $end){ Start-Sleep 3; try{ "
+                      f"$r=Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:{port}/admin/status' "
+                      "-Headers @{'X-EmuStart'='1'} -TimeoutSec 2; "
+                      f"if($r.version -eq '{version}'){{ break }} }}catch{{}} }}; "
+                      f"Start-Process -FilePath '{exe}' -ArgumentList '--server-panel'")
+                subprocess.Popen(["powershell", "-NoProfile", "-WindowStyle", "Hidden", "-Command", ps],
+                                 close_fds=True, creationflags=subprocess.DETACHED_PROCESS
+                                 | subprocess.CREATE_NO_WINDOW)
+            threading.Timer(0.5, lambda: os._exit(0)).start()
             return {"ok": True}
 
     url = f"http://127.0.0.1:{port}/server.html"
