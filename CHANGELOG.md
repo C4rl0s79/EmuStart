@@ -8,6 +8,27 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.27.0] — 2026-10-11
+
+### Dodane
+- **PIN profilu gracza** (4–8 cyfr) — rozróżnia graczy i chroni ich zapisy:
+  - **Nazwy profili są unikalne** bez względu na wielkość liter. Zakładając profil
+    o zajętej nazwie trzeba podać PIN istniejącego: dobry — to Twój profil (np. z innego
+    urządzenia) i trafia na to urządzenie; zły — trzeba wybrać inną nazwę.
+  - **PIN raz na urządzeniu**: przy pierwszym wyborze profilu na komputerze / telefonie;
+    urządzenie pamięta go do **Wyloguj z tego urządzenia** (Start na karcie profilu).
+    Zmiana PIN-u (z dotychczasowym) wylogowuje inne urządzenia.
+  - **Stare profile** (bez PIN-u) przy pierwszym wyborze proszą o ustawienie PIN-u;
+    folder i zapisy zostają, gdzie były.
+  - **Serwer pilnuje**: pliki profilu z PIN-em (zapisy, stany, ustawienia, blokada,
+    menedżer zapisów) wydaje tylko urządzeniu z tokenem po podaniu PIN-u; skrót PIN-u
+    (scrypt) nigdy nie wychodzi z serwera; złe PIN-y — rosnące opóźnienie.
+    Nowe API: `GET /v1/profiles`, `PUT /v1/profiles/login|create|pin`.
+  - Komputer bez serwera (sam SMB) sprawdza PIN sam — rozróżnia konta, ale kto ma dostęp
+    do udziału, ma dostęp do plików.
+  - **Zaktualizuj serwer i aplikację na telefonie** — starsza aplikacja nie odczyta profili
+    z PIN-em.
+
 ## [0.26.0] — 2026-10-11
 
 ### Dodane

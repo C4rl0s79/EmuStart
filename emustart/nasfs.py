@@ -230,6 +230,15 @@ class SmbFs:
         prune_backups(self._p(rel))
 
 
+# tokeny profili z PIN-em (profil małymi literami → token) — wysyłane do serwera
+# w nagłówku X-Profile-Token przy plikach tego profilu (profiles.py je ustawia)
+TOKENS: dict = {}
+
+
+class PinRequired(OSError):
+    """Serwer nie wydaje plików profilu bez PIN-u (brak / nieważny token)."""
+
+
 class RemoteFs:
     """Folder profili przez serwer EmuStart (/v1/nas/…)."""
 
@@ -250,6 +259,9 @@ class RemoteFs:
              headers: dict | None = None) -> tuple[int, bytes, dict]:
         url = (path if path.startswith("/v1/") else f"/v1/nas/{path}") + "?" + urllib.parse.urlencode(q)
         h = {"Authorization": f"Bearer {self.key}", **(headers or {})}
+        prof = (q.get("profile") or q.get("p") or "").replace("\\", "/").split("/")[0].lower()
+        if prof and TOKENS.get(prof):
+            h["X-Profile-Token"] = TOKENS[prof]
         last = None
         for attempt in range(3):
             c = self._conn()
@@ -272,6 +284,8 @@ class RemoteFs:
         st, data, _h = self._req("GET", path, q)
         if st == 404:
             return None
+        if st == 403 and b'"pin"' in data:
+            raise PinRequired(f"profil wymaga PIN-u ({q.get('p', '')})")
         if st != 200:
             raise OSError(f"serwer: {path} {st} {data[:200]!r}")
         return json.loads(data)
@@ -347,6 +361,23 @@ class RemoteFs:
 
     def prune(self, rel: str) -> None:
         pass                    # serwer przycina kopie zapasowe sam po każdym zapisie z kopią
+
+    # profile z PIN-em (emustart/pinauth.py)
+    def profiles(self) -> list:
+        st, data, _h = self._req("GET", "/v1/profiles", {})
+        if st != 200:
+            raise OSError(f"serwer: lista profili {st}")
+        return json.loads(data).get("profiles") or []
+
+    def profile_op(self, op: str, q: dict) -> dict:
+        st, data, _h = self._req("PUT", f"/v1/profiles/{op}", q, body=b"")
+        try:
+            out = json.loads(data)
+        except ValueError:
+            raise OSError(f"serwer: profil {op} {st}")
+        if st == 409:
+            out["exists"] = True
+        return out
 
     # menedżer zapisów (emustart/savemgr.py) — liczony na serwerze, przy plikach
     def savemgr_catalog(self, q: dict) -> dict:

@@ -199,6 +199,9 @@ class Api:
         """Pierwsze uruchomienie na tym komputerze: kto tu gra."""
         if not profiles.get(int(pid)):
             return {"ok": False, "reason": "Nie ma takiego profilu."}
+        block = self._pin_block(pid)
+        if block:
+            return block
         profiles.finish_setup(int(pid), bool(ask))
         self.profile_select(int(pid))
         threading.Thread(target=self._ra_adopt, daemon=True).start()
@@ -461,6 +464,9 @@ class Api:
         if self._session and self._session.phase in ("preparing", "downloading",
                                                      "extracting", "running"):
             return {"ok": False, "reason": "Inna gra jest właśnie uruchamiana."}
+        block = self._pin_block(self._profile)
+        if block:
+            return {**block, "profile_pin": True}
         g = library.game(int(game_id))
         if g:
             emu = self._effective_emu(g)
@@ -979,7 +985,39 @@ class Api:
         lst = profiles.all_profiles()
         for p in lst:
             p["nas_wanted"] = profiles.nas_wanted(p)
+            p["pin"] = profiles.pin_state(self._cfg, p["id"])
+            p.pop("pin_token", None)            # token zostaje w programie, nie w UI
         return {"profiles": lst, "current": self._profile}
+
+    def _pin_block(self, pid: int) -> dict | None:
+        st = profiles.pin_state(self._cfg, int(pid), fresh=True)
+        if st == "ok":
+            return None
+        prof = profiles.get(int(pid)) or {}
+        return {"ok": False, "need": st, "name": prof.get("name", ""),
+                "reason": f"Profil „{prof.get('name', '')}” — " +
+                          ("podaj PIN." if st == "need_pin" else "ustaw PIN profilu.")}
+
+    def profile_pin_check(self) -> dict:
+        """Przy starcie: czy bieżący profil jest odblokowany na tym urządzeniu."""
+        prof = profiles.get(self._profile) or {}
+        return {"state": profiles.pin_state(self._cfg, self._profile), "name": prof.get("name", "")}
+
+    def profile_unlock(self, pid: int, pin: str) -> dict:
+        ok, why = profiles.pin_unlock(self._cfg, int(pid), str(pin))
+        return {"ok": ok, "reason": why}
+
+    def profile_set_pin(self, pid: int, pin: str, old: str = "") -> dict:
+        ok, why = profiles.pin_set(self._cfg, int(pid), str(pin), str(old or ""))
+        return {"ok": ok, "reason": why}
+
+    def profile_logout(self, pid: int) -> dict:
+        profiles.pin_logout(int(pid))
+        return {"ok": True}
+
+    def profile_join(self, name: str, pin: str) -> dict:
+        prof, why = profiles.pin_join(self._cfg, str(name), str(pin))
+        return {"ok": bool(prof), "reason": why, "profile": prof and {k: v for k, v in prof.items() if k != "pin_token"}}
 
     def profile_nas_rename(self, pid: int) -> dict:
         reason = profiles.nas_rename(self._cfg, int(pid))
@@ -988,16 +1026,24 @@ class Api:
     def profile_select(self, pid: int) -> dict:
         if not profiles.get(int(pid)):
             return {"ok": False}
+        block = self._pin_block(pid)
+        if block:
+            return block
         self._profile = int(pid)
         library.meta_set("last_profile", str(self._profile))
         self._user_load(self._profile)
         return {"ok": True}
 
-    def profile_create(self, name: str) -> dict:
+    def profile_create(self, name: str, pin: str = "") -> dict:
+        """Nowy profil z PIN-em. Nazwa zajęta (bez względu na wielkość liter) → exists:
+        UI prosi o PIN tego profilu (profile_join) albo o inną nazwę."""
         try:
-            p = profiles.create(name)
-        except ValueError as ex:
+            p = profiles.create(name, cfg=self._cfg, pin=str(pin or ""))
+        except profiles.ProfileExists as ex:
+            return {"ok": False, "exists": ex.name, "reason": str(ex)}
+        except (ValueError, OSError) as ex:
             return {"ok": False, "reason": str(ex)}
+        p.pop("pin_token", None)
         return {"ok": True, "profile": p}
 
     def profile_rename(self, pid: int, name: str) -> dict:

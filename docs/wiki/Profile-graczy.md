@@ -45,6 +45,15 @@ Nowy profil zaczyna od bieżących ustawień.
   telefon ma własne — na telefonie **Ustawienia emulatora** otwiera emulator na tym
   urządzeniu. Wspólne są tylko zapisy (save'y).
 
+**PIN profilu.** Każdy profil ma PIN (4–8 cyfr). Nazwy profili są unikalne (bez względu
+na wielkość liter): zakładając profil o zajętej nazwie podajesz PIN istniejącego — dobry
+PIN dodaje Twój profil na to urządzenie, zły oznacza, że to inny gracz i trzeba wybrać
+inną nazwę. PIN podajesz raz na każdym urządzeniu; **Start** na karcie profilu → **Zmień
+PIN** / **Wyloguj z tego urządzenia**. Profile sprzed wersji 0.27 przy pierwszym wyborze
+proszą o ustawienie PIN-u. Serwer EmuStart wydaje pliki profilu z PIN-em tylko
+urządzeniu, które podało PIN (po złych próbach — coraz dłuższe czekanie); przy samym SMB
+PIN tylko rozróżnia konta.
+
 **Menedżer zapisów** (opcje gry → **Zapisy i stany**, na komputerze i telefonie):
 stany tej gry z komputera i z telefonu oraz wspólne zapisy w grze. Stan z jednej platformy
 można skopiować na drugą (pobierze się przy następnej grze). Zgodność:

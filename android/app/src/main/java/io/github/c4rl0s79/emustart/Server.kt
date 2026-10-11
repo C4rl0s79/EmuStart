@@ -12,17 +12,37 @@ class Server(private val prefs: Prefs) {
 
     class HttpError(val code: Int, msg: String) : Exception(msg)
 
+    /** Profil, którego dotyczy zapytanie (parametr p= / profile=). */
+    private fun profileOf(path: String): String {
+        val q = path.substringAfter('?', "")
+        val v = q.split('&').firstNotNullOfOrNull { kv ->
+            val k = kv.substringBefore('=')
+            if (k == "p" || k == "profile") java.net.URLDecoder.decode(kv.substringAfter('='), "UTF-8") else null
+        } ?: return ""
+        return v.replace('\\', '/').substringBefore('/')
+    }
+
+    /** Token PIN-u profilu, którego dotyczy zapytanie. */
+    private fun profileToken(c: HttpURLConnection, path: String) {
+        val prof = profileOf(path)
+        val t = if (prof.isEmpty()) "" else prefs.token(prof)
+        if (t.isNotEmpty()) c.setRequestProperty("X-Profile-Token", t)
+    }
+
     fun open(path: String, range: String? = null, timeoutMs: Int = 20000): HttpURLConnection {
         val c = URL(prefs.serverUrl + path).openConnection() as HttpURLConnection
         c.connectTimeout = 8000
         c.readTimeout = timeoutMs
         c.setRequestProperty("Authorization", "Bearer " + prefs.serverKey)
+        profileToken(c, path)
         c.setRequestProperty("User-Agent", "EmuStart-Android/" + BuildConfig.VERSION_NAME)
         if (range != null) c.setRequestProperty("Range", range)
         val code = c.responseCode
         if (code !in 200..299) {
             val msg = try { c.errorStream?.bufferedReader()?.readText() ?: "" } catch (e: Exception) { "" }
             c.disconnect()
+            // PIN zmieniony na innym urządzeniu: token nieważny — następnym razem pytamy o PIN
+            if (code == 403 && msg.contains("\"pin\"")) profileOf(path).takeIf { it.isNotEmpty() }?.let { prefs.setToken(it, "") }
             throw HttpError(code, if (code == 401) "zły klucz serwera" else "błąd serwera $code $msg".trim())
         }
         return c
@@ -102,6 +122,7 @@ class Server(private val prefs: Prefs) {
             c.doOutput = true
             c.setFixedLengthStreamingMode(data.size)
             c.setRequestProperty("Authorization", "Bearer " + prefs.serverKey)
+            profileToken(c, nasPath("file", p, extra))
             c.setRequestProperty("Content-Type", "application/octet-stream")
             c.outputStream.use { it.write(data) }
             val code = c.responseCode
@@ -126,10 +147,39 @@ class Server(private val prefs: Prefs) {
             c.doOutput = true
             c.setFixedLengthStreamingMode(0)
             c.setRequestProperty("Authorization", "Bearer " + prefs.serverKey)
+            profileToken(c, "/v1/savemgr/copy?" + query(q))
             c.outputStream.close()
             val code = c.responseCode
             if (code != 200) throw HttpError(code, "kopia stanu na serwerze: $code")
             return JSONObject(c.inputStream.bufferedReader(Charsets.UTF_8).readText())
+        } finally { c.disconnect() }
+    }
+
+    // ── profile z PIN-em (/v1/profiles) ──
+
+    /** [(nazwa, czy ma PIN)]; null — serwer bez PIN-ów profili (starszy niż 0.27). */
+    fun profiles(): List<Pair<String, Boolean>>? = try {
+        val a = JSONObject(text("/v1/profiles")).optJSONArray("profiles") ?: JSONArray()
+        (0 until a.length()).map { val o = a.getJSONObject(it); Pair(o.getString("name"), o.optBoolean("pin")) }
+    } catch (e: HttpError) { if (e.code == 404) null else throw e }
+
+    /** login | create | pin — odpowiedź serwera także przy błędzie (403 zły PIN, 409 nazwa zajęta). */
+    fun profileOp(op: String, q: Map<String, String>): JSONObject {
+        val c = URL(prefs.serverUrl + "/v1/profiles/$op?" + query(q)).openConnection() as HttpURLConnection
+        try {
+            c.connectTimeout = 8000
+            c.readTimeout = 30000
+            c.requestMethod = "PUT"
+            c.doOutput = true
+            c.setFixedLengthStreamingMode(0)
+            c.setRequestProperty("Authorization", "Bearer " + prefs.serverKey)
+            c.outputStream.close()
+            val code = c.responseCode
+            if (code == 401) throw HttpError(code, "zły klucz serwera")
+            val body = (if (code in 200..299) c.inputStream else c.errorStream)?.bufferedReader(Charsets.UTF_8)?.readText() ?: "{}"
+            val o = try { JSONObject(body) } catch (e: Exception) { JSONObject().put("error", "błąd serwera $code") }
+            if (code == 409) o.put("exists", true)
+            return o
         } finally { c.disconnect() }
     }
 
@@ -140,6 +190,7 @@ class Server(private val prefs: Prefs) {
             c.readTimeout = 20000
             c.requestMethod = "DELETE"
             c.setRequestProperty("Authorization", "Bearer " + prefs.serverKey)
+            profileToken(c, nasPath("file", p))
             val code = c.responseCode
             if (code != 200 && code != 404) throw HttpError(code, "usuwanie na serwerze: $code")
         } finally { c.disconnect() }

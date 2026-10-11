@@ -56,6 +56,15 @@ def _ensure_columns() -> None:
             con.execute("ALTER TABLE profiles ADD COLUMN nas_name TEXT NOT NULL DEFAULT ''")
             con.execute("ALTER TABLE profiles ADD COLUMN color TEXT NOT NULL DEFAULT ''")
             con.execute("UPDATE profiles SET nas_name=name WHERE nas_name=''")
+    if "pin_token" not in cols:
+        with con:
+            # PIN profilu (emustart/pinauth.py): token od serwera / odblokowanie przez SMB
+            con.execute("ALTER TABLE profiles ADD COLUMN pin_token TEXT NOT NULL DEFAULT ''")
+            con.execute("ALTER TABLE profiles ADD COLUMN unlocked INTEGER NOT NULL DEFAULT 0")
+    # tokeny profili dla zapytań do serwera (nagłówek X-Profile-Token)
+    nasfs.TOKENS.clear()
+    nasfs.TOKENS.update({r[0].lower(): r[1] for r in con.execute(
+        "SELECT nas_name, pin_token FROM profiles WHERE pin_token!=''")})
 
 
 def all_profiles() -> list:
@@ -73,17 +82,186 @@ def _safe_name(name: str) -> str:
     return re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "_", name).strip(" .") or "profil"
 
 
-def create(name: str, color: str = "") -> dict:
+class ProfileExists(ValueError):
+    """Nazwa zajęta (bez względu na wielkość liter) — dołączenie tylko z PIN-em tego profilu."""
+
+    def __init__(self, name: str):
+        super().__init__(f"Profil „{name}” już istnieje.")
+        self.name = name
+
+
+def create(name: str, color: str = "", cfg: dict | None = None, pin: str = "") -> dict:
+    """Nowy profil. Z `cfg` i `pin` (NAS dostępny) — od razu z PIN-em na NAS-ie / serwerze;
+    nazwa zajęta na NAS-ie albo tutaj → ProfileExists."""
+    from emustart import pinauth
     _ensure_columns()
     name = name.strip()[:32]
     if not name:
         raise ValueError("Pusta nazwa profilu.")
+    local = pinauth.find([p["name"] for p in all_profiles()] + [p["nas_name"] for p in all_profiles()], name)
+    online = cfg is not None and nas_online(cfg)
+    nas_name, token, unlocked = _safe_name(name), "", 0
+    if online:
+        if pin and not pinauth.valid_pin(pin):
+            raise ValueError("PIN to 4–8 cyfr.")
+        fs = nasfs.backend(cfg)
+        taken = pinauth.find(_nas_profiles(fs), name)
+        if taken or local:
+            raise ProfileExists(taken or local)
+        if pin:
+            if isinstance(fs, nasfs.RemoteFs):
+                r = fs.profile_op("create", {"name": name, "pin": pin})
+                if r.get("exists"):
+                    raise ProfileExists(r.get("name") or name)
+                if not r.get("ok"):
+                    raise ValueError(r.get("error") or "Serwer nie założył profilu.")
+                nas_name, token = r["name"], r["token"]
+            else:
+                pinauth.write(fs, nas_name, pinauth.make(pin))
+                fs.write(f"{nas_name}/emustart.json", b"{}")
+            unlocked = 1
+    elif local:
+        raise ProfileExists(local)
     with library.db() as c:
-        if c.execute("SELECT 1 FROM profiles WHERE name=?", (name,)).fetchone():
-            raise ValueError(f"Profil „{name}” już istnieje.")
-        cur = c.execute("INSERT INTO profiles(name, nas_name, color) VALUES(?,?,?)",
-                        (name, _safe_name(name), color))
+        cur = c.execute("INSERT INTO profiles(name, nas_name, color, pin_token, unlocked) VALUES(?,?,?,?,?)",
+                        (name, nas_name, color, token, unlocked))
     return get(cur.lastrowid)
+
+
+def _nas_profiles(fs) -> list:
+    """Nazwy profili w folderze profili (serwer: /v1/profiles, SMB: foldery)."""
+    if isinstance(fs, nasfs.RemoteFs):
+        return [p["name"] for p in fs.profiles()]
+    return [n for n, d in fs.listdir("") if d and not n.startswith((".", "_"))
+            and not fs.exists(f"{n}/moved.json")]
+
+
+# ── PIN profilu: raz na urządzeniu ──
+_pin_cache: dict = {}                 # pid → (czas, stan) — jedno sprawdzenie na minutę
+
+
+def pin_state(cfg: dict, pid: int, fresh: bool = False) -> str:
+    """ok — profil odblokowany na tym urządzeniu (albo NAS niedostępny: gra lokalnie),
+    need_pin — trzeba podać PIN, set_pin — profil jeszcze bez PIN-u (ustawić)."""
+    from emustart import pinauth
+    hit = _pin_cache.get(pid)
+    if hit and not fresh and time.monotonic() - hit[0] < 60:
+        return hit[1]
+    prof = get(pid)
+    if not prof or not nas_online(cfg):
+        return "ok"
+    fs = nasfs.backend(cfg)
+    try:
+        if isinstance(fs, nasfs.RemoteFs):
+            info = next((p for p in fs.profiles() if p["name"].lower() == prof["nas_name"].lower()), None)
+            if info is None:
+                st = "ok"                 # jeszcze nie ma go na serwerze — powstanie z pierwszym zapisem
+            elif not info["pin"]:
+                st = "set_pin"
+            elif not prof["pin_token"]:
+                st = "need_pin"
+            else:
+                fs.listdir(prof["nas_name"])          # 403 → PinRequired (token nieważny)
+                st = "ok"
+        else:
+            rec = pinauth.read(fs, prof["nas_name"])
+            st = "set_pin" if rec is None else ("ok" if prof["unlocked"] else "need_pin")
+    except nasfs.PinRequired:
+        st = "need_pin"                   # token nieważny (PIN zmieniony na innym urządzeniu)
+    except OSError:
+        st = "ok"
+    _pin_cache[pid] = (time.monotonic(), st)
+    return st
+
+
+def pin_unlock(cfg: dict, pid: int, pin: str) -> tuple[bool, str]:
+    """PIN profilu na tym urządzeniu → zapamiętane odblokowanie (token serwera)."""
+    from emustart import pinauth
+    prof = get(pid)
+    if not prof:
+        return False, "Nie ma takiego profilu."
+    fs = nasfs.backend(cfg)
+    if isinstance(fs, nasfs.RemoteFs):
+        r = fs.profile_op("login", {"name": prof["nas_name"], "pin": pin})
+        if not r.get("ok"):
+            return False, r.get("error") or "Zły PIN."
+        if r.get("needs_pin"):
+            return False, "Ten profil nie ma jeszcze PIN-u — ustaw go."
+        _remember(pid, r["token"])
+        return True, ""
+    ok, why, _w = pinauth.verify(fs, prof["nas_name"], pin)
+    if why == "brak":
+        return False, "Ten profil nie ma jeszcze PIN-u — ustaw go."
+    if ok:
+        _remember(pid, "")
+    return ok, why
+
+
+def pin_set(cfg: dict, pid: int, pin: str, old: str = "") -> tuple[bool, str]:
+    """Ustawia PIN (profil bez PIN-u) albo zmienia go (z dotychczasowym)."""
+    from emustart import pinauth
+    prof = get(pid)
+    if not prof:
+        return False, "Nie ma takiego profilu."
+    if not pinauth.valid_pin(pin):
+        return False, "PIN to 4–8 cyfr."
+    fs = nasfs.backend(cfg)
+    if isinstance(fs, nasfs.RemoteFs):
+        r = fs.profile_op("pin", {"name": prof["nas_name"], "pin": pin, "old": old})
+        if r.get("error") and "Nie ma profilu" in r["error"]:
+            fs.write(f"{prof['nas_name']}/emustart.json", b"{}")     # profil jeszcze bez folderu
+            r = fs.profile_op("pin", {"name": prof["nas_name"], "pin": pin, "old": old})
+        if not r.get("ok"):
+            return False, r.get("error") or "Nie udało się ustawić PIN-u."
+        _remember(pid, r["token"])
+        return True, ""
+    rec = pinauth.read(fs, prof["nas_name"])
+    if rec is not None:
+        ok, why, _w = pinauth.verify(fs, prof["nas_name"], old)
+        if not ok:
+            return False, "Zły dotychczasowy PIN." if why == "Zły PIN." else why
+    pinauth.write(fs, prof["nas_name"], pinauth.make(pin))
+    _remember(pid, "")
+    return True, ""
+
+
+def pin_join(cfg: dict, name: str, pin: str) -> tuple[dict | None, str]:
+    """Istniejący profil (np. założony na innym urządzeniu) na tym komputerze — z jego PIN-em."""
+    from emustart import pinauth
+    fs = nasfs.backend(cfg)
+    nas_name = pinauth.find(_nas_profiles(fs), name) or pinauth.find(
+        [p["nas_name"] for p in all_profiles()], name)
+    if not nas_name:
+        return None, f"Nie ma profilu „{name}”."
+    row = library.db().execute("SELECT id FROM profiles WHERE lower(nas_name)=?", (nas_name.lower(),)).fetchone()
+    if row:
+        pid = row["id"]
+    else:
+        with library.db() as c:
+            pid = c.execute("INSERT INTO profiles(name, nas_name, color) VALUES(?,?,?)",
+                            (nas_name[:32], nas_name, "")).lastrowid
+    ok, why = pin_unlock(cfg, pid, pin)
+    if not ok:
+        if not row:
+            with library.db() as c:      # obcy profil bez dobrego PIN-u nie zostaje na liście
+                c.execute("DELETE FROM profiles WHERE id=?", (pid,))
+        return None, why
+    return get(pid), ""
+
+
+def pin_logout(pid: int) -> None:
+    """Zapomina odblokowanie profilu na tym urządzeniu (następnym razem PIN)."""
+    with library.db() as c:
+        c.execute("UPDATE profiles SET pin_token='', unlocked=0 WHERE id=?", (pid,))
+    _pin_cache.pop(pid, None)
+    _ensure_columns()
+
+
+def _remember(pid: int, token: str) -> None:
+    with library.db() as c:
+        c.execute("UPDATE profiles SET pin_token=?, unlocked=1 WHERE id=?", (token, pid))
+    _pin_cache[pid] = (time.monotonic(), "ok")
+    _ensure_columns()
 
 
 def rename(pid: int, name: str, cfg: dict | None = None) -> None:
@@ -729,6 +907,9 @@ def import_from_nas(cfg: dict) -> list:
     resolve_moves(cfg)
     fs = nasfs.backend(cfg)
     try:
+        if isinstance(fs, nasfs.RemoteFs):
+            # serwer zna wszystkie profile (też z PIN-em, do których bez tokenu nie zajrzymy)
+            return _import_names([p["name"] for p in fs.profiles()])
         dirs = [name for name, is_dir in fs.listdir("") if is_dir and not name.startswith((".", "_"))]
     except (OSError, ValueError):
         return []
@@ -747,6 +928,20 @@ def import_from_nas(cfg: dict) -> list:
             log.exception("profil z NAS %s", d)
     if added:
         log.info("profile z NAS: %s", ", ".join(added))
+    return added
+
+
+def _import_names(names: list) -> list:
+    have = {p["nas_name"].lower() for p in all_profiles()} | {p["name"].lower() for p in all_profiles()}
+    added = []
+    for d in sorted(names or [], key=str.lower):
+        if d.lower() in have:
+            continue
+        with library.db() as c:
+            c.execute("INSERT INTO profiles(name, nas_name, color) VALUES(?,?,?)", (d[:32], d, ""))
+        added.append(d)
+    if added:
+        log.info("profile z serwera: %s", ", ".join(added))
     return added
 
 

@@ -39,6 +39,17 @@ class Prefs(ctx: Context) {
         get() = sp.getString("profile", "") ?: ""
         set(v) = sp.edit().putString("profile", v).apply()
 
+    /** Tokeny profili z PIN-em (od serwera po podaniu PIN-u; do wylogowania). */
+    fun token(profile: String): String = try {
+        org.json.JSONObject(sp.getString("profile_tokens", "{}") ?: "{}").optString(profile.lowercase())
+    } catch (e: Exception) { "" }
+
+    fun setToken(profile: String, token: String) {
+        val o = try { org.json.JSONObject(sp.getString("profile_tokens", "{}") ?: "{}") } catch (e: Exception) { org.json.JSONObject() }
+        if (token.isEmpty()) o.remove(profile.lowercase()) else o.put(profile.lowercase(), token)
+        sp.edit().putString("profile_tokens", o.toString()).apply()
+    }
+
     /** Profil, do którego należą zapisy zastane w emulatorach (pierwszy wybrany). */
     var phoneOwner: String
         get() = sp.getString("phone_owner", "") ?: ""
