@@ -88,6 +88,7 @@ class Bridge(private val act: MainActivity) {
         "launch_dismiss" -> { val l = launch; if (l != null && l.phase in setOf("finished", "error", "cancelled")) launch = null; null }
         "launch_play_now" -> null
         "toggle_pin" -> togglePin(a.getInt(0))
+        "remove_local" -> removeLocal(a.getInt(0))
         "look_save" -> { prefs.look = a.getJSONObject(0); JSONObject().put("ok", true) }
         "quit" -> { act.runOnUiThread { act.finishAndRemoveTask() }; null }
         "copy_status" -> JSONArray()
@@ -229,6 +230,16 @@ class Bridge(private val act: MainActivity) {
         d.put("filelist", files).put("files", files.length())
         val e = Cache.index(act).optJSONObject(key(d.optString("es"), d.optString("name")))
         d.put("cached", e?.optBoolean("complete") == true).put("pinned", e?.optBoolean("pinned") == true)
+        // ile gry jest już w telefonie (także przerwane pobieranie) — do „Usuń z telefonu”
+        val base = File(prefs.gamesDir(act), d.optString("es"))
+        val dl = Downloader(server, 1)
+        var local = 0L
+        for (i in 0 until files.length()) {
+            val f = files.getJSONObject(i)
+            val size = f.optLong("size")
+            local += size - dl.missing(File(base, f.getString("path")), size)
+        }
+        d.put("local", local)
         d.put("copying", false).put("meta_online", true)
         for (k in listOf("box", "snap", "logo")) if (d.has(k)) d.put(k, remote(d.optString(k)))
         return d
@@ -469,6 +480,23 @@ class Bridge(private val act: MainActivity) {
         val pinned = Cache.togglePin(act, key(g.optString("es"), g.optString("name")))
         synchronized(gamesCache) { gamesCache.clear() }
         return JSONObject().put("ok", true).put("pinned", pinned)
+    }
+
+    /** Usuwa grę z telefonu (pliki, niedokończone pobieranie, rozpakowany ZIP, przypięcie). */
+    private fun removeLocal(id: Int): JSONObject {
+        val l = launch
+        if (l != null && l.game.optInt("id") == id && l.phase in setOf("preparing", "downloading"))
+            return JSONObject().put("ok", false).put("reason", "Ta gra właśnie się pobiera — anuluj pobieranie.")
+        val g = try { server.game(id) } catch (e: Exception) {
+            return JSONObject().put("ok", false).put("reason", explain(e))
+        }
+        val es = g.optString("es")
+        val base = File(prefs.gamesDir(act), es)
+        val files = g.optJSONArray("files") ?: JSONArray()
+        val paths = (0 until files.length()).map { File(base, files.getJSONObject(it).getString("path")) }
+        val freed = Cache.remove(act, key(es, g.optString("name")), paths)
+        synchronized(gamesCache) { gamesCache.clear() }
+        return JSONObject().put("ok", true).put("freed", freed)
     }
 
     // ── grafiki z serwera (przez /remote/ — ten sam „origin” co interfejs) ──

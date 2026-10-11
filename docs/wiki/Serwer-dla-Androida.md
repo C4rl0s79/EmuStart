@@ -42,6 +42,32 @@ To ten sam program (`EmuStart.exe`), uruchamiany bez okna z parametrem `--server
 
 Adres serwera dla telefonu: `http://<adres Tailscale komputera>:8740`.
 
+## Panel serwera
+
+Serwer działa bez okna (zadanie Harmonogramu na koncie SYSTEM). Do podglądu i obsługi
+służy osobne okienko:
+
+```
+EmuStart.exe --server-panel
+```
+
+(`--install-server` dodaje też skrót **EmuStart Server** w menu Start). Panel pokazuje
+wersję i czas pracy serwera, adres dla telefonu, liczbę gier, urządzenia, które się łączyły,
+i gry pobierane w tej chwili, a przyciski:
+
+- **Przeładuj listę gier** — skan folderów z grami (nowe i usunięte gry) z paskiem postępu,
+- **Restart serwera** — nowy proces serwera, stary kończy się; pobieranie na telefonie
+  wznowi się samo,
+- **Pokaż klucz** — klucz serwera (kopiowany do schowka),
+- **Folder logów**.
+
+Gdy serwer nie odpowiada, panel najpierw uruchamia zadanie „EmuStart Server”, a jeśli go
+nie ma — serwer na koncie użytkownika. Panel działa tylko na tym komputerze (127.0.0.1).
+
+Po aktualizacji do 0.25.12 uruchom ponownie `EmuStart.exe --install-server` (jako
+administrator): zadanie dostaje brak limitu czasu pracy (schtasks domyślnie zatrzymuje
+zadanie po 72 h) i ponowne uruchomienie po awarii.
+
 ## Administracja
 
 Na komputerze z serwerem pełny interfejs EmuStart jest dostępny w przeglądarce:

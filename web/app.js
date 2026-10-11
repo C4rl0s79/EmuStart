@@ -340,6 +340,8 @@ function renderGames() {
   box.querySelectorAll(".row").forEach((el) => {
     el.addEventListener("click", () => { S.gameIdx = +el.dataset.i; renderGames(); });
     el.addEventListener("dblclick", () => { S.gameIdx = +el.dataset.i; launch(); });
+    // prawy przycisk myszy / długie dotknięcie — opcje gry (jak przytrzymane A)
+    el.addEventListener("contextmenu", (ev) => { ev.preventDefault(); S.gameIdx = +el.dataset.i; renderGames(); openGameOptions(); });
   });
   setHints([["a", "Graj (przytrzymaj: opcje)"], ["x", "Filtry"], ["y", S.games[S.gameIdx]?.pinned ? "Odepnij" : "Przypnij"],
             ["lb", "Strona"], ["lt", "Litera"], ["b", "Wstecz"], ["start", "Menu"]]);

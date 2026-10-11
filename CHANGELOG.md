@@ -8,6 +8,41 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.25.12] — 2026-10-11
+
+### Dodane
+- **Usuwanie gier z dysku** — opcje gry (przytrzymane A, prawy przycisk myszy) →
+  **Usuń z dysku**, z potwierdzeniem. Usuwa kopię lokalną, także niedokończone pobieranie
+  (`.part` i mapę bloków), i przypięcie; gra zostaje na NAS-ie. Na telefonie: opcje gry
+  (przytrzymane A, długie dotknięcie) z **Graj / Przypnij / Usuń z telefonu**.
+- **Panel serwera** — `EmuStart.exe --server-panel` (skrót „EmuStart Server” w menu Start
+  po `--install-server`): wersja i czas pracy, adres dla telefonu, liczba gier, urządzenia
+  i pobierane właśnie gry; przyciski **Przeładuj listę gier**, **Restart serwera**,
+  **Pokaż klucz**, **Folder logów**. Gdy serwer nie działa, panel go uruchamia. Działa tylko
+  na komputerze z serwerem (127.0.0.1).
+
+### Poprawione
+- **Przypięta gra nie kończyła pobierania** (zostawał pełny plik `.part`, status „przypięta
+  (pobierze się)”): błąd jednego ze strumieni przerywał całe pobieranie, nawet gdy pozostałe
+  pobrały już wszystkie bloki. Teraz chwilowe błędy sieci są ponawiane (5 prób na strumień),
+  komplet bloków zawsze kończy się plikiem gry, a plik zajęty przez inny program jest
+  przemianowywany w tle, gdy tylko zostanie zwolniony. Przypięta, niepełna gra wznawia
+  pobieranie sama po wejściu na nią.
+- **Postęp pobierania 40272 %** — po usunięciu gry z pamięci podręcznej zostawała mapa
+  pobranych bloków; następne pobieranie liczyło z niej, że brakuje tylko kilku MB. Mapa
+  jest usuwana razem z grą, a bez pliku `.part` ignorowana (Windows i Android); procent
+  nie przekracza 100.
+- **MSU-1 na telefonie: „W archiwum nie ma pliku gry”** — ROM (`.sfc`) w archiwum z muzyką
+  wybierany jest także wtedy, gdy serwer nie podał rozszerzeń systemu (serwer starszy niż
+  0.25.9) albo folder systemu ma inną wielkość liter (`snesmsu1`): pomijane są tylko pliki
+  towarzyszące (`.msu`, `.pcm`, `.bps`, `.bml`, opisy). To samo na Windows.
+- Status „lokalnie” liczony z plików w pamięci podręcznej, nie tylko z bazy.
+
+### Zmienione
+- `--install-server`: zadanie Harmonogramu bez limitu 72 h pracy (schtasks zatrzymywał
+  serwer po 3 dniach) i z ponownym uruchomieniem po awarii. **Uruchom `--install-server`
+  ponownie** (jako administrator).
+
 ## [0.25.11] — 2026-10-09
 
 ### Zmienione

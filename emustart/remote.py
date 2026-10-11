@@ -72,6 +72,12 @@ def authorized(handler) -> bool:
     return bool(got) and hmac.compare_digest(got.encode(), token.encode())
 
 
+def _seen(handler) -> None:
+    """Klient z kluczem — do listy urządzeń w panelu serwera."""
+    from emustart import srvadmin
+    srvadmin.seen(handler.client_address[0])
+
+
 def _json(handler, data, status: int = 200) -> None:
     body = json.dumps(data, ensure_ascii=False).encode("utf-8")
     handler.send_response(status)
@@ -92,6 +98,7 @@ def handle(handler) -> None:
     """GET /v1/… (handler: BaseHTTPRequestHandler serwera)."""
     if not authorized(handler):
         return _json(handler, {"error": "brak lub zły klucz serwera"}, 401)
+    _seen(handler)
     path = urllib.parse.unquote(urllib.parse.urlsplit(handler.path).path)
     parts = [p for p in path.split("/") if p][1:]           # bez „v1”
     try:
@@ -175,6 +182,7 @@ def handle_write(handler, method: str) -> None:
     """PUT/DELETE /v1/nas/… (zapis w folderze profili)."""
     if not authorized(handler):
         return _json(handler, {"error": "brak lub zły klucz serwera"}, 401)
+    _seen(handler)
     path = urllib.parse.unquote(urllib.parse.urlsplit(handler.path).path)
     parts = [p for p in path.split("/") if p][1:]
     if method == "PUT" and parts == ["system"]:
@@ -425,6 +433,8 @@ def _send_file(handler, gid: int, rel: str) -> None:
     if partial:
         handler.send_header("Content-Range", f"bytes {start}-{end}/{size}")
     handler.end_headers()
+    from emustart import srvadmin
+    ip = handler.client_address[0]
     with open(path, "rb") as f:
         f.seek(start)
         left = length
@@ -435,6 +445,7 @@ def _send_file(handler, gid: int, rel: str) -> None:
                 break
             handler.wfile.write(buf)
             left -= len(buf)
+            srvadmin.sent(ip, gid, g.get("title") or rel, len(buf))
 
 
 def install_autostart(exe: str, port: int) -> list:
@@ -444,6 +455,17 @@ def install_autostart(exe: str, port: int) -> list:
     cmds = [
         ["schtasks", "/Create", "/F", "/TN", "EmuStart Server", "/SC", "ONSTART", "/RU", "SYSTEM",
          "/RL", "HIGHEST", "/TR", f'"{exe}" --server'],
+        # schtasks zakłada limit 72 h pracy zadania — serwer działa bez końca;
+        # po awarii Harmonogram uruchamia go ponownie (3 razy co minutę)
+        ["powershell", "-NoProfile", "-Command",
+         "Set-ScheduledTask -TaskName 'EmuStart Server' -Settings (New-ScheduledTaskSettingsSet "
+         "-ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) "
+         "-AllowStartIfOnBatteries -DontStopIfGoingOnBatteries)"],
+        # skrót do panelu serwera w menu Start (wszyscy użytkownicy)
+        ["powershell", "-NoProfile", "-Command",
+         "$s=(New-Object -ComObject WScript.Shell).CreateShortcut("
+         "\"$env:ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\EmuStart Server.lnk\");"
+         f"$s.TargetPath='{exe}';$s.Arguments='--server-panel';$s.IconLocation='{exe},0';$s.Save()"],
         ["netsh", "advfirewall", "firewall", "add", "rule", "name=EmuStart Server", "dir=in",
          "action=allow", "protocol=TCP", f"localport={port}"],
     ]

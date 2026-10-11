@@ -81,11 +81,15 @@ const META_FIELDS = [["title", "Tytuł"], ["developer", "Producent"], ["publishe
   ["year", "Rok premiery"], ["genre", "Gatunek"], ["players", "Gracze"], ["description", "Opis"]];
 
 async function openGameOptions() {
-  if (S.platform === "android") return toast("Opcje gier i systemów są w EmuStart na komputerze z grami.");
   const g = S.games[S.gameIdx];
   if (!g) return;
   GO.id = g.id;
-  [GO.data, GO.detail] = await Promise.all([api().game_options(g.id), api().game_detail(g.id)]);
+  GO.confirmDel = false;
+  // telefon: tylko granie, przypięcie i usunięcie z telefonu — emulatory, zapisy
+  // i metadane ustawia się w EmuStart na komputerze z grami
+  [GO.data, GO.detail] = S.platform === "android"
+    ? [null, await api().game_detail(g.id)]
+    : await Promise.all([api().game_options(g.id), api().game_detail(g.id)]);
   GO.page = "main"; GO.idx = 0;
   S.modal = "gopt";
   $("gopt").classList.remove("hidden");
@@ -96,8 +100,34 @@ function closeGopt() {
   $("gopt").classList.add("hidden");
   renderGames();
 }
+function removeItem() {
+  const det = GO.detail || {};
+  if (!(det.cached || det.pinned || det.local)) return [];
+  const where = S.platform === "android" ? "z telefonu" : "z dysku";
+  return [{
+    label: GO.confirmDel ? `Na pewno usunąć ${where}? A — tak` : `Usuń ${where}`,
+    value: GO.confirmDel ? "B — nie" : (det.local ? fmtBytes(det.local) : "kopia lokalna"),
+    act: async () => {
+      if (!GO.confirmDel) { GO.confirmDel = true; return renderGopt(); }
+      GO.confirmDel = false;
+      const r = await api().remove_local(GO.id);
+      if (!r || !r.ok) { toast(r?.reason || "Nie udało się usunąć."); return renderGopt(); }
+      const gg = S.games.find((x) => x.id === GO.id);
+      if (gg) { gg.pinned = 0; gg.cached = 0; }
+      toast(`Usunięto ${where}${r.freed ? ` (${fmtBytes(r.freed)})` : ""}. Gra zostaje na ${S.platform === "android" ? "serwerze" : "NAS-ie"}.`);
+      closeGopt();
+      refreshState();
+      schedulePreview();
+    },
+  }];
+}
 function goptItems() {
   const d = GO.data, det = GO.detail, g = S.games[S.gameIdx] || {};
+  if (GO.page === "main" && S.platform === "android") return [
+    { label: "Graj", act: () => { closeGopt(); launch(); } },
+    { label: g.pinned ? "Odepnij (pozwól usunąć z telefonu)" : "Przypnij (trzymaj w telefonie)", act: async () => { await togglePin(); closeGopt(); } },
+    ...removeItem(),
+  ];
   if (GO.page === "main") return [
     { label: "Graj", act: () => { closeGopt(); launch(); } },
     { label: "Emulator", value: d.emulator.label + (d.emulator.own ? "  (tylko ta gra)" : ""), act: () => goPage("emus") },
@@ -110,6 +140,7 @@ function goptItems() {
     { label: "Pobierz opis z sieci", value: "Wikipedia, IGDB, TheGamesDB", act: async () => {
       await api().meta_fetch(GO.id, true); toast("Pobieram opis…"); setTimeout(refreshGoDetail, 4000); } },
     { label: g.pinned ? "Odepnij (pozwól usunąć z dysku)" : "Przypnij (trzymaj na dysku)", act: async () => { await togglePin(); closeGopt(); } },
+    ...removeItem(),
   ];
   if (GO.page === "emus") {
     const cur = d.emulator;
@@ -168,10 +199,12 @@ function renderGopt() {
 function goptInput(a) {
   if (GO.page === "art") return artPickInput(a);
   const n = GO.items.length;
+  if (a !== "a") GO.confirmDel = a === "b" ? GO.confirmDel : false;
   if (a === "up") GO.idx = (GO.idx - 1 + n) % n;
   else if (a === "down") GO.idx = (GO.idx + 1) % n;
   else if (a === "lb") GO.idx = Math.max(0, GO.idx - 8);
   else if (a === "rb") GO.idx = Math.min(n - 1, GO.idx + 8);
+  else if (a === "b" && GO.confirmDel) GO.confirmDel = false;
   else if (a === "b") return GO.page === "main" ? closeGopt() : goPage("main");
   else if (a === "a") return GO.items[GO.idx]?.act();
   renderGopt();

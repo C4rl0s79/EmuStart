@@ -58,6 +58,9 @@ class _Handler(BaseHTTPRequestHandler):
         # z internetu nie wyśle go do 127.0.0.1 bez zgody CORS, której nie dajemy)
         if not _host_ok(self) or self.headers.get("X-EmuStart") != "1":
             return self.send_error(403)
+        if self.path.startswith("/admin/"):
+            from emustart import srvadmin     # panel serwera (tylko z tego komputera)
+            return srvadmin.handle(self, DEV_API)
         name = urllib.parse.urlsplit(self.path).path.removeprefix("/api/")
         fn = getattr(DEV_API, name, None) if DEV_API and not name.startswith("_") else None
         if not callable(fn):

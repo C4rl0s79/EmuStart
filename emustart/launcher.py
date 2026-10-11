@@ -368,7 +368,7 @@ class Session:
                 with z.open(m) as src, winutil.open_temp_write(str(target)) as dst:
                     shutil.copyfileobj(src, dst, 1024 * 1024)
         files = [out_dir / Path(m.filename).name for m in members]
-        pick = [f for f in files if f.suffix.lower().lstrip(".") in wanted]
+        pick = pick_rom(files, wanted)
         if not pick and len(files) > 1:
             exts = ", ".join(sorted(wanted - {"m3u"}))
             raise LaunchError(f"W archiwum nie ma pliku gry ({exts}) — są tylko pliki dodatkowe "
@@ -658,6 +658,18 @@ def cleanup_run_dirs(max_age: float = 3600) -> int:
 
 
 DISK_EXTS = {".ipf", ".adf", ".adz", ".dms", ".fdi", ".d64", ".st", ".msa", ".dsk"}
+# pliki towarzyszące w archiwum — nigdy nie są grą (MSU-1: .msu, .pcm; łatki; opisy)
+COMPANION_EXTS = {"msu", "pcm", "bps", "ips", "ups", "xdelta", "bml", "xml", "txt", "nfo",
+                  "diz", "md", "pdf", "jpg", "jpeg", "png", "sha1", "md5", "sfv", "cfg",
+                  "ini", "sav", "srm", "m3u"}
+
+
+def pick_rom(names: list, wanted: set) -> list:
+    """Pliki gry spośród rozpakowanych: z rozszerzeniem systemu, a gdy żadnego
+    (nieznany system, stary serwer bez listy rozszerzeń) — wszystko poza plikami
+    towarzyszącymi."""
+    pick = [n for n in names if Path(n).suffix.lower().lstrip(".") in wanted]
+    return pick or [n for n in names if Path(n).suffix.lower().lstrip(".") not in COMPANION_EXTS]
 
 
 def _disk_order(p: Path):

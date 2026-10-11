@@ -66,6 +66,12 @@ Ekran pobierania pokazuje źródło („Pobieranie z serwera EmuStart”).
 - **Y na grze** przypina ją: zostaje na dysku na stałe i pobiera się w tle
   (postęp w górnym pasku).
 - Na liście gry lokalne mają znacznik „lokalnie”, przypięte 📌, kopiowane „⬇ kopiuje”.
+- **Usunięcie z dysku**: przytrzymaj A na grze (albo prawy przycisk myszy) →
+  **Usuń z dysku** → A, by potwierdzić. Usuwa kopię lokalną (także niedokończone
+  pobieranie) i przypięcie; gra zostaje na NAS-ie. Na telefonie tak samo:
+  **Usuń z telefonu** (długie dotknięcie gry albo przytrzymane A).
+- Przypięta gra, której pobieranie się przerwało, wznawia się sama po wejściu na nią
+  (najwyżej raz na 5 minut).
 
 ## Bez NAS-a
 
