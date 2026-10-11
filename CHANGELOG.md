@@ -8,6 +8,20 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.28.0] — 2026-10-11
+
+### Dodane
+- **Android: BIOS-y rdzeni RetroArcha z serwera** — przed grą telefon pobiera brakujące
+  BIOS-y rdzenia (lista z pliku `.info` RetroArcha na serwerze, pliki z folderu BIOS-ów
+  serwera i folderów `system` jego RetroArchów) do `RetroArch/system`: BIOS PS1 dla
+  SwanStation, Sega CD, PC Engine CD, FDS, Kickstarty Amigi itd. — jak EmuStart na Windows.
+- **Android: Amiga WHDLoad** — Kickstarty także do `…/WHDLoad/Devs/Kickstarts` (wcześniej
+  PUAE brał zamiennik AROS: „Kickstart ROM 'kick40068.A1200' not found”, a WHDLoad kończył
+  się „Couldn't find VCL instruction”).
+- **Android: gry arcade z rodzicem i BIOS-em** (np. `neogeo.zip`) — serwer dołącza je do
+  plików gry, telefon pobiera je obok gry.
+- Serwer: `GET /v1/bios?core=…` (lista), `GET /v1/bios?name=…` (plik). **Zaktualizuj serwer.**
+
 ## [0.27.3] — 2026-10-11
 
 ### Poprawione

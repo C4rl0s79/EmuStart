@@ -155,6 +155,24 @@ class Server(private val prefs: Prefs) {
         } finally { c.disconnect() }
     }
 
+    /** BIOS-y rdzenia, które serwer ma (ścieżki względem folderu system RetroArcha). */
+    fun biosFor(core: String): List<String> = try {
+        val a = JSONObject(text("/v1/bios?core=" + enc(core))).optJSONArray("files") ?: JSONArray()
+        (0 until a.length()).map { a.getString(it) }
+    } catch (e: HttpError) { if (e.code == 404) emptyList() else throw e }
+
+    /** BIOS z folderu BIOS-ów serwera (po nazwie) do `dst`; false = serwer go nie ma. */
+    fun bios(name: String, dst: java.io.File): Boolean {
+        val c = try { open("/v1/bios?name=" + enc(name), timeoutMs = 30000) } catch (e: HttpError) {
+            if (e.code == 404) return false else throw e
+        }
+        try {
+            val tmp = java.io.File(dst.path + ".part")
+            c.inputStream.use { i -> tmp.outputStream().use { o -> i.copyTo(o) } }
+            return tmp.renameTo(dst)
+        } finally { c.disconnect() }
+    }
+
     // ── profile z PIN-em (/v1/profiles) ──
 
     /** [(nazwa, czy ma PIN)]; null — serwer bez PIN-ów profili (starszy niż 0.27). */

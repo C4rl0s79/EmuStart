@@ -410,6 +410,16 @@ class Bridge(private val act: MainActivity) {
                 }
                 l.emu = emu; l.saveGame = sg; l.profile = prefs.profile
             }
+            if (Emulators.baseId(emu) == "retroarch") {
+                // BIOS-y rdzenia z serwera (PS1, Sega CD, PC Engine CD, FDS, Kickstarty…) — jak na Windows
+                l.phase = "preparing"; l.message = "BIOS-y…"
+                val core = Emulators.retroCore(l.sys.optString("plat"), Emulators.coreOf(emu).ifEmpty { l.sys.optString("core") })
+                Bios.forCore(server, core)
+                if (l.sys.optString("plat") == "AMIGA") {
+                    val warn = Bios.amiga(server, prefs)
+                    if (warn.isNotEmpty()) { Log.w(tag, warn); l.message = warn }
+                }
+            }
             val intent = Emulators.intent(act, emu, main, l.sys.optString("plat"), l.sys.optString("core"))
             l.startedAt = System.currentTimeMillis()
             l.phase = "running"
