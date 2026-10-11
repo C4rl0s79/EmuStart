@@ -1,2 +1,2 @@
-pywebview>=5.0
+pywebview>=6.2,<7   # api.py: fokus WebView2 przez pola wewnętrzne pywebview 6.x
 pytest>=8.0
