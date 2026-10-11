@@ -20,8 +20,7 @@ WINDOWS_ONLY = {
     "art_cancel", "art_candidates", "art_choose", "art_clear", "art_overview", "art_start",
     "import_pylinks_keys", "launchbox_status", "launchbox_update", "meta_save",
     # emulatory na komputerze, skanowanie folderów
-    "autodetect", "emulator_options", "install_cancel", "install_missing", "install_start",
-    "install_status", "scan_status", "set_game_emulator",
+    "autodetect", "emulator_options", "scan_status", "set_game_emulator",
     # opcje gier i systemów (openGameOptions / openSystemOptions zablokowane na Androidzie)
     "game_options", "system_logo_candidates", "system_logo_choose", "system_options",
     "system_rescan", "system_set",

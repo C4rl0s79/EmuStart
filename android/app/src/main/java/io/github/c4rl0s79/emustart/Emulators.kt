@@ -126,6 +126,12 @@ object Emulators {
         return out
     }
 
+    /** Emulatory, które pasują do platformy (do zainstalowania): samodzielne i RetroArch. */
+    fun candidates(plat: String, core: String): List<String> =
+        (STANDALONE[plat] ?: emptyList()) + (if (retroCore(plat, core).isNotEmpty()) listOf("retroarch") else emptyList())
+
+    fun labelOf(id: String): String = BY_ID[baseId(id)]?.label ?: id
+
     /** Nazwy rdzeni na Androidzie, gdy różnią się od wersji na Windows. */
     private val ANDROID_CORE = mapOf("mupen64plus_next" to "mupen64plus_next_gles3")
 

@@ -8,6 +8,20 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.29.0] — 2026-10-11
+
+### Dodane
+- **Android: instalacja emulatorów** — gra bez emulatora (albo Ustawienia → Emulatory →
+  **Pobierz brakujące emulatory**) proponuje pobranie: APK z najnowszego oficjalnego wydania
+  (RetroArch — buildbot.libretro.com, ArmSX2, melonDS, Azahar, Flycast — GitHub, PPSSPP —
+  ppsspp.org) i systemowy instalator (potwierdzasz instalację; za pierwszym razem zgoda
+  „Instalowanie nieznanych aplikacji” dla EmuStart). DuckStation, Dolphin, DraStic, M64Plus FZ,
+  Redream — strona w Google Play. Gdy adresu APK nie da się ustalić — strona wydania w przeglądarce.
+- **Android: brakujący rdzeń RetroArcha** — gdy RetroArch wraca od razu, a rdzeń jeszcze nigdy
+  nie uruchomił gry na tym telefonie, EmuStart mówi, który rdzeń pobrać (Online Updater → Core
+  Downloader) i otwiera RetroArch (Y). Rdzeni nie da się wgrać z zewnątrz — leżą w prywatnym
+  folderze RetroArcha.
+
 ## [0.28.0] — 2026-10-11
 
 ### Dodane
