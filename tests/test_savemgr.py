@@ -159,3 +159,25 @@ def test_saves_only_for_own_platform(tmp_path):
     assert "shared_card_1.mcd" in names and not any(n.endswith(".ps2") for n in names)
     ps2 = savemgr.catalog(fs, "Jezus", "ps2", "Okage (USA)", [], serial="SLUS-20431")
     assert {s["name"] for s in ps2["saves"]} == {"Mcd001.ps2"}
+
+
+def test_armsx2_autosave_listed_and_copied_as_resume(tmp_path):
+    """ARMSX2 zapisuje stan przy wyjściu jako .autosave.p2s (wczytywany przy starcie) —
+    menedżer go pokazuje, a kopia na komputer trafia jako .resume.p2s PCSX2 (i odwrotnie)."""
+    fs = _nas(tmp_path)
+    tel = tmp_path / "nas/Jezus/states/android/armsx2"
+    _w(tel / "SLUS-20851 (39B574F0).autosave.p2s", _p2s(V))
+    _w(tel / "SLUS-20851 (39B574F0).autosave.2.p2s", _p2s(V))
+    _w(tel / "SLUS-20851 (39B574F0).autosave.p2s.backup", b"x")
+    _w(tel / "SLUS-20851 (39B574F0).00.p2s", _p2s(V))
+    cat = savemgr.catalog(fs, "Jezus", "ps2", "Ace Combat 5 (USA)", [], serial="SLUS-20851")
+    slots = sorted(s["slot"] for s in cat["states"] if s["platform"] == "android")
+    assert slots == ["00", "autosave", "autosave.2"]                  # bez .backup
+    r = savemgr.copy(fs, "Jezus", "states/android/armsx2/SLUS-20851 (39B574F0).autosave.p2s",
+                     "windows", "pcsx2", "ps2", "Ace Combat 5 (USA)")
+    assert r["ok"] and r["rel"] == "save/pcsx2/sstates/SLUS-20851 (39B574F0).resume.p2s"
+    back = savemgr.copy(fs, "Jezus", r["rel"], "android", "armsx2", "ps2", "Ace Combat 5 (USA)")
+    assert back["rel"].endswith(".autosave.p2s")
+    two = savemgr.copy(fs, "Jezus", "states/android/armsx2/SLUS-20851 (39B574F0).autosave.2.p2s",
+                       "windows", "pcsx2", "ps2", "Ace Combat 5 (USA)")
+    assert two["rel"].endswith(".autosave.2.p2s")                     # starsze autozapisy bez zmiany nazwy

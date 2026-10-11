@@ -190,7 +190,12 @@ async function openSaveManager() {
   renderGopt();
 }
 function smSlot(st) {
-  return st.slot === "auto" ? "autozapis" : st.slot === "resume" ? "wznowienie" : `slot ${+st.slot}`;
+  const s = String(st.slot).toLowerCase();
+  if (s === "auto") return "autozapis";
+  if (s === "resume") return "wznowienie";
+  if (s === "autosave") return "autozapis przy wyjściu";
+  if (s.startsWith("autosave.")) return `autozapis ${s.split(".")[1]}`;
+  return `slot ${+s}`;
 }
 function smMark(t) { return t.ok === true ? "✓" : t.ok === false ? "✗" : "?"; }
 function saveManagerItems() {
@@ -234,7 +239,8 @@ function stateActItems() {
       const res = await api().save_copy(GO.id, st.rel, hereT.platform, hereT.emu);
       if (!res?.ok) return toast(res?.reason || "Nie udało się skopiować.");
       GO.data = await api().game_options(GO.id);
-      const local = (GO.data?.states || []).find((x) => x.name === st.name);
+      const copied = (res.rel || "").split("/").pop() || st.name;   // nazwa u celu (autosave → resume)
+      const local = (GO.data?.states || []).find((x) => x.name === copied);
       if (!local) return toast("Skopiowano, ale emulator tej gry nie widzi stanu — sprawdź emulator w opcjach gry.", 6000);
       closeGopt();
       launch(local.path);

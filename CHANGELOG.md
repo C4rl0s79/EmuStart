@@ -8,6 +8,18 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.27.2] — 2026-10-11
+
+### Poprawione
+- **Autozapis ARMSX2 był niewidoczny** — ARMSX2 zapisuje stan przy wyjściu jako
+  `<płyta> (CRC).autosave.p2s` (starsze: `.autosave.2–5.p2s`) i to on wczytuje się przy
+  starcie gry; EmuStart znał tylko sloty i `.resume.p2s` PCSX2, więc ani telefon go nie
+  wysyłał, ani menedżer zapisów go nie pokazywał. Teraz jest rozpoznawany (telefon i serwer),
+  w menedżerze jako „autozapis przy wyjściu”.
+- Kopia autozapisu ARMSX2 na komputer trafia jako stan wznowienia PCSX2 (`.resume.p2s`),
+  a wznowienie z komputera na telefon — jako autozapis ARMSX2 (wczyta się przy starcie gry).
+  **Zaktualizuj serwer i aplikację na telefonie.**
+
 ## [0.27.1] — 2026-10-11
 
 ### Poprawione
