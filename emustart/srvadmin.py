@@ -9,6 +9,10 @@ stronę `server.html` z działającego serwera i woła jego API administracyjne:
     POST /admin/restart   ponowne uruchomienie procesu serwera
     POST /admin/key       klucz serwera (do wklejenia na telefonie)
     POST /admin/logs      folder logów w Eksploratorze
+    POST /admin/update_check   najnowsze wydanie na GitHubie (emustart/updater.py)
+    POST /admin/update_start   pobranie i rozpakowanie aktualizacji w tle
+    POST /admin/update_status  postęp pobierania
+    POST /admin/update_apply   podmiana plików po zamknięciu serwera i jego ponowny start
 
 Tylko z tego komputera: nagłówek Host 127.0.0.1/localhost i nagłówek
 X-EmuStart (jak API interfejsu) — z sieci (Tailscale) panel jest niedostępny.
@@ -184,7 +188,65 @@ def _self_cmd() -> list:
     return [sys.executable, os.path.abspath(sys.argv[0])]
 
 
-ACTIONS = {"status": status, "rescan": rescan, "restart": restart, "key": key, "logs": open_logs}
+# ── aktualizacja (emustart/updater.py) ──
+_update: dict = {"info": None, "job": None}
+
+
+def update_check(_api) -> dict:
+    from emustart import updater
+    try:
+        info = updater.latest()
+    except Exception as ex:
+        log.warning("sprawdzenie aktualizacji: %s", ex)
+        return {"ok": False, "reason": f"Nie udało się sprawdzić wydań na GitHubie: {ex}"}
+    _update["info"] = info
+    return {"ok": True, **{k: info[k] for k in ("version", "current", "newer", "size", "notes",
+                                                "published", "page")},
+            "available": bool(info["url"]), "frozen": bool(getattr(sys, "frozen", False))}
+
+
+def update_start(_api) -> dict:
+    from emustart import updater
+    job = _update["job"]
+    if job and job.phase in ("downloading", "extracting", "applying"):
+        return {"ok": True, **job.status()}
+    info = _update["info"]
+    if not info or not info.get("url"):
+        return {"ok": False, "reason": "Najpierw sprawdź aktualizacje."}
+    if not info["newer"]:
+        return {"ok": False, "reason": f"Serwer ma już najnowszą wersję ({info['current']})."}
+    job = updater.Job(info)
+    _update["job"] = job
+    job.start()
+    return {"ok": True, **job.status()}
+
+
+def update_status(_api) -> dict:
+    job = _update["job"]
+    return {"ok": True, **job.status()} if job else {"ok": True, "phase": "idle"}
+
+
+def update_apply(_api) -> dict:
+    """Skrypt podmiany startuje, ten proces kończy się po chwili (odpowiedź musi dojść)."""
+    job = _update["job"]
+    if not job:
+        return {"ok": False, "reason": "Brak pobranej aktualizacji."}
+    r = job.apply(sys.argv[1:])
+    if not r.get("ok"):
+        return r
+    log.info("koniec serwera — aktualizacja do %s", job.info.get("version"))
+
+    def bye():
+        time.sleep(0.7)
+        logging.shutdown()
+        os._exit(0)
+    threading.Thread(target=bye, daemon=True, name="update-exit").start()
+    return {"ok": True, "version": job.info.get("version")}
+
+
+ACTIONS = {"status": status, "rescan": rescan, "restart": restart, "key": key, "logs": open_logs,
+           "update_check": update_check, "update_start": update_start,
+           "update_status": update_status, "update_apply": update_apply}
 
 
 def handle(handler, api) -> None:

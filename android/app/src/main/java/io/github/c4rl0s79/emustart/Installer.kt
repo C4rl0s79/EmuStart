@@ -106,6 +106,30 @@ class Installer(private val act: MainActivity) {
         }.start()
     }
 
+    /** Aktualizacja samego EmuStart: APK z wydania na GitHubie → systemowy instalator. */
+    fun startSelf(url: String, label: String) {
+        if (running) return
+        running = true
+        cancel.set(false)
+        errors.clear(); installed.clear(); queue.clear()
+        steps = 1; step = 1; current = label; done = 0; total = 0
+        Thread {
+            try {
+                queue += install(download(url, "emustart"))
+                installed += label
+            } catch (e: Exception) {
+                Log.w(tag, "aktualizacja EmuStart: $e")
+                errors += "$label: ${e.message ?: e.javaClass.simpleName}"
+            } finally {
+                running = false
+                act.runOnUiThread { next() }
+            }
+        }.start()
+    }
+
+    /** Najnowsze wydanie repozytorium (API GitHuba). */
+    fun latestRelease(repo: String): JSONObject = json("https://api.github.com/repos/$repo/releases/latest")
+
     /** Następny instalator z kolejki (po powrocie do EmuStart). */
     fun next() {
         if (running || queue.isEmpty()) return

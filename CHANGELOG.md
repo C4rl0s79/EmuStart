@@ -8,6 +8,29 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.31.0] — 2026-10-12
+
+Zakres: panel serwera (`web/server.html`, `web/server.js`, `emustart/srvadmin.py`), nowy
+`emustart/updater.py`, okno panelu w `main.py`; pozycja „Aktualizuj EmuStart” w menu Start
+(`web/app.js`, `emustart/api.py`, Android: `Bridge.kt`, `Installer.kt`). Bez zmian: lista
+gier, pozostałe pozycje menu, sterowanie, API dla telefonu.
+
+### Dodane
+- **Aktualizacja serwera z panelu** (`EmuStart.exe --server-panel` → sekcja Aktualizacja):
+  sprawdzenie najnowszego wydania na GitHubie (C4rl0s79/EmuStart), pobranie
+  `EmuStart-<wersja>-win64.zip` z postępem, sprawdzenie archiwum, podmiana plików programu
+  (`EmuStart.exe`, `_internal`) przez skrypt po zamknięciu serwera — z kopią zapasową
+  i przywróceniem przy błędzie — oraz ponowne uruchomienie serwera (zadanie Harmonogramu
+  „EmuStart Server”, a bez niego proces z tymi samymi parametrami). `config.json`, `data`,
+  `cache`, `logs` zostają nietknięte. Panel zamyka się na czas podmiany i otwiera sam po
+  starcie nowego serwera. Przebieg w `logs/update.log`.
+- **Aktualizacja w EmuStart na komputerze i telefonie** — menu Start → „Aktualizuj
+  EmuStart” (nad „Wyjdź z EmuStart”), sprawdzanie tylko na żądanie. Komputer: pobranie
+  ZIP-a z postępem, zamknięcie EmuStart, podmiana plików jak na serwerze (kopia,
+  przywrócenie przy błędzie) i ponowne uruchomienie z tymi samymi parametrami. Telefon:
+  pobranie `EmuStart-<wersja>-android.apk` z wydania i systemowy instalator (jak przy
+  instalacji emulatorów). Poza tą pozycją menu nic się nie zmienia.
+
 ## [0.30.6] — 2026-10-11
 
 Zakres: ścieżki plików gier wysyłane telefonowi (`emustart/remote.py`) i ich odczyt na

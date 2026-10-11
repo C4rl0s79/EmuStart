@@ -105,5 +105,53 @@ $("bLogs").addEventListener("click", async () => {
   if (!r?.ok) msg(r?.reason || "Nie udało się otworzyć folderu logów.");
 });
 
+/* ── aktualizacja z GitHuba (emustart/updater.py) ── */
+let updPoll = null;
+function updText(t) { $("updText").textContent = t || ""; }
+$("bUpdCheck").addEventListener("click", async () => {
+  updText("Sprawdzam wydania na GitHubie…");
+  $("bUpd").hidden = true;
+  const r = await admin("update_check").catch(() => null);
+  if (!r) return updText("Serwer nie odpowiada.");
+  if (!r.ok) return updText(r.reason);
+  $("updNotes").hidden = !r.notes || !r.newer;
+  $("updNotes").textContent = r.notes || "";
+  if (!r.newer) return updText(`Serwer ma najnowszą wersję (${r.current}).`);
+  if (!r.frozen) return updText(`Jest wersja ${r.version} (serwer ${r.current}) — aktualizacja z panelu działa tylko w EmuStart.exe.`);
+  if (!r.available) return updText(`Jest wersja ${r.version}, ale wydanie nie ma jeszcze pliku dla Windows — spróbuj za kilka minut.`);
+  updText(`Dostępna wersja ${r.version} (serwer ${r.current}) · ${fmtBytes(r.size)}`);
+  $("bUpd").textContent = `Aktualizuj do ${r.version}`;
+  $("bUpd").hidden = false;
+});
+$("bUpd").addEventListener("click", async () => {
+  if (!confirm("Pobrać aktualizację i uruchomić serwer ponownie? Trwające pobieranie na telefonie wznowi się samo.")) return;
+  $("bUpd").disabled = $("bUpdCheck").disabled = true;
+  const r = await admin("update_start").catch(() => null);
+  if (!r?.ok) { $("bUpd").disabled = $("bUpdCheck").disabled = false; return updText(r?.reason || "Serwer nie odpowiada."); }
+  $("updBarBox").hidden = false;
+  clearInterval(updPoll);
+  updPoll = setInterval(updTick, 700);
+});
+async function updTick() {
+  const st = await admin("update_status").catch(() => null);
+  if (!st) return;
+  $("updBar").style.width = st.total ? (100 * st.done / st.total).toFixed(0) + "%" : "5%";
+  if (st.phase === "downloading") return updText(`Pobieram ${st.version}: ${fmtBytes(st.done)} / ${fmtBytes(st.total)}`);
+  if (st.phase === "extracting") return updText("Rozpakowuję i sprawdzam archiwum…");
+  clearInterval(updPoll);
+  if (st.phase === "error") {
+    $("bUpd").disabled = $("bUpdCheck").disabled = false;
+    return updText("Aktualizacja nie powiodła się: " + st.error);
+  }
+  if (st.phase !== "ready") return;
+  updText("Podmieniam pliki i uruchamiam serwer ponownie — panel otworzy się sam po starcie nowej wersji (do kilku minut).");
+  const r = await admin("update_apply").catch(() => null);
+  if (!r?.ok) { $("bUpd").disabled = $("bUpdCheck").disabled = false; return updText(r?.reason || "Serwer nie odpowiada."); }
+  restarting = true;
+  // okno panelu to ten sam EmuStart.exe — zamyka się, żeby pliki dało się podmienić
+  const close = window.pywebview?.api?.close_for_update;
+  if (close) setTimeout(() => close(st.version), 300);
+}
+
 refresh();
 setInterval(refresh, 2000);
