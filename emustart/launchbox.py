@@ -13,6 +13,7 @@ wszystko działa bez sieci (sieć tylko po wybraną grafikę).
 
 from __future__ import annotations
 
+import contextlib
 import io
 import os
 import logging
@@ -110,9 +111,8 @@ def status() -> dict:
     if not p.is_file():
         return {"ready": False}
     try:
-        con = sqlite3.connect(f"file:{p}?mode=ro", uri=True)
-        meta = dict(con.execute("SELECT k, v FROM meta").fetchall())
-        con.close()
+        with _reader() as con:
+            meta = dict(con.execute("SELECT k, v FROM meta").fetchall())
     except sqlite3.Error:
         return {"ready": False}
     return {"ready": bool(meta.get("updated")), "updated": meta.get("updated", ""),
@@ -338,13 +338,13 @@ def fetch_platforms() -> int:
     do bazy LaunchBox. Zwraca liczbę platform."""
     with zipfile.ZipFile(io.BufferedReader(_RangeFile(METADATA_URL), 1 << 16)) as z:
         rows = _platform_rows(z.read("Platforms.xml"))
-    con = sqlite3.connect(str(db_path()))
-    try:
-        _store_platforms(con, rows)
-        con.commit()
-    finally:
-        con.close()
-    _local.con = None                       # połączenie tylko-do-odczytu otwórz na nowo
+    with _gate_enter():
+        con = sqlite3.connect(str(db_path()))
+        try:
+            _store_platforms(con, rows)
+            con.commit()
+        finally:
+            con.close()
     return len(rows)
 
 
@@ -354,7 +354,8 @@ def platform(es: str) -> dict | None:
     if not name or not db_path().is_file():
         return None
     try:
-        r = _con().execute("SELECT * FROM platforms WHERE name=?", (name,)).fetchone()
+        with _reader() as con:
+            r = con.execute("SELECT * FROM platforms WHERE name=?", (name,)).fetchone()
     except sqlite3.Error:
         return None                         # baza bez tabeli platform (sprzed 0.10)
     return dict(r) if r else None
@@ -362,53 +363,83 @@ def platform(es: str) -> dict | None:
 
 # ── zapytania ──
 
-_local = threading.local()
-# Połączenia tylko-do-odczytu wszystkich wątków. Windows nie podmieni pliku bazy, gdy
-# któreś jest otwarte (WinError 32 przy „Aktualizuj bazę LaunchBox”) — przy podmianie
-# zamykamy je, a wątki otwierają bazę na nowo (nowa generacja).
-_open_lock = threading.Lock()
-_open: list = []
-_gen = 0
+# Połączenie na zapytanie (otwarcie bazy SQLite to ułamek milisekundy). Odczyty i podmiana
+# pliku bazy przechodzą przez bramkę: Windows nie podmieni pliku otwartego w innym wątku
+# (WinError 32 przy „Aktualizuj bazę LaunchBox”), więc podmiana czeka, aż trwające
+# odczyty się skończą, a nowe odczyty czekają na koniec podmiany.
+_gate = threading.Condition()
+_readers = 0
+_swapping = False
+SWAP_WAIT = 30.0          # najdłużej tyle podmiana czeka na trwające odczyty
 
 
-def _con():
-    con = getattr(_local, "con", None)
-    if con is None or getattr(_local, "path", None) != db_path() or getattr(_local, "gen", -1) != _gen:
-        with _open_lock:
-            con = sqlite3.connect(f"file:{db_path()}?mode=ro", uri=True, check_same_thread=False)
-            con.row_factory = sqlite3.Row
-            _open.append(con)
-            _local.con, _local.path, _local.gen = con, db_path(), _gen
-    return con
+@contextlib.contextmanager
+def _gate_enter():
+    global _readers
+    with _gate:
+        while _swapping:
+            _gate.wait()
+        _readers += 1
+    try:
+        yield
+    finally:
+        with _gate:
+            _readers -= 1
+            _gate.notify_all()
+
+
+@contextlib.contextmanager
+def _reader():
+    """Połączenie tylko-do-odczytu na czas jednego zapytania (albo kilku w `with`)."""
+    with _gate_enter():
+        con = sqlite3.connect(f"file:{db_path()}?mode=ro", uri=True)
+        con.row_factory = sqlite3.Row
+        try:
+            yield con
+        finally:
+            con.close()
 
 
 def _install(tmp: Path) -> None:
-    """Nowa baza na miejsce starej: zamknięcie połączeń innych wątków, podmiana
-    (z ponowieniem, gdy plik chwilowo trzyma np. antywirus)."""
-    global _gen
-    with _open_lock:
-        _gen += 1
-        for c in _open:
-            try:
-                c.close()
-            except sqlite3.Error:
-                pass
-        _open.clear()
-        for i in range(20):
+    """Nowa baza na miejsce starej: po zakończeniu trwających odczytów, z ponowieniem,
+    gdy plik chwilowo trzyma inny proces (np. antywirus). Bramka nie jest trzymana
+    w czasie czekania — odczyty czekają tylko na samą podmianę."""
+    global _swapping
+    with _gate:
+        while _swapping:
+            _gate.wait()
+        _swapping = True
+        end = time.monotonic() + SWAP_WAIT
+        while _readers and time.monotonic() < end:
+            _gate.wait(end - time.monotonic())
+    try:
+        for i in range(10):
             try:
                 os.replace(tmp, db_path())
                 return
             except PermissionError:
-                if i == 19:
+                if i == 9:
                     raise
-                time.sleep(0.5)
+                time.sleep(0.3)
+    finally:
+        with _gate:
+            _swapping = False
+            _gate.notify_all()
 
 
 def find_game(es: str, name: str, setname: str = "") -> dict | None:
     """Gra LaunchBoksa dla gry EmuStart (platforma + tytuł; arcade po nazwie setu)."""
     if not ready():
         return None
-    con = _con()
+    try:
+        with _reader() as con:
+            return _find_game(con, es, name, setname)
+    except sqlite3.Error:
+        log.exception("LaunchBox: %s", name)
+        return None
+
+
+def _find_game(con, es: str, name: str, setname: str) -> dict | None:
     plat = PLATFORMS.get(es) or PLATFORMS.get(es.lower(), "")
     titles = []
     if setname:
@@ -513,7 +544,8 @@ def metadata_of(g: dict) -> dict:
 
 def images(gid: int, kind: str | None = None) -> list:
     """[{url, type, region}] — dla `kind` tylko kategorie tego rodzaju, od najlepszej."""
-    rows = [dict(r) for r in _con().execute("SELECT type, region, fn FROM images WHERE gid=?", (gid,))]
+    with _reader() as con:
+        rows = [dict(r) for r in con.execute("SELECT type, region, fn FROM images WHERE gid=?", (gid,))]
     order = KINDS.get(kind) if kind else None
     if order:
         rows = [r for r in rows if r["type"] in order]

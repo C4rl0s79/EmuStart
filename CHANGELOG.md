@@ -8,6 +8,21 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.30.5] — 2026-10-11
+
+Zakres: poprawki z przeglądu kodu 0.30.4 — `emustart/launchbox.py`, fokus okna
+w `emustart/api.py`, `requirements.txt`. Bez zmian: lista gier, menu, sterowanie, tłumaczenia.
+
+### Naprawione
+- **Baza LaunchBox — połączenie na zapytanie zamiast połączeń wątków** (0.30.4 trzymało
+  połączenie każdego wątku do końca sesji — wyciek przy przewijaniu listy; podmiana bazy
+  zamykała połączenia innych wątków w trakcie zapytania). Odczyty i podmiana pliku
+  przechodzą przez bramkę: podmiana czeka na trwające odczyty, nowe odczyty — na koniec
+  podmiany (bez trzymania blokady przy ponawianiu). `status()`/`ready()` też przez bramkę.
+- **Fokus okna**: obsługa aktywacji podpinana raz (bez dublowania przy kolejnym
+  pokazaniu okna); kontrolka WebView2 szukana na dwa sposoby, brak — ostrzeżenie w logu.
+  pywebview przypięty do 6.x (poprawka korzysta z jego wewnętrznych pól).
+
 ## [0.30.4] — 2026-10-11
 
 Zakres: tylko poniższe. Bez zmian: lista gier, menu, tłumaczenia.

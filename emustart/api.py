@@ -168,20 +168,28 @@ class Api:
         Gdy okno wraca na wierzch (po grze, menu w grze, Alt+Tab — SetForegroundWindow
         na formularzu), fokus zostawał na formularzu: pad działał (Python), klawiatura
         i kółko myszy nie. Każda aktywacja okna oddaje fokus stronie."""
+        if getattr(self, "_focus_hooked", False):      # „shown” bywa wołane ponownie
+            return
+        form = getattr(self._window, "native", None)
+        # pole wewnętrzne pywebview (WinForms, 6.x): BrowserForm.browser.webview / .webview
+        webview = getattr(getattr(form, "browser", None), "webview", None) or getattr(form, "webview", None)
+        if form is None or webview is None or not hasattr(webview, "Focus"):
+            log.warning("fokus WebView2: brak kontrolki w oknie pywebview (inna wersja/renderer) — "
+                        "klawiatura po powrocie z gry może wymagać kliknięcia w okno")
+            return
+
+        def on_activated(*_x):
+            try:
+                webview.Focus()
+            except Exception:
+                log.exception("fokus WebView2")
+
         try:
-            form = self._window.native
-            webview = form.browser.webview
-
-            def on_activated(*_x):
-                try:
-                    webview.Focus()
-                except Exception:
-                    log.exception("fokus WebView2")
-
             form.Activated += on_activated
+            self._focus_hooked = True
             log.info("fokus WebView2 przy aktywacji okna: włączony")
         except Exception:
-            log.exception("fokus okna (pywebview bez formularza WinForms?)")
+            log.exception("fokus okna")
 
     # ── profile: rzeczy per gracz (EmuStart, RetroAchievements) ──
     USER_KEYS = ("look", "games_logo", "hide_arcade_clones",
