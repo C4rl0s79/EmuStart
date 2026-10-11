@@ -8,6 +8,16 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.30.2] — 2026-10-11
+
+### Naprawione
+- **Kolekcja tłumaczeń „T-Eng” nie była rozpoznawana** — folder z `T-Eng`, `T-En`, `T+Pol`
+  w nazwie (bez nawiasów) jest teraz kolekcją tłumaczeń, także dodany jako osobny folder
+  z grami; język z nazwy folderu.
+- **Tłumaczenia o tych samych nazwach plików co oryginały znikały** — liczyły się jako ta
+  sama gra z drugiego folderu. Gry kolekcji tłumaczeń mają teraz ścieżkę z folderem
+  systemu (`snes\Gra.sfc`) i są osobnymi wersjami.
+
 ## [0.30.1] — 2026-10-11
 
 ### Naprawione

@@ -87,9 +87,10 @@ RetroArcha) i Esc.
 Fanowskie tłumaczenia trzymaj w osobnym folderze kolekcji — EmuStart pokazuje je jako
 **wersje** oryginału, nie jako osobne gry. Rozpoznawane są:
 
-- folder kolekcji w folderze z grami albo jako osobny folder z grami: nazwa z tagiem
-  `[T-…]` albo słowem „Translations”/„Tłumaczenia”, w środku foldery systemów —
-  np. `Gry\[T-En] Collection\Nintendo - Super Nintendo Entertainment System\`,
+- folder kolekcji w folderze z grami albo dodany w Ustawieniach jako osobny folder z grami:
+  w nazwie `T-Eng`, `T-En`, `T+Pol`, `[T-En]` albo słowo „Translations”/„Tłumaczenia”,
+  w środku foldery systemów — np. `Z:\ROMS\T-Eng\Nintendo - Super Nintendo Entertainment System\`.
+  Nic nie trzeba oznaczać — wystarczy nazwa,
 - folder systemu z tagiem: `Nintendo - Super Nintendo Entertainment System [T-En]`,
 - plik z tagiem `[T-En]`, `[T+Pol by …]` w nazwie (także obok oryginałów).
 
@@ -105,9 +106,9 @@ i telefonu (`variants.json` w folderze profilu). Pliki na dysku zostają nietkni
 kolekcję porządkuje RomHelper. Emulator wybrany dla oryginału (opcje gry → Emulator)
 obowiązuje też tłumaczenia.
 
-Po dodaniu kolekcji odśwież bibliotekę (Ustawienia → Skanuj). Plik tłumaczenia o tej
-samej nazwie co oryginał (język tylko w nazwie kolekcji) jest pomijany — nadaj mu tag
-`[T-…]` w nazwie.
+Pliki w kolekcji mogą mieć te same nazwy co oryginały — język bierze się wtedy z nazwy
+kolekcji. Po dodaniu kolekcji odśwież bibliotekę (menu Start → Skanuj kolekcję ponownie);
+telefon widzi tłumaczenia po skanie na komputerze z serwerem.
 
 ## Ukrycie systemu
 

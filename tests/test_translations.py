@@ -32,6 +32,8 @@ def test_names():
     assert translations.label("Gra (Japan) [T-En by X]", "en") == "[T-En by X]"
     assert translations.label("Gra (Japan)", "pl") == "Tłumaczenie (PL)"
     assert translations.is_pool("[T-En] Collection") and translations.is_pool("Translations")
+    assert translations.is_pool("T-Eng") and translations.lang_of("T-Eng") == "en" and translations.is_pool("t+pol")
+    assert not translations.is_pool("Tetris") and not translations.is_pool("Atari - ST")
     assert not translations.is_pool("Nintendo - Super Nintendo Entertainment System")
     assert translations.strip_pool_tag("Nintendo - Super Nintendo Entertainment System [T-En]") == \
         "Nintendo - Super Nintendo Entertainment System"
@@ -49,15 +51,16 @@ def test_scan_pool_in_games_folder(env):
     found, _unknown = scanner.collect_systems({"rom_root": str(roms), "systems": {}})
     assert sorted(p.parent.name for p in found["snes"]) == ["[T-En] Collection", "[T-Pl] Kolekcja", "roms"]
     scanner.scan_system("snes", found["snes"])
-    rows = {(Path(r["src"]).parent.name, r["rel"]): dict(r) for r in library.db().execute("SELECT * FROM games")}
-    org = rows[("roms", "Seiken Densetsu 3 (Japan).sfc")]
-    en = rows[("[T-En] Collection", "Seiken Densetsu 3 (Japan) [T-En by Neill Corlett].sfc")]
-    zero = rows[("[T-En] Collection", "Tengai Makyou Zero (Japan) [T-En by DDS].sfc")]
+    rows = {(Path(r["src"]).name, r["rel"].replace("\\", "/")): dict(r) for r in library.db().execute("SELECT * FROM games")}
+    org = rows[("snes", "Seiken Densetsu 3 (Japan).sfc")]
+    en = rows[("[T-En] Collection", "snes/Seiken Densetsu 3 (Japan) [T-En by Neill Corlett].sfc")]
+    zero = rows[("[T-En] Collection", "snes/Tengai Makyou Zero (Japan) [T-En by DDS].sfc")]
     assert org["trans"] == "" and org["hidden"] == 0
     assert en["trans"] == "en" and en["hidden"] == translations.HIDDEN and en["tbase"] == org["tbase"]
     assert zero["trans"] == "en" and zero["hidden"] == 0                 # widoczna, bo nie ma oryginału
-    # ta sama nazwa pliku co oryginał w innej kolekcji — wygrywa oryginał (jedna gra na ścieżkę)
-    assert ("[T-Pl] Kolekcja", "Seiken Densetsu 3 (Japan).sfc") not in rows
+    # ta sama nazwa pliku co oryginał — osobna wersja (język z nazwy kolekcji)
+    pl = rows[("[T-Pl] Kolekcja", "snes/Seiken Densetsu 3 (Japan).sfc")]
+    assert pl["trans"] == "pl" and pl["hidden"] == translations.HIDDEN
     listed = [g["name"] for g in library.list_games("snes", 1, False)]
     assert "Seiken Densetsu 3 (Japan) [T-En by Neill Corlett]" not in listed
     assert "Tengai Makyou Zero (Japan) [T-En by DDS]" in listed
@@ -94,7 +97,7 @@ def test_variant_choice_and_emulator(env, monkeypatch):
     assert a._variant_choice(g) is None
     pl = vs[1]
     assert a.set_variant(org_id, pl["id"])["ok"]
-    assert store[(1, "variants.json")] == {"snes/Mother 3 (Japan).sfc": "Mother 3 (Japan) [T-Pl by Ktoś].sfc"}
+    assert store[(1, "variants.json")] == {"snes/Mother 3 (Japan).sfc": "snes/Mother 3 (Japan) [T-Pl by Ktoś].sfc"}
     assert a._variant_choice(g)["id"] == pl["id"]
     a._profile = 2                                    # inny gracz — oryginał
     assert a._variant_choice(g) is None
@@ -105,3 +108,23 @@ def test_variant_choice_and_emulator(env, monkeypatch):
     with library.db() as c:
         c.execute("INSERT INTO game_emu VALUES(?,?,?,?)", (org_id, "bsnes", "C:/ra/retroarch.exe", "-L bsnes"))
     assert library.game_emu(library.game(pl["id"]))["label"] == "bsnes"
+
+
+def test_bare_t_eng_folder_same_names(env):
+    """Folder „T-Eng” w folderze z grami albo jako osobny folder z grami; pliki o tych
+    samych nazwach co oryginały."""
+    roms, teng = env / "roms", env / "T-Eng"
+    _write(roms / "snes" / "Mother 3 (Japan).sfc")
+    _write(roms / "T-Eng" / "snes" / "Mother 3 (Japan).sfc")
+    _write(teng / "Nintendo - Super Nintendo Entertainment System" / "Mother 3 (Japan).sfc")
+    found, unknown = scanner.collect_systems({"rom_roots": [str(roms), str(teng)], "systems": {}})
+    assert not unknown and len(found["snes"]) == 3
+    scanner.scan_system("snes", found["snes"])
+    rows = [dict(r) for r in library.db().execute("SELECT * FROM games ORDER BY trans")]
+    assert [r["trans"] for r in rows] == ["", "en", "en"]
+    assert all(r["hidden"] == translations.HIDDEN for r in rows[1:])
+    listed = library.list_games("snes", 1, False)
+    assert [g["name"] for g in listed] == ["Mother 3 (Japan)"]
+    a = api_mod.Api.__new__(api_mod.Api)
+    a._cfg, a._profile = {}, 1
+    assert len(a._variants(library.game(rows[0]["id"]))) == 2

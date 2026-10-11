@@ -49,8 +49,9 @@ _LANG = {
 _T_TAG = re.compile(r"[\[(]\s*T[-+]\s*([A-Za-z]+)", re.I)
 _T_LABEL = re.compile(r"[\[(]\s*T[-+][^\])]*[\])]", re.I)
 _BRACKETS = re.compile(r"[\[(][^\])]*[\])]")
-# folder kolekcji tłumaczeń: tag [T-…] albo słowo w nazwie
-_POOL = re.compile(r"[\[(]\s*T[-+]|translat|t[łl]umacz|traduc|[üu]bersetz", re.I)
+# folder kolekcji tłumaczeń: tag [T-…], sam „T-Eng” / „T-En” / „T+Pol” albo słowo w nazwie
+_FOLDER_T = re.compile(r"(?:^|[\s\[(_])T\s*[-+]\s*([A-Za-z]{2,})", re.I)
+_POOL = re.compile(r"(?:^|[\s\[(_])T\s*[-+]\s*[A-Za-z]{2,}|translat|t[łl]umacz|traduc|[üu]bersetz", re.I)
 
 
 def base_title(name: str) -> str:
@@ -67,9 +68,10 @@ def _lang(tok: str) -> str:
 
 
 def lang_of(*names: str) -> str:
-    """Język tłumaczenia z tagu `[T-…]` (pierwsza nazwa, która go ma) — kod ISO albo ""."""
+    """Język tłumaczenia z tagu `[T-…]` w nazwie pliku albo `T-Eng` w nazwie folderu
+    (pierwsza nazwa, która go ma) — kod ISO albo ""."""
     for n in names:
-        for m in _T_TAG.finditer(n or ""):
+        for m in list(_T_TAG.finditer(n or "")) + list(_FOLDER_T.finditer(n or "")):
             c = _lang(m.group(1))
             if c:
                 return c
@@ -86,8 +88,9 @@ def is_pool(*folder_names: str) -> bool:
 
 
 def strip_pool_tag(folder: str) -> str:
-    """„Nintendo - SNES [T-En]” → „Nintendo - SNES” (rozpoznanie systemu)."""
-    return re.sub(r"\s*[\[(]\s*T[-+][^\])]*[\])]", "", folder or "").strip()
+    """„Nintendo - SNES [T-En]” / „Nintendo - SNES T-Eng” → „Nintendo - SNES” (rozpoznanie systemu)."""
+    out = re.sub(r"\s*[\[(]\s*T[-+][^\])]*[\])]", "", folder or "")
+    return re.sub(r"\s*(?:^|\s)T\s*[-+]\s*[A-Za-z]{2,}\s*$", "", out, flags=re.I).strip(" -_")
 
 
 def label(name: str, lang: str) -> str:
