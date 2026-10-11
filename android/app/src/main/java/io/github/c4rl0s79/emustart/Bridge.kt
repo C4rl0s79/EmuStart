@@ -23,7 +23,8 @@ class Bridge(private val act: MainActivity) {
     private val pool = Executors.newFixedThreadPool(6)
     private val tag = "EmuStart"
     @Volatile private var profList: List<String> = emptyList()
-    @Volatile private var profPin: Map<String, Boolean> = emptyMap()      // profil → ma PIN (serwer 0.27+)
+    @Volatile private var profPin: Map<String, Boolean> = emptyMap()
+    private val emuProfile by lazy { EmuProfile(server, prefs) }      // profil → ma PIN (serwer 0.27+)
 
     init {
         pool.execute {
@@ -410,7 +411,25 @@ class Bridge(private val act: MainActivity) {
                 }
                 l.emu = emu; l.saveGame = sg; l.profile = prefs.profile
             }
-            val intent = Emulators.intent(act, emu, main, l.sys.optString("plat"), l.sys.optString("core"))
+            if (Emulators.baseId(emu) == "retroarch") {
+                // BIOS-y rdzenia z serwera (PS1, Sega CD, PC Engine CD, FDS, Kickstarty…) — jak na Windows
+                l.phase = "preparing"; l.message = "BIOS-y…"
+                val core = Emulators.retroCore(l.sys.optString("plat"), Emulators.coreOf(emu).ifEmpty { l.sys.optString("core") })
+                Bios.forCore(server, core)
+                if (l.sys.optString("plat") == "AMIGA") {
+                    val warn = Bios.amiga(server, prefs)
+                    if (warn.isNotEmpty()) { Log.w(tag, warn); l.message = warn }
+                }
+            }
+            // ustawienia i konto RetroAchievements profilu (osobno od komputera, wspólne dla telefonów)
+            var raCfg: String? = null
+            if (prefs.profile.isNotEmpty()) {
+                when (Emulators.baseId(emu)) {
+                    "retroarch" -> raCfg = emuProfile.retroarchBefore(prefs.profile, Emulators.raConfig(act, emu))?.absolutePath
+                    "armsx2" -> emuProfile.armsx2(prefs.profile, prefs.saveDir("armsx2").ifEmpty { prefs.learnedDir("armsx2") })
+                }
+            }
+            val intent = Emulators.intent(act, emu, main, l.sys.optString("plat"), l.sys.optString("core"), raCfg)
             l.startedAt = System.currentTimeMillis()
             l.phase = "running"
             act.runOnUiThread {
@@ -449,6 +468,10 @@ class Bridge(private val act: MainActivity) {
             if (sg != null) pool.execute {
                 try { saves.after(l.profile, l.emu, sg, l.startedAt, l.game.optString("title")) }
                 catch (e: Exception) { Log.w(tag, "zapisy po grze: $e") }
+            }
+            if (Emulators.baseId(l.emuId) == "retroarch" && prefs.profile.isNotEmpty()) {
+                val prof = prefs.profile
+                pool.execute { emuProfile.retroarchAfter(prof) }
             }
             synchronized(gamesCache) { gamesCache.clear() }
             act.js("window.__emuResumed && window.__emuResumed()")
@@ -589,7 +612,10 @@ class Bridge(private val act: MainActivity) {
         if (emu.isEmpty()) return JSONObject().put("ok", false)
             .put("reason", "Brak emulatora dla ${s.optString("display")} — zainstaluj go i wybierz w Ustawieniach.")
         return try {
-            val intent = Emulators.settingsIntent(act, emu, s.optString("plat"), s.optString("core"))
+            // RetroArch z plikiem profilu — zmienione ustawienia należą do gracza (i jego telefonów)
+            val cfg = if (Emulators.baseId(emu) == "retroarch" && prefs.profile.isNotEmpty())
+                emuProfile.retroarchBefore(prefs.profile, Emulators.raConfig(act, emu))?.absolutePath else null
+            val intent = Emulators.settingsIntent(act, emu, s.optString("plat"), s.optString("core"), cfg)
             act.runOnUiThread { act.startActivity(intent) }
             JSONObject().put("ok", true).put("android", true).put("label", Emulators.label(emu))
         } catch (e: Exception) {

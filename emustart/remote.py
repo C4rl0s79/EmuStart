@@ -103,7 +103,7 @@ def handle(handler) -> None:
     parts = [p for p in path.split("/") if p][1:]           # bez „v1”
     try:
         if parts == ["info"]:
-            feats = ["find", "system"] + (["nas", "roots", "savemgr", "profiles"] if NAS_ROOT else [])
+            feats = ["find", "system", "bios"] + (["nas", "roots", "savemgr", "profiles"] if NAS_ROOT else [])
             return _json(handler, {"name": socket.gethostname(), "version": __version__, "api": 1,
                                    "features": feats, "nas_id": NAS_ID})
         if parts and parts[0] == "nas":
@@ -114,6 +114,8 @@ def handle(handler) -> None:
             return _savemgr_catalog(handler)
         if parts == ["profiles"]:
             return _profiles_get(handler)
+        if parts == ["bios"]:
+            return _bios_get(handler)
         if parts == ["systems"]:
             from emustart import emulators, installer, systems
             out = []
@@ -134,6 +136,8 @@ def handle(handler) -> None:
             from emustart import library
             g = library.game(int(parts[1]))
             d["files"] = [{"path": rel, "size": size} for rel, size, _m in g["files"]]
+            # arcade: rodzic i BIOS (np. neogeo.zip) obok gry — jak na Windows
+            d["files"] += [{"path": rel, "size": size, "dep": True} for rel, _p, size in _arcade_deps(g)]
             d["es"] = g["es"]
             from emustart import systems
             info = systems.info(g["es"])
@@ -588,6 +592,95 @@ def _savemgr_copy(handler) -> None:
     return _json(handler, out)
 
 
+def _arcade_deps(g: dict) -> list:
+    """Zależności gry arcade: [(nazwa pliku, ścieżka na serwerze, rozmiar)] — rodzic i BIOS
+    z folderów systemu (launcher.py robi to samo na Windows)."""
+    from emustart import arcade, library, systems
+    if systems.info(g["es"])["kind"] != "arcade":
+        return []
+    out = []
+    dirs = [library.game_dir(g)] + [d for d in library.system_dirs(g["es"]) if d != library.game_dir(g)]
+    sub = Path(g["rel"].replace("\\", "/")).parent.as_posix()
+    for dep in arcade.dependencies(Path(g["rel"]).stem):
+        rel = f"{dep}.zip" if sub in ("", ".") else f"{sub}/{dep}.zip"     # obok gry
+        for d in dirs:
+            f = Path(d) / f"{dep}.zip"
+            try:
+                out.append((rel, f, f.stat().st_size))
+                break
+            except OSError:
+                continue
+    return out
+
+
+_BIOS_PART = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._ ()+-]{0,79}$")
+
+
+def _ra_roots(cfg: dict) -> list:
+    from emustart import emulators
+    out = []
+    for sc in (cfg.get("systems") or {}).values():
+        exe = (sc or {}).get("exe") or ""
+        if exe and emulators.family(exe) == "retroarch" and Path(exe).parent not in out:
+            out.append(Path(exe).parent)
+    return out
+
+
+def bios_dirs(cfg: dict) -> list:
+    """Gdzie serwer ma BIOS-y: folder BIOS-ów z ustawień i foldery `system` RetroArchów
+    wybranych dla systemów (tam EmuStart na komputerze kopiuje BIOS-y, Kickstarty itp.)."""
+    from emustart import installer
+    out = [Path(cfg["bios_dir"])] if cfg.get("bios_dir") else []
+    for root in _ra_roots(cfg):
+        d = installer.ra_system_dir(root)
+        if d not in out:
+            out.append(d)
+    return out
+
+
+def _bios_rel(rel: str) -> str:
+    rel = rel.replace("\\", "/").strip("/")
+    parts = rel.split("/")
+    return rel if parts and all(_BIOS_PART.match(p) and p != ".." for p in parts) and len(parts) <= 4 else ""
+
+
+def _bios_find(cfg: dict, rel: str):
+    for d in bios_dirs(cfg):
+        f = d / rel
+        try:
+            if f.is_file() and f.stat().st_size <= 64 * 1024 * 1024:
+                return f
+        except OSError:
+            continue
+    return None
+
+
+def _bios_get(handler) -> None:
+    """GET /v1/bios?core=swanstation — BIOS-y rdzenia (z pliku .info RetroArcha), które
+    serwer ma: {"files": [ścieżka względem system]}; GET /v1/bios?name=<ścieżka> — plik.
+    Telefon dokłada je do RetroArcha przed grą, jak EmuStart na Windows (bios.sync)."""
+    from emustart import bios
+    q = urllib.parse.parse_qs(urllib.parse.urlsplit(handler.path).query)
+    core = (q.get("core") or [""])[0]
+    if core:
+        names = []
+        for c in dict.fromkeys([core, re.sub(r"_(gles\d*|android)$", "", core)]):
+            for root in _ra_roots(API._cfg):
+                names += bios.firmware(root, c)
+        files = [r for r in dict.fromkeys(names) if _bios_rel(r) and _bios_find(API._cfg, r)]
+        return _json(handler, {"files": files})
+    rel = _bios_rel((q.get("name") or [""])[0])
+    f = _bios_find(API._cfg, rel) if rel else None
+    if not f:
+        return _json(handler, {"error": "nie ma takiego BIOS-u na serwerze"}, 404 if rel else 400)
+    data = f.read_bytes()
+    handler.send_response(200)
+    handler.send_header("Content-Type", "application/octet-stream")
+    handler.send_header("Content-Length", str(len(data)))
+    handler.end_headers()
+    handler.wfile.write(data)
+
+
 def _send_file(handler, gid: int, rel: str) -> None:
     from emustart import library
     g = library.game(gid)
@@ -595,10 +688,14 @@ def _send_file(handler, gid: int, rel: str) -> None:
         return _json(handler, {"error": "nie ma takiej gry"}, 404)
     files = {r.replace("\\", "/"): size for r, size, _m in g["files"]}
     rel = rel.replace("\\", "/")
-    if rel not in files:                      # tylko pliki tej gry — bez dowolnych ścieżek
+    deps = {r: p for r, p, _s in _arcade_deps(g)}
+    if rel not in files and rel not in deps:  # tylko pliki tej gry (i jej zależności arcade)
         return _json(handler, {"error": "nie ma takiego pliku"}, 404)
     base = Path(g.get("src") or "")
-    path = base / g["rel"] if rel == g["rel"].replace("\\", "/") and not g.get("is_dir") else base / rel
+    if rel in deps:
+        path = deps[rel]
+    else:
+        path = base / g["rel"] if rel == g["rel"].replace("\\", "/") and not g.get("is_dir") else base / rel
     try:
         size = path.stat().st_size
     except OSError:

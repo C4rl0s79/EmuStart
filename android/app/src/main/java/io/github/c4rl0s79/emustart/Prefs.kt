@@ -58,6 +58,9 @@ class Prefs(ctx: Context) {
     /** Rdzenie RetroArcha, które na tym telefonie uruchomiły grę (RetroArch nie pokazuje
      *  innym aplikacjom, które rdzenie są pobrane). */
     fun coreOk(core: String): Boolean = sp.getStringSet("cores_ok", emptySet())?.contains(core) == true
+    fun getString(key: String): String = sp.getString(key, "") ?: ""
+    fun putString(key: String, v: String) = sp.edit().putString(key, v).apply()
+
     fun markCoreOk(core: String) {
         val s = HashSet(sp.getStringSet("cores_ok", emptySet()) ?: emptySet())
         if (s.add(core)) sp.edit().putStringSet("cores_ok", s).apply()

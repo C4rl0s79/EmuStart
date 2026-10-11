@@ -139,7 +139,7 @@ object Emulators {
 
     /** Sam emulator (bez gry) — jego własne ustawienia na tym telefonie. RetroArch:
      *  menu z wybranym rdzeniem i plikiem ustawień telefonu (osobnym od Windows). */
-    fun settingsIntent(ctx: Context, id: String, plat: String, core: String): Intent {
+    fun settingsIntent(ctx: Context, id: String, plat: String, core: String, configFile: String? = null): Intent {
         val emu = BY_ID[baseId(id)] ?: throw IllegalStateException("nieznany emulator $id")
         val comp = component(ctx, emu, pkgOf(id)) ?: throw IllegalStateException("${emu.label} nie jest zainstalowany")
         val pkg = comp.substringBefore('/')
@@ -148,13 +148,21 @@ object Emulators {
         i.action = Intent.ACTION_MAIN
         i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
         if (emu.pass == Pass.RETROARCH) {
-            i.putExtra("CONFIGFILE", "${Environment.getExternalStorageDirectory()}/Android/data/$pkg/files/retroarch.cfg")
+            i.putExtra("CONFIGFILE", configFile ?: "${Environment.getExternalStorageDirectory()}/Android/data/$pkg/files/retroarch.cfg")
         }
         return i
     }
 
     /** Intencja uruchamiająca grę `file` w emulatorze `id`. */
-    fun intent(ctx: Context, id: String, file: File, plat: String, core: String): Intent {
+    /** Własny retroarch.cfg RetroArcha (w Android/data — czyta go tylko RetroArch). */
+    fun raConfig(ctx: Context, id: String): String {
+        val emu = BY_ID[baseId(id)] ?: return ""
+        val comp = component(ctx, emu, pkgOf(id)) ?: return ""
+        return "${Environment.getExternalStorageDirectory()}/Android/data/${comp.substringBefore('/')}/files/retroarch.cfg"
+    }
+
+    /** @param configFile plik ustawień profilu (EmuProfile) zamiast własnego retroarch.cfg RetroArcha */
+    fun intent(ctx: Context, id: String, file: File, plat: String, core: String, configFile: String? = null): Intent {
         val emu = BY_ID[baseId(id)] ?: throw IllegalStateException("nieznany emulator $id")
         val comp = component(ctx, emu, pkgOf(id)) ?: throw IllegalStateException("${emu.label} nie jest zainstalowany")
         val pkg = comp.substringBefore('/')
@@ -166,7 +174,7 @@ object Emulators {
             i.action = Intent.ACTION_MAIN
             i.putExtra("ROM", file.absolutePath)
             i.putExtra("LIBRETRO", "/data/data/$pkg/cores/${c}_libretro_android.so")
-            i.putExtra("CONFIGFILE", "${Environment.getExternalStorageDirectory()}/Android/data/$pkg/files/retroarch.cfg")
+            i.putExtra("CONFIGFILE", configFile ?: "${Environment.getExternalStorageDirectory()}/Android/data/$pkg/files/retroarch.cfg")
             return i
         }
         // gra wielu plików (.cue/.m3u/.gdi): emulator musi widzieć pliki obok — ścieżka zamiast URI

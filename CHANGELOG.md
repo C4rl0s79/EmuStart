@@ -8,6 +8,28 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.28.0] — 2026-10-11
+
+### Dodane
+- **Android: BIOS-y rdzeni RetroArcha z serwera** — przed grą telefon pobiera brakujące
+  BIOS-y rdzenia (lista z pliku `.info` RetroArcha na serwerze, pliki z folderu BIOS-ów
+  serwera i folderów `system` jego RetroArchów) do `RetroArch/system`: BIOS PS1 dla
+  SwanStation, Sega CD, PC Engine CD, FDS, Kickstarty Amigi itd. — jak EmuStart na Windows.
+- **Android: Amiga WHDLoad** — Kickstarty także do `…/WHDLoad/Devs/Kickstarts` (wcześniej
+  PUAE brał zamiennik AROS: „Kickstart ROM 'kick40068.A1200' not found”, a WHDLoad kończył
+  się „Couldn't find VCL instruction”).
+- **Android: gry arcade z rodzicem i BIOS-em** (np. `neogeo.zip`) — serwer dołącza je do
+  plików gry, telefon pobiera je obok gry.
+- **Android: konto RetroAchievements z profilu** — RetroArch i ArmSX2 na telefonie logują się
+  kontem gracza (to samo co na komputerze; profil bez konta — wyłączone, profil bez wyboru —
+  zostaje logowanie z emulatora).
+- **Android: ustawienia RetroArcha należą do profilu i synchronizują się między telefonami**
+  (osobno od komputera; serwer: `<profil>/settings/android/retroarch/`). RetroArch dostaje plik
+  profilu z `#include` swojego `retroarch.cfg` — zmiany z menu RetroArcha trafiają do profilu,
+  oryginał zostaje nietknięty; ścieżki, sterowniki i urządzenia zostają z danego telefonu.
+  „Ustawienia emulatora” w opcjach gry też zapisują do profilu.
+- Serwer: `GET /v1/bios?core=…` (lista), `GET /v1/bios?name=…` (plik). **Zaktualizuj serwer.**
+
 ## [0.27.3] — 2026-10-11
 
 ### Poprawione
