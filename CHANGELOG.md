@@ -8,6 +8,13 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.30.1] — 2026-10-11
+
+### Naprawione
+- **Błędy interfejsu nie znikają po cichu** — błąd JavaScriptu (także błąd wywołania API
+  z Pythona) pokazuje się na ekranie i trafia do `logs/emustart.log` („UI: BŁĄD JS: …”
+  z ekranem i otwartym oknem). Diagnostyka niedziałającej klawiatury na komputerze.
+
 ## [0.30.0] — 2026-10-11
 
 ### Dodane

@@ -5,6 +5,21 @@
 const $ = (id) => document.getElementById(id);
 const api = () => window.pywebview.api;
 
+// błąd w interfejsie: na ekran i do logu (logs/emustart.log), zamiast cichej, martwej klawiatury
+let uiErrors = 0;
+function reportUiError(msg) {
+  if (uiErrors++ > 20) return;
+  let where = "";
+  try { where = ` [ekran ${S.screen}, okno ${S.modal || "-"}]`; } catch (e) { /* błąd przed startem UI */ }
+  try { if (window.pywebview && window.pywebview.api) window.pywebview.api.ui_log("BŁĄD JS: " + msg + where); } catch (e) { /* most niedostępny */ }
+  try { toast("Błąd interfejsu: " + msg, 8000); } catch (e) { /* toast jeszcze nie gotowy */ }
+}
+window.addEventListener("error", (e) => reportUiError(`${e.message} (${(e.filename || "").split("/").pop()}:${e.lineno})`));
+window.addEventListener("unhandledrejection", (e) => {
+  const r = e.reason;
+  reportUiError(r && r.message ? `${r.message} ${(r.stack || "").split("\n")[1] || ""}`.trim() : String(r));
+});
+
 const S = {
   screen: "systems",
   systems: [], sysIdx: 0,
