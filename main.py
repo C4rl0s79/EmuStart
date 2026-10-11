@@ -66,6 +66,7 @@ def main() -> None:
         return _server_panel()
     _logging()
     _log_unblocked()
+    _log_versions()
     debug = "--debug" in sys.argv
     windowed = debug or "--window" in sys.argv
     cfg = config.load()
@@ -178,6 +179,18 @@ def _server_mode() -> None:
              __import__("emustart").__version__, port, base.replace("0.0.0.0", "127.0.0.1"))
     while True:
         time.sleep(3600)
+
+
+def _log_versions() -> None:
+    """Wersje bibliotek okna (pywebview, pythonnet) — różnią się między buildami."""
+    from importlib import metadata
+    vers = []
+    for name in ("pywebview", "pythonnet", "clr_loader"):
+        try:
+            vers.append(f"{name} {metadata.version(name)}")
+        except metadata.PackageNotFoundError:
+            pass
+    logging.getLogger("emustart").info("Python %s, %s", sys.version.split()[0], ", ".join(vers) or "brak metadanych")
 
 
 def _log_unblocked() -> None:

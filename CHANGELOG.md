@@ -8,6 +8,20 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.30.4] — 2026-10-11
+
+Zakres: tylko poniższe. Bez zmian: lista gier, sterowanie, menu, tłumaczenia.
+
+### Naprawione
+- **„Aktualizuj bazę LaunchBox” kończyła się błędem WinError 32** (plik `launchbox.db`
+  używany przez inny proces) — baza była otwarta do odczytu w wątkach pobierania opisów
+  i grafik, a Windows nie podmienia otwartego pliku. Przed podmianą połączenia są
+  zamykane, wątki otwierają nową bazę same.
+
+### Diagnostyka
+- W `logs/emustart.log` przy starcie: wersje Pythona, pywebview, pythonnet i clr_loader
+  (binarka z GitHub Actions bierze najnowsze — do sprawdzenia niedziałającej klawiatury).
+
 ## [0.30.3] — 2026-10-11
 
 ### Naprawione
