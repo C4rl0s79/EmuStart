@@ -10,9 +10,13 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
 ## [0.30.4] — 2026-10-11
 
-Zakres: tylko poniższe. Bez zmian: lista gier, sterowanie, menu, tłumaczenia.
+Zakres: tylko poniższe. Bez zmian: lista gier, menu, tłumaczenia.
 
 ### Naprawione
+- **Klawiatura i kółko myszy przestawały działać po grze** (pad działał) — po powrocie
+  okna na wierzch (koniec gry, menu w grze, Alt+Tab) fokus dostawał formularz okna, a nie
+  strona w WebView2; pywebview oddaje go stronie tylko przy pierwszym pokazaniu okna.
+  Teraz każda aktywacja okna przekazuje fokus stronie.
 - **„Aktualizuj bazę LaunchBox” kończyła się błędem WinError 32** (plik `launchbox.db`
   używany przez inny proces) — baza była otwarta do odczytu w wątkach pobierania opisów
   i grafik, a Windows nie podmienia otwartego pliku. Przed podmianą połączenia są

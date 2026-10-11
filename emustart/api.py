@@ -158,6 +158,30 @@ class Api:
 
     def attach(self, window) -> None:
         self._window = window
+        try:
+            window.events.shown += self._hook_webview_focus
+        except Exception:
+            log.exception("fokus okna")
+
+    def _hook_webview_focus(self, *_a) -> None:
+        """pywebview daje fokus kontrolce WebView2 tylko przy pierwszym pokazaniu okna.
+        Gdy okno wraca na wierzch (po grze, menu w grze, Alt+Tab — SetForegroundWindow
+        na formularzu), fokus zostawał na formularzu: pad działał (Python), klawiatura
+        i kółko myszy nie. Każda aktywacja okna oddaje fokus stronie."""
+        try:
+            form = self._window.native
+            webview = form.browser.webview
+
+            def on_activated(*_x):
+                try:
+                    webview.Focus()
+                except Exception:
+                    log.exception("fokus WebView2")
+
+            form.Activated += on_activated
+            log.info("fokus WebView2 przy aktywacji okna: włączony")
+        except Exception:
+            log.exception("fokus okna (pywebview bez formularza WinForms?)")
 
     # ── profile: rzeczy per gracz (EmuStart, RetroAchievements) ──
     USER_KEYS = ("look", "games_logo", "hide_arcade_clones",
