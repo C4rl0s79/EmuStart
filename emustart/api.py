@@ -10,8 +10,10 @@ import collections
 import json
 import logging
 import math
+import os
 import re
 import socket
+import sys
 import threading
 import urllib.error
 import time
@@ -446,6 +448,59 @@ class Api:
                     "logo": art.media_url(r["es"], r["name"], "logo") if r["art_logo"] == art.HAS else "",
                     "checked": bool(r["art_box"] and r["art_snap"])}
         return out
+
+    # ── aktualizacja EmuStart (menu Start; emustart/updater.py) ──
+    def app_update_check(self) -> dict:
+        from emustart import updater
+        try:
+            info = updater.latest()
+        except Exception as ex:
+            log.warning("sprawdzenie aktualizacji: %s", ex)
+            return {"ok": False, "reason": f"Nie udało się sprawdzić wydań na GitHubie: {ex}"}
+        self._app_update = {"info": info, "job": None}
+        frozen = bool(getattr(sys, "frozen", False))
+        return {"ok": True, "version": info["version"], "current": info["current"], "newer": info["newer"],
+                "size": info["size"], "available": bool(info["url"]) and frozen and os.name == "nt",
+                "reason": "" if frozen else "Aktualizacja z menu działa w EmuStart.exe."}
+
+    def app_update_start(self) -> dict:
+        from emustart import updater
+        st = getattr(self, "_app_update", None) or {}
+        info = st.get("info")
+        if not info or not info.get("newer") or not info.get("url"):
+            return {"ok": False, "reason": "Najpierw sprawdź aktualizacje."}
+        if st.get("job") and st["job"].phase in ("downloading", "extracting"):
+            return {"ok": True, **st["job"].status()}
+        job = updater.Job(info)
+        st["job"] = job
+        job.start()
+        return {"ok": True, **job.status()}
+
+    def app_update_status(self) -> dict:
+        job = (getattr(self, "_app_update", None) or {}).get("job")
+        return {"ok": True, **job.status()} if job else {"ok": True, "phase": "idle"}
+
+    def app_update_apply(self) -> dict:
+        """Podmiana plików po zamknięciu EmuStart i ponowne uruchomienie z tymi samymi parametrami."""
+        job = (getattr(self, "_app_update", None) or {}).get("job")
+        if not job:
+            return {"ok": False, "reason": "Brak pobranej aktualizacji."}
+        if self._session and self._session.phase in ("preparing", "downloading", "extracting", "running"):
+            return {"ok": False, "reason": "Najpierw zamknij grę."}
+        r = job.apply(sys.argv[1:], server=False)
+        if not r.get("ok"):
+            return r
+        log.info("koniec EmuStart — aktualizacja do %s", job.info.get("version"))
+
+        def bye():
+            time.sleep(0.8)
+            try:
+                self._shutdown()
+            finally:
+                logging.shutdown()
+                os._exit(0)
+        threading.Thread(target=bye, daemon=True, name="update-exit").start()
+        return {"ok": True, "version": job.info.get("version")}
 
     # ── tłumaczenia: wersje gry (emustart/translations.py) ──
     def _variants(self, g: dict) -> list:

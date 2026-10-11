@@ -116,13 +116,15 @@ class Job:
             raise RuntimeError(f"Pobrano {part.stat().st_size} z {self.total} B — spróbuj ponownie.")
         part.replace(dest)
 
-    def apply(self, argv: list) -> dict:
-        """Uruchamia skrypt podmiany (poza procesem serwera). Wołający kończy proces."""
+    def apply(self, argv: list, server: bool = True) -> dict:
+        """Uruchamia skrypt podmiany (poza tym procesem). Wołający kończy proces.
+        server=True — potem start zadania Harmonogramu serwera (gdy jest), False —
+        EmuStart z tymi samymi parametrami (okno do grania)."""
         if self.phase != "ready":
             return {"ok": False, "reason": "Aktualizacja nie jest gotowa."}
         if os.name != "nt" or not getattr(sys, "frozen", False):
             return {"ok": False, "reason": "Podmiana działa tylko w EmuStart.exe na Windows."}
-        script = write_script(update_dir(), paths.APP, os.getpid(), argv)
+        script = write_script(update_dir(), paths.APP, os.getpid(), argv, server=server)
         flags = (subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
                  | subprocess.CREATE_NO_WINDOW)
         cmd = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script)]
@@ -164,11 +166,14 @@ def _ps(s: str) -> str:
     return "'" + str(s).replace("'", "''") + "'"
 
 
-def write_script(udir: Path, app: Path, pid: int, argv: list) -> Path:
+def write_script(udir: Path, app: Path, pid: int, argv: list, server: bool = True) -> Path:
     """Skrypt PowerShell podmiany plików (patrz opis modułu)."""
     exe = app / "EmuStart.exe"
     args = " ".join(a if re.fullmatch(r"[\w\-=.:]+", a) else '"' + a.replace('"', '') + '"'
-                    for a in argv if a != "--restarted") + " --restarted"
+                    for a in argv if a != "--restarted")
+    if server:
+        args = (args + " --restarted").strip()
+    use_task = "$true" if server else "$false"
     script = udir / "apply.ps1"
     script.write_text(f"""$ErrorActionPreference = 'Continue'
 $app = {_ps(app)}; $new = {_ps(udir / 'new')}; $bak = {_ps(udir / 'backup')}
@@ -197,13 +202,16 @@ if ($rc1 -ge 8 -or $rc2 -ge 8) {{
   L 'podmiana zakończona'
   Remove-Item -LiteralPath $new -Recurse -Force -ErrorAction SilentlyContinue
 }}
-schtasks /Query /TN {_ps(TASK)} 2>$null | Out-Null
-if ($LASTEXITCODE -eq 0) {{
+$task = $false
+if ({use_task}) {{ schtasks /Query /TN {_ps(TASK)} 2>$null | Out-Null; $task = ($LASTEXITCODE -eq 0) }}
+if ($task) {{
   schtasks /Run /TN {_ps(TASK)} | Out-Null
   L 'serwer uruchomiony (zadanie Harmonogramu)'
 }} else {{
-  Start-Process -FilePath $exe -ArgumentList {_ps(args)} -WorkingDirectory $app -WindowStyle Hidden
-  L 'serwer uruchomiony'
+  $a = {_ps(args)}
+  if ($a) {{ Start-Process -FilePath $exe -ArgumentList $a -WorkingDirectory $app }}
+  else {{ Start-Process -FilePath $exe -WorkingDirectory $app }}
+  L 'EmuStart uruchomiony ponownie'
 }}
 """, encoding="utf-8-sig")
     return script

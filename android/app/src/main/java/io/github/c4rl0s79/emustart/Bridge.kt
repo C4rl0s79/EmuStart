@@ -99,6 +99,10 @@ class Bridge(private val act: MainActivity) {
         "install_start" -> installStart(a.getJSONArray(0))
         "install_status" -> installer.status()
         "install_cancel" -> { installer.cancel.set(true); null }
+        "app_update_check" -> appUpdateCheck()
+        "app_update_start" -> appUpdateStart()
+        "app_update_status" -> appUpdateStatus()
+        "app_update_apply" -> { act.runOnUiThread { installer.next() }; JSONObject().put("ok", true).put("android", true) }
         "save_manager" -> saveManager(a.getInt(0))
         "save_copy" -> saveCopy(a.getInt(0), a.getString(1), a.getString(2), a.getString(3))
         "look_save" -> { prefs.look = a.getJSONObject(0); JSONObject().put("ok", true) }
@@ -239,6 +243,58 @@ class Bridge(private val act: MainActivity) {
             g.put("seconds", 0).put("favorite", 0)
         }
         return arr
+    }
+
+    // ── aktualizacja EmuStart (menu Start): APK z wydania na GitHubie ──
+    @Volatile private var selfUpdate: JSONObject? = null
+    @Volatile private var selfStarted = false
+
+    private fun vparts(v: String) = Regex("\\d+").findAll(v).map { it.value.toInt() }.toList()
+    private fun newer(a: String, b: String): Boolean {
+        val x = vparts(a); val y = vparts(b)
+        for (i in 0 until maxOf(x.size, y.size)) {
+            val p = x.getOrElse(i) { 0 }; val q = y.getOrElse(i) { 0 }
+            if (p != q) return p > q
+        }
+        return false
+    }
+
+    private fun appUpdateCheck(): JSONObject = try {
+        val rel = installer.latestRelease("C4rl0s79/EmuStart")
+        val ver = rel.optString("tag_name").removePrefix("v")
+        val assets = rel.optJSONArray("assets") ?: JSONArray()
+        val apk = (0 until assets.length()).map { assets.getJSONObject(it) }
+            .firstOrNull { Regex("EmuStart-[\\d.]+-android\\.apk").matches(it.optString("name")) }
+        val cur = BuildConfig.VERSION_NAME
+        val info = JSONObject().put("ok", true).put("version", ver).put("current", cur)
+            .put("newer", newer(ver, cur)).put("size", apk?.optLong("size") ?: 0L)
+            .put("available", apk != null).put("url", apk?.optString("browser_download_url") ?: "")
+        selfUpdate = info
+        info
+    } catch (e: Exception) {
+        JSONObject().put("ok", false).put("reason", "Nie udało się sprawdzić wydań na GitHubie: ${e.message ?: e.javaClass.simpleName}")
+    }
+
+    private fun appUpdateStart(): JSONObject {
+        val u = selfUpdate
+        if (u == null || !u.optBoolean("newer") || u.optString("url").isEmpty())
+            return JSONObject().put("ok", false).put("reason", "Najpierw sprawdź aktualizacje.")
+        selfStarted = true
+        installer.startSelf(u.optString("url"), "EmuStart ${u.optString("version")}")
+        return appUpdateStatus()
+    }
+
+    private fun appUpdateStatus(): JSONObject {
+        val st = installer.status()
+        val phase = when {
+            !selfStarted -> "idle"
+            installer.running -> "downloading"
+            installer.errors.isNotEmpty() -> "error"
+            else -> "ready"
+        }
+        return JSONObject().put("ok", true).put("phase", phase).put("done", st.optLong("done"))
+            .put("total", st.optLong("total")).put("version", selfUpdate?.optString("version") ?: "")
+            .put("error", installer.errors.joinToString("; "))
     }
 
     // ── tłumaczenia: wersja gry wybrana w profilu (<profil>/variants.json na serwerze) ──

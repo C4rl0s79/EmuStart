@@ -739,6 +739,7 @@ function openMenu() {
     ["Zmień profil", () => openProfiles()],
     ["Kolejność padów", () => openPads()],
     ["Skanuj kolekcję ponownie", () => startScan()],
+    ["Aktualizuj EmuStart", () => appUpdate()],
     ["Wyjdź z EmuStart", () => api().quit()],
   ];
   if (S.platform === "android") {
@@ -746,6 +747,7 @@ function openMenu() {
     items.push(["Ustawienia", () => openSettings()], ["Zmień profil", () => openProfiles()],
                ["Wygląd (logo, czcionki, kolory)", () => openLook()],
                ["Odśwież listę z serwera", async () => { await api().rescan(); await refreshState(); show("systems"); }],
+               ["Aktualizuj EmuStart", () => appUpdate()],
                ["Wyjdź z EmuStart", () => api().quit()]);
   }
   if (S.screen === "settings") items.shift();
@@ -766,6 +768,38 @@ function menuInput(a) {
   else if (a === "b" || a === "start") return closeMenu();
   else if (a === "a") { const fn = S.menu[S.menuIdx][1]; closeMenu(); return fn(); }
   renderMenu();
+}
+
+/* ───────────── aktualizacja EmuStart (menu Start) ───────────── */
+let updTimer = null;
+async function appUpdate() {
+  toast("Sprawdzam wydania na GitHubie…", 4000);
+  const r = await api().app_update_check();
+  if (!r || !r.ok) return toast(r?.reason || "Nie udało się sprawdzić aktualizacji.", 5000);
+  if (!r.newer) return toast(`Masz najnowszą wersję (${r.current}).`, 4000);
+  if (!r.available) return toast(r.reason || `Jest wersja ${r.version}, ale wydanie nie ma jeszcze pliku dla tego urządzenia.`, 6000);
+  S.menu = [[`Aktualizuj do ${r.version} (${fmtBytes(r.size)})`, () => appUpdateStart()], ["Nie teraz", () => {}]];
+  S.menuIdx = 0; S.modal = "menu";
+  $("menu").classList.remove("hidden");
+  renderMenu();
+}
+async function appUpdateStart() {
+  const r = await api().app_update_start();
+  if (!r || !r.ok) return toast(r?.reason || "Nie udało się pobrać aktualizacji.", 5000);
+  clearInterval(updTimer);
+  updTimer = setInterval(async () => {
+    const st = await api().app_update_status();
+    if (!st) return;
+    if (st.phase === "downloading") return toast(`Pobieram EmuStart ${st.version}: ${fmtBytes(st.done)} / ${fmtBytes(st.total)}`, 2000);
+    if (st.phase === "extracting") return toast("Rozpakowuję aktualizację…", 2000);
+    clearInterval(updTimer);
+    if (st.phase === "error") return toast("Aktualizacja nie powiodła się: " + st.error, 7000);
+    if (st.phase !== "ready") return;
+    const a = await api().app_update_apply();
+    if (!a || !a.ok) return toast(a?.reason || "Nie udało się zainstalować aktualizacji.", 6000);
+    toast(S.platform === "android" ? "Potwierdź instalację w oknie Androida."
+                                   : `Instaluję ${st.version} — EmuStart uruchomi się ponownie.`, 8000);
+  }, 700);
 }
 
 /* ───────────── skanowanie ───────────── */
