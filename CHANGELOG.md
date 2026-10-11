@@ -8,6 +8,15 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.25.13] — 2026-10-11
+
+### Poprawione
+- **„Failed to resolve Python.Runtime.Loader.Initialize” po rozpakowaniu pobranego ZIP-a**
+  (okno EmuStart i `--server-panel`): Windows oznacza pliki z pobranego archiwum jako
+  „z internetu” i .NET nie wczytuje wtedy `Python.Runtime.dll`. EmuStart przy starcie sam
+  zdejmuje ten znacznik ze swoich plików — `Unblock-File` nie jest już potrzebne.
+- Panel serwera, gdy okno mimo to nie wystartuje, otwiera się w przeglądarce (jak EmuStart).
+
 ## [0.25.12] — 2026-10-11
 
 ### Dodane

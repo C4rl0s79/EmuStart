@@ -16,7 +16,33 @@ import sys
 from pathlib import Path
 from logging.handlers import RotatingFileHandler
 
-import webview
+
+def _unblock_self() -> int:
+    """Zdejmuje znacznik „pobrane z internetu” (strumień Zone.Identifier) z plików
+    programu. Windows dodaje go plikom wypakowanym z pobranego ZIP-a, a .NET nie
+    wczytuje wtedy Python.Runtime.dll (okno: „Failed to resolve
+    Python.Runtime.Loader.Initialize”). Musi się stać przed `import webview`."""
+    if os.name != "nt" or not getattr(sys, "frozen", False):
+        return 0
+    base = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+    probe = base / "pythonnet" / "runtime" / "Python.Runtime.dll"
+    if not os.path.exists(str(probe) + ":Zone.Identifier"):
+        return 0                      # nic nie jest zablokowane (szybka ścieżka)
+    n = 0
+    for root in {base, Path(sys.executable).parent}:
+        for dirpath, _dirs, files in os.walk(root):
+            for name in files:
+                try:
+                    os.remove(os.path.join(dirpath, name) + ":Zone.Identifier")
+                    n += 1
+                except OSError:
+                    pass
+    return n
+
+
+_UNBLOCKED = _unblock_self()
+
+import webview  # noqa: E402  (po zdjęciu blokady)
 
 from emustart import api as api_mod, config, paths, server
 
@@ -36,8 +62,10 @@ def _logging(name: str = "emustart.log") -> None:
 def main() -> None:
     if "--server-panel" in sys.argv:
         _logging("panel.log")             # osobny log — serwer pisze do emustart.log
+        _log_unblocked()
         return _server_panel()
     _logging()
+    _log_unblocked()
     debug = "--debug" in sys.argv
     windowed = debug or "--window" in sys.argv
     cfg = config.load()
@@ -152,6 +180,12 @@ def _server_mode() -> None:
         time.sleep(3600)
 
 
+def _log_unblocked() -> None:
+    if _UNBLOCKED:
+        logging.getLogger("emustart").info("zdjęto znacznik „z internetu” z %d plików programu",
+                                           _UNBLOCKED)
+
+
 def _server_panel() -> None:
     """Małe okno serwera: stan, urządzenia, pobierane gry, przeładowanie listy gier,
     restart. Serwer zwykle działa bez okna (zadanie Harmonogramu, konto SYSTEM) —
@@ -169,9 +203,16 @@ def _server_panel() -> None:
             os.startfile(str(paths.LOGS))      # type: ignore[attr-defined]
             return {"ok": True}
 
-    webview.create_window("EmuStart Server", f"http://127.0.0.1:{port}/server.html", js_api=PanelApi(),
-                          width=760, height=640, min_size=(560, 480), background_color="#0b0d12")
-    webview.start(private_mode=False)
+    url = f"http://127.0.0.1:{port}/server.html"
+    try:
+        webview.create_window("EmuStart Server", url, js_api=PanelApi(),
+                              width=760, height=640, min_size=(560, 480), background_color="#0b0d12")
+        webview.start(private_mode=False)
+    except Exception:
+        # okno (pywebview + .NET + WebView2) nie wystartowało — panel w przeglądarce
+        logging.getLogger("emustart").exception("okno panelu nie wystartowało")
+        import webbrowser
+        webbrowser.open(url)
 
 
 if __name__ == "__main__":
