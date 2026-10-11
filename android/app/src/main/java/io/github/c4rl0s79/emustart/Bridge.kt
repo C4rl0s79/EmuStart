@@ -396,7 +396,7 @@ class Bridge(private val act: MainActivity) {
                 val sg = Saves.Game(es, g.optString("name"), main.nameWithoutExtension, main.parentFile ?: base,
                                     Emulators.retroCore(l.sys.optString("plat"),
                                         Emulators.coreOf(emu).ifEmpty { l.sys.optString("core") }),
-                                    l.sys.optString("plat"))
+                                    l.sys.optString("plat"), g.optJSONObject("meta")?.optString("serial") ?: "")
                 try {
                     val msg = saves.before(prefs.profile, emu, sg, takeover)
                     l.message = msg
