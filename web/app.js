@@ -363,7 +363,7 @@ function renderGames() {
     if (g.cached) icons.push('<span class="tag c">lokalnie</span>');
     html.push(`<div class="row${i === S.gameIdx ? " sel" : ""}" data-i="${i}" style="top:${(i - top) * rh}px">` +
       (S.state?.games_logo && g.logo ? `<img class="tlogo" src="${esc(g.logo)}" alt="${esc(g.title)}">` : `<span class="t">${esc(g.title)}</span>`) +
-      `<span class="g">${esc(g.tags)}</span>` +
+      `<span class="g">${esc(listTags(g.tags))}</span>` +
       `<span class="ic">${icons.join("")}</span></div>`);
   }
   box.innerHTML = html.join("");
@@ -414,6 +414,14 @@ function jumpLetter(dir) {
   S.gameIdx = i;
 }
 
+// Lista gier: oznaczenia tylko do języka tłumaczenia — „(Japan) [T-En by DeJap v1.2] [b]”
+// → „(Japan) [T-En]”. Pełne oznaczenia są w szczegółach gry (podgląd obok listy).
+function listTags(tags) {
+  const m = /[\[(]\s*T\s*[-+]\s*[A-Za-z]+/i.exec(tags || "");
+  if (!m) return tags || "";
+  const close = m[0][0] === "(" ? ")" : "]";
+  return (tags.slice(0, m.index) + m[0].replace(/\s+/g, "") + close).trim();
+}
 function gamesInput(a) {
   const n = S.games.length;
   const page = Math.max(1, Math.floor($("rows").clientHeight / 44) - 1);
