@@ -21,6 +21,7 @@ import hashlib
 import http.client
 import json
 import logging
+import re
 import ssl
 import threading
 import time
@@ -37,11 +38,13 @@ LAN_RTT = 0.004             # odpowiedź serwera szybsza = ta sama sieć lokalna
 
 BEST_TTL = 300              # wybrany adres serwera ważny tyle s (potem ponowne sprawdzenie)
 PROBE_TIMEOUT = 2.5
-KIND_ORDER = {"lan": 0, "tailscale": 1, "public": 2}
+KIND_ORDER = {"lan": 0, "tailscale": 1, "public": 2, "tunnel": 3}
 
 _info: dict = {}
 _info_lock = threading.Lock()
 _PINS: dict = {}            # (host, port) → odcisk certyfikatu serwera (HTTPS)
+_CA: set = set()            # (host, port) — HTTPS ze zwykłym certyfikatem (tunel Cloudflare)
+_EPINFO: dict = {}          # (schemat, host, port) → {"mode": plain|pin|ca, "kind": …}
 _best: dict = {}
 _best_lock = threading.Lock()
 _learned: dict = {}         # pamięć serwer-adresy.json
@@ -66,6 +69,9 @@ class PinnedHTTPS(http.client.HTTPSConnection):
 
 def conn(host: str, port: int, timeout: float = TIMEOUT) -> http.client.HTTPConnection:
     """Połączenie z serwerem: HTTPS z przypiętym certyfikatem, gdy ten adres jest szyfrowany."""
+    if (host, port) in _CA:
+        import ssl as _ssl
+        return http.client.HTTPSConnection(host, port, timeout=timeout, context=_ssl.create_default_context())
     fp = _PINS.get((host, port))
     if fp is not None:
         return PinnedHTTPS(host, port, fp, timeout)
@@ -173,36 +179,59 @@ def _split(url: str) -> tuple[str, str, int] | None:
     if not url:
         return None
     if "://" not in url:
-        url = "http://" + url
+        # nazwa domeny (np. emustart.emucloud.org — tunel) → https; adres IP / nazwa komputera → http
+        host = url.split("/")[0].split(":")[0]
+        domain = "." in host and not re.fullmatch(r"\d+(\.\d+){3}", host)
+        url = ("https://" if domain else "http://") + url
     u = urllib.parse.urlsplit(url)
     if not u.hostname:
         return None
-    return u.scheme, u.hostname, u.port or (8741 if u.scheme == "https" else 8740)
+    return u.scheme, u.hostname, u.port or (443 if u.scheme == "https" else 8740)
 
 
-def _kind(host: str) -> int:
+def _kind(sp) -> int:
     from emustart.remote import kind_of
-    return KIND_ORDER.get(kind_of(host), 2)
+    k = (_EPINFO.get(sp) or {}).get("kind") or kind_of(sp[1])
+    return KIND_ORDER.get(k, 2)
 
 
 def candidates(cfg: dict) -> list:
-    """Adresy serwera do sprawdzenia: wpisany + podane przez serwer. HTTPS tylko z odciskiem."""
+    """Adresy serwera do sprawdzenia: wpisany + podane przez serwer.
+    HTTPS z przypiętym certyfikatem tylko z odciskiem; tunel (i adres https wpisany ręcznie,
+    którego serwer nie podał jako własny) — zwykłe sprawdzanie certyfikatu."""
     fp = server_fp(cfg)
+    eps = {}
+    for e in _store().get("endpoints") or []:
+        sp = _split(e.get("url", ""))
+        if sp:
+            mode = "plain" if sp[0] == "http" else ("ca" if e.get("ca") else "pin")
+            eps[sp] = {"mode": mode, "kind": e.get("kind") or ""}
     out, seen = [], set()
-    for url in [cfg.get("server_url") or ""] + [e.get("url", "") for e in _store().get("endpoints") or []]:
-        sp = _split(url)
-        if not sp or (sp[0] == "https" and not fp) or sp in seen:
+    for sp in [_split(cfg.get("server_url") or "")] + list(eps):
+        if not sp or sp in seen:
+            continue
+        info = eps.get(sp) or {"mode": "ca" if sp[0] == "https" else "plain",
+                               "kind": "tunnel" if sp[0] == "https" else ""}
+        if info["mode"] == "pin" and not fp:
             continue
         seen.add(sp)
+        _EPINFO[sp] = info
         out.append(sp)
     return out
+
+
+def _mode(sp) -> str:
+    return (_EPINFO.get(sp) or {}).get("mode") or ("plain" if sp[0] == "http" else "pin")
 
 
 def _probe(sp, key: str, fp: str) -> float | None:
     scheme, host, port = sp
     t = time.monotonic()
-    if scheme == "https":
+    mode = _mode(sp)
+    if mode == "pin":
         c = PinnedHTTPS(host, port, fp, PROBE_TIMEOUT)
+    elif mode == "ca":
+        c = http.client.HTTPSConnection(host, port, timeout=PROBE_TIMEOUT, context=ssl.create_default_context())
     else:
         c = http.client.HTTPConnection(host, port, timeout=PROBE_TIMEOUT)
     try:
@@ -230,7 +259,7 @@ def best(cfg: dict, fresh: bool = False):
     done = threading.Condition()
 
     def rank(sp):
-        return _kind(sp[1]), sp[0] == "https"
+        return _kind(sp), sp[0] == "https"
 
     def one(sp):
         r = _probe(sp, key, fp)
@@ -280,7 +309,9 @@ def endpoint(cfg: dict) -> tuple[str, int, str] | None:
     if not sp:
         return None
     scheme, host, port = sp
-    if scheme == "https":
+    if _mode(sp) == "ca":
+        _CA.add((host, port))
+    elif scheme == "https":
         _PINS[(host, port)] = server_fp(cfg)
     return host, port, key
 

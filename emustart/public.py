@@ -52,7 +52,27 @@ def _local(ip: str) -> bool:
 
 
 # ── połączenia i zapytania na porcie publicznym ──
+def _loopback(ip: str) -> bool:
+    try:
+        return ipaddress.ip_address(ip).is_loopback
+    except ValueError:
+        return False
+
+
+def client_ip(handler) -> str:
+    """Adres klienta: przez tunel Cloudflare (cloudflared na tym komputerze łączy się
+    z 127.0.0.1) — z nagłówka CF-Connecting-IP; inaczej — adres połączenia."""
+    peer = handler.client_address[0]
+    if _loopback(peer):
+        cf = (handler.headers.get("CF-Connecting-IP") or "").strip()
+        if cf:
+            return cf
+    return peer
+
+
 def conn_open(ip: str) -> bool:
+    if _loopback(ip):
+        return True                  # tunel: wszyscy z 127.0.0.1 — limity po adresie z nagłówka (gate)
     now = time.time()
     with _lock:
         if _banned.get(ip, 0) > now:
@@ -87,8 +107,12 @@ def gate(handler) -> bool:
     """Zapytanie na porcie publicznym: True = obsłuż dalej; False = odpowiedź już wysłana."""
     from urllib.parse import urlsplit
     from emustart import remote
-    ip = handler.client_address[0]
+    ip = client_ip(handler)
     path = urlsplit(handler.path).path
+    if _banned.get(ip, 0) > time.time():
+        handler.close_connection = True
+        handler.send_error(403)
+        return False
     if not (path.startswith("/v1/") or path.startswith("/media/")) or path.startswith("/v1/pair"):
         handler.close_connection = True
         handler.send_error(404)
@@ -227,4 +251,63 @@ def stop() -> None:
 def status() -> dict:
     with _lock:
         banned = sum(1 for t in _banned.values() if t > time.time())
-    return {**STATE, "banned": banned, "now": time.time()}
+    if TUNNEL["url"] and time.time() - TUNNEL["checked"] > 300:
+        check_tunnel_later()
+    return {**STATE, "banned": banned, "now": time.time(), "tunnel": dict(TUNNEL)}
+
+
+# ── tunel (Cloudflare Tunnel → port publiczny) ──
+TUNNEL: dict = {"url": "", "state": "", "error": "", "checked": 0.0}
+
+
+def tunnel_endpoint() -> dict | None:
+    """Adres tunelu dla listy adresów serwera: zwykły certyfikat (ca), rodzaj „tunnel” —
+    urządzenia biorą go na końcu (po sieci lokalnej, Tailscale i porcie publicznym)."""
+    if TUNNEL["url"]:
+        return {"url": TUNNEL["url"], "kind": "tunnel", "tls": True, "ca": True}
+    return None
+
+
+def set_tunnel(url: str) -> str:
+    """Adres tunelu z ustawień (`server_tunnel_url`) — znormalizowany, '' = brak."""
+    url = (url or "").strip().rstrip("/")
+    if url and "://" not in url:
+        url = "https://" + url
+    if url and not url.startswith("https://"):
+        raise ValueError("adres tunelu musi zaczynać się od https://")
+    TUNNEL.update(url=url, state="", error="", checked=0.0)
+    if url:
+        check_tunnel_later()
+    return url
+
+
+def check_tunnel() -> None:
+    """Czy serwer odpowiada przez tunel (zapytanie z kluczem serwera przez internet)."""
+    import ssl
+    import urllib.request
+    from emustart import remote
+    url = TUNNEL["url"]
+    if not url:
+        return
+    tok = (remote.API._cfg.get("server_token") if remote.API else "") or ""
+    req = urllib.request.Request(url + "/v1/info", headers={"Authorization": f"Bearer {tok}",
+                                                            "User-Agent": "EmuStart-serwer"})
+    try:
+        with urllib.request.urlopen(req, timeout=10, context=ssl.create_default_context()) as r:
+            ok = r.status == 200 and b'"version"' in r.read()
+        TUNNEL.update(state="ok" if ok else "error", error="" if ok else "nieoczekiwana odpowiedź")
+    except Exception as ex:
+        code = getattr(ex, "code", None)
+        TUNNEL.update(state="error", error=(f"odpowiedź {code}" + (" — tunel nie dociera do serwera (502: "
+                      "sprawdź usługę https://localhost:8742 i „Disable TLS verification”)" if code == 502 else ""))
+                      if code else str(ex)[:200])
+    TUNNEL["checked"] = time.time()
+    if TUNNEL["state"] == "ok":
+        log.info("tunel %s działa", url)
+    else:
+        log.warning("tunel %s: %s", url, TUNNEL["error"])
+
+
+def check_tunnel_later() -> None:
+    TUNNEL["checked"] = time.time()          # bez wielokrotnych prób naraz
+    threading.Thread(target=check_tunnel, daemon=True, name="tunel").start()

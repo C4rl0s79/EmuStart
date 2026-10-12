@@ -227,6 +227,7 @@ let pubOn = false;
 async function refreshPublic() {
   const r = await admin("public_status").catch(() => null);
   if (!r) return;
+  showTunnel(r.tunnel);
   pubOn = !!r.enabled;
   $("bPublic").textContent = pubOn ? "Wyłącz dostęp z internetu" : "Włącz dostęp z internetu";
   if (!pubOn) { $("pubInfo").innerHTML = r.error ? `<dt>Błąd</dt><dd>${esc(r.error)}</dd>` : ""; return; }
@@ -244,6 +245,18 @@ async function refreshPublic() {
   if (r.error) rows.push(["Uwaga", r.error]);
   $("pubInfo").innerHTML = rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("");
 }
+function showTunnel(t) {
+  if (!t) return;
+  if (document.activeElement !== $("tunUrl")) $("tunUrl").value = t.url || "";
+  $("tunInfo").textContent = !t.url ? "Tunel nie ustawiony." :
+    t.state === "ok" ? `Tunel działa (sprawdzony ${ago(t.checked)}).` :
+    t.state === "error" ? `Tunel nie odpowiada: ${t.error}` : "Sprawdzam tunel…";
+}
+$("bTunnel").addEventListener("click", async () => {
+  const r = await admin("tunnel_set", { url: $("tunUrl").value.trim() }).catch(() => null);
+  msg(r?.ok ? (r.url ? "Zapisano adres tunelu — sprawdzam…" : "Tunel wyłączony.") : (r?.reason || "Serwer nie odpowiada."), r?.ok);
+  setTimeout(refreshPublic, 2500);
+});
 $("bPublic").addEventListener("click", async () => {
   if (!pubOn && !confirm("Włączyć dostęp z internetu? Serwer otworzy port na routerze (UPnP). " +
                          "Wejdą tylko sparowane urządzenia z kluczem.")) return;

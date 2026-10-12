@@ -29,36 +29,57 @@ class Server(private val prefs: Prefs) {
     }
 
     // ── adres serwera: najlepszy z podanych przez serwer (sieć lokalna → Tailscale → publiczny) ──
-    private data class Ep(val url: String, val rank: Int)
+    private data class Ep(val url: String, val rank: Int, val ca: Boolean)
+    /** Adresy z certyfikatem sprawdzanym zwykłym trybem (tunel Cloudflare) — bez przypinania. */
+    @Volatile private var caUrls: Set<String> = emptySet()
     @Volatile private var base = ""
     @Volatile private var baseAt = 0L
     @Volatile private var baseSig = ""
 
-    private fun rankOf(url: String): Int {
+    private fun rankOf(url: String, kindName: String = ""): Int {
         val host = url.substringAfter("://").substringBefore('/').substringBeforeLast(':')
-        val kind = when {
-            host.matches(Regex("""100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\..*""")) -> 1
-            host.matches(Regex("""(10\..*|192\.168\..*|172\.(1[6-9]|2\d|3[01])\..*|169\.254\..*)""")) -> 0
-            !host.contains('.') -> 0
-            else -> 2
+        val kind = when (kindName) {
+            "lan" -> 0
+            "tailscale" -> 1
+            "public" -> 2
+            "tunnel" -> 3
+            else -> when {
+                host.matches(Regex("""100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\..*""")) -> 1
+                host.matches(Regex("""(10\..*|192\.168\..*|172\.(1[6-9]|2\d|3[01])\..*|169\.254\..*)""")) -> 0
+                !host.contains('.') -> 0
+                else -> 2
+            }
         }
         return kind * 2 + (if (url.startsWith("https")) 1 else 0)
     }
 
+    /** Wpisany adres + adresy podane przez serwer. HTTPS z własnym certyfikatem serwera tylko
+     *  z odciskiem; tunel (i ręcznie wpisany adres https, którego serwer nie podał) — zwykłe
+     *  sprawdzanie certyfikatu. Kolejność: sieć lokalna, Tailscale, publiczny, tunel. */
     private fun candidates(): List<Ep> {
-        val urls = LinkedHashSet<String>()
-        if (prefs.serverUrl.isNotBlank()) urls += prefs.serverUrl.trimEnd('/')
+        val known = LinkedHashMap<String, Ep>()
         try {
             val a = JSONArray(prefs.serverEndpoints.ifBlank { "[]" })
-            for (i in 0 until a.length()) a.optJSONObject(i)?.optString("url")?.takeIf { it.isNotBlank() }?.let { urls += it.trimEnd('/') }
+            for (i in 0 until a.length()) {
+                val o = a.optJSONObject(i) ?: continue
+                val u = o.optString("url").trimEnd('/').takeIf { it.isNotBlank() } ?: continue
+                known[u] = Ep(u, rankOf(u, o.optString("kind")), o.optBoolean("ca"))
+            }
         } catch (e: Exception) { }
-        return urls.filter { !it.startsWith("https") || prefs.serverFp.isNotEmpty() }.map { Ep(it, rankOf(it)) }
+        val out = LinkedHashMap<String, Ep>()
+        val typed = prefs.serverUrl.trimEnd('/')
+        if (typed.isNotBlank()) out[typed] = known[typed]
+            ?: if (typed.startsWith("https")) Ep(typed, rankOf(typed, "tunnel"), true) else Ep(typed, rankOf(typed), false)
+        for ((u, e) in known) if (u !in out) out[u] = e
+        val list = out.values.filter { !it.url.startsWith("https") || it.ca || prefs.serverFp.isNotEmpty() }
+        caUrls = list.filter { it.ca }.map { it.url }.toSet()
+        return list
     }
 
     /** Czy adres odpowiada (GET /v1/info z kluczem) — czas w ms albo null. */
     private fun probe(url: String): Long? = try {
         val t = System.nanoTime()
-        val c = Net.open("$url/v1/info", prefs.serverFp)
+        val c = Net.open("$url/v1/info", prefs.serverFp, url in caUrls)
         c.connectTimeout = 2500; c.readTimeout = 2500
         c.setRequestProperty("Authorization", "Bearer " + prefs.serverKey)
         val ok = c.responseCode == 200
@@ -109,7 +130,10 @@ class Server(private val prefs: Prefs) {
         d.optJSONObject("tls")?.optString("fp")?.takeIf { it.isNotEmpty() && it != prefs.serverFp }?.let { prefs.serverFp = it; forgetBase() }
     }
 
-    private fun conn(path: String): HttpURLConnection = Net.open(baseUrl() + path, prefs.serverFp)
+    private fun conn(path: String): HttpURLConnection {
+        val b = baseUrl()
+        return Net.open(b + path, prefs.serverFp, b in caUrls)
+    }
 
     fun open(path: String, range: String? = null, timeoutMs: Int = 20000): HttpURLConnection {
         val c = conn(path)

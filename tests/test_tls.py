@@ -95,7 +95,11 @@ def test_client_learns_endpoints_and_picks_best(srv, monkeypatch):
 def test_https_without_known_fingerprint_is_never_used(srv):
     _port, tport, _fp = srv
     cfg = {"server_url": f"https://127.0.0.1:{tport}", "server_key": KEY}
-    assert netsrc.candidates(cfg) == []                  # bez odcisku — nie ufamy
+    # wpisany ręcznie adres https bez odcisku = zwykłe sprawdzanie certyfikatu (jak tunel):
+    # własny certyfikat serwera go nie przejdzie, więc połączenia nie ma
+    assert netsrc.candidates(cfg) == [("https", "127.0.0.1", tport)]
+    assert netsrc._mode(("https", "127.0.0.1", tport)) == "ca"
+    assert netsrc._probe(("https", "127.0.0.1", tport), KEY, "") is None
 
 
 def test_pairing_response_carries_fingerprint(srv, monkeypatch):
@@ -107,3 +111,10 @@ def test_pairing_response_carries_fingerprint(srv, monkeypatch):
     cfg = {"server_url": r["url"], "server_key": r["key"]}
     netsrc.learn(cfg, r)
     assert netsrc.server_fp(cfg) == fp
+
+
+def test_typed_address_domain_means_https():
+    assert netsrc._split("emustart.emucloud.org") == ("https", "emustart.emucloud.org", 443)
+    assert netsrc._split("100.85.254.31") == ("http", "100.85.254.31", 8740)
+    assert netsrc._split("EMUSTATION") == ("http", "emustation", 8740)
+    assert netsrc._split("https://emustart.emucloud.org/") == ("https", "emustart.emucloud.org", 443)

@@ -130,9 +130,9 @@ def endpoints() -> list:
         if TLS:
             out.append({"url": f"https://{a}:{TLS['port']}", "kind": k, "tls": True})
     from emustart import public
-    pub = public.endpoint()
-    if pub:
-        out.append(pub)
+    for extra in (public.endpoint(), public.tunnel_endpoint()):
+        if extra:
+            out.append(extra)
     return out
 
 

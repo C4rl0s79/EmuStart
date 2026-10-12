@@ -120,12 +120,12 @@ class _Api:
     _scan: dict = {}
 
 
-def _req(port, fp, method, path, key=""):
+def _req(port, fp, method, path, key="", extra=None):
     c = netsrc.PinnedHTTPS("127.0.0.1", port, fp, 5)
     try:
         c.request(method, path, body=b"{}" if method == "POST" else None,
                   headers={**({"Authorization": f"Bearer {key}"} if key else {}), "X-EmuStart": "1",
-                           "Host": f"127.0.0.1:{port}"})
+                           "Host": f"127.0.0.1:{port}", **(extra or {})})
         return c.getresponse().status
     finally:
         c.close()
@@ -141,11 +141,14 @@ def test_public_port_only_api_with_key_and_bans_guessers(monkeypatch):
     assert _req(port, fp, "POST", "/admin/status", KEY) == 404          # panel — nigdy z internetu
     assert _req(port, fp, "POST", "/v1/pair/request", KEY) == 404       # parowanie — tylko lokalnie
     assert _req(port, fp, "GET", "/index.html", KEY) == 404             # interfejs — nie
-    for _ in range(4):
-        _req(port, fp, "GET", "/v1/info", "zgaduje")
-    with pytest.raises((OSError, http.client.HTTPException)):          # zablokowany: połączenie zrywane
-        _req(port, fp, "GET", "/v1/info", KEY)
+    # tunel Cloudflare: połączenie z 127.0.0.1, klient w nagłówku CF-Connecting-IP —
+    # blokada dotyczy zgadującego, nie wszystkich przychodzących tunelem
+    for _ in range(5):
+        _req(port, fp, "GET", "/v1/info", "zgaduje", {"CF-Connecting-IP": "81.2.69.10"})
+    assert _req(port, fp, "GET", "/v1/info", KEY, {"CF-Connecting-IP": "81.2.69.10"}) == 403
+    assert _req(port, fp, "GET", "/v1/info", KEY, {"CF-Connecting-IP": "81.2.69.11"}) == 200
     assert public.status()["banned"] == 1
+    assert public.STATE["last_ip"] == "81.2.69.11"
 
 
 def test_plain_ports_refuse_internet_clients():
@@ -170,3 +173,21 @@ def test_known_router_is_tried_first(router, monkeypatch):
     assert gw.location == router
     public._remember_router(router)
     assert public._known_router() == router
+
+
+def test_tunnel_endpoint_is_listed_with_normal_certificate(monkeypatch):
+    monkeypatch.setattr(public, "TUNNEL", {"url": "", "state": "", "error": "", "checked": 0.0})
+    monkeypatch.setattr(public, "check_tunnel_later", lambda: None)
+    assert public.set_tunnel("emustart.emucloud.org/") == "https://emustart.emucloud.org"
+    assert public.tunnel_endpoint() == {"url": "https://emustart.emucloud.org", "kind": "tunnel", "tls": True, "ca": True}
+    with pytest.raises(ValueError):
+        public.set_tunnel("http://emustart.emucloud.org")
+    # klient: tunel ostatni w kolejności, zwykły certyfikat
+    monkeypatch.setitem(netsrc._learned, "store", {"fp": "a" * 64, "endpoints": [
+        {"url": "http://192.168.1.130:8740", "kind": "lan"}, {"url": "https://81.2.69.142:8742", "kind": "public", "tls": True},
+        public.tunnel_endpoint()]})
+    cands = netsrc.candidates({"server_url": "http://100.85.254.31:8740", "server_key": KEY})
+    order = sorted(cands, key=lambda sp: (netsrc._kind(sp), sp[0] == "https"))
+    assert order[-1] == ("https", "emustart.emucloud.org", 443) and netsrc._mode(order[-1]) == "ca"
+    assert order[0] == ("http", "192.168.1.130", 8740)
+    assert netsrc._mode(("https", "81.2.69.142", 8742)) == "pin"
