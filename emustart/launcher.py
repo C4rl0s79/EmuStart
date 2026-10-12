@@ -56,6 +56,7 @@ class Session:
         self.configure = configure        # sam emulator, bez gry — zmiana ustawień profilu
         self.takeover = takeover          # przejęcie profilu zablokowanego przez inne urządzenie
         self.locked_by = ""
+        self.notice = ""                  # komunikat dla gracza w trakcie gry (np. stan z telefonu)
         self._t_created = time.monotonic()
         self.game_id = game_id
         self.profile_id = profile_id
@@ -90,6 +91,7 @@ class Session:
         out = {"phase": self.phase, "message": self.message, "mode": self.mode, "source": self.source,
                "title": self.game.get("title", ""), "tags": self.game.get("tags", ""),
                "system": info["display"], "game_id": self.game_id, "locked_by": self.locked_by,
+               "notice": getattr(self, "notice", ""),
                "can_play_now": self.phase == "downloading" and not self.game.get("is_dir")
                and info["kind"] in ("disc", "mixed")}
         if self.prog:
@@ -397,6 +399,14 @@ class Session:
         save_names = self._profile_prepare(adapter)
         self._t_prof = time.monotonic() - t_prof
         try:
+            if adapter.family == "retroarch" and save_names:
+                # stany tej gry z telefonu tam, gdzie ten RetroArch ich szuka (ten sam rdzeń)
+                try:
+                    from emustart import rastates
+                    self.notice = rastates.present(self.cfg, profiles.get(self.profile_id), adapter,
+                                                   rastates.core_id(args), Path(rom))
+                except Exception:
+                    log.exception("stany z telefonu")
             adapter.keyboard_game = systems.info(g["es"])["plat"] in systems.COMPUTER_PLATS
             if adapter.family == "retroarch" and g["es"] in systems.WHD_SYSTEMS:
                 try:   # po podpięciu profilu — folder saves wskazuje już na właściwego gracza
@@ -455,6 +465,13 @@ class Session:
                 try:
                     if save_names:
                         self._resume_to_nas(g, started_at)
+                    if adapter.family == "retroarch" and save_names:
+                        try:          # stany tej gry → wspólne miejsce na serwerze (inne urządzenia)
+                            from emustart import rastates
+                            rastates.publish(self.cfg, profiles.get(self.profile_id), adapter,
+                                             rastates.core_id(args), Path(rom), started_at)
+                        except Exception:
+                            log.exception("stany na serwer")
                     self._profile_finish(adapter, save_names)
                     self._learn_states(g, adapter, started_at)
                     cache.enforce_limit(self.cfg, keep_ids=(g["id"],))

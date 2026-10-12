@@ -76,9 +76,11 @@ Zapisy z gry są **wspólne z komputerem**:
 - Profil gra na komputerze — telefon nie uruchomi gry na tym samym profilu (i odwrotnie).
 - Bez połączenia gra działa na zapisach z telefonu; wyślą się przy następnym
   połączeniu (Ustawienia → Zapisy gier → „Czekają na wysłanie”).
-- **Stany gry (savestate)** z telefonu też są na serwerze — w `states\android\<emulator>`
-  profilu, osobno od stanów z PC (różne wersje emulatorów często ich nie wczytują). Przed grą
-  trafiają do telefonu, po grze wracają na serwer; przetrwają reinstalację i zmianę telefonu.
+- **Stany gry (savestate)**: RetroArch — wspólne z komputerem (`states\shared\retroarch\<rdzeń>`),
+  niezależnie od ustawień RetroArcha na każdym urządzeniu (płasko, w folderze rdzenia, w folderze
+  gry): przed grą nowszy stan tej gry i tego rdzenia trafia tam, gdzie RetroArch go szuka.
+  Stany różnych rdzeni się nie wczytują — ustaw ten sam rdzeń na obu urządzeniach. ARMSX2 /
+  AetherSX2 — osobno (`states\android\<emulator>`), kopiowanie w menedżerze zapisów.
 
 **Foldery emulatorów.** EmuStart musi widzieć folder zapisów emulatora — w pamięci
 telefonu, nie w `Android/data` (tam Android nie wpuszcza innych aplikacji):

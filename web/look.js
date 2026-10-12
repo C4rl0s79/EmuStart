@@ -17,6 +17,10 @@ const BACKS = {   // nazwa → [kolor tła, poświata u góry]
 };
 
 const pct = (v) => `${Math.round(v)}%`;
+// telefon (body.phone): suwaki układu przeliczane na wymiary telefonu — `ph` daje zmienne CSS,
+// opis pokazuje procent wielkości domyślnej (vh z komputera nic nie mówi na niskim ekranie)
+const isPhone = () => document.body.classList.contains("phone");
+const rel = (v, def, base) => base * v / def;
 const vh = (v) => `${+v.toFixed(1)} vh`;
 const scale = (css) => (v) => [css, String(v / 100)];
 // k, etykieta, min, max, krok, domyślna, format, (v) → [zmienna CSS, wartość]
@@ -25,14 +29,20 @@ const LOOK_SPEC = [
   { k: "tlogo", t: "Logo tytułu na liście — wysokość", min: 50, max: 100, step: 2, def: 92, fmt: (v) => `${v}% wiersza`, css: scale("--tlogo-h") },
   { k: "tlogo_w", t: "Logo tytułu na liście — szerokość", min: 30, max: 95, step: 5, def: 75, fmt: (v) => `do ${v}%`, css: (v) => ["--tlogo-w", v + "%"] },
   { k: "syslogo", t: "Logo systemu w karuzeli", min: 50, max: 150, step: 5, def: 100, fmt: pct,
-    css: (v) => [["--car-h", `${34 * v / 100}%`], ["--car-w", `${26 * v / 100}vw`]] },
+    css: (v) => [["--car-h", `${34 * v / 100}%`], ["--car-w", `${26 * v / 100}vw`]],
+    ph: (v) => [["--car-h", `${Math.min(70, 50 * v / 100)}%`], ["--car-w", `${36 * v / 100}vw`]] },
   { k: "car_gap", t: "Odstęp między logo systemów", min: 14, max: 40, step: 1, def: 25, fmt: (v) => `${v} vw`, css: null },
-  { k: "listlogo", t: "Logo systemu i gry nad listą", min: 3, max: 14, step: 0.5, def: 6.5, fmt: vh, css: (v) => ["--listlogo-h", v + "vh"] },
+  { k: "listlogo", t: "Logo systemu i gry nad listą", min: 3, max: 14, step: 0.5, def: 6.5, fmt: vh, css: (v) => ["--listlogo-h", v + "vh"],
+    ph: (v) => ["--listlogo-h", `${Math.round(rel(v, 6.5, 42))}px`] },
   { head: "Lista i podgląd" },
-  { k: "row", t: "Wysokość wiersza listy", min: 3, max: 10, step: 0.2, def: 4.6, fmt: vh, css: (v) => ["--row", `max(28px, ${v}vh)`] },
-  { k: "list_w", t: "Szerokość listy gier", min: 25, max: 65, step: 1, def: 42, fmt: (v) => `${v}% ekranu`, css: (v) => ["--list-w", v + "%"] },
-  { k: "media_h", t: "Wysokość okładki i zrzutu", min: 20, max: 62, step: 1, def: 44, fmt: vh, css: (v) => ["--media-h", v + "vh"] },
-  { k: "setrow", t: "Wysokość wiersza w ustawieniach", min: 2.4, max: 8, step: 0.2, def: 4.6, fmt: vh, css: (v) => ["--setrow", `max(28px, ${v}vh)`] },
+  { k: "row", t: "Wysokość wiersza listy", min: 3, max: 10, step: 0.2, def: 4.6, fmt: vh, css: (v) => ["--row", `max(28px, ${v}vh)`],
+    ph: (v) => ["--row", `${Math.round(rel(v, 4.6, 36))}px`] },
+  { k: "list_w", t: "Szerokość listy gier", min: 25, max: 65, step: 1, def: 42, fmt: (v) => `${v}% ekranu`, css: (v) => ["--list-w", v + "%"],
+    ph: (v) => ["--list-w", `${rel(v, 42, 33).toFixed(1)}%`] },
+  { k: "media_h", t: "Wysokość okładki i zrzutu", min: 20, max: 62, step: 1, def: 44, fmt: vh, css: (v) => ["--media-h", v + "vh"],
+    ph: (v) => ["--ph-media", `${Math.min(80, rel(v, 44, 56)).toFixed(1)}%`] },
+  { k: "setrow", t: "Wysokość wiersza w ustawieniach", min: 2.4, max: 8, step: 0.2, def: 4.6, fmt: vh, css: (v) => ["--setrow", `max(28px, ${v}vh)`],
+    ph: (v) => ["--setrow", `${Math.round(rel(v, 4.6, 40))}px`] },
   { k: "desc_lines", t: "Liczba linii opisu gry", min: 3, max: 40, step: 1, def: 14, fmt: (v) => String(v), css: (v) => ["--desc-lines", String(v)] },
   { head: "Wielkość czcionek" },
   { k: "fs", t: "Cały interfejs", min: 70, max: 170, step: 5, def: 100, fmt: pct, css: scale("--fs-all") },
@@ -71,7 +81,7 @@ function applyLook(values, replace = false) {
     if (!it.css) continue;
     let v = lookVal(it.k);
     if (it.opts ? !it.opts.includes(v) : typeof v !== "number") v = it.def;
-    let pairs = it.css(v);
+    let pairs = (isPhone() && it.ph ? it.ph : it.css)(v);
     if (!Array.isArray(pairs[0])) pairs = [pairs];
     for (const [name, val] of pairs) root.setProperty(name, val);
   }
@@ -104,7 +114,7 @@ function renderLook() {
       val = `<span class="ch">◀</span>${r.swatch ? `<span class="sw" style="background:${esc(v)}"></span>` : ""}<b>${esc(r.fmt(v))}</b><span class="ch">▶</span>`;
     } else {
       const w = 100 * (v - r.min) / (r.max - r.min);
-      val = `<span class="track"><i style="width:${w.toFixed(1)}%"></i></span><b>${esc(r.fmt(v))}</b>`;
+      val = `<span class="track"><i style="width:${w.toFixed(1)}%"></i></span><b>${esc(isPhone() && r.ph ? pct(v / r.def * 100) : r.fmt(v))}</b>`;
     }
     const chg = !r.cfg && v !== r.def;
     return `<div class="lkrow${i === LK.idx ? " sel" : ""}${chg ? " chg" : ""}" data-i="${i}"><span class="lk">${esc(r.t)}</span><span class="lv">${val}</span></div>`;
