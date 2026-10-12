@@ -398,13 +398,14 @@ class Session:
         t_prof = time.monotonic()
         save_names = self._profile_prepare(adapter)
         self._t_prof = time.monotonic() - t_prof
+        ra_info: dict = {}           # stany RetroArcha z serwera na starcie (autozapis, konflikty)
         try:
             if adapter.family == "retroarch" and save_names:
                 # stany tej gry z telefonu tam, gdzie ten RetroArch ich szuka (ten sam rdzeń)
                 try:
                     from emustart import rastates
                     self.notice = rastates.present(self.cfg, profiles.get(self.profile_id), adapter,
-                                                   rastates.core_id(args), Path(rom))
+                                                   rastates.core_id(args), Path(rom), ra_info)
                 except Exception:
                     log.exception("stany z telefonu")
             adapter.keyboard_game = systems.info(g["es"])["plat"] in systems.COMPUTER_PLATS
@@ -429,7 +430,8 @@ class Session:
                     resume = None              # stan zapisał inny emulator — nie wczytamy go
                 if resume and resume["path"] and not Path(resume["path"]).is_file():
                     resume = None
-                extra = adapter.launch_args(self.run_dir, bool(resume), order)
+                # autozapis wspólny dla urządzeń (np. z telefonu) wczytuje się sam
+                extra = adapter.launch_args(self.run_dir, bool(resume) or bool(ra_info.get("autoload")), order)
                 if resume and resume["path"]:
                     extra += adapter.resume_args(Path(resume["path"]))
             cmd[1:1] = extra
@@ -469,7 +471,8 @@ class Session:
                         try:          # stany tej gry → wspólne miejsce na serwerze (inne urządzenia)
                             from emustart import rastates
                             rastates.publish(self.cfg, profiles.get(self.profile_id), adapter,
-                                             rastates.core_id(args), Path(rom), started_at)
+                                             rastates.core_id(args), Path(rom), started_at,
+                                             ra_info if "base" in ra_info else None)
                         except Exception:
                             log.exception("stany na serwer")
                     self._profile_finish(adapter, save_names)

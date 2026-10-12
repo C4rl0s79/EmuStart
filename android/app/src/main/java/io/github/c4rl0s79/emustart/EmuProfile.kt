@@ -28,6 +28,7 @@ class EmuProfile(private val server: Server, private val prefs: Prefs) {
         private val MACHINE = Regex("""^(.*_directory|.*_path|.*_dir|video_driver|audio_driver|audio_device|""" +
             """input_joypad_driver|input_driver|camera_driver|location_driver|menu_driver|libretro_.*)$""")
         private val SECRET = Regex("""^(cheevos_token|cheevos_password|.*_api_key|.*_auth_token|netplay_password|netplay_spectate_password)$""")
+        private val AUTOSTATE = setOf("savestate_auto_save", "savestate_auto_load")
         private val KEY = Regex("""^\s*([A-Za-z0-9_]+)\s*=""")
     }
 
@@ -63,7 +64,11 @@ class EmuProfile(private val server: Server, private val prefs: Prefs) {
                     }
                 }
             } catch (e: Exception) { Log.w(tag, "ustawienia RetroArcha z serwera: $e") }
-            val out = body.filter { val k = keyOf(it); k.isNotEmpty() && !k.startsWith("cheevos_") }.toMutableList()
+            val out = body.filter { val k = keyOf(it); k.isNotEmpty() && !k.startsWith("cheevos_") && k !in AUTOSTATE }
+                .toMutableList()
+            // autozapis wspólny dla urządzeń: zapis przy wyjściu, wczytanie przy starcie (jak na komputerze)
+            out += "savestate_auto_save = \"true\""
+            out += "savestate_auto_load = \"true\""
             val acc = account(profile)
             val keep = local.filter { keyOf(it).startsWith("cheevos_") }
             if (acc == null) out += keep                                      // bez wyboru — jak było

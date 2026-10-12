@@ -11,6 +11,12 @@ a każde urządzenie zgłasza swój układ w `.layouts.json` obok. Przed grą ur
 z serwera nowsze stany tej gry i tego rdzenia i kładzie je tam, gdzie jego RetroArch ich
 szuka; po grze zmienione wysyła z powrotem. Stany różnych rdzeni się nie wczytują —
 dlatego wszystko jest w folderach rdzeni.
+
+Autozapis (`.state.auto`) jest wspólny: gdy jest, RetroArch wczytuje go przy starcie gry
+(`present` → `info["autoload"]`). Po grze stan trafia na serwer tylko wtedy, gdy sesja
+wystartowała z wersji, która nadal jest na serwerze. Jeśli nie (wersja z serwera się nie
+pobrała, sesja ruszyła bez serwera albo inne urządzenie zapisało w międzyczasie), stan
+z tej sesji idzie do kopii jako konflikt i nie nadpisuje wspólnego.
 """
 
 from __future__ import annotations
@@ -29,6 +35,7 @@ log = logging.getLogger("emustart.rastates")
 SHARED = "states/shared/retroarch"
 LEGACY_PHONE = "states/android/retroarch"        # telefon przed 0.31.1
 LAYOUTS = ".layouts.json"
+CONFLICTS: list = []            # (profil, gra) z konfliktem w ostatniej sesji → komunikat przy następnej
 _STATE = re.compile(r"^(?P<stem>.+?)\.state(\d*)(\.auto)?(\.png)?$", re.I)
 _CORE_ARG = re.compile(r'-L\s+"?([^"]*?)([\w.+-]+?)_libretro\.(?:dll|so|dylib)"?', re.I)
 
@@ -108,30 +115,43 @@ def _register(fs, nas: str, adapter) -> None:
             log.info("układ stanów: %s", ex)
 
 
-def _candidates(fs, nas: str, cname: str, stem: str) -> list:
+def _candidates(fs, nas: str, cname: str, stem: str, base_out: dict | None = None) -> list:
     """[(ścieżka na serwerze, nazwa pliku, czas)] stanów tej gry i tego rdzenia — wspólne
-    i (przejściowo) ze starszych wersji aplikacji na telefon."""
+    i (przejściowo) ze starszych wersji aplikacji na telefon. `base_out` dostaje wersje
+    ze wspólnego miejsca: {nazwa: (rozmiar, czas)}."""
     out = {}
     for base in (SHARED, LEGACY_PHONE):
         try:
             files = fs.scan(f"{nas}/{base}")
         except OSError:
             continue
-        for rel, (_size, mtime) in files.items():
+        for rel, (size, mtime) in files.items():
             if "/" not in rel or norm_core(rel.split("/", 1)[0]) != norm_core(cname):
                 continue
             name = rel.rsplit("/", 1)[-1]
             m = _STATE.match(name)
             if not m or norm(m.group("stem")) != stem:
                 continue
+            if base == SHARED and base_out is not None:
+                base_out[name] = (size, mtime)
             if name not in out or mtime > out[name][2]:
                 out[name] = (f"{base}/{rel}", name, mtime)
     return list(out.values())
 
 
-def present(cfg: dict, prof: dict, adapter, core: str, content: Path) -> str:
+def _is_auto(name: str) -> bool:
+    m = _STATE.match(name)
+    return bool(m and m.group(3))
+
+
+def present(cfg: dict, prof: dict, adapter, core: str, content: Path, info: dict | None = None) -> str:
     """Przed grą: nowsze stany tej gry (ten rdzeń) z serwera → folder, w którym ten
-    RetroArch ich szuka. Zwraca komunikat dla gracza ('' = nic do zgłoszenia)."""
+    RetroArch ich szuka. Zwraca komunikat dla gracza ('' = nic do zgłoszenia).
+
+    `info` (wypełniane dla `publish`): "base" — stany we wspólnym miejscu na starcie
+    {nazwa: (rozmiar, czas)}, "stale" — nazwy, których nie udało się pobrać,
+    "autoload" — jest aktualny autozapis do wczytania przy starcie."""
+    info = {} if info is None else info
     if not prof or not core:
         return ""
     fs = nasfs.backend(cfg)
@@ -140,14 +160,18 @@ def present(cfg: dict, prof: dict, adapter, core: str, content: Path) -> str:
     stem = norm(content.stem)
     cname = core_name(adapter.home, core)
     dst_dir = state_dir(adapter, core, content)
+    base: dict = {}
+    cands = _candidates(fs, nas, cname, stem, base)
+    info["base"], info["stale"] = base, set()
     n = 0
-    for rel, name, mtime in _candidates(fs, nas, cname, stem):
+    for rel, name, mtime in cands:
         dst = dst_dir / name
         try:
             if dst.is_file() and dst.stat().st_mtime >= mtime - 2:
                 continue                           # tutaj ten sam albo nowszy
             tmp = dst.with_name(dst.name + ".z-serwera")
             if not fs.get_file(f"{nas}/{rel}", tmp):
+                info["stale"].add(name)
                 continue
             if dst.is_file() and dst.read_bytes() == tmp.read_bytes():
                 tmp.unlink(missing_ok=True)
@@ -161,15 +185,36 @@ def present(cfg: dict, prof: dict, adapter, core: str, content: Path) -> str:
             if not name.lower().endswith(".png"):
                 n += 1
         except OSError as ex:
+            info["stale"].add(name)
             log.warning("stan %s: %s", name, ex)
+    # autozapis tej gry na miejscu i aktualny → RetroArch wczyta go przy starcie
+    autos = [f.name for f in dst_dir.glob("*.state.auto")
+             if norm(_STATE.match(f.name).group("stem")) == stem] if dst_dir.is_dir() else []
+    info["autoload"] = bool(autos) and not any(a in info["stale"] for a in autos)
+    pending = _take_conflict(nas, stem)
+    if info["stale"]:
+        return ("Nie udało się pobrać stanu tej gry z serwera — wersja z serwera zostaje, "
+                "stan z tej sesji trafi do kopii.")
     if n:
         log.info("stany wspólne (%s): %d → %s", cname, n, dst_dir)
-        return f"Stan gry z innego urządzenia gotowy do wczytania ({cname})."
+        what = "Autozapis" if info["autoload"] and any(_is_auto(c[1]) for c in cands) else "Stan gry"
+        return pending or f"{what} z innego urządzenia gotowy do wczytania ({cname})."
+    if pending:
+        return pending
     other = _other_cores(fs, nas, cname, stem)
-    if other and not _candidates(fs, nas, cname, stem):
+    if other and not cands:
         return (f"Stan tej gry z innego urządzenia jest z rdzenia {', '.join(sorted(other))}, a tu gra "
                 f"rdzeń {cname} — stany różnych rdzeni się nie wczytują.")
     return ""
+
+
+def _take_conflict(nas: str, stem: str) -> str:
+    """Komunikat o konflikcie z poprzedniej sesji tej gry (jednorazowo)."""
+    hit = [c for c in CONFLICTS if c == (nas, stem)]
+    for c in hit:
+        CONFLICTS.remove(c)
+    return ("Ostatnio stan z tego komputera nie nadpisał nowszego z innego urządzenia — "
+            "leży w kopii zapasowej (konflikt).") if hit else ""
 
 
 def _other_cores(fs, nas: str, cname: str, stem: str) -> set:
@@ -188,8 +233,12 @@ def _other_cores(fs, nas: str, cname: str, stem: str) -> set:
     return out
 
 
-def publish(cfg: dict, prof: dict, adapter, core: str, content: Path, since: float) -> int:
-    """Po grze: stany tej gry zmienione w tej sesji → wspólne miejsce na serwerze."""
+def publish(cfg: dict, prof: dict, adapter, core: str, content: Path, since: float,
+            info: dict | None = None) -> int:
+    """Po grze: stany tej gry zmienione w tej sesji → wspólne miejsce na serwerze.
+
+    `info` z `present` (None = sesja bez stanów z serwera). Stan z tej sesji nie nadpisuje
+    wersji z serwera innej niż ta ze startu gry — idzie do kopii jako konflikt."""
     if not prof or not core:
         return 0
     fs = nasfs.backend(cfg)
@@ -215,6 +264,16 @@ def publish(cfg: dict, prof: dict, adapter, core: str, content: Path, since: flo
             continue                               # na serwerze już ten
         if st.st_mtime < since - 2 and have and have[1] >= st.st_mtime:
             continue                               # nie z tej sesji, a na serwerze nowszy
+        if have and _conflict(info, f.name, have):
+            try:
+                fs.put_file(f, f"{nas}/_backup/{stamp}/konflikt/{SHARED}/{rel}")
+                log.warning("stan %s: na serwerze inna wersja niż na starcie gry — z tej sesji "
+                            "do kopii (konflikt), wspólny bez zmian", f.name)
+                if (nas, stem) not in CONFLICTS:
+                    CONFLICTS.append((nas, stem))
+            except OSError as ex:
+                log.warning("stan %s do kopii: %s", f.name, ex)
+            continue
         try:
             fs.put_file(f, f"{nas}/{SHARED}/{rel}",
                         backup=f"{nas}/_backup/{stamp}/{SHARED}/{rel}" if have else "")
@@ -225,3 +284,17 @@ def publish(cfg: dict, prof: dict, adapter, core: str, content: Path, since: flo
     if n:
         log.info("stany na serwer (%s): %d", cname, n)
     return n
+
+
+def _conflict(info: dict | None, name: str, have: tuple) -> bool:
+    """Wersja na serwerze (`have`) nie jest tą, od której sesja wystartowała."""
+    if info is None or "base" not in info:
+        # start bez serwera: autozapisu z serwera nie było jak wczytać — nie nadpisujemy go
+        return _is_auto(name[:-4] if name.lower().endswith(".png") else name)
+    main = name[:-4] if name.lower().endswith(".png") else name
+    if main in info.get("stale", ()):
+        return True
+    b = info["base"].get(name)
+    if b is None:
+        return True                                # pojawił się w trakcie gry (inne urządzenie)
+    return not (b[0] == have[0] and abs(b[1] - have[1]) <= 2)
