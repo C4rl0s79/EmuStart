@@ -272,7 +272,7 @@ def test_pc_pushes_missing_game_art_to_server(srv, tmp_path, monkeypatch):
     # telefon dostaje logo w liście gier (grafiki przez serwer)
     assert artsync.server_put("snes", "../zle.logo.png", png)[0] == 400
     assert artsync.server_put("snes", "Gra (USA).logo.png", b"nie png")[0] == 400
-    webp = b"RIFF   WEBPVP8 " + b"x" * 20                # logo WebP zapisane jako .png
+    webp = b"RIFF\x10\x00\x00\x00WEBPVP8 " + b"x" * 20                # logo WebP zapisane jako .png
     assert artsync.server_put("snes", "Gra (USA).box.png", webp)[0] == 200
 
 
