@@ -166,3 +166,21 @@ def test_profiles_move_into_server_folder_after_confirmation(tmp_path, monkeypat
     assert (share / "Jezus/save/pcsx2/memcards/Mcd001.ps2").is_file()       # stary folder zostaje
     assert (share / ".emustart-moved").is_file()
     assert not srvadmin.profiles_migrate(A(), {"confirm": True})["ok"]        # już przeniesione
+
+
+def test_pairing_qr_is_svg_with_the_pairing_link():
+    pytest.importorskip("segno")
+    from emustart import qr
+    code = srvadmin.pair_code(None)
+    assert code["svg"].lstrip().startswith("<svg") and "path" in code["svg"]
+    assert qr.svg("emustart://pair?u=http://100.85.254.31:8740&c=ABCD2345").count("<svg") == 1
+
+
+def test_panel_works_without_segno(monkeypatch):
+    import builtins
+    from emustart import qr
+    real = builtins.__import__
+    monkeypatch.setattr(builtins, "__import__",
+                        lambda n, *a, **k: (_ for _ in ()).throw(ImportError(n)) if n == "segno" else real(n, *a, **k))
+    assert qr.svg("x") == ""                                   # bez biblioteki: sam kod, bez obrazka
+    assert srvadmin.pair_code(None)["code"]

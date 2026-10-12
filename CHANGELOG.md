@@ -8,6 +8,15 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.32.1] — 2026-10-12
+
+Zakres: `requirements.txt`, `emustart.spec`, testy. Bez zmian w działaniu poza obrazkiem QR.
+
+### Dodane
+- **Kod QR parowania w panelu serwera** — biblioteka `segno` (czysty Python, BSD) wchodzi do
+  `EmuStart.exe`, więc komputer z serwerem nie potrzebuje Pythona ani instalowania czegokolwiek.
+  Gdyby jej zabrakło (uruchamianie ze źródeł), panel pokazuje sam kod do wpisania.
+
 ## [0.32.0] — 2026-10-12
 
 EmuStart 2.0, etap 1 ([koncepcja](docs/koncepcja-2.0.md)). Zakres: `emustart/devices.py`
