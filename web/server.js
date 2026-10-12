@@ -5,8 +5,9 @@
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 
-async function admin(name) {
-  const r = await fetch("/admin/" + name, { method: "POST", headers: { "X-EmuStart": "1" } });
+async function admin(name, args) {
+  const r = await fetch("/admin/" + name, { method: "POST", headers: { "X-EmuStart": "1" },
+                                            body: args ? JSON.stringify(args) : undefined });
   if (!r.ok) throw new Error("HTTP " + r.status);
   return r.json();
 }
@@ -153,5 +154,90 @@ async function updTick() {
   if (close) setTimeout(() => close(st.version), 300);
 }
 
+/* ── sparowane urządzenia i parowanie kodem QR (emustart/devices.py) ── */
+const KIND = { pc: "komputer", phone: "telefon" };
+async function refreshDevices() {
+  const r = await admin("devices").catch(() => null);
+  if (!r) return;
+  $("devices").innerHTML = r.devices.length ? r.devices.map((d) =>
+    `<tr class="${d.revoked ? "off" : ""}"><td>${esc(d.name)}<div class="muted">${esc(d.ip || "")}</div></td>` +
+    `<td>${esc(KIND[d.class] || d.class)}</td><td>${esc(d.version || "—")}</td>` +
+    `<td class="n">${d.revoked ? "unieważnione" : ago(d.last_seen)}</td>` +
+    `<td class="n">${d.revoked ? "" : `<button data-ren="${esc(d.id)}">Nazwa</button> <button class="danger" data-rev="${esc(d.id)}">Unieważnij</button>`}</td></tr>`).join("")
+    : `<tr><td colspan="5" class="muted">Brak sparowanych urządzeń — „Dodaj urządzenie”. Urządzenia ze wspólnym kluczem serwera działają dalej.</td></tr>`;
+  $("devices").querySelectorAll("[data-rev]").forEach((b) => b.addEventListener("click", async () => {
+    if (!confirm("Unieważnić to urządzenie? Straci dostęp do serwera, dopóki nie sparujesz go ponownie.")) return;
+    await admin("device_revoke", { id: b.dataset.rev }).catch(() => null);
+    refreshDevices();
+  }));
+  $("devices").querySelectorAll("[data-ren]").forEach((b) => b.addEventListener("click", async () => {
+    const name = prompt("Nowa nazwa urządzenia:");
+    if (!name) return;
+    await admin("device_rename", { id: b.dataset.ren, name }).catch(() => null);
+    refreshDevices();
+  }));
+}
+let pairTimer = null;
+$("bPair").addEventListener("click", async () => {
+  const r = await admin("pair_code").catch(() => null);
+  if (!r?.ok) return msg("Serwer nie odpowiada.");
+  $("pairQr").innerHTML = r.svg || "";
+  $("pairQr").hidden = !r.svg;
+  $("pairCode").textContent = r.pretty;
+  $("pairUrl").textContent = r.url;
+  $("pairBox").hidden = false;
+  clearInterval(pairTimer);
+  const tick = () => {
+    const left = Math.max(0, r.expires - Date.now() / 1000);
+    $("pairLeft").textContent = left ? `jeszcze ${Math.ceil(left / 60)} min` : "— wygasł, wygeneruj nowy";
+    if (!left) { clearInterval(pairTimer); $("pairQr").innerHTML = ""; }
+    refreshDevices();
+  };
+  tick();
+  pairTimer = setInterval(tick, 3000);
+});
+
+/* ── przeniesienie profili z udziału do katalogu serwera (2.0) ── */
+let migrPoll = null;
+async function migrTick() {
+  const st = await admin("profiles_migrate_status").catch(() => null);
+  if (!st) return;
+  $("profRoot").textContent = "Teraz: " + (st.root || "—");
+  const inServer = /[\\/]server[\\/]profiles$/i.test(st.root || "");
+  $("bMigrate").hidden = inServer;
+  if (!st.phase) return;
+  $("migrBarBox").hidden = st.phase === "done";
+  $("migrBar").style.width = st.total ? (100 * st.done / st.total).toFixed(0) + "%" : "5%";
+  if (st.phase === "copying") $("migrText").textContent = `Kopiuję ${st.files} plików: ${fmtBytes(st.done)} / ${fmtBytes(st.total)}`;
+  else if (st.phase === "verifying") $("migrText").textContent = `Sprawdzam kopie (SHA-1): ${fmtBytes(st.done)} / ${fmtBytes(st.total)}`;
+  else {
+    clearInterval(migrPoll); migrPoll = null;
+    $("bMigrate").disabled = false;
+    $("migrText").textContent = st.phase === "done"
+      ? "Gotowe — profile są w katalogu serwera. Stary folder na udziale został nietknięty (zapas); możesz go usunąć, gdy wszystko działa."
+      : "Nie udało się: " + st.error + " — serwer dalej używa starego folderu.";
+  }
+}
+$("bMigrate").addEventListener("click", async () => {
+  const plan = await admin("profiles_migrate", {}).catch(() => null);
+  if (!plan?.ok) return ($("migrText").textContent = plan?.reason || "Serwer nie odpowiada.");
+  if (!confirm(`Przenieść profile do katalogu serwera?
+
+Z: ${plan.src}
+Do: ${plan.dst}
+` +
+               `${plan.files} plików, ${fmtBytes(plan.size)}.
+
+Każdy plik zostanie skopiowany i sprawdzony; ` +
+               `dopiero potem serwer przełączy się na nowy folder. Stary folder zostaje nietknięty.`)) return;
+  const r = await admin("profiles_migrate", { confirm: true }).catch(() => null);
+  if (!r?.ok) return ($("migrText").textContent = r?.reason || "Serwer nie odpowiada.");
+  $("bMigrate").disabled = true;
+  migrPoll = setInterval(migrTick, 700);
+});
+
 refresh();
+refreshDevices();
+migrTick();
 setInterval(refresh, 2000);
+setInterval(refreshDevices, 15000);

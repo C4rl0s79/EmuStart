@@ -70,5 +70,7 @@ val copyWeb by tasks.registering(Copy::class) {
 tasks.named("preBuild") { dependsOn(copyWeb) }
 
 dependencies {
-    implementation("androidx.core:core-ktx:1.13.1")      // FileProvider (gry dla emulatorów)
+    implementation("androidx.core:core-ktx:1.13.1")
+    // parowanie z serwerem: skan kodu QR (skaner Google Play — bez uprawnienia do aparatu)
+    implementation("com.google.android.gms:play-services-code-scanner:16.1.0")      // FileProvider (gry dla emulatorów)
 }

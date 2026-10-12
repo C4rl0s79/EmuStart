@@ -79,12 +79,36 @@
     <dl id="info"></dl>
   </section>
   <section>
+    <h2>Folder profili (zapisy, stany, ustawienia graczy)</h2>
+    <div id="profRoot" class="muted"></div>
+    <div class="actions" style="margin-top:8px"><button id="bMigrate">Przenieś profile do katalogu serwera</button></div>
+    <div id="migrText" class="muted" style="margin-top:8px"></div>
+    <div id="migrBarBox" class="bar" hidden><div id="migrBar"></div></div>
+  </section>
+  <section>
+    <h2>Sparowane urządzenia</h2>
+    <div class="actions"><button id="bPair" class="primary">Dodaj urządzenie</button></div>
+    <div id="pairBox" hidden style="margin-top:10px">
+      <div style="display:flex;gap:18px;align-items:center;flex-wrap:wrap">
+        <div id="pairQr" style="background:#fff;border-radius:8px;line-height:0"></div>
+        <div>
+          <div class="muted">Telefon: EmuStart → Ustawienia → <b>Połącz z serwerem</b> → zeskanuj kod.<br>
+            Komputer: Ustawienia → Serwer EmuStart → <b>Połącz kodem</b> → wpisz kod:</div>
+          <div style="font-size:30px;letter-spacing:.12em;margin:8px 0"><code id="pairCode"></code></div>
+          <div class="muted">Adres serwera: <code id="pairUrl"></code> · kod ważny <span id="pairLeft"></span></div>
+        </div>
+      </div>
+    </div>
+    <table style="margin-top:10px"><thead><tr><th>Urządzenie</th><th>Rodzaj</th><th>Wersja</th><th class="n">Ostatnio</th><th></th></tr></thead>
+      <tbody id="devices"></tbody></table>
+  </section>
+  <section>
     <h2>Pobierane gry</h2>
     <table><thead><tr><th>Gra</th><th>Urządzenie</th><th class="n">Wysłano</th><th class="n">Ostatnio</th></tr></thead>
       <tbody id="transfers"></tbody></table>
   </section>
   <section>
-    <h2>Urządzenia</h2>
+    <h2>Połączenia od startu serwera</h2>
     <table><thead><tr><th>Urządzenie</th><th class="n">Zapytania</th><th class="n">Wysłano</th><th class="n">Ostatnio</th></tr></thead>
       <tbody id="clients"></tbody></table>
   </section>

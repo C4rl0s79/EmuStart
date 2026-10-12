@@ -68,6 +68,37 @@ Po aktualizacji do 0.25.12 uruchom ponownie `EmuStart.exe --install-server` (jak
 administrator): zadanie dostaje brak limitu czasu pracy (schtasks domyślnie zatrzymuje
 zadanie po 72 h) i ponowne uruchomienie po awarii.
 
+## Urządzenia i parowanie (0.32)
+
+Każdy komputer i telefon ma **własny klucz** — zamiast przepisywać wspólny klucz serwera:
+
+1. Panel serwera → **Sparowane urządzenia** → **Dodaj urządzenie** — kod jednorazowy (ważny
+   10 minut) jako tekst i kod QR.
+2. **Telefon**: Ustawienia → **Połącz z serwerem (kod QR)** → zeskanuj kod (skaner Google
+   Play, bez uprawnienia do aparatu w EmuStart). Bez Google Play: **Połącz kodem** i wpisz kod.
+3. **Komputer**: Ustawienia → Serwer EmuStart → **Połącz kodem** → wpisz kod (albo wklej link
+   `emustart://pair?…` z kodu QR).
+
+Panel pokazuje urządzenia z rodzajem, wersją EmuStart i ostatnim kontaktem; **Unieważnij**
+odcina tylko to jedno urządzenie, **Nazwa** zmienia nazwę. Serwer trzyma tylko skróty kluczy
+(SHA-256). Wspólny klucz serwera działa dalej — dla urządzeń sprzed parowania.
+
+## Katalog serwera (0.32)
+
+Serwer trzyma wszystko poza grami w podkatalogu `server\` obok `EmuStart.exe`: ustawienia
+(`config.json`), bibliotekę, grafiki, rejestr urządzeń, a po przeniesieniu — także profile.
+Skopiowanie katalogu programu przenosi serwer na inny komputer. Przy pierwszym starcie
+serwera 0.32 `config.json` i `data\` z wcześniejszych wersji trafiają do `server\` same.
+Zwykły EmuStart uruchomiony na komputerze z serwerem pracuje na tych samych danych.
+
+**Profile w katalogu serwera:** panel → **Folder profili** → **Przenieś profile do katalogu
+serwera**. Najpierw plan (ile plików, ile danych), po potwierdzeniu kopiowanie w tle — każdy
+plik sprawdzony (rozmiar i SHA-1), dopiero potem serwer przełącza się na nowy folder. Stary
+folder na udziale zostaje nietknięty (z plikiem `.emustart-moved`) — jako zapas.
+
+Klienci z ustawionym serwerem zapisują profile **tylko przez serwer** (bez SMB); gdy serwer
+chwilowo nie odpowiada — tryb offline, zapisy czekają w kolejce.
+
 ## Administracja
 
 Na komputerze z serwerem pełny interfejs EmuStart jest dostępny w przeglądarce:
@@ -82,6 +113,7 @@ Każde zapytanie z kluczem: nagłówek `Authorization: Bearer <klucz>` albo `?k=
 
 | Adres | Zawartość |
 |---|---|
+| `POST /v1/pair` | parowanie: `{code, name, class, version}` → klucz urządzenia (jednorazowy kod z panelu) |
 | `GET /v1/info` | nazwa komputera, wersja, obsługiwane funkcje (`features`) |
 | `GET /v1/find?es=<system>&rel=<ścieżka>` | gra po systemie i ścieżce względnej: `id` i pliki (EmuStart na Windows) |
 | `GET /v1/systems` | systemy (`es`, `display`, `games`, `logo`, `kind`) |

@@ -141,12 +141,18 @@ def endpoint(cfg: dict) -> tuple[str, int, str] | None:
     return u.hostname, u.port or 8740, key
 
 
+def auth_headers(key: str) -> dict:
+    """Klucz i wersja EmuStart (panel serwera pokazuje wersje sparowanych urządzeń)."""
+    from emustart import __version__
+    return {"Authorization": f"Bearer {key}", "X-EmuStart-Version": __version__}
+
+
 def _request(ep, path: str, timeout: float = 5) -> tuple[int, bytes, float]:
     host, port, key = ep
     t = time.monotonic()
     c = http.client.HTTPConnection(host, port, timeout=timeout)
     try:
-        c.request("GET", path, headers={"Authorization": f"Bearer {key}"})
+        c.request("GET", path, headers=auth_headers(key))
         r = c.getresponse()
         return r.status, r.read(), time.monotonic() - t
     finally:
@@ -257,6 +263,39 @@ def push_roots(cfg: dict) -> list:
     if d.get("missing"):
         log.info("serwer nie widzi folderów: %s", ", ".join(d["missing"]))
     return d.get("added") or []
+
+
+def parse_pair(text: str, url: str = "") -> tuple[str, str]:
+    """(adres serwera, kod) z wpisanego kodu albo z linku z kodu QR
+    (emustart://pair?u=http://100.x.x.x:8740&c=ABCD1234)."""
+    text = (text or "").strip()
+    if text.lower().startswith("emustart://pair"):
+        q = urllib.parse.parse_qs(urllib.parse.urlsplit(text).query)
+        return (q.get("u") or [url])[0], (q.get("c") or [""])[0]
+    return url, text
+
+
+def pair(url: str, code: str, name: str, cls: str = "pc") -> dict:
+    """Parowanie z serwerem jednorazowym kodem → {"ok", "key", "url", "server"} albo {"ok": False, "reason"}."""
+    from emustart import __version__
+    if "://" not in url:
+        url = "http://" + url
+    u = urllib.parse.urlsplit(url)
+    if not u.hostname:
+        return {"ok": False, "reason": "Podaj adres serwera (np. http://100.85.254.31:8740)."}
+    body = json.dumps({"code": code, "name": name, "class": cls, "version": __version__}).encode("utf-8")
+    c = http.client.HTTPConnection(u.hostname, u.port or 8740, timeout=15)
+    try:
+        c.request("POST", "/v1/pair", body=body, headers={"Content-Type": "application/json"})
+        r = c.getresponse()
+        d = json.loads(r.read() or b"{}")
+    except (OSError, http.client.HTTPException, ValueError) as ex:
+        return {"ok": False, "reason": f"Brak połączenia z {u.hostname}:{u.port or 8740} ({ex})"}
+    finally:
+        c.close()
+    if not d.get("ok"):
+        return {"ok": False, "reason": d.get("reason") or d.get("error") or "Serwer odrzucił kod."}
+    return {"ok": True, "key": d["key"], "url": f"http://{u.hostname}:{u.port or 8740}", "server": d.get("server", "")}
 
 
 def on_lan(cfg: dict) -> bool:

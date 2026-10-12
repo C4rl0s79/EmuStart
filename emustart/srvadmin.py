@@ -252,14 +252,20 @@ ACTIONS = {"status": status, "rescan": rescan, "restart": restart, "key": key, "
 def handle(handler, api) -> None:
     """POST /admin/<akcja> (server.py sprawdził już Host i X-EmuStart)."""
     name = handler.path.split("?")[0].removeprefix("/admin/")
-    fn = ACTIONS.get(name) if ENABLED else None
+    fn = (ACTIONS.get(name) or ACTIONS_ARGS.get(name)) if ENABLED else None
     n = int(handler.headers.get("Content-Length") or 0)
-    if n:
-        handler.rfile.read(min(n, 1 << 16))
+    raw = handler.rfile.read(min(n, 1 << 16)) if n else b""
     if not fn:
         return handler.send_error(404)
     try:
-        data = fn(api)
+        if name in ACTIONS_ARGS:
+            try:
+                args = json.loads(raw or b"{}")
+            except ValueError:
+                args = {}
+            data = fn(api, args if isinstance(args, dict) else {})
+        else:
+            data = fn(api)
     except Exception as ex:
         log.exception("panel %s", name)
         data = {"ok": False, "reason": str(ex)}
@@ -270,6 +276,104 @@ def handle(handler, api) -> None:
     handler.send_header("Cache-Control", "no-store")
     handler.end_headers()
     handler.wfile.write(body)
+
+
+# ── urządzenia (EmuStart 2.0: klucz na urządzenie, parowanie kodem QR) ──
+def devices_list(_api) -> dict:
+    from emustart import devices
+    return {"ok": True, "devices": devices.listing(), "now": time.time()}
+
+
+def pair_code(api) -> dict:
+    """Nowy jednorazowy kod parowania + zawartość kodu QR (adres Tailscale serwera)."""
+    from emustart import devices, qr, remote
+    port = int((api._cfg if api else {}).get("server_port") or remote.DEFAULT_PORT)
+    addrs = _addresses()
+    base = f"http://{addrs[0]}:{port}" if addrs else f"http://{socket.gethostname()}:{port}"
+    c = devices.new_code()
+    uri = devices.pair_uri(base, c["code"])
+    return {"ok": True, **c, "url": base, "uri": uri, "svg": qr.svg(uri)}
+
+
+def device_revoke(_api, args: dict) -> dict:
+    from emustart import devices
+    return {"ok": devices.revoke(str(args.get("id", "")))}
+
+
+def device_rename(_api, args: dict) -> dict:
+    from emustart import devices
+    return {"ok": devices.rename(str(args.get("id", "")), str(args.get("name", "")))}
+
+
+# ── przeniesienie profili z udziału NAS do katalogu serwera (2.0, etap 1) ──
+_migr: dict = {"phase": "", "done": 0, "total": 0, "files": 0, "error": ""}
+
+
+def profiles_migrate(api, args: dict) -> dict:
+    """Bez confirm — plan (ile plików, ile danych); z confirm — kopiowanie w tle: każdy plik
+    sprawdzony (rozmiar + SHA-1), dopiero potem serwer przełącza się na nowy folder. Stary
+    folder zostaje nietknięty (z plikiem .emustart-moved) — jako zapas."""
+    from emustart import nasfs, remote
+    src, dst = remote.NAS_ROOT, paths.SERVER / "profiles"
+    if not src:
+        return {"ok": False, "reason": "Serwer nie ma folderu profili."}
+    if src.resolve() == dst.resolve():
+        return {"ok": False, "reason": "Profile są już w katalogu serwera.", "done": True}
+    files = {k: v for k, v in nasfs.scan_dir(src).items() if k != nasfs.ROOT_MARK}
+    size = sum(v[0] for v in files.values())
+    if not args.get("confirm"):
+        return {"ok": True, "src": str(src), "dst": str(dst), "files": len(files), "size": size}
+    if _migr["phase"] in ("copying", "verifying"):
+        return {"ok": False, "reason": "Przenoszenie już trwa."}
+    _migr.update(phase="copying", done=0, total=size, files=len(files), error="")
+    threading.Thread(target=_migrate_run, args=(api, src, dst, files), daemon=True, name="profile-2.0").start()
+    return {"ok": True, "started": True}
+
+
+def _migrate_run(api, src, dst, files: dict) -> None:
+    import hashlib
+    import shutil
+    from emustart import config, nasfs, remote
+
+    def sha(p):
+        h = hashlib.sha1()
+        with open(p, "rb") as f:
+            for b in iter(lambda: f.read(1 << 20), b""):
+                h.update(b)
+        return h.hexdigest()
+    try:
+        for rel in files:
+            d = dst / rel
+            d.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src / rel, d)
+            _migr["done"] += files[rel][0]
+        _migr.update(phase="verifying", done=0)
+        for rel, (size, _mt) in files.items():
+            a, b = src / rel, dst / rel
+            if b.stat().st_size != size or sha(a) != sha(b):
+                raise OSError(f"kopia różni się od oryginału: {rel}")
+            _migr["done"] += size
+        new_id = nasfs.root_id(dst, create=True)
+        cfg = api._cfg
+        cfg["profiles_nas"] = str(dst)
+        config.save(cfg)
+        (src / ".emustart-moved").write_text(json.dumps({"to": str(dst), "time": time.time()}), encoding="utf-8")
+        remote.NAS_ROOT, remote.NAS_ID = dst, new_id
+        _migr["phase"] = "done"
+        log.info("profile przeniesione: %s → %s (%d plików)", src, dst, len(files))
+    except Exception as ex:
+        log.exception("przenoszenie profili")
+        _migr.update(phase="error", error=str(ex))
+
+
+def profiles_migrate_status(_api) -> dict:
+    from emustart import remote
+    return {**_migr, "root": str(remote.NAS_ROOT or "")}
+
+
+ACTIONS_ARGS = {"device_revoke": device_revoke, "device_rename": device_rename,
+                "profiles_migrate": profiles_migrate}
+ACTIONS.update({"devices": devices_list, "pair_code": pair_code, "profiles_migrate_status": profiles_migrate_status})
 
 
 # ── po stronie panelu (osobny proces) ──

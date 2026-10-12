@@ -258,7 +258,8 @@ class RemoteFs:
     def _req(self, method: str, path: str, q: dict, body: bytes | None = None,
              headers: dict | None = None) -> tuple[int, bytes, dict]:
         url = (path if path.startswith("/v1/") else f"/v1/nas/{path}") + "?" + urllib.parse.urlencode(q)
-        h = {"Authorization": f"Bearer {self.key}", **(headers or {})}
+        from emustart import netsrc
+        h = {**netsrc.auth_headers(self.key), **(headers or {})}
         prof = (q.get("profile") or q.get("p") or "").replace("\\", "/").split("/")[0].lower()
         if prof and TOKENS.get(prof):
             h["X-Profile-Token"] = TOKENS[prof]
@@ -400,7 +401,9 @@ _choice_lock = threading.Lock()
 
 
 def backend(cfg: dict):
-    """RemoteFs, gdy serwer EmuStart udostępnia ten sam folder profili; inaczej SmbFs."""
+    """Folder profili. Z ustawionym serwerem EmuStart — tylko przez serwer (2.0: klienci bez
+    SMB); serwer chwilowo niedostępny = tryb offline (zapisy czekają w kolejce), nie SMB.
+    SMB tylko bez serwera albo ze starszym serwerem, który nie udostępnia folderu profili."""
     from emustart import netsrc
     from emustart import profiles
     smb = SmbFs(profiles.nas_root(cfg))
@@ -408,25 +411,13 @@ def backend(cfg: dict):
     if not ep or cfg.get("server_profiles", True) is False:
         return smb
     info = netsrc.info(cfg)
-    if not info.get("ok") or "nas" not in info.get("features", []) or not info.get("nas_id"):
-        return smb
-    key = (ep, info["nas_id"], str(smb.root))
+    if info.get("ok") and "nas" not in info.get("features", []):
+        return smb                             # serwer sprzed 0.24 — folder profili tylko przez SMB
     with _choice_lock:
-        hit = _choice.get(key)
-        if hit and time.monotonic() - hit[0] < 600:
-            return hit[1]
-    # ten sam folder? Serwer zakłada znacznik w swoim folderze profili — gdy SMB jest
-    # dostępny, ten sam znacznik musi być widoczny przez SMB (inaczej dwa różne foldery)
-    reachable = smb.root.is_dir()
-    mine = root_id(smb.root, create=False) if reachable else ""
-    if reachable and mine != info["nas_id"]:
-        log.warning("folder profili serwera (%s) to nie %s — synchronizacja przez SMB", info.get("name"), smb.root)
-        fs = smb
-    else:
-        fs = RemoteFs(*ep)
-    with _choice_lock:
-        _choice[key] = (time.monotonic(), fs)
-    return fs
+        hit = _choice.get(ep)
+        if hit is None:
+            hit = _choice[ep] = RemoteFs(*ep)
+    return hit
 
 
 def reset() -> None:

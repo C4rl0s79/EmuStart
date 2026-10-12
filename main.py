@@ -65,14 +65,18 @@ def main() -> None:
     if "--server-panel" in sys.argv:
         _logging("panel.log")             # osobny log — serwer pisze do emustart.log
         _log_unblocked()
+        _use_server_layout(migrate=False)
         return _server_panel()
     _logging()
     _log_unblocked()
     _log_versions()
     debug = "--debug" in sys.argv
     windowed = debug or "--window" in sys.argv
+    server_args = any(a in sys.argv for a in ("--server", "--server-key", "--install-server"))
+    if server_args or paths.server_layout_active():
+        _use_server_layout(migrate=server_args)
     cfg = config.load()
-    if any(a in sys.argv for a in ("--server", "--server-key", "--install-server")):
+    if server_args:
         return _server_mode()
     api = api_mod.Api()
     if "--browser" in sys.argv:
@@ -131,6 +135,15 @@ def _message(text: str, title: str = "EmuStart Server") -> None:
         ctypes.windll.user32.MessageBoxW(None, text, title, 0x40)
     except Exception:
         pass
+
+
+def _use_server_layout(migrate: bool) -> None:
+    """Katalog serwera (folder server): migracja z 0.x i przełączenie ścieżek; grafiki serwowane
+    z nowego miejsca."""
+    moved = paths.use_server_layout(migrate=migrate)
+    server.ROUTES["/media/"] = paths.MEDIA
+    if moved:
+        logging.getLogger("emustart").info("katalog serwera %s: przeniesiono %s", paths.SERVER, ", ".join(moved))
 
 
 def _server_mode() -> None:
