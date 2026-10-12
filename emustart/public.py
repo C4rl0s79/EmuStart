@@ -194,14 +194,13 @@ def _self_check(ext: str, port: int) -> None:
     """Próba połączenia z własnym adresem zewnętrznym (działa, gdy router umie „zawrócić”
     ruch — NAT loopback). Niepowodzenie nie przesądza: decyduje połączenie z zewnątrz."""
     from emustart import netsrc, remote
-    tok = (remote.API._cfg.get("server_token") if remote.API else "") or ""
     fp = (remote.TLS or {}).get("fp", "")
-    if not (tok and fp):
+    if not fp:
         return
     try:
         c = netsrc.PinnedHTTPS(ext, port, fp, 5)
-        c.request("GET", "/v1/info", headers=netsrc.auth_headers(tok))
-        ok = c.getresponse().status == 200
+        c.request("GET", "/v1/info")
+        ok = c.getresponse().status in (200, 401)      # odpowiedział nasz serwer (bez klucza: 401)
         c.close()
     except Exception:
         ok = False
@@ -292,15 +291,17 @@ def check_tunnel() -> None:
     url = TUNNEL["url"]
     if not url:
         return
-    tok = (remote.API._cfg.get("server_token") if remote.API else "") or ""
-    req = urllib.request.Request(url + "/v1/info", headers={"Authorization": f"Bearer {tok}",
-                                                            "User-Agent": "EmuStart-serwer"})
+    req = urllib.request.Request(url + "/v1/info", headers={"User-Agent": "EmuStart-serwer"})
     try:
         with urllib.request.urlopen(req, timeout=10, context=ssl.create_default_context()) as r:
-            ok = r.status == 200 and b'"version"' in r.read()
+            ok = r.status == 200
         TUNNEL.update(state="ok" if ok else "error", error="" if ok else "nieoczekiwana odpowiedź")
     except Exception as ex:
         code = getattr(ex, "code", None)
+        if code == 401 and b"klucz" in (ex.read() if hasattr(ex, "read") else b""):
+            TUNNEL.update(state="ok", error="", checked=time.time())      # odpowiedział nasz serwer
+            log.info("tunel %s działa", url)
+            return
         TUNNEL.update(state="error", error=(f"odpowiedź {code}" + (" — tunel nie dociera do serwera (502: "
                       "sprawdź usługę https://localhost:8742 i „Disable TLS verification”)" if code == 502 else ""))
                       if code else str(ex)[:200])

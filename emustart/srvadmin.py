@@ -7,7 +7,6 @@ stronę `server.html` z działającego serwera i woła jego API administracyjne:
     POST /admin/status    wersja, czas pracy, klienci, pobierane gry, skan
     POST /admin/rescan    przeładowanie listy gier (skan folderów)
     POST /admin/restart   ponowne uruchomienie procesu serwera
-    POST /admin/key       klucz serwera (do wklejenia na telefonie)
     POST /admin/logs      folder logów w Eksploratorze
     POST /admin/update_check   najnowsze wydanie na GitHubie (emustart/updater.py)
     POST /admin/update_start   pobranie i rozpakowanie aktualizacji w tle
@@ -142,11 +141,6 @@ def rescan(api) -> dict:
     return {"ok": True}
 
 
-def key(api) -> dict:
-    from emustart import remote
-    return {"key": remote.ensure_token(api._cfg)}
-
-
 def open_logs(_api) -> dict:
     try:
         os.startfile(str(paths.LOGS))      # type: ignore[attr-defined]
@@ -244,7 +238,7 @@ def update_apply(_api) -> dict:
     return {"ok": True, "version": job.info.get("version")}
 
 
-ACTIONS = {"status": status, "rescan": rescan, "restart": restart, "key": key, "logs": open_logs,
+ACTIONS = {"status": status, "rescan": rescan, "restart": restart, "logs": open_logs,
            "update_check": update_check, "update_start": update_start,
            "update_status": update_status, "update_apply": update_apply}
 

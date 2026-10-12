@@ -49,8 +49,8 @@ Ustawienia → **Serwer EmuStart**:
 
 1. **Adres serwera** — podpowiadany z udziału sieciowego z grami (np. dysk `Z:` →
    `http://100.85.254.31:8740`).
-2. **Klucz serwera** — na serwerze `EmuStart.exe --server-key` (kopiuje klucz do
-   schowka), tu **Wklej klucz ze schowka** albo wpisz ręcznie.
+2. **Połącz kodem** (kod z panelu serwera) albo **Dołącz przez internet** — komputer
+   tworzy klucz urządzenia (TPM/DPAPI); wiersz **Klucz** pokazuje jego rodzaj.
 3. **Sprawdź połączenie**.
 
 Gra jest szukana na serwerze po systemie i ścieżce; plik idzie z serwera tylko przy

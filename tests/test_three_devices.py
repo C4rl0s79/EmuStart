@@ -51,12 +51,13 @@ def _req(srv, method, path, key="", body=None, headers=None):
 
 
 def _pair(srv, name, cls):
+    """Parowanie kodem z kluczem urządzenia → (token sesji, id, użyty kod)."""
+    import keyhelp
     code = srvadmin.pair_code(None)
     assert code["uri"].startswith("emustart://pair?") and code["code"] in code["uri"]
-    st, d = _req(srv, "POST", "/v1/pair", body={"code": code["pretty"], "name": name, "class": cls,
-                                               "version": "2.0-test"})
-    assert st == 200 and d["ok"], d
-    return d["key"], d["id"], code["code"]
+    host, port, _nas = srv
+    tok, did, _key = keyhelp.pair(host, port, name, cls, code=code["pretty"])
+    return tok, did, code["code"]
 
 
 def test_pairing_gives_each_device_its_own_key(srv):
@@ -91,10 +92,13 @@ def test_revoked_device_is_cut_off_others_keep_working(srv):
 
 
 def test_wrong_codes_are_rate_limited(srv):
+    import keyhelp
+    pem = keyhelp.new_key()[1]
     for _ in range(devices.MAX_FAILS):
-        assert _req(srv, "POST", "/v1/pair", body={"code": "ZZZZZZZZ", "name": "x", "class": "pc"})[0] == 403
+        assert _req(srv, "POST", "/v1/pair", body={"code": "ZZZZZZZZ", "name": "x", "class": "pc",
+                                                   "pubkey": pem})[0] == 403
     good = srvadmin.pair_code(None)["code"]
-    st, d = _req(srv, "POST", "/v1/pair", body={"code": good, "name": "x", "class": "pc"})
+    st, d = _req(srv, "POST", "/v1/pair", body={"code": good, "name": "x", "class": "pc", "pubkey": pem})
     assert st == 403 and "Za dużo" in d["reason"]                 # nawet dobry kod — przerwa
 
 
@@ -187,9 +191,14 @@ def test_panel_works_without_segno(monkeypatch):
 
 
 def test_new_pc_joins_after_phone_approves(srv):
+    import keyhelp
     ph_key, _ph, _ = _pair(srv, "Telefon", "phone")
-    # nowy komputer: prośba o dołączenie (bez klucza) — kod i QR na jego ekranie
-    st, req = _req(srv, "POST", "/v1/pair/request", body={"name": "Laptop", "class": "pc", "version": "2.0"})
+    # nowy komputer: prośba o dołączenie (bez klucza serwera, z kluczem publicznym) — kod i QR na ekranie
+    st, bad = _req(srv, "POST", "/v1/pair/request", body={"name": "Stary", "class": "pc"})
+    assert not bad["ok"] and "klucza urządzenia" in bad["reason"]          # bez klucza — odmowa
+    lk, lpem = keyhelp.new_key()
+    st, req = _req(srv, "POST", "/v1/pair/request", body={"name": "Laptop", "class": "pc", "version": "2.0",
+                                                          "pubkey": lpem})
     assert st == 200 and req["ok"] and len(req["code"]) == 8
     assert _req(srv, "POST", "/v1/pair/poll", body={"rid": req["rid"]})[1]["status"] == "pending"
     # zatwierdzać może tylko sparowane urządzenie
@@ -201,7 +210,9 @@ def test_new_pc_joins_after_phone_approves(srv):
     assert ok["ok"] and ok["status"] == "approved"
     # komputer odbiera swój klucz — tylko raz
     st, got = _req(srv, "POST", "/v1/pair/poll", body={"rid": req["rid"]})
-    assert got["status"] == "approved" and _req(srv, "GET", "/v1/info", got["key"])[0] == 200
+    host, port, _n = srv
+    assert got["status"] == "approved" and "key" not in got
+    assert _req(srv, "GET", "/v1/info", keyhelp.login(host, port, got["id"], lk))[0] == 200
     assert _req(srv, "POST", "/v1/pair/poll", body={"rid": req["rid"]})[1]["status"] == "expired"
     devs = {d["name"]: d for d in devices.listing()}
     assert devs["Laptop"]["approved_by"] == "Telefon"
@@ -210,14 +221,18 @@ def test_new_pc_joins_after_phone_approves(srv):
 
 
 def test_denied_request_and_panel_approval(srv):
-    st, a = _req(srv, "POST", "/v1/pair/request", body={"name": "Obcy", "class": "pc"})
+    import keyhelp
+    _k, pem = keyhelp.new_key()
+    st, a = _req(srv, "POST", "/v1/pair/request", body={"name": "Obcy", "class": "pc", "pubkey": pem})
     assert srvadmin.devices_list(None)["requests"][0]["name"] == "Obcy"
     assert srvadmin.pair_approve(None, {"code": a["code"], "allow": False})["status"] == "denied"
     assert _req(srv, "POST", "/v1/pair/poll", body={"rid": a["rid"]})[1]["status"] == "denied"
-    st, b = _req(srv, "POST", "/v1/pair/request", body={"name": "Mój PC", "class": "pc"})
+    bk, bpem = keyhelp.new_key()
+    st, b = _req(srv, "POST", "/v1/pair/request", body={"name": "Mój PC", "class": "pc", "pubkey": bpem})
     assert srvadmin.pair_approve(None, {"code": b["code"], "allow": True})["ok"]
-    key = _req(srv, "POST", "/v1/pair/poll", body={"rid": b["rid"]})[1]["key"]
-    assert _req(srv, "GET", "/v1/info", key)[0] == 200
+    did = _req(srv, "POST", "/v1/pair/poll", body={"rid": b["rid"]})[1]["id"]
+    host, port, _n = srv
+    assert _req(srv, "GET", "/v1/info", keyhelp.login(host, port, did, bk))[0] == 200
     # zły identyfikator prośby nic nie zdradza
     assert _req(srv, "POST", "/v1/pair/poll", body={"rid": "zgadywanie"})[1]["status"] == "expired"
 
@@ -237,9 +252,12 @@ def test_pc_client_join_flow(srv, monkeypatch):
     st, ok = _req(srv, "POST", "/v1/pair/approve", ph_key, body={"code": code, "allow": True})
     assert ok["ok"]
     assert a.server_join_poll()["status"] == "approved"
-    assert saved["server_url"] == f"http://{host}:{port}" and saved["server_key"]
+    assert saved["server_url"] == f"http://{host}:{port}" and saved["server_key"].startswith("dev:")
+    assert saved["server_keyname"]                                  # klucz urządzenia, nie klucz-hasło
     # ten komputer może teraz sam zatwierdzać kolejne
-    st, nxt = _req(srv, "POST", "/v1/pair/request", body={"name": "Tablet", "class": "phone"})
+    import keyhelp
+    st, nxt = _req(srv, "POST", "/v1/pair/request", body={"name": "Tablet", "class": "phone",
+                                                         "pubkey": keyhelp.new_key()[1]})
     assert a.server_approve(f"emustart://approve?u=x&c={nxt['code']}", None)["request"]["name"] == "Tablet"
     assert a.server_approve(nxt["pretty"], True)["status"] == "approved"
 

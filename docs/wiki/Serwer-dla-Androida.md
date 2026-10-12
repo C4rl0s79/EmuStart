@@ -35,10 +35,12 @@ To ten sam program (`EmuStart.exe`), uruchamiany bez okna z parametrem `--server
    ```
    schtasks /Run /TN "EmuStart Server"
    ```
-5. Klucz serwera (potrzebny w aplikacji na Androida):
+5. Kod parowania dla nowego urządzenia (to samo co **Dodaj urządzenie** w panelu):
    ```
    EmuStart.exe --server-key
    ```
+   Od 0.39 polecenie pokazuje jednorazowy kod parowania z działającego serwera, nie
+   wspólny klucz.
 
 Adres serwera dla telefonu: `http://<adres Tailscale komputera>:8740`.
 
@@ -58,7 +60,6 @@ i gry pobierane w tej chwili, a przyciski:
 - **Przeładuj listę gier** — skan folderów z grami (nowe i usunięte gry) z paskiem postępu,
 - **Restart serwera** — nowy proces serwera, stary kończy się; pobieranie na telefonie
   wznowi się samo,
-- **Pokaż klucz** — klucz serwera (kopiowany do schowka),
 - **Folder logów**.
 
 Gdy serwer nie odpowiada, panel najpierw uruchamia zadanie „EmuStart Server”, a jeśli go
@@ -88,7 +89,22 @@ na innym sparowanym komputerze albo w panelu serwera (**Proszą o dołączenie**
 
 Panel pokazuje urządzenia z rodzajem, wersją EmuStart i ostatnim kontaktem; **Unieważnij**
 odcina tylko to jedno urządzenie, **Nazwa** zmienia nazwę. Serwer trzyma tylko skróty kluczy
-(SHA-256). Wspólny klucz serwera działa dalej — dla urządzeń sprzed parowania.
+(SHA-256).
+
+## Tylko klucze urządzeń (0.39)
+
+Każde połączenie z serwerem to **klucz urządzenia** (para kluczy EC P-256: TPM albo DPAPI na
+Windows, Android Keystore na telefonie) i logowanie podpisem (token sesji na godzinę).
+Serwer nie wydaje już kluczy-haseł:
+
+- parowanie kodem i prośba o dołączenie wymagają klucza publicznego urządzenia — starsza
+  wersja dostaje komunikat „Zaktualizuj EmuStart”,
+- urządzenie ze starym kluczem-hasłem po aktualizacji **samo przechodzi** na klucz
+  urządzenia (`/v1/auth/upgrade`) — ten sam wpis w panelu (nazwa, konto, rola), stary
+  klucz przestaje działać; do tego czasu stary klucz otwiera tylko `/v1/info` i przejście,
+- wspólny klucz serwera (`server_token`) działa **tylko na komputerze serwera** (127.0.0.1,
+  nie przez tunel); panel nie ma już przycisku „Pokaż klucz”, a aplikacje — pola „Klucz
+  serwera” i „Wklej klucz ze schowka”.
 
 ## Adresy serwera i szyfrowanie (0.34)
 
@@ -244,7 +260,8 @@ gdy przez SMB widzi ten sam znacznik (albo SMB jest niedostępny).
 
 ## Bezpieczeństwo
 
-- Klucz serwera jest losowy (`config.json` → `server_token`), porównywany w stałym czasie.
+- Urządzenia logują się podpisem kluczem urządzenia; klucz prywatny nie opuszcza urządzenia.
+  Wspólny klucz serwera (`config.json` → `server_token`) działa tylko lokalnie.
 - Serwer wydaje wyłącznie pliki gier z biblioteki (ścieżka spoza gry → 404).
 - Zapis tylko w folderze profili (ścieżki z `..`, dyskiem albo bezwzględne → 400).
 - Połączenie przez Tailscale jest szyfrowane; nie wystawiaj portu 8740 do internetu

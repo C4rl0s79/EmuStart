@@ -127,6 +127,19 @@ def _browser_fallback(api, ex) -> None:
         time.sleep(3600)
 
 
+def _pair_code_from_server(port: int) -> str:
+    """Kod parowania z działającego serwera (kody żyją w jego pamięci) — przez panel na tym komputerze."""
+    import json
+    import urllib.request
+    try:
+        req = urllib.request.Request(f"http://127.0.0.1:{port}/admin/pair_code", data=b"{}", method="POST",
+                                     headers={"X-EmuStart": "1"})
+        with urllib.request.urlopen(req, timeout=5) as r:
+            return json.loads(r.read()).get("pretty", "")
+    except Exception:
+        return ""
+
+
 def _message(text: str, title: str = "EmuStart Server") -> None:
     """Okienko z informacją (EmuStart.exe nie ma konsoli)."""
     print(text)
@@ -157,18 +170,13 @@ def _server_mode() -> None:
     token = remote.ensure_token(api._cfg)
     port = int(api._cfg.get("server_port") or remote.DEFAULT_PORT)
     if "--server-key" in sys.argv:
-        copied = False
-        try:                              # klucz od razu w schowku — do wklejenia na telefonie
-            import subprocess
-            subprocess.run(["clip"], input=token.encode("utf-16-le"), check=True,
-                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-            copied = True
-        except Exception:
-            pass
+        # od 0.39 urządzenia łączą się tylko kluczem urządzenia — zamiast klucza serwera
+        # jednorazowy kod parowania z działającego serwera (panel ma ten sam przycisk)
+        code = _pair_code_from_server(port)
         return _message(f"Adres: http://{socket.gethostname()}:{port}\n"
-                        "(w aplikacji na telefonie wpisz adres Tailscale tego komputera)\n\n"
-                        f"Klucz serwera:\n\n{token}"
-                        + ("\n\nKlucz jest w schowku (Ctrl+V)." if copied else ""))
+                        "(na nowym urządzeniu: adres Tailscale tego komputera albo emustart.emucloud.org)\n\n"
+                        + (f"Kod parowania (jednorazowy, ważny kilka minut):\n\n{code}" if code else
+                           "Serwer nie działa — uruchom go i spróbuj ponownie (albo kod z panelu serwera)."))
     if "--install-server" in sys.argv:
         if not getattr(sys, "frozen", False):
             return _message("Autostart serwera instaluje się z EmuStart.exe (wersja zbudowana).")

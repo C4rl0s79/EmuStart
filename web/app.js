@@ -1011,7 +1011,9 @@ function buildSetRowsAndroid() {
   const rows = [];
   rows.push({ head: "Serwer EmuStart (komputer z grami)" });
   rows.push({ k: "Adres serwera", key: "server_url", type: "text", fmt: (v) => v || "np. http://100.85.254.31:8740" });
-  rows.push({ k: "Klucz serwera", key: "server_key", type: "text", fmt: (v) => (v ? "••••••" + v.slice(-4) : "brak — EmuStart.exe --server-key na serwerze") });
+  rows.push({ k: "Klucz", key: "server_key", type: "info",
+              fmt: (v) => (String(v || "").startsWith("dev:") ? `klucz urządzenia${c.server_keykind ? " (" + c.server_keykind + ")" : ""}`
+                : v ? "stary klucz — przejdzie na klucz urządzenia przy połączeniu z serwerem" : "brak — połącz się z serwerem (kod albo przez internet)") });
   const pairDone = async (r) => {
     if (!r.ok) return toast(r.reason, 6000);
     S.settings = await api().get_settings(); renderSettings(); await refreshState();
@@ -1077,8 +1079,9 @@ function buildSetRows() {
   rows.push({ k: "Adres serwera", key: "server_url", type: "text",
               prefill: () => c.server_url || c.server_url_guess || "http://",
               fmt: (v) => v || (c.server_url_guess ? `nie ustawiono — A: podpowiedź ${c.server_url_guess}` : "nie ustawiono — gry przez SMB jak dotąd") });
-  rows.push({ k: "Klucz serwera", key: "server_key", type: "text", secret: true,
-              fmt: (v) => (v ? "••••••" + v.slice(-4) : "brak — na serwerze EmuStart.exe --server-key (kopiuje do schowka)") });
+  rows.push({ k: "Klucz", key: "server_key", type: "info",
+              fmt: (v) => (String(v || "").startsWith("dev:") ? `klucz urządzenia${c.server_keykind ? " (" + c.server_keykind + ")" : ""}`
+                : v ? "stary klucz — przejdzie na klucz urządzenia przy połączeniu z serwerem" : "brak — połącz się z serwerem (kod albo przez internet)") });
   rows.push({ k: "Połącz kodem", type: "action", fmt: () => "kod z panelu serwera (Dodaj urządzenie) — własny klucz tego komputera",
               run: () => oskOpen("Kod z panelu serwera", "", async (v) => {
                 if (!v.trim()) return;
@@ -1096,10 +1099,6 @@ function buildSetRows() {
               run: () => oskOpen("Adres serwera", S.settings.server_url || S.settings.server_url_guess || "", (v) => joinOpen(v.trim())) });
   if (c.server_key) rows.push({ k: "Zatwierdź nowe urządzenie (kod)", type: "action", fmt: () => "kod z ekranu nowego urządzenia",
               run: () => oskOpen("Kod z ekranu nowego urządzenia", "", (v) => { if (v.trim()) approveFlow(v.trim()); }) });
-  rows.push({ k: "Wklej klucz ze schowka", type: "action", run: async () => {
-    const r = await api().server_paste_key();
-    if (!r.ok) return toast(r.reason, 4000);
-    S.settings = await api().get_settings(); renderSettings(); toast("Klucz zapisany"); } });
   rows.push({ k: "Gry z serwera", key: "server_games", type: "bool",
               fmt: (v) => (v ? "tak — 8 strumieni; gdy serwer nie ma gry albo nie odpowiada: SMB" : "nie — zawsze SMB") });
   rows.push({ k: "Zapisy i profile przez serwer", key: "server_profiles", type: "bool",
