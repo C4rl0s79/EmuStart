@@ -117,8 +117,9 @@ def _refresh() -> None:
     port = STATE["port"]
     try:
         if _gw is None:
-            _gw = upnp.find_gateway()
+            _gw = upnp.find_gateway(known=_known_router())
             log.info("router UPnP: %s (ten komputer %s)", _gw.location, _gw.local_ip)
+            _remember_router(_gw.location)
         ext = _gw.external_ip()
         cgnat = bool(ext) and _local(ext)
         STATE.update(router=_gw.location, ext_ip=ext, cgnat=cgnat, checked=time.time())
@@ -137,6 +138,29 @@ def _refresh() -> None:
         _gw = None
         STATE.update(mapped=False, error=f"router: {ex}", checked=time.time())
         log.warning("UPnP: %s", ex)
+
+
+def _router_file():
+    from emustart import paths
+    return paths.SERVER / "router.json"
+
+
+def _known_router() -> str:
+    """Adres opisu routera z poprzedniego razu (UPnP bywa niesłowne przy wyszukiwaniu)."""
+    import json
+    try:
+        return json.loads(_router_file().read_text(encoding="utf-8")).get("location", "")
+    except (OSError, ValueError):
+        return ""
+
+
+def _remember_router(location: str) -> None:
+    import json
+    try:
+        _router_file().parent.mkdir(parents=True, exist_ok=True)
+        _router_file().write_text(json.dumps({"location": location}), encoding="utf-8")
+    except OSError:
+        pass
 
 
 def _self_check(ext: str, port: int) -> None:
@@ -160,7 +184,7 @@ def _self_check(ext: str, port: int) -> None:
 def _loop() -> None:
     while not _stop.is_set():
         _refresh()
-        _stop.wait(RENEW if STATE["mapped"] else 300)
+        _stop.wait(RENEW if STATE["mapped"] else 60)    # bez routera — kolejna próba za minutę
 
 
 def start(cfg: dict, ctx) -> dict:

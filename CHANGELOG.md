@@ -8,6 +8,22 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.35.3] — 2026-10-12
+
+### Bezpieczeństwo
+- **Zwykły (8740) i szyfrowany (8741) port przyjmują tylko sieć lokalną, Tailscale i ten
+  komputer.** Gdy router przekierowuje na serwer ruch z internetu (DMZ, zakres portów,
+  ręczne przekierowanie), zapytania z zewnątrz dostają odmowę, a log serwera ostrzega (raz na
+  godzinę). Z internetu — wyłącznie port publiczny (8742: HTTPS, tylko z kluczem urządzenia,
+  bez parowania). Wcześniej z internetu działało m.in. parowanie po zwykłym HTTP.
+
+### Poprawione
+- **„Nie znaleziono routera z UPnP”, choć UPnP był włączony.** Wyszukiwanie wysyła teraz
+  zapytanie z każdej karty sieciowej osobno (domyślną bywa karta Tailscale albo wirtualna),
+  powtarza je do 3 razy, a znaleziony router zapamiętuje (`server\router.json`) i przy
+  następnym starcie łączy się z nim od razu. Bez routera kolejna próba po minucie
+  (było: 5 minut).
+
 ## [0.35.2] — 2026-10-12
 
 ### Poprawione

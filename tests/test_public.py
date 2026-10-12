@@ -103,7 +103,7 @@ def test_router_with_permanent_leases_only(router):
 
 
 def test_refresh_publishes_public_endpoint_and_detects_cgnat(router, monkeypatch):
-    monkeypatch.setattr(upnp, "find_gateway", lambda timeout=3.0: upnp.Gateway.from_location(router))
+    monkeypatch.setattr(upnp, "find_gateway", lambda timeout=3.0, known="": upnp.Gateway.from_location(router))
     monkeypatch.setattr(public, "_self_check", lambda ext, port: None)
     public.STATE.update(enabled=True, port=8742)
     public._refresh()
@@ -146,3 +146,27 @@ def test_public_port_only_api_with_key_and_bans_guessers(monkeypatch):
     with pytest.raises((OSError, http.client.HTTPException)):          # zablokowany: połączenie zrywane
         _req(port, fp, "GET", "/v1/info", KEY)
     assert public.status()["banned"] == 1
+
+
+def test_plain_ports_refuse_internet_clients():
+    class H:
+        def __init__(self, ip):
+            self.client_address = (ip, 5555)
+            self.server = type("S", (), {"server_address": ("0.0.0.0", 8740)})()
+            self.close_connection = False
+            self.sent = None
+
+        def send_error(self, code):
+            self.sent = code
+    for ip in ("127.0.0.1", "192.168.1.20", "10.0.0.5", "100.85.254.31", "::ffff:192.168.1.7"):
+        assert server._near(H(ip)), ip
+    h = H("81.2.69.142")
+    assert not server._near(h) and h.sent == 403 and h.close_connection
+
+
+def test_known_router_is_tried_first(router, monkeypatch):
+    monkeypatch.setattr(upnp, "discover", lambda *a, **k: [])          # wyszukiwanie nic nie daje
+    gw = upnp.find_gateway(known=router)
+    assert gw.location == router
+    public._remember_router(router)
+    assert public._known_router() == router
