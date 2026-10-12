@@ -1478,7 +1478,8 @@ class Api:
                 log.exception("klucz urządzenia")
                 return {"ok": False, "reason": f"Nie udało się utworzyć klucza urządzenia: {ex}"}
         r = netsrc._post(url, "/v1/enroll/request", {"mode": mode, "account": account, "name": socket.gethostname(),
-                                                     "class": "pc", "version": __version__, "pubkey": pem})
+                                                     "class": "pc", "version": __version__, "pubkey": pem,
+                                                     "hw": netsrc.hw_id()})
         if not r.get("ok"):
             if not old:
                 keystore.delete(name, kind)

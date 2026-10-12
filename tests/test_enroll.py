@@ -282,3 +282,34 @@ def test_account_profile_needs_no_server_pin_on_its_device(srv, monkeypatch):
     fs = nasfs.backend(a._cfg)
     fs.write("Jezus/save/y.srm", b"bez PIN-u")
     assert fs.read("Jezus/save/y.srm") == b"bez PIN-u"
+
+
+def test_one_registration_per_hardware(srv):
+    """Ten sam telefon dołączony ponownie (stare parowanie + nowe dołączenie) — jedna rejestracja;
+    dwa różne telefony tego samego modelu (ta sama nazwa) — dwie."""
+    hw = "a" * 32
+    admin_key, _ = _admin_key(srv)
+    # stare parowanie kodem — identyfikator sprzętu przychodzi z pierwszym zapytaniem
+    code = srvadmin.pair_code(None)["code"]
+    old = _req(srv, "POST", "/v1/pair", body={"code": code, "name": "Telefon 25102PCBEG", "class": "phone"})[1]
+    host, port, _n = srv
+    c = http.client.HTTPConnection(host, port, timeout=10)
+    c.request("GET", "/v1/info", headers={"Authorization": f"Bearer {old['key']}", "X-EmuStart-Hw": hw})
+    assert c.getresponse().status == 200
+    assert devices._load()[old["id"]]["hw"] == hw
+    # inny telefon tego samego modelu — osobna rejestracja
+    other = Device("Telefon 25102PCBEG")
+    _req(srv, "POST", "/v1/enroll/request", body={"mode": "new", "account": "Ola", "name": other.name,
+                                                   "class": "phone", "pubkey": other.pem, "hw": "b" * 32})
+    # ten sam telefon dołącza przez internet — prośba mówi, co zastąpi; po zatwierdzeniu stara znika
+    dev = Device("Telefon 25102PCBEG")
+    _req(srv, "POST", "/v1/enroll/request", body={"mode": "existing", "account": "Jezus", "name": dev.name,
+                                                   "class": "phone", "pubkey": dev.pem, "hw": hw})
+    reqs = _req(srv, "POST", "/v1/enroll/pending", admin_key, body={})[1]["requests"]
+    mine = next(q for q in reqs if q["account"] == "Jezus")
+    assert mine["replaces"] == ["Telefon 25102PCBEG"]
+    assert next(q for q in reqs if q["account"] == "Ola")["replaces"] == []
+    _req(srv, "POST", "/v1/enroll/decide", admin_key, body={"id": mine["id"], "allow": True})
+    active = [d for d in devices.listing() if not d.get("revoked") and d["name"] == "Telefon 25102PCBEG"]
+    assert len(active) == 1 and active[0]["hw"] == hw
+    assert _req(srv, "GET", "/v1/info", old["key"])[0] == 401              # stara rejestracja nieważna
