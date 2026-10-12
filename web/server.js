@@ -5,8 +5,9 @@
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 
-async function admin(name) {
-  const r = await fetch("/admin/" + name, { method: "POST", headers: { "X-EmuStart": "1" } });
+async function admin(name, args) {
+  const r = await fetch("/admin/" + name, { method: "POST", headers: { "X-EmuStart": "1" },
+                                            body: args ? JSON.stringify(args) : undefined });
   if (!r.ok) throw new Error("HTTP " + r.status);
   return r.json();
 }
@@ -153,5 +154,50 @@ async function updTick() {
   if (close) setTimeout(() => close(st.version), 300);
 }
 
+/* ── sparowane urządzenia i parowanie kodem QR (emustart/devices.py) ── */
+const KIND = { pc: "komputer", phone: "telefon" };
+async function refreshDevices() {
+  const r = await admin("devices").catch(() => null);
+  if (!r) return;
+  $("devices").innerHTML = r.devices.length ? r.devices.map((d) =>
+    `<tr class="${d.revoked ? "off" : ""}"><td>${esc(d.name)}<div class="muted">${esc(d.ip || "")}</div></td>` +
+    `<td>${esc(KIND[d.class] || d.class)}</td><td>${esc(d.version || "—")}</td>` +
+    `<td class="n">${d.revoked ? "unieważnione" : ago(d.last_seen)}</td>` +
+    `<td class="n">${d.revoked ? "" : `<button data-ren="${esc(d.id)}">Nazwa</button> <button class="danger" data-rev="${esc(d.id)}">Unieważnij</button>`}</td></tr>`).join("")
+    : `<tr><td colspan="5" class="muted">Brak sparowanych urządzeń — „Dodaj urządzenie”. Urządzenia ze wspólnym kluczem serwera działają dalej.</td></tr>`;
+  $("devices").querySelectorAll("[data-rev]").forEach((b) => b.addEventListener("click", async () => {
+    if (!confirm("Unieważnić to urządzenie? Straci dostęp do serwera, dopóki nie sparujesz go ponownie.")) return;
+    await admin("device_revoke", { id: b.dataset.rev }).catch(() => null);
+    refreshDevices();
+  }));
+  $("devices").querySelectorAll("[data-ren]").forEach((b) => b.addEventListener("click", async () => {
+    const name = prompt("Nowa nazwa urządzenia:");
+    if (!name) return;
+    await admin("device_rename", { id: b.dataset.ren, name }).catch(() => null);
+    refreshDevices();
+  }));
+}
+let pairTimer = null;
+$("bPair").addEventListener("click", async () => {
+  const r = await admin("pair_code").catch(() => null);
+  if (!r?.ok) return msg("Serwer nie odpowiada.");
+  $("pairQr").innerHTML = r.svg || "";
+  $("pairQr").hidden = !r.svg;
+  $("pairCode").textContent = r.pretty;
+  $("pairUrl").textContent = r.url;
+  $("pairBox").hidden = false;
+  clearInterval(pairTimer);
+  const tick = () => {
+    const left = Math.max(0, r.expires - Date.now() / 1000);
+    $("pairLeft").textContent = left ? `jeszcze ${Math.ceil(left / 60)} min` : "— wygasł, wygeneruj nowy";
+    if (!left) { clearInterval(pairTimer); $("pairQr").innerHTML = ""; }
+    refreshDevices();
+  };
+  tick();
+  pairTimer = setInterval(tick, 3000);
+});
+
 refresh();
+refreshDevices();
 setInterval(refresh, 2000);
+setInterval(refreshDevices, 15000);

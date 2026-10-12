@@ -36,6 +36,7 @@ class Server(private val prefs: Prefs) {
         c.setRequestProperty("Authorization", "Bearer " + prefs.serverKey)
         profileToken(c, path)
         c.setRequestProperty("User-Agent", "EmuStart-Android/" + BuildConfig.VERSION_NAME)
+        c.setRequestProperty("X-EmuStart-Version", BuildConfig.VERSION_NAME)      // panel serwera: wersje urządzeń
         if (range != null) c.setRequestProperty("Range", range)
         val code = c.responseCode
         if (code !in 200..299) {

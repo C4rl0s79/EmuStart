@@ -862,6 +862,18 @@ function buildSetRowsAndroid() {
   rows.push({ head: "Serwer EmuStart (komputer z grami)" });
   rows.push({ k: "Adres serwera", key: "server_url", type: "text", fmt: (v) => v || "np. http://100.85.254.31:8740" });
   rows.push({ k: "Klucz serwera", key: "server_key", type: "text", fmt: (v) => (v ? "••••••" + v.slice(-4) : "brak — EmuStart.exe --server-key na serwerze") });
+  const pairDone = async (r) => {
+    if (!r.ok) return toast(r.reason, 6000);
+    S.settings = await api().get_settings(); renderSettings(); await refreshState();
+    toast(`Połączono z serwerem ${r.server || r.url} — ten telefon ma własny klucz.`, 5000);
+  };
+  rows.push({ k: "Połącz z serwerem (kod QR)", type: "action", fmt: () => "panel serwera → Dodaj urządzenie → zeskanuj kod",
+              run: async () => { const s = await api().server_scan(); if (!s.ok) return toast(s.reason, 5000);
+                                 toast("Łączę z serwerem…", 10000); pairDone(await api().server_pair(s.text, "")); } });
+  rows.push({ k: "Połącz kodem", type: "action", fmt: () => "kod z panelu serwera wpisany ręcznie",
+              run: () => oskOpen("Kod z panelu serwera", "", async (v) => {
+                if (!v.trim()) return; toast("Łączę z serwerem…", 10000);
+                pairDone(await api().server_pair(v.trim(), S.settings.server_url || "")); }) });
   rows.push({ k: "Sprawdź połączenie", type: "action", run: async () => {
     toast("Łączę z serwerem…", 10000); const r = await api().server_test();
     toast(r.ok ? `Połączono: ${r.name} (EmuStart ${r.version}), ${r.systems} systemów` : `Błąd: ${r.reason}`, 6000);
@@ -910,6 +922,15 @@ function buildSetRows() {
               fmt: (v) => v || (c.server_url_guess ? `nie ustawiono — A: podpowiedź ${c.server_url_guess}` : "nie ustawiono — gry przez SMB jak dotąd") });
   rows.push({ k: "Klucz serwera", key: "server_key", type: "text", secret: true,
               fmt: (v) => (v ? "••••••" + v.slice(-4) : "brak — na serwerze EmuStart.exe --server-key (kopiuje do schowka)") });
+  rows.push({ k: "Połącz kodem", type: "action", fmt: () => "kod z panelu serwera (Dodaj urządzenie) — własny klucz tego komputera",
+              run: () => oskOpen("Kod z panelu serwera", "", async (v) => {
+                if (!v.trim()) return;
+                toast("Łączę z serwerem…", 10000);
+                const r = await api().server_pair(v.trim(), S.settings.server_url || S.settings.server_url_guess || "");
+                if (!r.ok) return toast(r.reason, 6000);
+                S.settings = await api().get_settings(); renderSettings();
+                toast(`Połączono z serwerem ${r.server || r.url} — ten komputer ma własny klucz.`, 5000);
+              }) });
   rows.push({ k: "Wklej klucz ze schowka", type: "action", run: async () => {
     const r = await api().server_paste_key();
     if (!r.ok) return toast(r.reason, 4000);

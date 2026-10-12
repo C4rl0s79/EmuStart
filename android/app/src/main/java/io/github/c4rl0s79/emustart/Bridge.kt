@@ -9,7 +9,9 @@ import org.json.JSONObject
 import java.io.ByteArrayInputStream
 import java.io.File
 import java.security.MessageDigest
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 /**
  * Funkcje dla interfejsu EmuStart (ten sam HTML/JS co na Windows) — odpowiednik
@@ -86,6 +88,8 @@ class Bridge(private val act: MainActivity) {
         "get_settings" -> settings()
         "save_settings" -> { saveSettings(a.getJSONObject(0)); JSONObject().put("ok", true) }
         "server_test" -> serverTest()
+        "server_scan" -> scanQr()
+        "server_pair" -> pairServer(a.optString(0, ""), a.optString(1, ""))
         "rescan" -> { systemsCache = null; synchronized(gamesCache) { gamesCache.clear() }; JSONObject().put("ok", true) }
         "launch" -> startLaunch(a.getInt(0), a.optBoolean(2, false))
         "launch_status" -> launchStatus()
@@ -424,6 +428,68 @@ class Bridge(private val act: MainActivity) {
     } catch (e: Exception) {
         online = false
         JSONObject().put("ok", false).put("reason", explain(e))
+    }
+
+    /** Kod QR z panelu serwera (Dodaj urządzenie) — skaner kodów Google Play: bez uprawnienia
+     *  do aparatu w EmuStart. Bez Google Play: ręczne wpisanie kodu (Połącz kodem). */
+    private fun scanQr(): JSONObject {
+        val latch = CountDownLatch(1)
+        var out = JSONObject().put("ok", false).put("reason", "Anulowano.")
+        act.runOnUiThread {
+            try {
+                val opts = com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions.Builder()
+                    .setBarcodeFormats(com.google.mlkit.vision.barcode.common.Barcode.FORMAT_QR_CODE).build()
+                com.google.mlkit.vision.codescanner.GmsBarcodeScanning.getClient(act, opts).startScan()
+                    .addOnSuccessListener { b -> out = JSONObject().put("ok", true).put("text", b.rawValue ?: ""); latch.countDown() }
+                    .addOnCanceledListener { latch.countDown() }
+                    .addOnFailureListener { e ->
+                        out = JSONObject().put("ok", false)
+                            .put("reason", "Skaner kodów niedostępny (${e.message}) — wpisz kod ręcznie: Połącz kodem.")
+                        latch.countDown()
+                    }
+            } catch (e: Exception) {
+                out = JSONObject().put("ok", false).put("reason", "Skaner kodów niedostępny — wpisz kod ręcznie: Połącz kodem.")
+                latch.countDown()
+            }
+        }
+        latch.await(5, TimeUnit.MINUTES)
+        return out
+    }
+
+    /** Parowanie: kod z panelu serwera albo link z kodu QR (emustart://pair?u=…&c=…) →
+     *  własny klucz tego telefonu (zamiast przepisywania wspólnego klucza serwera). */
+    private fun pairServer(text: String, url0: String): JSONObject {
+        var url = url0.ifBlank { prefs.serverUrl }
+        var code = text.trim()
+        if (code.lowercase().startsWith("emustart://pair")) {
+            val u = Uri.parse(code)
+            url = u.getQueryParameter("u") ?: url
+            code = u.getQueryParameter("c") ?: ""
+        }
+        if (url.isBlank()) return JSONObject().put("ok", false).put("reason", "Podaj adres serwera albo zeskanuj kod QR.")
+        if (!url.startsWith("http")) url = "http://$url"
+        if (!Regex(":\d+$").containsMatchIn(url.removePrefix("http://").removePrefix("https://"))) url += ":8740"
+        return try {
+            val c = java.net.URL(url.trimEnd('/') + "/v1/pair").openConnection() as java.net.HttpURLConnection
+            c.connectTimeout = 8000; c.readTimeout = 15000
+            c.requestMethod = "POST"; c.doOutput = true
+            c.setRequestProperty("Content-Type", "application/json")
+            val body = JSONObject().put("code", code).put("name", saves.device).put("class", "phone")
+                .put("version", BuildConfig.VERSION_NAME).toString().toByteArray()
+            c.outputStream.use { it.write(body) }
+            val code2 = c.responseCode
+            val txt = (if (code2 in 200..299) c.inputStream else c.errorStream)?.bufferedReader()?.readText() ?: "{}"
+            c.disconnect()
+            val d = JSONObject(txt)
+            if (!d.optBoolean("ok")) return JSONObject().put("ok", false).put("reason", d.optString("reason", "Serwer odrzucił kod."))
+            prefs.serverUrl = url
+            prefs.serverKey = d.getString("key")
+            systemsCache = null
+            online = true
+            JSONObject().put("ok", true).put("server", d.optString("server")).put("url", url)
+        } catch (e: Exception) {
+            JSONObject().put("ok", false).put("reason", explain(e))
+        }
     }
 
     /** Zrozumiały powód błędu połączenia z serwerem. */

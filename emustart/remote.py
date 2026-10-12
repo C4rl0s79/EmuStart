@@ -57,10 +57,9 @@ def ensure_token(cfg: dict) -> str:
 
 
 def authorized(handler) -> bool:
+    """Klucz urządzenia (sparowanego kodem QR, emustart/devices.py) albo — dla urządzeń
+    sprzed parowania — wspólny klucz serwera. handler.device = id urządzenia ('' = wspólny)."""
     if API is None:
-        return False
-    token = API._cfg.get("server_token") or ""
-    if not token:
         return False
     got = ""
     auth = handler.headers.get("Authorization") or ""
@@ -69,7 +68,34 @@ def authorized(handler) -> bool:
     else:
         q = urllib.parse.parse_qs(urllib.parse.urlsplit(handler.path).query)
         got = (q.get("k") or [""])[0]
-    return bool(got) and hmac.compare_digest(got.encode(), token.encode())
+    if not got:
+        return False
+    token = API._cfg.get("server_token") or ""
+    if token and hmac.compare_digest(got.encode(), token.encode()):
+        handler.device = ""
+        return True
+    from emustart import devices
+    did = devices.verify(got)
+    if did:
+        handler.device = did
+        devices.touch(did, handler.client_address[0], handler.headers.get("X-EmuStart-Version") or "")
+        return True
+    return False
+
+
+def pair(handler) -> None:
+    """POST /v1/pair {code, name, class, version} → klucz urządzenia (bez klucza — jednorazowy kod)."""
+    from emustart import devices
+    n = int(handler.headers.get("Content-Length") or 0)
+    try:
+        d = json.loads(handler.rfile.read(min(n, 4096)) or b"{}") if n else {}
+    except ValueError:
+        d = {}
+    r = devices.pair(str(d.get("code", "")), str(d.get("name", "")), str(d.get("class", "")),
+                     handler.client_address[0], str(d.get("version", "")))
+    if r.get("ok"):
+        r["server"] = socket.gethostname()
+    return _json(handler, r, 200 if r.get("ok") else 403)
 
 
 def _seen(handler) -> None:

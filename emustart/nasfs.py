@@ -258,7 +258,8 @@ class RemoteFs:
     def _req(self, method: str, path: str, q: dict, body: bytes | None = None,
              headers: dict | None = None) -> tuple[int, bytes, dict]:
         url = (path if path.startswith("/v1/") else f"/v1/nas/{path}") + "?" + urllib.parse.urlencode(q)
-        h = {"Authorization": f"Bearer {self.key}", **(headers or {})}
+        from emustart import netsrc
+        h = {**netsrc.auth_headers(self.key), **(headers or {})}
         prof = (q.get("profile") or q.get("p") or "").replace("\\", "/").split("/")[0].lower()
         if prof and TOKENS.get(prof):
             h["X-Profile-Token"] = TOKENS[prof]

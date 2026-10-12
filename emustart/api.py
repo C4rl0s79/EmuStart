@@ -1356,6 +1356,25 @@ class Api:
                                              "zaktualizuj go do wersji z pobieraniem gier przez serwer"}
         return {k: v for k, v in r.items() if k not in ("features", "nas_id")}
 
+    def server_pair(self, code: str, url: str = "") -> dict:
+        """Ustawienia → Połącz kodem: kod z panelu serwera (albo link z kodu QR) → klucz
+        tego urządzenia. Zastępuje przepisywanie wspólnego klucza serwera."""
+        import socket
+        url, code = netsrc.parse_pair(code, url or self._cfg.get("server_url") or
+                                      netsrc.guess_url(config.rom_roots(self._cfg)))
+        r = netsrc.pair(url, code, socket.gethostname(), "pc")
+        if not r.get("ok"):
+            return r
+        self._cfg["server_url"], self._cfg["server_key"] = r["url"], r["key"]
+        config.save(self._cfg)
+        netsrc._info.clear()
+        nasfs.reset()
+        return {"ok": True, "server": r.get("server", ""), "url": r["url"]}
+
+    def server_scan(self) -> dict:
+        """Skan kodu QR — tylko na telefonie (aparat); na komputerze kod wpisuje się ręcznie."""
+        return {"ok": False, "reason": "Na komputerze wpisz kod z panelu serwera (Połącz kodem)."}
+
     def server_paste_key(self) -> dict:
         """Klucz serwera ze schowka (EmuStart.exe --server-key na serwerze kopiuje go)."""
         text = _clipboard_text().strip()

@@ -50,6 +50,9 @@ def _isolated_app(tmp_path_factory, monkeypatch):
     monkeypatch.setattr(paths, "LOGS", base / "logs")
     monkeypatch.setattr(paths, "DEFAULT_CACHE", base / "cache")
     monkeypatch.setattr(paths, "RUN_TMP", base / "run")
+    monkeypatch.setattr(paths, "SERVER", base / "server")
+    from emustart import devices
+    devices.reset_cache()
     monkeypatch.setattr(profiles, "LOCAL", base / "profiles")
     if "/media/" in getattr(server, "ROUTES", {}):
         monkeypatch.setitem(server.ROUTES, "/media/", base / "data" / "media")
