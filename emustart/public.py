@@ -110,22 +110,20 @@ def gate(handler) -> bool:
     """Zapytanie na porcie publicznym: True = obsłuż dalej; False = odpowiedź już wysłana."""
     from urllib.parse import urlsplit
     from emustart import remote
+    from emustart.server import refuse
     ip = client_ip(handler)
     path = urlsplit(handler.path).path
     if _banned.get(ip, 0) > time.time():
-        handler.close_connection = True
-        handler.send_error(403)
+        refuse(handler, 403)
         return False
     if not path.startswith(ALLOWED) or path.startswith("/v1/pair"):
-        handler.close_connection = True
-        handler.send_error(404)
+        refuse(handler, 404)
         return False
     if path in OPEN_PATHS:
         return True                  # dołączanie i logowanie podpisem — bez klucza (emustart/enroll.py)
     if not remote.authorized(handler):
         _fail(ip)
-        handler.close_connection = True
-        handler.send_error(401)
+        refuse(handler, 401)
         return False
     if not _local(ip) and ip != STATE["ext_ip"]:          # własny test serwera się nie liczy
         STATE["last_inbound"], STATE["last_ip"] = time.time(), ip

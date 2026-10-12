@@ -17,6 +17,40 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   RetroArchu na Androidzie; ocena „wyświetlania nad innymi aplikacjami” i usługi ułatwień
   dostępu dla pozostałych emulatorów na Androidzie.
 
+## [0.38.0] — 2026-10-12
+
+Zakres: komputer (`emustart/libsync.py` — nowy, `api.py`, `config.py`, `bios.py`,
+`server.py`), serwer (`remote.py`), interfejs (`web/app.js`). Etap 2 koncepcji 2.0 —
+„cienki klient”.
+
+### Dodane
+- **Komputer bez folderów z grami bierze wszystko z serwera** — bez skanowania:
+  - **biblioteka**: `GET /v1/library` (systemy z wersją = czas skanowania na serwerze)
+    i `GET /v1/library?es=…` (gry: ścieżki, pliki, rozmiary, tagi, znaczniki grafik);
+    synchronizacja przy starcie, po zatwierdzeniu nowego urządzenia i z menu Start →
+    *Odśwież bibliotekę z serwera* — pobierane są tylko systemy zmienione na serwerze,
+    systemy usunięte z serwera znikają;
+  - **gry** w całości przez serwer (istniejące pobieranie wieloma strumieniami);
+  - **grafiki** gier i własne logo systemów — lokalny serwer interfejsu pobiera brakujący
+    plik z serwera i zapamiętuje go;
+  - **BIOS-y** rdzeni RetroArcha z serwera, gdy komputer nie ma własnego folderu BIOS-ów;
+  - **emulator i rdzeń dla systemu** zalecane przez serwer (jak na komputerze
+    administratora) przy wykrywaniu emulatorów.
+- Komputer z serwerem, bez folderów z grami, jest „skonfigurowany” (nie wraca do ekranu
+  pierwszego uruchomienia).
+- Konto zatwierdzone bez gier nie dostaje biblioteki (serwer: 403).
+
+### Poprawione
+- **Odmowy serwera przed przeczytaniem treści zapytania** (POST/PUT/DELETE: obcy klient,
+  brak nagłówka interfejsu, nieznana funkcja, port publiczny bez klucza) — Windows potrafił
+  zerwać połączenie (RST) zamiast oddać kod błędu. Teraz jedna funkcja odmowy najpierw
+  doczytuje treść (do 1 MB), dopiero potem odpowiada — we wszystkich tych miejscach.
+
+### Ograniczenia
+- Emulatory trzeba mieć na komputerze (folder emulatorów); instalacja z serwera — etap 3.
+- Automaty (arcade): zestawy rodzica i BIOS-y automatów (np. `neogeo.zip`) jeszcze nie są
+  pobierane dla gier z biblioteki serwera.
+
 ## [0.37.5] — 2026-10-12
 
 Zakres: komputer (`emustart/api.py`, `profiles.py`), aplikacja na Androida (`Bridge.kt`),

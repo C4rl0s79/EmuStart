@@ -77,6 +77,9 @@ class Api:
         threading.Thread(target=lambda: netsrc.push_roots(self._cfg), daemon=True,
                          name="foldery-serwer").start()   # foldery z grami → serwer
         threading.Thread(target=self._profiles_bootstrap, daemon=True, name="profiles").start()
+        from emustart import libsync
+        if libsync.thin(self._cfg):            # biblioteka z serwera przy starcie (tylko zmienione systemy)
+            threading.Thread(target=self._thin_sync, daemon=True, name="biblioteka-serwera").start()
         threading.Thread(target=self._arcade_meta, daemon=True, name="arcade-meta").start()
         threading.Thread(target=self._platforms_meta, daemon=True, name="platforms").start()
         # Menu w grze: stan czyta UI (ingame_poll), Python niczego nie wywołuje
@@ -365,6 +368,7 @@ class Api:
             "configured": config.is_configured(cfg),
             "rom_roots": config.rom_roots(cfg), "rom_online": rom_ok,
             "server": self._server_state(),
+            "thin": __import__("emustart.libsync", fromlist=["thin"]).thin(cfg),
             "account": profiles.account_of_device(cfg),
             "network_mode": cfg.get("network_mode", "auto"),
             "systems": self.list_systems(),
@@ -399,9 +403,12 @@ class Api:
         return [g for k, g in self.HIDE_KEYS.items() if self._cfg.get(k)]
 
     def list_systems(self) -> list:
+        from emustart import libsync
         out = []
         summary = library.systems_summary()
-        logos.fetch_missing(self._cfg, [s["es"] for s in summary])
+        thin = libsync.thin(self._cfg)
+        if not thin:
+            logos.fetch_missing(self._cfg, [s["es"] for s in summary])
         groups = self._hide_groups()
         clones = [s["es"] for s in summary if systems.info(s["es"])["kind"] == "arcade"] \
             if self._cfg.get("hide_arcade_clones", True) else []
@@ -414,6 +421,8 @@ class Api:
             if not emu.get("enabled", True) or not s["games"]:
                 continue
             lg = logos.url_for(s["es"], self._cfg)
+            if thin:                              # logo systemu takie jak na serwerze (własne → z serwera)
+                lg = libsync.logo_for(s["es"]) or lg
             out.append({"es": s["es"], "display": emu.get("name") or s["display"], "games": s["games"],
                         "cached": s["cached"], "logo": lg["url"], "logo_glow": lg["glow"],
                         "emulator": emu.get("label", ""), "kind": info["kind"]})
@@ -1298,16 +1307,30 @@ class Api:
                 "from": keys["source"]}
 
     # ── skan ──
+    def _thin_sync(self, force: bool = False) -> dict:
+        """Biblioteka z serwera; po pierwszej — emulatory dla nowych systemów (zalecane przez serwer)."""
+        from emustart import libsync
+        r = libsync.sync(self._cfg, force=force)
+        if r.get("ok") and self._cfg.get("emu_root"):
+            self.autodetect()
+        return r
+
     def rescan(self) -> dict:
         if self._scan["running"]:
             return {"ok": False}
         self._scan.update(running=True, text="Start…", done=0, total=0, result=None)
+        from emustart import libsync
 
         def prog(text, done, total):
             self._scan.update(text=text, done=done, total=total)
 
         def run():
             try:
+                if libsync.thin(self._cfg):          # bez folderów z grami — biblioteka z serwera, nie skan
+                    self._scan["result"] = libsync.sync(self._cfg, prog, force=True)
+                    if self._scan["result"].get("ok") and self._cfg.get("emu_root"):
+                        self.autodetect()
+                    return
                 self._scan["result"] = scanner.scan_all(self._cfg, prog)
             except Exception as ex:
                 log.exception("scan")
@@ -1487,6 +1510,9 @@ class Api:
                              name="adresy-serwera").start()
             log.info("dołączono do serwera %s (konto %s)", p["url"], self._cfg["server_account"])
             self._adopt_account(self._cfg["server_account"])
+            from emustart import libsync
+            if libsync.thin(self._cfg):
+                threading.Thread(target=self._thin_sync, daemon=True, name="biblioteka-serwera").start()
         elif st in ("denied", "expired"):
             self.server_enroll_cancel()
         return {"ok": True, "status": st, "account": p["account"], "code": p["code"], "reason": r.get("reason", "")}
@@ -1623,8 +1649,14 @@ class Api:
 
     def autodetect(self) -> dict:
         """Domyślny emulator dla każdego folderu, który jeszcze go nie ma."""
+        from emustart import libsync
         cfg = self._cfg
-        found_sys, _unknown = scanner.collect_systems(cfg)
+        if libsync.thin(cfg):                     # systemy z biblioteki serwera
+            found_sys = {r["es"]: [] for r in library.systems_summary()}
+            if not found_sys:
+                return {"ok": False, "reason": "Biblioteka z serwera jest pusta — odśwież ją (Start → Odśwież z serwera)."}
+        else:
+            found_sys, _unknown = scanner.collect_systems(cfg)
         if not found_sys:
             return {"ok": False, "reason": "Brak dostępnych folderów z grami: "
                     + ", ".join(config.rom_roots(cfg))}
@@ -1635,7 +1667,7 @@ class Api:
             cur = cfg["systems"].setdefault(es, {"enabled": True})
             if cur.get("exe") and Path(cur["exe"]).is_file():
                 continue
-            opt = emulators.default_option(systems.info(es), cfg.get("emu_root", ""))
+            opt = _recommended_option(es, cfg) or emulators.default_option(systems.info(es), cfg.get("emu_root", ""))
             if opt:
                 cur.update(label=opt["label"], exe=opt["exe"], args=opt["args"])
                 found += 1
@@ -1790,3 +1822,20 @@ def _clipboard_text() -> str:
             k.GlobalUnlock(h)
     finally:
         u.CloseClipboard()
+
+
+def _recommended_option(es: str, cfg: dict) -> dict:
+    """Emulator zalecany przez serwer dla systemu (ten sam co na komputerze administratora —
+    stany zgodne): RetroArch z tym rdzeniem albo pierwszy samodzielny emulator."""
+    from emustart import libsync
+    rec = libsync.recommended(es)
+    if not rec.get("emu"):
+        return {}
+    opts = emulators.options_for(systems.info(es), cfg.get("emu_root", ""))
+    if rec["emu"] == "retroarch" and rec.get("core"):
+        want = f"{rec['core']}_libretro".lower()
+        return next((o for o in opts if Path(o["exe"]).stem.lower() == "retroarch"
+                     and want in (o.get("args") or "").lower()), {})
+    if rec["emu"] == "standalone":
+        return next((o for o in opts if Path(o["exe"]).stem.lower() != "retroarch"), {})
+    return {}

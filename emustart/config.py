@@ -87,4 +87,7 @@ def cache_dir(cfg: dict) -> Path:
 
 
 def is_configured(cfg: dict) -> bool:
-    return paths.CONFIG_PATH.exists() and bool(cfg.get("systems"))
+    if not paths.CONFIG_PATH.exists():
+        return False
+    # komputer połączony z serwerem bez folderów z grami bierze bibliotekę z serwera (libsync)
+    return bool(cfg.get("systems")) or bool(cfg.get("server_url") and cfg.get("server_key") and not rom_roots(cfg))
