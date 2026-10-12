@@ -758,7 +758,7 @@ function openMenu() {
               : "Grafiki i metadane", () => openArt()],
     ["Zmień profil", () => openProfiles()],
     ["Kolejność padów", () => openPads()],
-    ["Skanuj kolekcję ponownie", () => startScan()],
+    [S.state?.thin ? "Odśwież bibliotekę z serwera" : "Skanuj kolekcję ponownie", () => startScan()],
     ["Aktualizuj EmuStart", () => appUpdate()],
     ["Wyjdź z EmuStart", () => api().quit()],
   ];

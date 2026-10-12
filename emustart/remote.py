@@ -255,12 +255,21 @@ def handle(handler) -> None:
     parts = [p for p in path.split("/") if p][1:]           # bez „v1”
     try:
         if parts == ["info"]:
-            feats = ["find", "system", "bios", "media"] + (["nas", "roots", "savemgr", "profiles"] if NAS_ROOT else [])
+            feats = ["find", "system", "bios", "media", "library"] + (["nas", "roots", "savemgr", "profiles"] if NAS_ROOT else [])
             return _json(handler, {"name": socket.gethostname(), "version": __version__, "api": 1,
                                    "features": feats, "nas_id": NAS_ID, "endpoints": endpoints(),
                                    "tls": {"port": TLS["port"], "fp": TLS["fp"]} if TLS else None})
         if parts and parts[0] == "nas":
             return _nas(handler, "GET", parts[1:])
+        if parts == ["library"]:                       # biblioteka dla komputera bez folderów z grami
+            if not _games_ok(handler):
+                return _json(handler, {"error": "To konto nie pobiera gier z serwera."}, 403)
+            from emustart import libsync
+            q = urllib.parse.parse_qs(urllib.parse.urlsplit(handler.path).query)
+            es = (q.get("es") or [""])[0]
+            if es:
+                return _json(handler, {"games": libsync.server_games(es)})
+            return _json(handler, {"systems": libsync.server_systems()})
         if parts == ["sysinfo"]:                       # opis platformy (producent, lata, opis) dla telefonu
             q = urllib.parse.parse_qs(urllib.parse.urlsplit(handler.path).query)
             return _json(handler, API.system_info((q.get("es") or [""])[0]))

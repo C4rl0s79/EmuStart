@@ -183,6 +183,9 @@ class _Handler(BaseHTTPRequestHandler):
             target.relative_to(base.resolve())
         except ValueError:
             return self.send_error(403)
+        if not target.is_file() and base == ROUTES.get("/media/") and DEV_API is not None:
+            from emustart import libsync           # komputer z biblioteką z serwera — grafika z serwera
+            libsync.fetch_media(getattr(DEV_API, "_cfg", {}), rel, target)
         if not target.is_file():
             return self.send_error(404)
         data = target.read_bytes()

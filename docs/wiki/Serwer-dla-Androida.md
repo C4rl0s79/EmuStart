@@ -175,6 +175,25 @@ urządzenia*). *Użytkownik* — tylko swoje konto (zapisy, stany, ustawienia), 
 urządzenia swojego konta; gry z serwera — jeśli zatwierdzający na to pozwolił. Urządzenia
 sparowane przed 0.37 działają jak dotąd (pełny dostęp) — przejście na klucze urządzeń: 0.38.
 
+## Komputer bez folderów z grami — wszystko z serwera (0.38)
+
+Komputer połączony z serwerem (np. *Dołącz przez internet*), który nie ma ustawionych
+folderów z grami, **niczego nie skanuje** — bierze wszystko od serwera:
+
+- **biblioteka** — systemy i gry z serwera, przy starcie i z menu Start → *Odśwież
+  bibliotekę z serwera* (pobierane są tylko systemy zmienione na serwerze);
+- **gry** — uruchamiane w całości przez serwer (pobieranie wieloma strumieniami, pamięć
+  podręczna, granie w trakcie pobierania jak dotąd);
+- **grafiki** — okładki, zrzuty, logo gier i własne logo systemów pobierane z serwera przy
+  pierwszym wyświetleniu i zapamiętywane;
+- **BIOS-y** — przed grą w RetroArchu brakujące BIOS-y rdzenia z serwera (gdy komputer
+  nie ma własnego folderu BIOS-ów);
+- **emulator dla systemu** — po wskazaniu folderu emulatorów EmuStart wybiera ten sam
+  emulator i rdzeń, którego używa komputer administratora (stany zgodne).
+
+Emulatory trzeba na razie mieć na tym komputerze (Ustawienia → *Emulatory* → folder).
+Konto bez uprawnienia do gier (zatwierdzone „tylko zapisy i profil”) nie dostaje biblioteki.
+
 ## Katalog serwera (0.32)
 
 Serwer trzyma wszystko poza grami w podkatalogu `server\` obok `EmuStart.exe`: ustawienia

@@ -41,11 +41,14 @@ def firmware(ra_root: Path, core: str) -> list:
 
 def sync(cfg: dict, ra_root: Path, core: str, extra: tuple = ()) -> list:
     """Kopiuje brakujące BIOS-y rdzenia (i pliki z `extra`) z folderu BIOS-ów do
-    folderu system RetroArcha. Zwraca listę skopiowanych."""
-    src_root = Path(cfg.get("bios_dir") or "")
-    if not cfg.get("bios_dir") or not core:
+    folderu system RetroArcha; czego tam nie ma — z serwera EmuStart (komputer bez
+    własnego folderu BIOS-ów). Zwraca listę skopiowanych."""
+    from emustart import installer, libsync
+    have_dir = bool(cfg.get("bios_dir"))
+    from_server = bool(cfg.get("server_url") and cfg.get("server_key"))
+    if not core or not (have_dir or from_server):
         return []
-    from emustart import installer
+    src_root = Path(cfg.get("bios_dir") or "")
     dst_root = installer.ra_system_dir(ra_root)
     copied = []
     for rel in list(firmware(ra_root, core)) + list(extra):
@@ -54,7 +57,9 @@ def sync(cfg: dict, ra_root: Path, core: str, extra: tuple = ()) -> list:
             continue
         src = src_root / rel
         try:
-            if not src.is_file():
+            if not have_dir or not src.is_file():
+                if from_server and libsync.bios_from_server(cfg, rel, dst):
+                    copied.append(rel)
                 continue
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, dst)
