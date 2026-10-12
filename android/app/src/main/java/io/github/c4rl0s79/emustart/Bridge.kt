@@ -192,11 +192,25 @@ class Bridge(private val act: MainActivity) {
 
     private fun cacheFile(name: String) = File(act.filesDir, "lista-$name.json")
 
+    @Volatile private var learnedAt = 0L
+
+    /** Adresy serwera (sieć lokalna, Tailscale, publiczny, tunel) i odcisk certyfikatu — po
+     *  udanym połączeniu, najwyżej raz na godzinę. Bez tego telefon znał tylko adres wpisany
+     *  przy parowaniu i po wyłączeniu Tailscale nie miał dokąd się połączyć. */
+    private fun learnAddresses() {
+        val now = System.currentTimeMillis()
+        if (now - learnedAt < 3_600_000) return
+        learnedAt = now
+        pool.execute {
+            try { server.info() } catch (e: Exception) { learnedAt = 0L; Log.w(tag, "adresy serwera: $e") }
+        }
+    }
+
     private fun systems(): JSONArray {
         systemsCache?.let { return it }
         if (!prefs.configured) return JSONArray()
         val arr = try {
-            server.systems().also { online = true; cacheFile("systemy").writeText(it.toString()) }
+            server.systems().also { online = true; cacheFile("systemy").writeText(it.toString()); learnAddresses() }
         } catch (e: Exception) {
             online = false
             Log.w(tag, "serwer: $e")
