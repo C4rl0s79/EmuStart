@@ -40,6 +40,12 @@ Zakres: komputer (`emustart/libsync.py` — nowy, `api.py`, `config.py`, `bios.p
   pierwszego uruchomienia).
 - Konto zatwierdzone bez gier nie dostaje biblioteki (serwer: 403).
 
+### Poprawione
+- **Odmowy serwera przed przeczytaniem treści zapytania** (POST/PUT/DELETE: obcy klient,
+  brak nagłówka interfejsu, nieznana funkcja, port publiczny bez klucza) — Windows potrafił
+  zerwać połączenie (RST) zamiast oddać kod błędu. Teraz jedna funkcja odmowy najpierw
+  doczytuje treść (do 1 MB), dopiero potem odpowiada — we wszystkich tych miejscach.
+
 ### Ograniczenia
 - Emulatory trzeba mieć na komputerze (folder emulatorów); instalacja z serwera — etap 3.
 - Automaty (arcade): zestawy rodzica i BIOS-y automatów (np. `neogeo.zip`) jeszcze nie są

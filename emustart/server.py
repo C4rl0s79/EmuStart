@@ -50,13 +50,32 @@ def _near(handler) -> bool:
     except ValueError:
         ok = False
     if not ok:
-        handler.close_connection = True
-        handler.send_error(403)
+        refuse(handler, 403)
         _warn_public(ip, handler.server.server_address[1])
     return ok
 
 
 _warned: dict = {}
+MAX_DRAIN = 1 << 20
+
+
+def refuse(handler, code: int) -> None:
+    """Odmowa przed przeczytaniem treści zapytania (POST/PUT/DELETE): najpierw doczytujemy
+    treść (do 1 MB; większa — zamykamy połączenie), dopiero potem odpowiedź. Odpowiedź przy
+    nieprzeczytanej treści Windows potrafi zerwać (RST) zamiast ją oddać — klient dostaje
+    „połączenie przerwane” zamiast kodu błędu."""
+    headers = getattr(handler, "headers", None) or {}
+    try:
+        n = int(headers.get("Content-Length") or 0)
+    except ValueError:
+        n = MAX_DRAIN + 1
+    if 0 < n <= MAX_DRAIN:
+        try:
+            handler.rfile.read(n)
+        except OSError:
+            pass
+    handler.close_connection = True
+    handler.send_error(code)
 
 
 def _warn_public(ip: str, port: int) -> None:
@@ -109,14 +128,14 @@ class _Handler(BaseHTTPRequestHandler):
         # API tylko dla naszego UI: właściwy Host i własny nagłówek (zwykła strona
         # z internetu nie wyśle go do 127.0.0.1 bez zgody CORS, której nie dajemy)
         if not _host_ok(self) or self.headers.get("X-EmuStart") != "1":
-            return self.send_error(403)
+            return refuse(self, 403)
         if self.path.startswith("/admin/"):
             from emustart import srvadmin     # panel serwera (tylko z tego komputera)
             return srvadmin.handle(self, DEV_API)
         name = urllib.parse.urlsplit(self.path).path.removeprefix("/api/")
         fn = getattr(DEV_API, name, None) if DEV_API and not name.startswith("_") else None
         if not callable(fn):
-            return self.send_error(404)
+            return refuse(self, 404)
         n = int(self.headers.get("Content-Length") or 0)
         args = json.loads(self.rfile.read(n) or b"[]")
         body = json.dumps(fn(*args), ensure_ascii=False).encode("utf-8")
@@ -136,8 +155,7 @@ class _Handler(BaseHTTPRequestHandler):
         if urllib.parse.urlsplit(self.path).path.startswith("/v1/"):
             from emustart import remote      # zapis w folderze profili (z kluczem)
             return remote.handle_write(self, "PUT")
-        self.close_connection = True
-        return self.send_error(405)
+        return refuse(self, 405)
 
     def do_DELETE(self):
         if getattr(self.server, "public", False):
@@ -149,8 +167,7 @@ class _Handler(BaseHTTPRequestHandler):
         if urllib.parse.urlsplit(self.path).path.startswith("/v1/"):
             from emustart import remote
             return remote.handle_write(self, "DELETE")
-        self.close_connection = True
-        return self.send_error(405)
+        return refuse(self, 405)
 
     def do_GET(self):
         if getattr(self.server, "public", False):
