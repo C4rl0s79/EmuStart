@@ -8,6 +8,16 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.32.2] — 2026-10-12
+
+Zakres: panel serwera (`web/server.js`). Bez zmian w działaniu serwera.
+
+### Poprawione
+- Panel serwera: potwierdzenie restartu / aktualizacji wspominało o „trwającym pobieraniu
+  na telefonie” zawsze — także gdy nic się nie pobierało (wyglądało jak błąd). Teraz tylko
+  gdy któreś urządzenie naprawdę pobiera grę, z jej nazwą.
+- Opis wydania w sekcji Aktualizacja bez znaczników Markdown (`###`, `**`, `` ` ``).
+
 ## [0.32.1] — 2026-10-12
 
 Zakres: `requirements.txt`, `emustart.spec`, testy. Bez zmian w działaniu poza obrazkiem QR.

@@ -32,7 +32,18 @@ function msg(text, ok) {
   $("msg").style.color = ok ? "var(--ok)" : "var(--warn)";
 }
 
-let restarting = false;
+let restarting = false, lastStatus = null;
+
+// zdanie o pobieraniu tylko wtedy, gdy któreś urządzenie naprawdę pobiera grę
+function busyNote() {
+  const active = (lastStatus?.transfers || []).filter((t) => t.active);
+  return active.length ? `
+
+Teraz pobiera: ${active.map((t) => `${t.title} (${t.name || t.ip})`).join(", ")} — ` +
+                         "pobieranie wznowi się samo po starcie serwera." : "";
+}
+// opis wydania z CHANGELOG.md bez znaczników Markdown
+const plain = (t) => String(t || "").replace(/^#+\s*/gm, "").replace(/\*\*(.+?)\*\*/g, "$1").replace(/`([^`]+)`/g, "$1");
 
 async function refresh() {
   let st;
@@ -43,6 +54,7 @@ async function refresh() {
     $("state").textContent = restarting ? "uruchamianie ponownie…" : "serwer nie odpowiada";
     return;
   }
+  lastStatus = st;
   if (restarting) { restarting = false; msg("Serwer uruchomiony ponownie.", true); }
   $("dot").className = "dot ok";
   $("state").textContent = `działa od ${fmtDur(st.uptime)}`;
@@ -87,7 +99,7 @@ $("bRescan").addEventListener("click", async () => {
   refresh();
 });
 $("bRestart").addEventListener("click", async () => {
-  if (!confirm("Uruchomić serwer ponownie? Trwające pobieranie na telefonie wznowi się samo.")) return;
+  if (!confirm("Uruchomić serwer ponownie?" + busyNote())) return;
   const r = await admin("restart").catch(() => null);
   if (r?.ok) { restarting = true; msg("Restartuję serwer…", true); }
   else msg(r?.reason || "Serwer nie odpowiada.");
@@ -116,7 +128,7 @@ $("bUpdCheck").addEventListener("click", async () => {
   if (!r) return updText("Serwer nie odpowiada.");
   if (!r.ok) return updText(r.reason);
   $("updNotes").hidden = !r.notes || !r.newer;
-  $("updNotes").textContent = r.notes || "";
+  $("updNotes").textContent = plain(r.notes);
   if (!r.newer) return updText(`Serwer ma najnowszą wersję (${r.current}).`);
   if (!r.frozen) return updText(`Jest wersja ${r.version} (serwer ${r.current}) — aktualizacja z panelu działa tylko w EmuStart.exe.`);
   if (!r.available) return updText(`Jest wersja ${r.version}, ale wydanie nie ma jeszcze pliku dla Windows — spróbuj za kilka minut.`);
@@ -125,7 +137,7 @@ $("bUpdCheck").addEventListener("click", async () => {
   $("bUpd").hidden = false;
 });
 $("bUpd").addEventListener("click", async () => {
-  if (!confirm("Pobrać aktualizację i uruchomić serwer ponownie? Trwające pobieranie na telefonie wznowi się samo.")) return;
+  if (!confirm("Pobrać aktualizację i uruchomić serwer ponownie?" + busyNote())) return;
   $("bUpd").disabled = $("bUpdCheck").disabled = true;
   const r = await admin("update_start").catch(() => null);
   if (!r?.ok) { $("bUpd").disabled = $("bUpdCheck").disabled = false; return updText(r?.reason || "Serwer nie odpowiada."); }
