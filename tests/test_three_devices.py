@@ -184,3 +184,61 @@ def test_panel_works_without_segno(monkeypatch):
                         lambda n, *a, **k: (_ for _ in ()).throw(ImportError(n)) if n == "segno" else real(n, *a, **k))
     assert qr.svg("x") == ""                                   # bez biblioteki: sam kod, bez obrazka
     assert srvadmin.pair_code(None)["code"]
+
+
+def test_new_pc_joins_after_phone_approves(srv):
+    ph_key, _ph, _ = _pair(srv, "Telefon", "phone")
+    # nowy komputer: prośba o dołączenie (bez klucza) — kod i QR na jego ekranie
+    st, req = _req(srv, "POST", "/v1/pair/request", body={"name": "Laptop", "class": "pc", "version": "2.0"})
+    assert st == 200 and req["ok"] and len(req["code"]) == 8
+    assert _req(srv, "POST", "/v1/pair/poll", body={"rid": req["rid"]})[1]["status"] == "pending"
+    # zatwierdzać może tylko sparowane urządzenie
+    assert _req(srv, "POST", "/v1/pair/approve", body={"code": req["code"], "allow": True})[0] == 401
+    # telefon: podgląd (nazwa nowego urządzenia), potem zatwierdzenie
+    st, prev = _req(srv, "POST", "/v1/pair/approve", ph_key, body={"code": req["pretty"]})
+    assert prev["ok"] and prev["request"]["name"] == "Laptop" and "rid" not in prev["request"]
+    st, ok = _req(srv, "POST", "/v1/pair/approve", ph_key, body={"code": req["code"], "allow": True})
+    assert ok["ok"] and ok["status"] == "approved"
+    # komputer odbiera swój klucz — tylko raz
+    st, got = _req(srv, "POST", "/v1/pair/poll", body={"rid": req["rid"]})
+    assert got["status"] == "approved" and _req(srv, "GET", "/v1/info", got["key"])[0] == 200
+    assert _req(srv, "POST", "/v1/pair/poll", body={"rid": req["rid"]})[1]["status"] == "expired"
+    devs = {d["name"]: d for d in devices.listing()}
+    assert devs["Laptop"]["approved_by"] == "Telefon"
+    # kod zużyty
+    assert not _req(srv, "POST", "/v1/pair/approve", ph_key, body={"code": req["code"], "allow": True})[1]["ok"]
+
+
+def test_denied_request_and_panel_approval(srv):
+    st, a = _req(srv, "POST", "/v1/pair/request", body={"name": "Obcy", "class": "pc"})
+    assert srvadmin.devices_list(None)["requests"][0]["name"] == "Obcy"
+    assert srvadmin.pair_approve(None, {"code": a["code"], "allow": False})["status"] == "denied"
+    assert _req(srv, "POST", "/v1/pair/poll", body={"rid": a["rid"]})[1]["status"] == "denied"
+    st, b = _req(srv, "POST", "/v1/pair/request", body={"name": "Mój PC", "class": "pc"})
+    assert srvadmin.pair_approve(None, {"code": b["code"], "allow": True})["ok"]
+    key = _req(srv, "POST", "/v1/pair/poll", body={"rid": b["rid"]})[1]["key"]
+    assert _req(srv, "GET", "/v1/info", key)[0] == 200
+    # zły identyfikator prośby nic nie zdradza
+    assert _req(srv, "POST", "/v1/pair/poll", body={"rid": "zgadywanie"})[1]["status"] == "expired"
+
+
+def test_pc_client_join_flow(srv, monkeypatch):
+    from emustart import api as api_mod
+    host, port, _nas = srv
+    ph_key, _, _ = _pair(srv, "Telefon", "phone")
+    saved = {}
+    monkeypatch.setattr("emustart.config.save", lambda c: saved.update(c))
+    a = api_mod.Api.__new__(api_mod.Api)
+    a._cfg = {}
+    r = a.server_join(f"{host}:{port}")
+    assert r["ok"] and r["pretty"]
+    assert a.server_join_poll()["status"] == "pending"
+    code = r["pretty"]
+    st, ok = _req(srv, "POST", "/v1/pair/approve", ph_key, body={"code": code, "allow": True})
+    assert ok["ok"]
+    assert a.server_join_poll()["status"] == "approved"
+    assert saved["server_url"] == f"http://{host}:{port}" and saved["server_key"]
+    # ten komputer może teraz sam zatwierdzać kolejne
+    st, nxt = _req(srv, "POST", "/v1/pair/request", body={"name": "Tablet", "class": "phone"})
+    assert a.server_approve(f"emustart://approve?u=x&c={nxt['code']}", None)["request"]["name"] == "Tablet"
+    assert a.server_approve(nxt["pretty"], True)["status"] == "approved"

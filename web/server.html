@@ -93,11 +93,17 @@
         <div id="pairQr" style="background:#fff;border-radius:8px;line-height:0"></div>
         <div>
           <div class="muted">Telefon: EmuStart → Ustawienia → <b>Połącz z serwerem</b> → zeskanuj kod.<br>
-            Komputer: Ustawienia → Serwer EmuStart → <b>Połącz kodem</b> → wpisz kod:</div>
+            Komputer: Ustawienia → Serwer EmuStart → <b>Połącz kodem</b> → wpisz kod<br>
+            (albo na komputerze <b>Dołącz do serwera</b> i zatwierdź telefonem):</div>
           <div style="font-size:30px;letter-spacing:.12em;margin:8px 0"><code id="pairCode"></code></div>
           <div class="muted">Adres serwera: <code id="pairUrl"></code> · kod ważny <span id="pairLeft"></span></div>
         </div>
       </div>
+    </div>
+    <div id="reqBox" hidden style="margin-top:10px">
+      <h3 style="margin:0 0 6px">Proszą o dołączenie</h3>
+      <div class="muted">Sprawdź, czy kod zgadza się z kodem na ekranie urządzenia.</div>
+      <table><tbody id="requests"></tbody></table>
     </div>
     <table style="margin-top:10px"><thead><tr><th>Urządzenie</th><th>Rodzaj</th><th>Wersja</th><th class="n">Ostatnio</th><th></th></tr></thead>
       <tbody id="devices"></tbody></table>

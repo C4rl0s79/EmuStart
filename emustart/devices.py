@@ -77,6 +77,7 @@ def reset_cache() -> None:
         _cache = None
         _codes.clear()
         _fails.clear()
+        _reqs.clear()
 
 
 def new_code() -> dict:
@@ -109,15 +110,116 @@ def pair(code: str, name: str, cls: str, ip: str = "", version: str = "") -> dic
             fails.append(now)
             return {"ok": False, "reason": "Nieprawidłowy albo wygasły kod — wygeneruj nowy w panelu serwera."}
         _codes.pop(c, None)                       # kod jednorazowy
-        key = secrets.token_urlsafe(32)
-        did = secrets.token_hex(6)
-        devs = _load()
-        devs[did] = {"name": (str(name).strip() or "urządzenie")[:40],
-                     "class": cls if cls in CLASSES else "pc",
-                     "key": _h(key), "created": now, "last_seen": now, "ip": ip, "version": version}
-        _save()
-    log.info("sparowano urządzenie %s (%s, %s)", devs[did]["name"], devs[did]["class"], ip)
+        did, key = _add(name, cls, ip, version, now)
     return {"ok": True, "id": did, "key": key}
+
+
+def _add(name: str, cls: str, ip: str, version: str, now: float, by: str = "") -> tuple:
+    """Nowe urządzenie w rejestrze (wołający trzyma _lock) → (id, klucz)."""
+    key = secrets.token_urlsafe(32)
+    did = secrets.token_hex(6)
+    devs = _load()
+    devs[did] = {"name": (str(name).strip() or "urządzenie")[:40],
+                 "class": cls if cls in CLASSES else "pc",
+                 "key": _h(key), "created": now, "last_seen": now, "ip": ip, "version": version}
+    if by:
+        devs[did]["approved_by"] = by
+    _save()
+    log.info("sparowano urządzenie %s (%s, %s)%s", devs[did]["name"], devs[did]["class"], ip,
+             f" — zatwierdził {by}" if by else "")
+    return did, key
+
+
+# ── prośba o dołączenie, zatwierdzana na sparowanym urządzeniu (jak logowanie telewizora) ──
+# Nowe urządzenie: POST /v1/pair/request → kod + QR na jego ekranie; telefon (albo panel
+# serwera) zatwierdza kod; nowe urządzenie odpytuje /v1/pair/poll i odbiera swój klucz.
+REQ_TTL = 600
+MAX_PENDING_IP = 5
+_reqs: dict = {}                 # kod → prośba
+
+
+def _gc(now: float) -> None:
+    for c, r in list(_reqs.items()):
+        if r["expires"] < now:
+            _reqs.pop(c, None)
+
+
+def request(name: str, cls: str, ip: str = "", version: str = "") -> dict:
+    """Nowe urządzenie prosi o dołączenie → {"ok", "rid" (tajny, do odpytywania), "code", "pretty"}."""
+    now = time.time()
+    with _lock:
+        _gc(now)
+        if sum(1 for r in _reqs.values() if r["ip"] == ip and r["status"] == "pending") >= MAX_PENDING_IP:
+            return {"ok": False, "reason": "Za dużo oczekujących próśb z tego adresu — spróbuj za kilka minut."}
+        code = "".join(secrets.choice(PAIR_ALPHABET) for _ in range(8))
+        rid = secrets.token_urlsafe(24)
+        _reqs[code] = {"rid": rid, "name": (str(name).strip() or "urządzenie")[:40],
+                       "class": cls if cls in CLASSES else "pc", "ip": ip, "version": version,
+                       "created": now, "expires": now + REQ_TTL, "status": "pending", "key": "", "id": ""}
+    log.info("prośba o dołączenie: %s (%s, %s)", name, cls, ip)
+    return {"ok": True, "rid": rid, "code": code, "pretty": f"{code[:4]}-{code[4:]}", "expires": now + REQ_TTL}
+
+
+def poll(rid: str) -> dict:
+    """Stan prośby: pending / approved (+ klucz, oddawany raz) / denied / expired."""
+    now = time.time()
+    with _lock:
+        _gc(now)
+        for c, r in _reqs.items():
+            if rid and hmac.compare_digest(r["rid"], str(rid)):
+                if r["status"] == "pending":
+                    return {"ok": True, "status": "pending"}
+                _reqs.pop(c, None)                # klucz i odmowa — tylko raz
+                if r["status"] == "approved":
+                    return {"ok": True, "status": "approved", "key": r["key"], "id": r["id"]}
+                return {"ok": True, "status": "denied"}
+    return {"ok": True, "status": "expired"}
+
+
+def pending(code: str) -> dict | None:
+    """Prośba czekająca na zatwierdzenie (do pokazania: nazwa, klasa, adres) — bez sekretów."""
+    with _lock:
+        _gc(time.time())
+        r = _reqs.get(_norm_code(code))
+        if not r or r["status"] != "pending":
+            return None
+        return {k: r[k] for k in ("name", "class", "ip", "version", "created", "expires")}
+
+
+def pending_list() -> list:
+    with _lock:
+        _gc(time.time())
+        return [{"code": c, "pretty": f"{c[:4]}-{c[4:]}", **{k: r[k] for k in ("name", "class", "ip", "created")}}
+                for c, r in _reqs.items() if r["status"] == "pending"]
+
+
+def approve(code: str, allow: bool, by: str = "") -> dict:
+    """Zatwierdzenie (albo odrzucenie) prośby kodem — na sparowanym urządzeniu lub w panelu."""
+    now = time.time()
+    with _lock:
+        _gc(now)
+        c = _norm_code(code)
+        r = _reqs.get(c)
+        if not r or r["status"] != "pending":
+            return {"ok": False, "reason": "Nie ma takiej prośby (kod wygasł albo już użyty)."}
+        if not allow:
+            r["status"] = "denied"
+            log.info("odrzucono prośbę o dołączenie: %s (%s)", r["name"], r["ip"])
+            return {"ok": True, "status": "denied", "name": r["name"]}
+        r["id"], r["key"] = _add(r["name"], r["class"], r["ip"], r["version"], now, by)
+        r["status"] = "approved"
+        return {"ok": True, "status": "approved", "name": r["name"], "id": r["id"]}
+
+
+def name_of(did: str) -> str:
+    with _lock:
+        return (_load().get(did) or {}).get("name", "") if did else "panel serwera"
+
+
+def approve_uri(base_url: str, code: str) -> str:
+    """QR na ekranie nowego urządzenia: skanuje go sparowany telefon."""
+    from urllib.parse import urlencode
+    return "emustart://approve?" + urlencode({"u": base_url, "c": code})
 
 
 def verify(key: str) -> str:

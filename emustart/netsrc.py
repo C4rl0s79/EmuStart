@@ -298,6 +298,64 @@ def pair(url: str, code: str, name: str, cls: str = "pc") -> dict:
     return {"ok": True, "key": d["key"], "url": f"http://{u.hostname}:{u.port or 8740}", "server": d.get("server", "")}
 
 
+def _post(url: str, path: str, data: dict, key: str = "") -> dict:
+    """POST JSON na serwer → odpowiedź (z "url" — adres w postaci kanonicznej) albo {"ok": False, "reason"}."""
+    if "://" not in url:
+        url = "http://" + url
+    u = urllib.parse.urlsplit(url)
+    if not u.hostname:
+        return {"ok": False, "reason": "Podaj adres serwera (np. http://100.85.254.31:8740)."}
+    port = u.port or 8740
+    h = {"Content-Type": "application/json", **(auth_headers(key) if key else {})}
+    c = http.client.HTTPConnection(u.hostname, port, timeout=15)
+    try:
+        c.request("POST", path, body=json.dumps(data).encode("utf-8"), headers=h)
+        r = c.getresponse()
+        d = json.loads(r.read() or b"{}")
+    except (OSError, http.client.HTTPException, ValueError) as ex:
+        return {"ok": False, "reason": f"Brak połączenia z {u.hostname}:{port} ({ex})"}
+    finally:
+        c.close()
+    if not isinstance(d, dict):
+        d = {}
+    if r.status == 404:
+        return {"ok": False, "reason": "Serwer ma starszą wersję EmuStart — zaktualizuj go (panel serwera)."}
+    d.setdefault("ok", False)
+    if not d["ok"] and not d.get("reason"):
+        d["reason"] = d.get("error") or f"Serwer odpowiedział {r.status}."
+    d["url"] = f"http://{u.hostname}:{port}"
+    return d
+
+
+def join_request(url: str, name: str, cls: str = "pc") -> dict:
+    """Prośba o dołączenie (nowe urządzenie) → {"ok", "rid", "code", "pretty", "url"}."""
+    from emustart import __version__
+    return _post(url, "/v1/pair/request", {"name": name, "class": cls, "version": __version__})
+
+
+def join_poll(url: str, rid: str) -> dict:
+    """Stan prośby: pending / approved (+ "key") / denied / expired."""
+    return _post(url, "/v1/pair/poll", {"rid": rid})
+
+
+def approve(cfg: dict, code: str, allow: bool | None) -> dict:
+    """Zatwierdzenie nowego urządzenia kodem z jego ekranu (to urządzenie jest sparowane).
+    allow=None — tylko podgląd prośby (nazwa, rodzaj, adres)."""
+    data: dict = {"code": code}
+    if allow is not None:
+        data["allow"] = bool(allow)
+    return _post(cfg.get("server_url") or "", "/v1/pair/approve", data, cfg.get("server_key") or "")
+
+
+def parse_approve(text: str) -> str:
+    """Kod z wpisanego tekstu albo z linku z kodu QR nowego urządzenia (emustart://approve?u=…&c=…)."""
+    text = (text or "").strip()
+    if text.lower().startswith("emustart://approve"):
+        q = urllib.parse.parse_qs(urllib.parse.urlsplit(text).query)
+        return (q.get("c") or [""])[0]
+    return text
+
+
 def on_lan(cfg: dict) -> bool:
     i = info(cfg)
     return bool(i.get("ok")) and i.get("rtt", 1) < LAN_RTT

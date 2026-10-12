@@ -211,6 +211,26 @@ class Server(private val prefs: Prefs) {
         } finally { c.disconnect() }
     }
 
+    /** Zatwierdzenie nowego urządzenia (POST /v1/pair/approve); allow == null — podgląd prośby. */
+    fun approve(code: String, allow: Boolean?): JSONObject {
+        val c = URL(prefs.serverUrl + "/v1/pair/approve").openConnection() as HttpURLConnection
+        try {
+            c.connectTimeout = 8000
+            c.readTimeout = 15000
+            c.requestMethod = "POST"
+            c.doOutput = true
+            c.setRequestProperty("Content-Type", "application/json")
+            c.setRequestProperty("Authorization", "Bearer " + prefs.serverKey)
+            val b = JSONObject().put("code", code)
+            if (allow != null) b.put("allow", allow)
+            c.outputStream.use { it.write(b.toString().toByteArray()) }
+            val status = c.responseCode
+            if (status == 404) return JSONObject().put("ok", false).put("reason", "Serwer ma starszą wersję EmuStart — zaktualizuj go.")
+            val body = (if (status in 200..299) c.inputStream else c.errorStream)?.bufferedReader(Charsets.UTF_8)?.readText() ?: "{}"
+            return try { JSONObject(body) } catch (e: Exception) { JSONObject().put("ok", false).put("reason", "błąd serwera $status") }
+        } finally { c.disconnect() }
+    }
+
     fun nasDelete(p: String) {
         val c = URL(prefs.serverUrl + nasPath("file", p)).openConnection() as HttpURLConnection
         try {

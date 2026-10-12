@@ -221,6 +221,22 @@
 </div>
 
 <!-- okno skanowania -->
+<!-- dołączenie do serwera: kod i QR zatwierdzane na sparowanym telefonie -->
+<div id="join" class="modal hidden">
+  <div class="panel">
+    <h2>Dołącz do serwera</h2>
+    <div style="display:flex;gap:24px;align-items:center;flex-wrap:wrap">
+      <div id="joinQr" style="background:#fff;border-radius:10px;line-height:0;width:220px"></div>
+      <div style="flex:1;min-width:260px">
+        <p>Na telefonie z EmuStart: <b>Ustawienia → Zatwierdź nowe urządzenie</b> → zeskanuj kod.<br>
+          Albo w panelu serwera: <b>Proszą o dołączenie</b> → Zatwierdź.</p>
+        <div id="joinCode" style="font-size:44px;letter-spacing:.12em;margin:10px 0"></div>
+        <p id="joinText" class="muted"></p>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div id="scan" class="modal hidden">
   <div class="panel">
     <h2>Skanowanie kolekcji</h2>

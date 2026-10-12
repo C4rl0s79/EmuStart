@@ -79,6 +79,13 @@ Każdy komputer i telefon ma **własny klucz** — zamiast przepisywać wspólny
 3. **Komputer**: Ustawienia → Serwer EmuStart → **Połącz kodem** → wpisz kod (albo wklej link
    `emustart://pair?…` z kodu QR).
 
+**Nowy komputer bez przepisywania kodu (0.33):** na nowym komputerze Ustawienia → Serwer
+EmuStart → **Dołącz do serwera (zatwierdź telefonem)** → adres serwera. Komputer pokazuje kod
+i QR; na sparowanym telefonie Ustawienia → **Zatwierdź nowe urządzenie (kod QR)** → zeskanuj →
+**Zatwierdź** (telefon pokazuje nazwę i adres nowego urządzenia). Można też zatwierdzić kodem
+na innym sparowanym komputerze albo w panelu serwera (**Proszą o dołączenie**). Kod ważny
+10 minut, jednorazowy; zatwierdzać może tylko sparowane urządzenie.
+
 Panel pokazuje urządzenia z rodzajem, wersją EmuStart i ostatnim kontaktem; **Unieważnij**
 odcina tylko to jedno urządzenie, **Nazwa** zmienia nazwę. Serwer trzyma tylko skróty kluczy
 (SHA-256). Wspólny klucz serwera działa dalej — dla urządzeń sprzed parowania.
