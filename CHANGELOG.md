@@ -8,6 +8,14 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.34.1] — 2026-10-12
+
+### Poprawione
+- **Zapora Windows blokowała port szyfrowany.** Reguła zapory z instalacji autostartu
+  dopuszcza tylko zwykły port (8740). Serwer (konto SYSTEM) dopisuje teraz przy starcie
+  regułę „EmuStart Server (szyfrowany)” dla portu szyfrowanego; instalacja autostartu
+  dodaje obie.
+
 ## [0.34.0] — 2026-10-12
 
 Zakres: serwer (`emustart/tls.py`, `server.py`, `remote.py`, `main.py`), klient na Windows
