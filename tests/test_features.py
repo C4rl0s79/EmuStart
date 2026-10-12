@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from emustart import ingame, library, metadata, pads, paths, profiles
+from emustart import ingame, metadata, pads, paths, profiles
 
 from test_core import _write, env  # noqa: F401  (fixture)
 

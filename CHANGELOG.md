@@ -17,7 +17,39 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   RetroArchu na Androidzie; ocena „wyświetlania nad innymi aplikacjami” i usługi ułatwień
   dostępu dla pozostałych emulatorów na Androidzie.
 
-## [0.40.0] — 2026-10-12
+## [0.41.0] — 2026-10-13
+
+Audyt bezpieczeństwa całości (serwer, PC, Android, interfejs) i sprzątanie kodu. Zawiera też
+zmiany z 0.40.0, którego wydanie się nie zbudowało (niestabilny test na CI).
+
+### Bezpieczeństwo
+- **Krytyczne: API programu i panel serwera z sieci.** W trybie serwera interfejs, `/api`
+  i `/admin` (reset haseł, zatwierdzanie urządzeń, aktualizacja) chronił tylko nagłówek
+  `Host`, który ustawia klient — urządzenie z sieci lokalnej albo Tailscale mogło go
+  podrobić. Teraz decyduje adres połączenia (tylko ten komputer, nie tunel, nie port publiczny).
+- **Wysokie: zatwierdzanie próśb z sieci lokalnej** (urządzenie dostaje rolę administratora)
+  — teraz tylko urządzenie administratora, nie dowolne urządzenie konta.
+- **Wysokie: ścieżki w folderze profili**, które Windows utożsamia z innymi (`Jezus.`,
+  `Jezus ` , `JEZUS~1`, `CON`…), omijały sprawdzanie konta — odrzucane; dawny plik PIN-u
+  ukryty bez względu na wielkość liter; nazwy kont bez nazw zarezerwowanych w Windows.
+- **Średnie:** identyfikator sprzętu z nagłówka nie unieważnia już innych rejestracji
+  (dowolne urządzenie mogło tak odciąć cudze); odpowiedź po zwykłym porcie nie zmienia
+  zapamiętanego odcisku certyfikatu ani adresów serwera (PC i Android); sprawdzanie haseł
+  ograniczone do 2 naraz (scrypt ≈ 32 MB każde) i łączny limit oczekujących próśb o dołączenie;
+  aktualizacja tylko z adresu wydań repozytorium i ze zgodnym skrótem SHA-256 z GitHuba.
+- **Niskie:** klucz tylko w nagłówku (bez `?k=` w adresie); błędy 500 bez szczegółów
+  wyjątku; Android — adres interfejsu `emustart.local` nigdy nie idzie do sieci (mDNS);
+  interfejs — escapowanie logo systemu i wierszy narzędzia „Grafiki”.
+
+### Usunięte
+- Martwy kod: dawny PIN serwera w `pinauth` (token, odczyt, zapis, weryfikacja), nieużywane
+  funkcje i importy (PC, testy); nieaktualne opisy modułów (wspólny klucz, `?k=`).
+
+### Poprawione
+- Test uruchamiania PowerShella w tle czeka do 60 s — pierwszy start na CI bywa wolny
+  (przez niego nie zbudowało się wydanie 0.40.0).
+
+## [0.40.0] — 2026-10-12 (niewydane — zmiany w 0.41.0)
 
 ### Dodane
 - **Hasła kont na serwerze** (PC, Android, serwer, panel). Konto (profil) ma hasło: co

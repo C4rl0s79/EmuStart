@@ -255,7 +255,7 @@ function renderSystems() {
   const car = $("carousel");
   if (car.childElementCount !== n) {
     car.innerHTML = S.systems.map((s, i) =>
-      `<div class="syscard" data-i="${i}">${s.logo ? `<img src="${s.logo}" alt=""${s.logo_glow ? ' class="glow"' : ""}>` : `<div class="txt">${esc(s.display)}</div>`}</div>`).join("");
+      `<div class="syscard" data-i="${i}">${s.logo ? `<img src="${esc(s.logo)}" alt=""${s.logo_glow ? ' class="glow"' : ""}>` : `<div class="txt">${esc(s.display)}</div>`}</div>`).join("");
     // logo, które się nie wczytało (np. brak połączenia z serwerem) — nazwa systemu zamiast pustej karty
     car.querySelectorAll(".syscard img").forEach((img) => img.addEventListener("error", () => {
       const s = S.systems[+img.parentElement.dataset.i];
@@ -1315,9 +1315,9 @@ function buildArtRows() {
   const d = A.data, rows = [];
   rows.push({ head: "Źródła (kolejność prób)" });
   for (const [k, label] of Object.entries(SRC))
-    rows.push({ k: label, v: d.sources[k] ? '<span class="ok">aktywne</span>' : '<span class="no">brak klucza</span>' });
+    rows.push({ k: label, vh: d.sources[k] ? '<span class="ok">aktywne</span>' : '<span class="no">brak klucza</span>' });
   rows.push({ k: "Importuj klucze z PyLinksWeb", act: "import",
-              v: d.keys_from ? esc("z " + d.keys_from) : "SteamGridDB, IGDB, TheGamesDB" });
+              v: d.keys_from ? "z " + d.keys_from : "SteamGridDB, IGDB, TheGamesDB" });
   const lb = d.launchbox || {};
   rows.push({ head: "Baza LaunchBox (opisy, metadane, grafiki w kategoriach — offline)" });
   rows.push({ k: lb.ready ? "Aktualizuj bazę LaunchBox" : "Pobierz bazę LaunchBox (108 MB)", act: "lb",
@@ -1342,7 +1342,7 @@ function renderArt() {
   const list = $("artList");
   list.innerHTML = A.rows.map((r, i) => r.head
     ? `<div class="setrow head">${esc(r.head)}</div>`
-    : `<div class="setrow${i === A.idx ? " sel" : ""}${r.act ? " action" : ""}" data-i="${i}"><span class="k">${esc(r.k)}</span><span class="v">${r.v}</span><span></span></div>`).join("");
+    : `<div class="setrow${i === A.idx ? " sel" : ""}${r.act ? " action" : ""}" data-i="${i}"><span class="k">${esc(r.k)}</span><span class="v">${r.vh ?? esc(r.v)}</span><span></span></div>`).join("");
   list.querySelectorAll(".setrow[data-i]").forEach((el) => el.addEventListener("click", () => {
     if (!A.rows[+el.dataset.i].act) return;
     A.idx = +el.dataset.i; renderArt(); artInput("a");

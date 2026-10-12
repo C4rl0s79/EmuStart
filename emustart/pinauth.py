@@ -1,22 +1,17 @@
-"""pinauth — PIN profilu gracza.
+"""pinauth — PIN profilu na urządzeniu (od 0.40 tylko lokalny) i nazwy profili.
 
-Nazwa profilu jest unikalna (bez względu na wielkość liter), a PIN (4–8 cyfr)
-potwierdza, że to ten gracz. Skrót PIN-u (scrypt, losowa sól) leży w folderze
-profilu: `<profil>/.auth.json`. Serwer EmuStart nigdy go nie wydaje (/v1/nas go
-ukrywa) i wydaje pliki profilu z PIN-em tylko z tokenem profilu (nagłówek
-X-Profile-Token), który dostaje urządzenie po podaniu PIN-u — urządzenie pamięta
-token do wylogowania. Token = HMAC(sekret serwera, profil + skrót PIN-u): zmiana
-PIN-u unieważnia tokeny wszystkich urządzeń. Złe PIN-y: rosnące opóźnienie.
+PIN (4–8 cyfr) to blokada profilu na jednym urządzeniu: skrót scrypt z losową solą leży
+w bazie programu (emustart/profiles.py: local_pin_*), serwer go nie zna. Złe PIN-y: rosnące
+opóźnienie. Konto na serwerze chroni hasło (emustart/accounts.py).
 
-Przez SMB (komputer bez serwera) PIN sprawdza EmuStart sam — kto ma dostęp do
-udziału, ma też dostęp do plików, więc to rozróżnienie kont, nie zabezpieczenie.
+`AUTH` — nazwa dawnego pliku PIN-u w folderze profilu (0.27–0.39): serwer go nie wydaje.
+`find` — nazwy profili są unikalne bez względu na wielkość liter.
 """
 
 from __future__ import annotations
 
 import hashlib
 import hmac
-import json
 import re
 import secrets
 import threading
@@ -56,34 +51,6 @@ def check(rec: dict, pin: str) -> bool:
     return hmac.compare_digest(got, want)
 
 
-def token(secret: str, profile: str, rec: dict) -> str:
-    msg = (profile.lower() + "\n" + rec.get("hash", "")).encode()
-    return hmac.new(secret.encode(), msg, hashlib.sha256).hexdigest()
-
-
-def token_ok(secret: str, profile: str, rec: dict, got: str) -> bool:
-    return bool(got) and hmac.compare_digest(token(secret, profile, rec), got)
-
-
-def read(fs, profile: str) -> dict | None:
-    """Rekord PIN-u profilu (None = profil bez PIN-u)."""
-    try:
-        data = fs.read(f"{profile}/{AUTH}")
-    except OSError:
-        return None
-    if not data:
-        return None
-    try:
-        rec = json.loads(data.decode("utf-8"))
-    except ValueError:
-        return None
-    return rec if isinstance(rec, dict) and rec.get("hash") else None
-
-
-def write(fs, profile: str, rec: dict) -> None:
-    fs.write(f"{profile}/{AUTH}", json.dumps(rec).encode("utf-8"))
-
-
 # ── złe PIN-y: opóźnienie ──
 def wait_left(profile: str) -> float:
     """Ile s jeszcze czekać przed następną próbą (0 = można)."""
@@ -104,21 +71,6 @@ def failed(profile: str) -> None:
 def succeeded(profile: str) -> None:
     with _lock:
         _fails.pop(profile.lower(), None)
-
-
-def verify(fs, profile: str, pin: str) -> tuple[bool, str, float]:
-    """(dobry PIN?, powód, ile czekać). Profil bez PIN-u: (False, "brak", 0)."""
-    left = wait_left(profile)
-    if left > 0:
-        return False, f"Za dużo złych PIN-ów — spróbuj za {int(left) + 1} s.", left
-    rec = read(fs, profile)
-    if rec is None:
-        return False, "brak", 0.0
-    if check(rec, pin):
-        succeeded(profile)
-        return True, "", 0.0
-    failed(profile)
-    return False, "Zły PIN.", wait_left(profile)
 
 
 def find(names, wanted: str) -> str:

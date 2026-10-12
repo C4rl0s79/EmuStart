@@ -22,7 +22,7 @@ import time
 import urllib.parse
 from pathlib import Path
 
-from emustart import config, library, netsrc, paths
+from emustart import config, library, netsrc
 
 log = logging.getLogger("emustart.libsync")
 

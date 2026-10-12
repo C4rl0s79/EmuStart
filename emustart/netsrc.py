@@ -356,17 +356,21 @@ def server_fp(cfg: dict) -> str:
     return cfg.get("server_fp") or _store().get("fp") or ""
 
 
-def learn(cfg: dict, d: dict) -> bool:
-    """Adresy i odcisk certyfikatu z odpowiedzi serwera → serwer-adresy.json. True = zmienione."""
+def learn(cfg: dict, d: dict, trusted: bool = True) -> bool:
+    """Adresy i odcisk certyfikatu z odpowiedzi serwera → serwer-adresy.json. True = zmienione.
+    `trusted` — odpowiedź z połączenia szyfrowanego (przypięty certyfikat albo tunel) albo
+    z parowania. Nieszyfrowana nie zmienia już zapamiętanych: podszywający się w sieci podałby
+    własny certyfikat i adresy, a urządzenie wysyłałoby tam token i hasła (certyfikat serwera
+    jest ważny 20 lat — zmienia się tylko z nową instalacją, wtedy parowanie od nowa)."""
     eps = [e for e in (d.get("endpoints") or []) if isinstance(e, dict) and e.get("url")]
     tls = d.get("tls") if isinstance(d.get("tls"), dict) else {}
     fp = tls.get("fp") or ""
     st = dict(_store())
     changed = False
-    if eps and eps != st.get("endpoints"):
+    if eps and eps != st.get("endpoints") and (trusted or not st.get("endpoints")):
         st["endpoints"] = eps
         changed = True
-    if fp and fp != st.get("fp"):
+    if fp and fp != st.get("fp") and (trusted or not st.get("fp")):
         if st.get("fp"):
             log.warning("serwer ma nowy certyfikat (%s… → %s…)", st["fp"][:12], fp[:12])
         st["fp"] = fp
@@ -544,7 +548,7 @@ def info(cfg: dict, fresh: bool = False) -> dict:
             res = {"ok": False, "reason": f"serwer odpowiedział {st}"}
         else:
             d = json.loads(body)
-            learn(cfg, d)
+            learn(cfg, d, trusted=(ep[0], ep[1]) in _PINS or (ep[0], ep[1]) in _CA)
             res = {"ok": True, "name": d.get("name", ""), "version": d.get("version", ""),
                    "features": d.get("features") or [], "nas_id": d.get("nas_id", ""), "rtt": rtt}
     except (OSError, http.client.HTTPException, ValueError) as ex:

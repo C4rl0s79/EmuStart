@@ -16,7 +16,6 @@ from __future__ import annotations
 import json
 import logging
 import re
-import struct
 import threading
 import time
 import urllib.parse

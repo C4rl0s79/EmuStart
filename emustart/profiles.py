@@ -524,10 +524,6 @@ def nas_root(cfg: dict) -> Path:
     return Path(cfg.get("profiles_nas") or "")
 
 
-def _nas_dir(cfg: dict, prof: dict) -> Path:
-    return nas_root(cfg) / prof["nas_name"]
-
-
 def nas_online(cfg: dict) -> bool:
     """Folder profili dostępny — przez serwer EmuStart albo SMB (nasfs.backend)."""
     return nasfs.backend(cfg).online()
@@ -539,10 +535,6 @@ def via(cfg: dict) -> str:
 
 
 NAS_BACKUPS = 10        # tyle ostatnich kopii nadpisanych plików trzymamy na NAS
-
-
-def _sig(st) -> list:
-    return [st.st_size, round(st.st_mtime)]
 
 
 def _same_sig(a, b) -> bool:

@@ -4,8 +4,6 @@
 from __future__ import annotations
 
 import io
-import urllib.error
-import urllib.parse
 import json
 import struct
 import zipfile

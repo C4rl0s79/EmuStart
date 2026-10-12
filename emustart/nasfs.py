@@ -16,6 +16,7 @@ import http.client
 import json
 import logging
 import os
+import re
 import shutil
 import threading
 import time
@@ -39,13 +40,23 @@ def _zstd():
         return None
 
 
+_RESERVED = {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$",
+             *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}
+_SHORT_83 = re.compile(r"^[^.~]{1,6}~\d{1,6}(\.[^.]{0,3})?$")
+
+
 def clean_rel(rel: str) -> str:
-    """Ścieżka względna bez wyjścia poza korzeń: bez „..”, dysków, ścieżek bezwzględnych."""
+    """Ścieżka względna bez wyjścia poza korzeń: bez „..”, dysków, ścieżek bezwzględnych —
+    i bez nazw, które Windows utożsamia z innymi (kropka / spacja na końcu, krótkie nazwy
+    8.3 jak „JEZUS~1”, urządzenia jak „CON”): inaczej „Jezus.” ominęłoby sprawdzanie konta
+    „Jezus”, a trafiło do jego folderu."""
     parts = []
     for p in str(rel).replace("\\", "/").split("/"):
         if p in ("", "."):
             continue
-        if p == ".." or ":" in p or p.startswith("~"):
+        if (p == ".." or ":" in p or p.startswith("~") or p.endswith((".", " "))
+                or any(ord(ch) < 32 for ch in p) or _SHORT_83.match(p)
+                or p.split(".", 1)[0].upper().rstrip() in _RESERVED):
             raise ValueError(f"niedozwolona ścieżka: {rel}")
         parts.append(p)
     return "/".join(parts)

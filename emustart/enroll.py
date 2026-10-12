@@ -45,6 +45,7 @@ log = logging.getLogger("emustart.enroll")
 
 ENROLL_TTL = 24 * 3600
 MAX_PENDING_IP = 5
+MAX_PENDING = 50                 # wszystkich oczekujących (zapisanych na dysku) — z wielu adresów
 NONCE_TTL = 120
 TOKEN_TTL = 3600
 CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
@@ -118,8 +119,13 @@ def pretty(code: str) -> str:
 
 
 def _safe_account(name: str) -> str:
-    name = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "", (name or "").strip()).strip(" .")
-    return name[:30]
+    from emustart import nasfs
+    name = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "", (name or "").strip()).strip(" .")[:30].strip(" .")
+    try:
+        ok = nasfs.clean_rel(name) == name and not name.startswith(("_", "."))
+    except ValueError:
+        ok = False
+    return name if ok else ""
 
 
 # ── prośby ──
@@ -161,8 +167,11 @@ def request(mode: str, account: str, name: str, cls: str, ip: str, version: str,
     with _lock:
         _gc(now)
         reqs = _load()
-        if sum(1 for q in reqs.values() if q["ip"] == ip and q["status"] == "pending") >= MAX_PENDING_IP:
+        pend = [q for q in reqs.values() if q["status"] == "pending"]
+        if sum(1 for q in pend if q["ip"] == ip) >= MAX_PENDING_IP:
             return {"ok": False, "reason": "Za dużo oczekujących próśb z tego adresu — spróbuj później."}
+        if len(pend) >= MAX_PENDING and not any(q["pubkey"] == pubkey for q in pend):
+            return {"ok": False, "reason": "Serwer ma za dużo oczekujących próśb — spróbuj później."}
         # ponowna prośba tego samego klucza — ta sama prośba (np. po restarcie aplikacji)
         for rid, q in reqs.items():
             if q["pubkey"] == pubkey and q["status"] == "pending":

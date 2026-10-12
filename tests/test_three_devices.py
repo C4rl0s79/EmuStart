@@ -11,7 +11,7 @@ import json
 
 import pytest
 
-from emustart import devices, nasfs, netsrc, paths, profiles, remote, server, srvadmin
+from emustart import devices, nasfs, netsrc, paths, remote, server, srvadmin
 
 MASTER = "m" * 32
 

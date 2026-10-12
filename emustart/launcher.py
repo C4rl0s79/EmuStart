@@ -15,7 +15,6 @@ dla gier wielopłytowych, start procesu, czas gry, sprzątanie, limit cache.
 from __future__ import annotations
 
 import logging
-import os
 import re
 import shutil
 import subprocess

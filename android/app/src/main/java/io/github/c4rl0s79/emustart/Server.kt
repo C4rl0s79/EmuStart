@@ -128,10 +128,17 @@ class Server(private val prefs: Prefs) {
     /** Adres przestał odpowiadać — następne zapytanie sprawdzi wszystkie od nowa. */
     fun forgetBase() { baseAt = 0L }
 
-    /** Adresy i odcisk certyfikatu z odpowiedzi serwera (info, parowanie) → ustawienia. */
-    fun learn(d: JSONObject) {
-        d.optJSONArray("endpoints")?.let { if (it.length() > 0 && it.toString() != prefs.serverEndpoints) { prefs.serverEndpoints = it.toString(); forgetBase() } }
-        d.optJSONObject("tls")?.optString("fp")?.takeIf { it.isNotEmpty() && it != prefs.serverFp }?.let { prefs.serverFp = it; forgetBase() }
+    /** Adresy i odcisk certyfikatu z odpowiedzi serwera (info, parowanie) → ustawienia.
+     *  `trusted` — odpowiedź z połączenia szyfrowanego albo z parowania; nieszyfrowana nie zmienia
+     *  już zapamiętanych (podszywający się w sieci podałby własny certyfikat i adresy). */
+    fun learn(d: JSONObject, trusted: Boolean = true) {
+        d.optJSONArray("endpoints")?.let {
+            if (it.length() > 0 && it.toString() != prefs.serverEndpoints && (trusted || prefs.serverEndpoints.isBlank())) {
+                prefs.serverEndpoints = it.toString(); forgetBase()
+            }
+        }
+        d.optJSONObject("tls")?.optString("fp")?.takeIf { it.isNotEmpty() && it != prefs.serverFp && (trusted || prefs.serverFp.isEmpty()) }
+            ?.let { prefs.serverFp = it; forgetBase() }
     }
 
     private fun conn(path: String): HttpURLConnection {
@@ -245,7 +252,10 @@ class Server(private val prefs: Prefs) {
         try { return c.inputStream.bufferedReader(Charsets.UTF_8).readText() } finally { c.disconnect() }
     }
 
-    fun info(): JSONObject = JSONObject(text("/v1/info")).also { learn(it) }
+    fun info(): JSONObject {
+        val viaTls = baseUrl().startsWith("https")
+        return JSONObject(text("/v1/info")).also { learn(it, trusted = viaTls) }
+    }
     fun systems(): JSONArray = JSONArray(text("/v1/systems"))
     fun games(es: String): JSONArray = JSONArray(text("/v1/systems/" + enc(es) + "/games"))
     /** Szczegóły gry; ścieżki plików zawsze z „/” (serwer na Windows sprzed 0.30.6 wysyłał „\\”,

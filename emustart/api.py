@@ -15,7 +15,6 @@ import re
 import socket
 import sys
 import threading
-import urllib.error
 import time
 from pathlib import Path
 

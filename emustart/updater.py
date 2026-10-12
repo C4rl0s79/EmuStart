@@ -33,6 +33,7 @@ log = logging.getLogger("emustart.updater")
 
 REPO = "C4rl0s79/EmuStart"
 API_URL = f"https://api.github.com/repos/{REPO}/releases/latest"
+DOWNLOAD_PREFIX = f"https://github.com/{REPO}/releases/download/"
 UA = f"EmuStart/{__version__}"
 TASK = "EmuStart Server"
 
@@ -53,6 +54,7 @@ def latest(timeout: float = 15) -> dict:
     return {"version": ver, "tag": tag, "current": __version__,
             "newer": vtuple(ver) > vtuple(__version__),
             "url": asset["browser_download_url"] if asset else "", "size": asset["size"] if asset else 0,
+            "sha256": ((asset or {}).get("digest") or "").removeprefix("sha256:").lower(),
             "notes": (rel.get("body") or "")[:4000], "published": rel.get("published_at") or "",
             "page": rel.get("html_url") or ""}
 
@@ -101,6 +103,10 @@ class Job:
     def _download(self, url: str, dest: Path) -> None:
         if not url:
             raise RuntimeError("W wydaniu nie ma pliku EmuStart-…-win64.zip.")
+        if not url.startswith(DOWNLOAD_PREFIX):
+            raise RuntimeError(f"Nieoczekiwany adres aktualizacji: {url}")
+        import hashlib
+        h = hashlib.sha256()
         part = dest.with_suffix(".part")
         req = urllib.request.Request(url, headers={"User-Agent": UA})
         with urllib.request.urlopen(req, timeout=60) as r, open(part, "wb") as f:
@@ -112,9 +118,15 @@ class Job:
                 if not chunk:
                     break
                 f.write(chunk)
+                h.update(chunk)
                 self.done += len(chunk)
         if self.total and part.stat().st_size != self.total:
             raise RuntimeError(f"Pobrano {part.stat().st_size} z {self.total} B — spróbuj ponownie.")
+        # skrót SHA-256 podany przez GitHub dla pliku wydania — plik dokładnie ten z wydania
+        want = self.info.get("sha256") or ""
+        if want and h.hexdigest() != want:
+            part.unlink(missing_ok=True)
+            raise RuntimeError("Pobrany plik ma inny skrót SHA-256 niż plik wydania — aktualizacja przerwana.")
         part.replace(dest)
 
     def apply(self, argv: list, server: bool = True) -> dict:

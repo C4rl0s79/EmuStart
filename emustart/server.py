@@ -97,6 +97,25 @@ def _host_ok(handler) -> bool:
     return host in (f"127.0.0.1:{port}", f"localhost:{port}")
 
 
+def _local_ui(handler) -> bool:
+    """Interfejs, API programu (/api) i panel serwera (/admin) — wyłącznie z tego komputera.
+    Rozstrzyga adres połączenia: nagłówek Host ustawia klient, więc urządzenie z sieci
+    lokalnej albo Tailscale mogłoby go podrobić (tryb serwera słucha na 0.0.0.0). Do tego
+    nasz Host (DNS rebinding); nie port publiczny i nie tunel (cloudflared łączy się lokalnie,
+    ale dokłada CF-Connecting-IP)."""
+    import ipaddress
+    if getattr(handler.server, "public", False) or handler.headers.get("CF-Connecting-IP"):
+        return False
+    try:
+        a = ipaddress.ip_address(handler.client_address[0])
+        if a.version == 6 and a.ipv4_mapped:
+            a = a.ipv4_mapped
+        loopback = a.is_loopback
+    except ValueError:
+        loopback = False
+    return loopback and _host_ok(handler)
+
+
 class _Handler(BaseHTTPRequestHandler):
     # HTTP/1.1: połączenie zostaje otwarte między zapytaniami. Przy HTTP/1.0 każdy blok
     # pobieranej gry zaczynał TCP od nowa (uzgodnienie + wolny start) — przy dalekim
@@ -127,7 +146,7 @@ class _Handler(BaseHTTPRequestHandler):
             return remote.pair_flow(self, p.rsplit("/", 1)[1])
         # API tylko dla naszego UI: właściwy Host i własny nagłówek (zwykła strona
         # z internetu nie wyśle go do 127.0.0.1 bez zgody CORS, której nie dajemy)
-        if not _host_ok(self) or self.headers.get("X-EmuStart") != "1":
+        if not _local_ui(self) or self.headers.get("X-EmuStart") != "1":
             return refuse(self, 403)
         if self.path.startswith("/admin/"):
             from emustart import srvadmin     # panel serwera (tylko z tego komputera)
@@ -180,7 +199,7 @@ class _Handler(BaseHTTPRequestHandler):
         if raw.startswith("/v1/"):
             from emustart import remote      # API dla Androida — klucz zamiast sprawdzania Host
             return remote.handle(self)
-        if not _host_ok(self):
+        if not _local_ui(self):
             from emustart import remote      # grafiki dla aplikacji na Androida (z kluczem)
             if not (raw.startswith(("/media/", "/assets/", "/local/")) and remote.authorized(self)):
                 return self.send_error(403)
