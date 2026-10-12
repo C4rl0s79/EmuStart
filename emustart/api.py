@@ -357,7 +357,8 @@ class Api:
         if not (self._cfg.get("server_url") and self._cfg.get("server_key")):
             return None
         i = netsrc.info(self._cfg)
-        return {"ok": bool(i.get("ok")), "name": i.get("name", ""), "account": self._cfg.get("server_account", "")}
+        return {"ok": bool(i.get("ok")), "name": i.get("name", ""), "account": self._cfg.get("server_account", ""),
+                "key_rejected": bool(i.get("key_rejected"))}
 
     # ── stan ogólny ──
     def get_state(self) -> dict:

@@ -1437,7 +1437,13 @@ async function refreshState() {
   const mode = { auto: "", lan: " · LAN", remote: " · zdalnie" }[st.network_mode] || "";
   if (st.server && !(st.rom_roots || []).length) {
     // klient serwera (bez folderów z grami): stan serwera EmuStart zamiast NAS-a
-    net.textContent = st.server.ok ? `Serwer ${st.server.name || "EmuStart"}` : "Serwer niedostępny";
+    net.textContent = st.server.ok ? `Serwer ${st.server.name || "EmuStart"}`
+      : st.server.key_rejected ? "Klucz urządzenia nieważny" : "Serwer niedostępny";
+    if (st.server.key_rejected && !S.keyWarned) {
+      S.keyWarned = true;
+      toast("Serwer nie przyjmuje klucza tego urządzenia (unieważniony?) — połącz ponownie: " +
+            "Ustawienia → Dołącz przez internet.", 9000);
+    }
     net.className = "pill " + (st.server.ok ? "ok" : "warn");
   } else {
     net.textContent = (st.rom_online ? "NAS dostępny" : "NAS offline, tylko gry lokalne") + mode;
