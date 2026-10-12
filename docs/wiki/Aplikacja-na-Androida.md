@@ -85,6 +85,11 @@ Zapisy z gry są **wspólne z komputerem**:
   Stany różnych rdzeni się nie wczytują — ustaw ten sam rdzeń na obu urządzeniach. ARMSX2 /
   AetherSX2 — osobno (`states\android\<emulator>`), kopiowanie w menedżerze zapisów.
 
+**Wygląd na telefonie** (menu Start → *Wygląd*): suwaki zmienia się dotykiem — przyciski − / +
+albo dotknięcie paska; *Wysokość wiersza listy* to odstępy między tytułami, *Lista gier* —
+wielkość czcionki listy. Wygląd telefonu jest zapisywany w telefonie, osobno od komputera.
+Logo gry jest pod szczegółami gry (komputer wysyła logo gier na serwer — 0.35.1).
+
 **Foldery emulatorów.** EmuStart musi widzieć folder zapisów emulatora — w pamięci
 telefonu, nie w `Android/data` (tam Android nie wpuszcza innych aplikacji):
 

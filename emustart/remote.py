@@ -208,7 +208,7 @@ def handle(handler) -> None:
     parts = [p for p in path.split("/") if p][1:]           # bez „v1”
     try:
         if parts == ["info"]:
-            feats = ["find", "system", "bios"] + (["nas", "roots", "savemgr", "profiles"] if NAS_ROOT else [])
+            feats = ["find", "system", "bios", "media"] + (["nas", "roots", "savemgr", "profiles"] if NAS_ROOT else [])
             return _json(handler, {"name": socket.gethostname(), "version": __version__, "api": 1,
                                    "features": feats, "nas_id": NAS_ID, "endpoints": endpoints(),
                                    "tls": {"port": TLS["port"], "fp": TLS["fp"]} if TLS else None})
@@ -216,6 +216,12 @@ def handle(handler) -> None:
             return _nas(handler, "GET", parts[1:])
         if parts == ["find"]:
             return _find(handler)
+        if parts == ["media", "have"]:                 # grafiki gier, które serwer ma (artsync)
+            from emustart import artsync
+            q = urllib.parse.parse_qs(urllib.parse.urlsplit(handler.path).query)
+            have = artsync.server_have((q.get("es") or [""])[0])
+            return _json(handler, {"files": have} if have is not None else {"error": "nieznany system"},
+                         200 if have is not None else 404)
         if parts == ["savemgr", "catalog"]:
             return _savemgr_catalog(handler)
         if parts == ["profiles"]:
@@ -309,6 +315,8 @@ def handle_write(handler, method: str) -> None:
         return _system_put(handler)
     if method == "PUT" and parts == ["roots"]:
         return _roots_put(handler)
+    if method == "PUT" and parts == ["media"]:
+        return _media_put(handler)
     if method == "PUT" and parts == ["savemgr", "copy"]:
         return _savemgr_copy(handler)
     if method == "PUT" and len(parts) == 2 and parts[0] == "profiles":
@@ -382,6 +390,19 @@ def _roots_put(handler) -> None:
         except Exception:
             log.exception("skanowanie nowych folderów")
     return _json(handler, {"ok": True, "added": added, "missing": missing})
+
+
+def _media_put(handler) -> None:
+    """Grafika gry z EmuStart na Windows (artsync) — logo, okładka, zrzut."""
+    from emustart import artsync
+    n = int(handler.headers.get("Content-Length") or 0)
+    if n > artsync.MAX_FILE:
+        handler.close_connection = True
+        return _json(handler, {"error": "za duży plik"}, 413)
+    body = handler.rfile.read(n) if n else b""
+    q = urllib.parse.parse_qs(urllib.parse.urlsplit(handler.path).query)
+    code, msg = artsync.server_put((q.get("es") or [""])[0], (q.get("file") or [""])[0], body)
+    return _json(handler, {"ok": code == 200} if code == 200 else {"error": msg}, code)
 
 
 def _system_put(handler) -> None:

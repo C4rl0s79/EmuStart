@@ -430,6 +430,19 @@ body.phone {
   filter: drop-shadow(0 2px 6px rgba(0,0,0,.85)); pointer-events: none; }
 body:not(.phone) #listGameLogo { display: none; }
 .phone #pvGameLogo { display: none; }
+/* telefon: logo gry pod szczegółami (w nagłówku listy tylko logo platformy) */
+#pvMetaLogo { display: none; }
+.phone .pv3 .meta { display: flex; flex-direction: column; }
+.phone .pv3 .meta > * { flex-shrink: 0; }
+.phone #pvMetaLogo:not(.hidden) { display: block; flex: 1 1 0; min-height: 24px; width: 100%;
+  max-height: calc(var(--listlogo-h) * 2.2); margin-top: .6em; object-fit: contain; object-position: left top;
+  filter: drop-shadow(0 2px 6px rgba(0,0,0,.85)); }
+.phone #listGameLogo { display: none; }
+/* edytor wyglądu dotykiem: −/+ i ◀/▶ jako przyciski, pasek — dotknięcie ustawia wartość */
+.lkrow .lv .ch { cursor: pointer; user-select: none; padding: 0 .45em; border-radius: 6px; }
+.lkrow .lv .ch:active { background: var(--line); }
+.lkrow .lv .track { cursor: pointer; }
+.phone .lkrow .lv .ch { padding: .15em .7em; font-size: 1.15em; }
 body:not(.phone) .listhead { height: calc(var(--listlogo-h) * 1.3 + 2.5vh); }
 body:not(.phone) .listhead img#listLogo { height: calc(var(--listlogo-h) * 1.3); max-width: 26vw; }
 .listhead img#listLogo:not(.hidden) ~ .lhtext h2 { display: none; }   /* nazwa platformy — jest logo */

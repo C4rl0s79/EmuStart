@@ -242,3 +242,33 @@ def test_pc_client_join_flow(srv, monkeypatch):
     st, nxt = _req(srv, "POST", "/v1/pair/request", body={"name": "Tablet", "class": "phone"})
     assert a.server_approve(f"emustart://approve?u=x&c={nxt['code']}", None)["request"]["name"] == "Tablet"
     assert a.server_approve(nxt["pretty"], True)["status"] == "approved"
+
+
+def test_pc_pushes_missing_game_art_to_server(srv, tmp_path, monkeypatch):
+    from emustart import art, artsync, library
+    host, port, _nas = srv
+    pc_key, _, _ = _pair(srv, "Komputer", "pc")
+    monkeypatch.setattr(artsync, "SERVER_MEDIA", tmp_path / "serwer-media")
+    with library.db() as c:
+        for name in ("Gra (USA)", "Inna (Europe)"):
+            c.execute("INSERT INTO games(es, rel, name, title, tags, files, size, seen) "
+                      "VALUES('snes', ?, ?, ?, '', '[]', 0, 0)", (name + ".sfc", name, name))
+    png = b"\x89PNG\r\n\x1a\n" + b"x" * 50
+    pc = paths.MEDIA / "snes"
+    pc.mkdir(parents=True)
+    (pc / "Gra (USA).logo.png").write_bytes(png)
+    (pc / "Gra (USA).box.png").write_bytes(png)
+    (pc / "Nieznana (USA).logo.png").write_bytes(png)             # serwer nie ma takiej gry
+    srvd = tmp_path / "serwer-media" / "snes"
+    srvd.mkdir(parents=True)
+    (srvd / "Gra (USA).box.png").write_bytes(b"\x89PNG\r\n\x1a\nwlasna-serwera")
+    cfg = {"server_url": f"http://{host}:{port}", "server_key": pc_key}
+    assert artsync.push_missing(cfg) == 1                           # tylko brakujące logo
+    assert (srvd / "Gra (USA).logo.png").read_bytes() == png
+    assert (srvd / "Gra (USA).box.png").read_bytes().endswith(b"wlasna-serwera")   # okładka serwera zostaje
+    gid = library.db().execute("SELECT id FROM games WHERE name='Gra (USA)'").fetchone()[0]
+    assert library.game(gid)["art_logo"] == art.HAS
+    assert artsync.push_missing(cfg) == 0                           # drugi raz nic
+    # telefon dostaje logo w liście gier (grafiki przez serwer)
+    assert artsync.server_put("snes", "../zle.logo.png", png)[0] == 400
+    assert artsync.server_put("snes", "Gra (USA).logo.png", b"nie png")[0] == 400

@@ -8,6 +8,27 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.35.1] — 2026-10-12
+
+Zakres: interfejs (`web/look.js`, `web/app.js`, `web/app.css`, `web/index.html`), grafiki
+gier komputer → serwer (`emustart/artsync.py`, `remote.py`, `api.py`).
+
+### Dodane
+- **Logo gier na telefonie.** Komputer pobiera logo gier sam (serwer miał ich 0), więc
+  aplikacja na Androida nie miała czego pokazać. Teraz komputer po starcie wysyła na serwer
+  grafiki gier, których serwer nie ma (logo, brakujące okładki i zrzuty) — tylko brakujące,
+  grafiki serwera zostają. Grafika wybrana ręcznie w opcjach gry trafia na serwer od razu.
+  API: `GET /v1/media/have?es=…`, `PUT /v1/media?es=…&file=…` (tylko PNG, tylko istniejące
+  gry, nazwa bez ścieżki).
+- **Telefon: logo gry pod szczegółami** (zamiast w nagłówku listy) — zajmuje miejsce, które
+  zostaje pod listą szczegółów, i zmniejsza się, gdy go brakuje.
+
+### Poprawione
+- **Edytor wyglądu na telefonie dało się obsłużyć tylko padem.** Dotknięcie zaznaczało wiersz,
+  ale wartości nie zmieniało. Teraz każdy suwak ma przyciski − / +, wybory mają ◀ / ▶,
+  a dotknięcie paska ustawia wartość wprost — np. *Wysokość wiersza listy* (odstępy między
+  tytułami) i *Lista gier* (czcionka). Działa też myszą na komputerze.
+
 ## [0.35.0] — 2026-10-12
 
 Zakres: serwer (`emustart/upnp.py`, `public.py`, `server.py`, `remote.py`, `srvadmin.py`,
