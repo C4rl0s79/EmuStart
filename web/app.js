@@ -1434,8 +1434,14 @@ async function refreshState() {
   S.sysIdx = i >= 0 ? i : Math.min(S.sysIdx, Math.max(0, S.systems.length - 1));
   const net = $("netInfo");
   const mode = { auto: "", lan: " · LAN", remote: " · zdalnie" }[st.network_mode] || "";
-  net.textContent = (st.rom_online ? "NAS dostępny" : "NAS offline, tylko gry lokalne") + mode;
-  net.className = "pill " + (st.rom_online ? "ok" : "warn");
+  if (st.server && !(st.rom_roots || []).length) {
+    // klient serwera (bez folderów z grami): stan serwera EmuStart zamiast NAS-a
+    net.textContent = st.server.ok ? `Serwer ${st.server.name || "EmuStart"}` : "Serwer niedostępny";
+    net.className = "pill " + (st.server.ok ? "ok" : "warn");
+  } else {
+    net.textContent = (st.rom_online ? "NAS dostępny" : "NAS offline, tylko gry lokalne") + mode;
+    net.className = "pill " + (st.rom_online ? "ok" : "warn");
+  }
   S.copying = new Set(st.copying);
   $("profInfo").textContent = st.profile ? "👤 " + st.profile.name : "";
   if (st.conflicts?.length) {

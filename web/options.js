@@ -487,6 +487,7 @@ const PR = { list: [], current: 0, idx: 0, delArmed: null, startup: false, ask: 
 async function openProfiles(startup = false) {
   const r = await api().profiles_list();
   PR.list = r.profiles; PR.current = r.current; PR.startup = startup;
+  PR.account = S.state?.account || "";      // urządzenie przypisane do konta (klucz urządzenia)
   PR.idx = Math.max(0, PR.list.findIndex((p) => p.id === r.current));
   show("profiles");
 }
@@ -505,16 +506,19 @@ function renderProfiles() {
     `<div class="pcard${i === PR.idx ? " sel" : ""}${p.id === PR.current ? " cur" : ""}" data-i="${i}">` +
     `<div class="pav">${esc((p.name[0] || "?").toUpperCase())}</div><div class="pname">${esc(p.name)}` +
     `${p.pin === "need_pin" ? " 🔒" : p.pin === "set_pin" ? " ⚠" : ""}</div></div>`).join("") +
-    `<div class="pcard add${PR.idx === PR.list.length ? " sel" : ""}" data-i="${PR.list.length}"><div class="pav">+</div><div class="pname">Nowy profil</div></div>`;
+    // urządzenie przypisane do konta: tylko to konto — bez zakładania, zmiany nazwy i usuwania
+    (PR.account ? "" : `<div class="pcard add${PR.idx === PR.list.length ? " sel" : ""}" data-i="${PR.list.length}"><div class="pav">+</div><div class="pname">Nowy profil</div></div>`);
   $("profCards").innerHTML = cards;
   $("profCards").querySelectorAll(".pcard").forEach((el) => el.addEventListener("click", () => { PR.idx = +el.dataset.i; profilesInput("a"); }));
   const onProfile = PR.idx < PR.list.length;
+  if (PR.account) return setHints([["a", "Graj jako"], ["b", "Wstecz"]]);
   if (setup) return setHints([["a", onProfile ? "To mój profil" : "Utwórz"], ["y", `Pytaj przy starcie: ${PR.ask ? "tak" : "nie"}`]]);
   if (S.platform === "android") return setHints(onProfile ? [["a", "Graj jako"], ["start", "PIN / wyloguj"], ["b", "Wstecz"]] : [["a", "Utwórz"], ["b", "Wstecz"]]);
   setHints(onProfile ? [["a", "Graj jako"], ["start", "Opcje profilu"], ["y", "Zmień nazwę"], ["x", "Usuń"], ["b", "Wstecz"]] : [["a", "Utwórz"], ["b", "Wstecz"]]);
 }
 async function profilesInput(a) {
-  const n = PR.list.length + 1;
+  if (PR.account && ["start", "x", "y"].includes(a)) return;      // konto z serwera — bez zmian profili tutaj
+  const n = PR.list.length + (PR.account ? 0 : 1);
   const p = PR.list[PR.idx];
   const setup = PR.startup === "setup";
   if (a === "left" || a === "up") PR.idx = (PR.idx - 1 + n) % n;
