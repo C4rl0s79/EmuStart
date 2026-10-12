@@ -8,6 +8,15 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+### Dokumentacja
+- Koncepcja 2.0 (`docs/koncepcja-2.0.md`, wersja robocza 3): **stany jak w Steam** — każdy
+  zapis stanu to nowy, niezmienny wpis na serwerze, przed grą sloty wypełniane najnowszymi
+  zgodnymi stanami (RetroArch: `savestate_auto_index` + numer nadawany przez serwer;
+  PCSX2/ARMSX2, Dolphin, PPSSPP: warstwa slotów EmuStart z wersją formatu ze stanu);
+  „Kontynuuj” = najnowszy stan; **nowy stan kombinacją pada** (LB + Y) na Windows i w
+  RetroArchu na Androidzie; ocena „wyświetlania nad innymi aplikacjami” i usługi ułatwień
+  dostępu dla pozostałych emulatorów na Androidzie.
+
 ## [0.37.5] — 2026-10-12
 
 Zakres: komputer (`emustart/api.py`, `profiles.py`), aplikacja na Androida (`Bridge.kt`),
