@@ -79,6 +79,9 @@ Zapisy z gry są **wspólne z komputerem**:
 - **Stany gry (savestate)**: RetroArch — wspólne z komputerem (`states\shared\retroarch\<rdzeń>`),
   niezależnie od ustawień RetroArcha na każdym urządzeniu (płasko, w folderze rdzenia, w folderze
   gry): przed grą nowszy stan tej gry i tego rdzenia trafia tam, gdzie RetroArch go szuka.
+  Autozapis (`.state.auto`) wczytuje się sam przy starcie gry na każdym urządzeniu. Stan z sesji
+  nie nadpisuje innej wersji na serwerze (np. zapisanej w międzyczasie na drugim urządzeniu) —
+  trafia do kopii zapasowej (`_backup\…\konflikt`).
   Stany różnych rdzeni się nie wczytują — ustaw ten sam rdzeń na obu urządzeniach. ARMSX2 /
   AetherSX2 — osobno (`states\android\<emulator>`), kopiowanie w menedżerze zapisów.
 
