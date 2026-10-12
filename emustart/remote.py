@@ -194,6 +194,9 @@ def find_nas_root(cfg: dict) -> Path | None:
     own = cfg.get("profiles_nas") or ""
     if own and Path(own).is_dir():
         return Path(own)
+    from emustart import paths
+    if (paths.SERVER / "profiles" / ".emustart-root").is_file():
+        return paths.SERVER / "profiles"          # 2.0: profile w katalogu serwera
     for r in config.rom_roots(cfg):
         for d in [Path(r), *Path(r).parents]:
             cand = d / "emustart" / "Profiles"

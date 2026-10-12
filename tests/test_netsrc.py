@@ -171,14 +171,19 @@ def test_remote_rejects_paths_outside_profiles(env, monkeypatch):
     assert not (tmp / "x").exists()
 
 
-def test_other_folder_on_smb_means_smb(env, monkeypatch):
+def test_with_server_profiles_never_go_through_smb(env, monkeypatch):
+    """2.0: z ustawionym serwerem zapisy tylko przez serwer — także gdy przez SMB widać inny
+    folder albo serwer chwilowo nie odpowiada (wtedy tryb offline, nie SMB)."""
     from emustart import nasfs
-    cfg, tmp = _nas_server(env, monkeypatch, nas_name="inny")      # SMB widzi inny folder niż serwer
+    cfg, tmp = _nas_server(env, monkeypatch, nas_name="inny")
     (tmp / "inny").mkdir()
     nasfs.reset()
-    fs = nasfs.backend(cfg)
-    assert isinstance(fs, nasfs.SmbFs) and fs.root == tmp / "inny"
-
+    assert isinstance(nasfs.backend(cfg), nasfs.RemoteFs)
+    off = {**cfg, "server_url": "127.0.0.1:1"}                     # serwer nie odpowiada
+    netsrc._info.clear(); nasfs.reset()
+    fs = nasfs.backend(off)
+    assert isinstance(fs, nasfs.RemoteFs) and not fs.online()
+    assert isinstance(nasfs.backend({"profiles_nas": str(tmp / "inny")}), nasfs.SmbFs)   # bez serwera
 
 def test_push_all_sends_existing_local_saves(env, monkeypatch):
     from emustart import profiles

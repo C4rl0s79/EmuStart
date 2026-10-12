@@ -197,7 +197,47 @@ $("bPair").addEventListener("click", async () => {
   pairTimer = setInterval(tick, 3000);
 });
 
+/* ── przeniesienie profili z udziału do katalogu serwera (2.0) ── */
+let migrPoll = null;
+async function migrTick() {
+  const st = await admin("profiles_migrate_status").catch(() => null);
+  if (!st) return;
+  $("profRoot").textContent = "Teraz: " + (st.root || "—");
+  const inServer = /[\\/]server[\\/]profiles$/i.test(st.root || "");
+  $("bMigrate").hidden = inServer;
+  if (!st.phase) return;
+  $("migrBarBox").hidden = st.phase === "done";
+  $("migrBar").style.width = st.total ? (100 * st.done / st.total).toFixed(0) + "%" : "5%";
+  if (st.phase === "copying") $("migrText").textContent = `Kopiuję ${st.files} plików: ${fmtBytes(st.done)} / ${fmtBytes(st.total)}`;
+  else if (st.phase === "verifying") $("migrText").textContent = `Sprawdzam kopie (SHA-1): ${fmtBytes(st.done)} / ${fmtBytes(st.total)}`;
+  else {
+    clearInterval(migrPoll); migrPoll = null;
+    $("bMigrate").disabled = false;
+    $("migrText").textContent = st.phase === "done"
+      ? "Gotowe — profile są w katalogu serwera. Stary folder na udziale został nietknięty (zapas); możesz go usunąć, gdy wszystko działa."
+      : "Nie udało się: " + st.error + " — serwer dalej używa starego folderu.";
+  }
+}
+$("bMigrate").addEventListener("click", async () => {
+  const plan = await admin("profiles_migrate", {}).catch(() => null);
+  if (!plan?.ok) return ($("migrText").textContent = plan?.reason || "Serwer nie odpowiada.");
+  if (!confirm(`Przenieść profile do katalogu serwera?
+
+Z: ${plan.src}
+Do: ${plan.dst}
+` +
+               `${plan.files} plików, ${fmtBytes(plan.size)}.
+
+Każdy plik zostanie skopiowany i sprawdzony; ` +
+               `dopiero potem serwer przełączy się na nowy folder. Stary folder zostaje nietknięty.`)) return;
+  const r = await admin("profiles_migrate", { confirm: true }).catch(() => null);
+  if (!r?.ok) return ($("migrText").textContent = r?.reason || "Serwer nie odpowiada.");
+  $("bMigrate").disabled = true;
+  migrPoll = setInterval(migrTick, 700);
+});
+
 refresh();
 refreshDevices();
+migrTick();
 setInterval(refresh, 2000);
 setInterval(refreshDevices, 15000);

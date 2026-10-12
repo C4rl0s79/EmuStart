@@ -136,3 +136,33 @@ def test_server_layout_migration_moves_config_and_data(tmp_path, monkeypatch):
     # drugi start: nic do przenoszenia, nic nie ginie
     assert paths.use_server_layout(migrate=True) == []
     assert (app / "server" / "config.json").read_text(encoding="utf-8").startswith('{"rom_roots"')
+
+
+def test_profiles_move_into_server_folder_after_confirmation(tmp_path, monkeypatch):
+    import time as _t
+    share = tmp_path / "udzial" / "emustart" / "Profiles"
+    (share / "Jezus" / "save" / "pcsx2" / "memcards").mkdir(parents=True)
+    (share / "Jezus" / "save" / "pcsx2" / "memcards" / "Mcd001.ps2").write_bytes(bytes([255]) * 4096)
+    (share / "Jezus" / "lock").write_text("{}")
+    monkeypatch.setattr(remote, "NAS_ROOT", share)
+    monkeypatch.setattr(remote, "NAS_ID", nasfs.root_id(share, create=True))
+    monkeypatch.setattr(srvadmin, "_migr", {"phase": "", "done": 0, "total": 0, "files": 0, "error": ""})
+    saved = {}
+    monkeypatch.setattr("emustart.config.save", lambda c: saved.update(c))
+
+    class A:
+        _cfg = {}
+    plan = srvadmin.profiles_migrate(A(), {})                      # bez potwierdzenia: tylko plan
+    assert plan["ok"] and plan["files"] == 2 and not (paths.SERVER / "profiles").exists()
+    assert srvadmin.profiles_migrate(A(), {"confirm": True})["started"]
+    for _ in range(100):
+        if srvadmin._migr["phase"] in ("done", "error"):
+            break
+        _t.sleep(0.05)
+    assert srvadmin._migr["phase"] == "done", srvadmin._migr
+    dst = paths.SERVER / "profiles"
+    assert (dst / "Jezus/save/pcsx2/memcards/Mcd001.ps2").read_bytes() == bytes([255]) * 4096
+    assert remote.NAS_ROOT == dst and saved["profiles_nas"] == str(dst)
+    assert (share / "Jezus/save/pcsx2/memcards/Mcd001.ps2").is_file()       # stary folder zostaje
+    assert (share / ".emustart-moved").is_file()
+    assert not srvadmin.profiles_migrate(A(), {"confirm": True})["ok"]        # już przeniesione

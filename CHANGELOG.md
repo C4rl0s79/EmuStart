@@ -8,6 +8,36 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.32.0] — 2026-10-12
+
+EmuStart 2.0, etap 1 ([koncepcja](docs/koncepcja-2.0.md)). Zakres: `emustart/devices.py`
+(nowy), `emustart/qr.py` (nowy), `emustart/paths.py`, `main.py`, `emustart/remote.py`,
+`emustart/server.py`, `emustart/srvadmin.py`, `emustart/nasfs.py`, `emustart/netsrc.py`,
+`emustart/api.py`, panel serwera (`web/server.*`), ustawienia (`web/app.js`), Android
+(`Bridge.kt`, `Server.kt`, `build.gradle.kts`), testy (`tests/test_three_devices.py`).
+Bez zmian: lista gier, uruchamianie, pobieranie gier, synchronizacja zapisów (poza wyborem
+drogi: serwer / SMB).
+
+### Dodane
+- **Własny klucz dla każdego urządzenia i parowanie kodem QR** — panel serwera → Sparowane
+  urządzenia → Dodaj urządzenie (kod jednorazowy, 10 min, tekst i kod QR); telefon:
+  **Połącz z serwerem (kod QR)** (skaner Google Play) albo **Połącz kodem**; komputer:
+  **Połącz kodem**. Panel pokazuje urządzenia (rodzaj, wersja, ostatni kontakt), pozwala
+  zmienić nazwę i **unieważnić** pojedyncze urządzenie. Serwer trzyma tylko skróty kluczy;
+  błędne kody — przerwa po 10 próbach. Wspólny klucz serwera działa dalej.
+- **Katalog serwera `server\`** — ustawienia, biblioteka, grafiki i rejestr urządzeń w jednym
+  podkatalogu programu (przenośny serwer). Przy pierwszym starcie serwera `config.json`
+  i `data\` przenoszone automatycznie.
+- **Przeniesienie profili do katalogu serwera** (panel → Folder profili) — po potwierdzeniu,
+  z kopiowaniem i sprawdzeniem każdego pliku; stary folder zostaje jako zapas.
+- Test „trzech urządzeń” (serwer + komputer + telefon): parowanie, klucze, unieważnienie,
+  zapis z komputera czytany na telefonie i odwrotnie, przeniesienie katalogu i profili.
+
+### Zmienione
+- **Klienci z ustawionym serwerem zapisują profile tylko przez serwer** — bez SMB (także gdy
+  przez SMB widać folder profili); serwer chwilowo niedostępny = tryb offline (kolejka).
+- Zapytania klientów niosą wersję EmuStart (`X-EmuStart-Version`) — widoczną w panelu.
+
 ## [0.31.2] — 2026-10-12
 
 Zakres: nagłówek listy gier i podgląd na komputerze (`web/index.html`, `web/app.css`, `web/app.js`);
