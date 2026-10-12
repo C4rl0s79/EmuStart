@@ -525,7 +525,8 @@ function layoutPreview() {
     const arBox = ratio($("pvBox"), 0.75);
     const arSnap = $("pvSnap").classList.contains("hidden") ? 0 : ratio($("pvSnap"), 4 / 3);
     const gap = parseFloat(getComputedStyle(pv).columnGap) || 0;
-    const rowH = pv.clientHeight * 0.56;
+    const share = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--ph-media")) || 56;
+    const rowH = pv.clientHeight * share / 100;              // suwak „Wysokość okładki i zrzutu”
     const fit = (pv.clientWidth * 0.62 - gap) / (arBox + arSnap);
     const h = Math.max(60, Math.min(rowH, fit));
     pv.style.setProperty("--ph-h", `${h}px`);
@@ -573,7 +574,7 @@ async function togglePin() {
 }
 
 /* ───────────── uruchamianie ───────────── */
-let launchPoll;
+let launchPoll, lastNotice = "";
 async function launch(state = "", takeover = false, configure = false) {
   const g = S.games[S.gameIdx];
   if (g.vid === undefined) setVariant(g, await api().game_detail(g.id));   // A przed wczytaniem podglądu
@@ -629,6 +630,7 @@ async function updateLaunch() {
     $("lEta").textContent = p.left ? fmtEta(p.eta) : "gotowe";
     $("lFiles").textContent = p.files > 1 ? `Plik ${p.file} z ${p.files}` : "";
   }
+  if (st.notice && st.notice !== lastNotice) { lastNotice = st.notice; toast(st.notice, 9000); }
   const msg = $("lMsg");
   msg.className = "lmsg" + (st.phase === "error" ? " err" : "");
   if (st.phase === "running") msg.textContent = !st.copying ? "Miłej gry!"

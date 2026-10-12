@@ -44,8 +44,11 @@ SOURCES = [
     ("android", "retroarch", "RetroArch na telefonie", "states/android/retroarch", "ra"),
     ("android", "armsx2", "ARMSX2 na telefonie", "states/android/armsx2", "ps2"),
     ("android", "nethersx2", "AetherSX2 na telefonie", "states/android/nethersx2", "ps2"),
+    # od 0.31.1: stany RetroArcha wspólne dla wszystkich urządzeń (emustart/rastates.py) —
+    # każde urządzenie bierze je samo przed grą, tam gdzie jego RetroArch ich szuka
+    ("shared", "retroarch", "RetroArch — wspólne (komputer i telefon)", "states/shared/retroarch", "ra"),
 ]
-PLATFORM = {"windows": "Komputer", "android": "Telefon"}
+PLATFORM = {"windows": "Komputer", "android": "Telefon", "shared": "Wszystkie urządzenia"}
 
 _RA_STATE = re.compile(r"^(?P<stem>.+)\.state(?P<slot>\d*)(?P<auto>\.auto)?$", re.I)
 # sloty 00–09, stan wznowienia PCSX2 (.resume) i autozapis ARMSX2 przy wyjściu
@@ -172,8 +175,10 @@ def _version(fs, rel: str) -> int | None:
 def _targets(st: dict, latest_ver: dict) -> list:
     """Dokąd można skopiować stan: ta sama rodzina na drugiej platformie, z oceną zgodności."""
     out = []
+    if st["platform"] == "shared":
+        return out                       # wspólne — każde urządzenie bierze je samo
     for platform, emu, label, _base, kind in SOURCES:
-        if kind != st["kind"] or platform == st["platform"]:
+        if kind != st["kind"] or platform == st["platform"] or platform == "shared":
             continue
         if kind == "ra":
             ok, note = None, ("ten sam rdzeń na obu urządzeniach — zwykle się wczyta"
@@ -239,7 +244,10 @@ def copy(fs, nas: str, src_rel: str, platform: str, emu: str, es: str, name: str
         return {"ok": False, "reason": "Nie ma już tego stanu."}
     fname = _equivalent_name(PurePosixPath(src_rel).name, platform)
     _p, _e, label, base, kind = target
-    sub = _dest_dir(fs, nas, base, kind, src_rel)
+    try:
+        sub = _dest_dir(fs, nas, base, kind, src_rel)
+    except ValueError as ex:
+        return {"ok": False, "reason": str(ex)}
     dst = f"{base}/{sub}{fname}" if sub else f"{base}/{fname}"
     stamp = time.strftime("%Y%m%d-%H%M%S")
     old = fs.read(f"{nas}/{dst}")
@@ -286,15 +294,27 @@ def _dest_dir(fs, nas: str, base: str, kind: str, src_rel: str) -> str:
     if kind == "ps2":
         dirs = [r.rsplit("/", 1)[0] for r in files if r.lower().endswith(".p2s") and "/" in r]
         return (max(set(dirs), key=dirs.count) if dirs else "sstates") + "/"
-    dirs = [r.rsplit("/", 1)[0] for r in files if _RA_STATE.match(r.rsplit("/", 1)[-1]) and "/" in r]
-    src_parent = PurePosixPath(src_rel).parent.name
-    if not dirs:
-        return "states/"
-    # RetroArch z sortowaniem stanów wg rdzenia: ten sam podfolder rdzenia, jeśli istnieje
-    for d in dirs:
-        if d.rsplit("/", 1)[-1].lower() == src_parent.lower():
-            return d + "/"
-    return max(set(dirs), key=dirs.count) + "/"
+    # RetroArch: stan należy do rdzenia — folder rdzenia stanu źródłowego (telefon od 0.31.1
+    # trzyma stany w states/android/retroarch/<rdzeń>/). Bez rdzenia nie zgadujemy (wcześniej
+    # „najczęstszy folder” wkładał stan SNES do folderu rdzenia Amigi).
+    core = PurePosixPath(src_rel).parent.name
+    if core.lower() in ("retroarch", "states", ""):
+        # stan bez rdzenia (starsza aplikacja): folder rdzenia, w którym komputer ma stany
+        # TEJ gry — tylko gdy jest dokładnie jeden; kilka (np. bsnes i Snes9x) = nie zgadujemy
+        m = _RA_STATE.match(PurePosixPath(src_rel).name)
+        stem = norm_stem(m.group("stem")) if m else ""
+        same = {r.rsplit("/", 1)[0] for r in files if "/" in r
+                and (mm := _RA_STATE.match(r.rsplit("/", 1)[-1])) and norm_stem(mm.group("stem")) == stem}
+        if len(same) == 1:
+            return same.pop() + "/"
+        raise ValueError("Stan z telefonu bez informacji o rdzeniu (zapisany starszą wersją aplikacji) — "
+                         "zagraj raz na telefonie z wersją 0.31.1 lub nowszą, stan zapisze się w folderze rdzenia.")
+    dirs = {r.rsplit("/", 2)[0] for r in files if _RA_STATE.match(r.rsplit("/", 1)[-1]) and r.count("/") >= 2}
+    root = "states" if "states" in dirs or not dirs else sorted(dirs)[0]
+    for d in (r.rsplit("/", 1)[0] for r in files if "/" in r):
+        if d.rsplit("/", 1)[-1].lower() == core.lower():
+            return d + "/"                      # istniejący folder rdzenia (wielkość liter jak na PC)
+    return f"{root}/{core}/"
 
 
 def _index_add(fs, nas: str, base: str, es: str, name: str, fname: str) -> None:

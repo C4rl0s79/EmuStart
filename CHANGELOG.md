@@ -8,6 +8,34 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.31.1] — 2026-10-12
+
+Zakres: stany RetroArcha (`emustart/rastates.py` — nowy, `emustart/launcher.py`,
+`emustart/savemgr.py`, Android `Saves.kt`), edytor wyglądu na telefonie (`web/look.js`,
+`web/app.css`, `web/app.js`). Bez zmian: zapisy w grze, karty pamięci, stany PCSX2/ARMSX2.
+
+### Zmienione
+- **Stany RetroArcha wspólne dla komputera i telefonu, niezależnie od ustawień RetroArcha.**
+  Na serwerze jedno miejsce w stałym układzie: `<profil>/states/shared/retroarch/<rdzeń>/`.
+  Każde urządzenie zgłasza swój układ stanów w `.layouts.json` (płasko / folder rdzenia /
+  folder gry / folder gry + rdzenia): komputer z `retroarch.cfg` (`savestate_directory`,
+  `sort_savestates_enable`, `sort_savestates_by_content_enable`), telefon — z miejsca,
+  w którym RetroArch zapisał stan. Przed grą nowsze stany tej gry i tego rdzenia trafiają
+  tam, gdzie RetroArch danego urządzenia ich szuka (poprzednia wersja do kopii zapasowej),
+  po grze zmienione wracają na serwer. Gdy stan jest tylko z innego rdzenia — komunikat
+  zamiast cichego „nie widzi”. Menedżer zapisów pokazuje wspólne stany.
+
+### Poprawione
+- **PC nie widział stanu RetroArcha z telefonu**: telefon wysyłał stan płasko (bez folderu
+  rdzenia), a menedżer zapisów kopiował go do „najczęstszego” folderu rdzeni — np. stan SNES
+  do folderu PUAE (Amiga). Menedżer nie zgaduje już folderu: tylko folder rdzenia stanu,
+  a dla starych stanów bez rdzenia — folder, w którym komputer ma stany tej gry, gdy jest
+  dokładnie jeden.
+- **Edytor wyglądu na telefonie**: suwaki układu (logo w karuzeli i nad listą, wysokość
+  wierszy, szerokość listy, wysokość okładki i zrzutu, wiersze ustawień, linie opisu) nic
+  nie zmieniały — układ telefonu nadpisywał ich wartości. Teraz przeliczają się na wymiary
+  telefonu (100 % = domyślny układ telefonu).
+
 ## [0.31.0] — 2026-10-12
 
 Zakres: panel serwera (`web/server.html`, `web/server.js`, `emustart/srvadmin.py`), nowy

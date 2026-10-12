@@ -73,7 +73,7 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
             Fam("armsx2", "ArmSX2", "save/pcsx2/memcards", Kind.PS2_CARDS, rx("armsx2")),
             Fam("nethersx2", "AetherSX2 / NetherSX2", "save/pcsx2/memcards", Kind.PS2_CARDS, rx("aether|nether")),
             // stany gry z telefonu — na serwerze, ale osobno od PC (inne wersje emulatorów ich nie wczytują)
-            Fam("retroarch_states", "RetroArch — stany gry", "states/android/retroarch", Kind.RA_STATES, rx("^retroarch$")),
+            Fam("retroarch_states", "RetroArch — stany gry", SHARED_RA, Kind.RA_STATES, rx("^retroarch$")),
             Fam("armsx2_states", "ArmSX2 — stany gry", "states/android/armsx2", Kind.PS2_STATES, rx("armsx2"), cards = "armsx2"),
             Fam("nethersx2_states", "AetherSX2 — stany gry", "states/android/nethersx2", Kind.PS2_STATES,
                 rx("aether|nether"), cards = "nethersx2"))
@@ -95,6 +95,13 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
         /** PS1 w RetroArchu (SwanStation, Beetle PSX): zapis `<gra>.srm` to surowa karta pamięci
          *  128 KB — ta sama co karta DuckStation `<gra>_1.mcd` na komputerze. DuckStation na
          *  Androidzie trzyma dane w Android/data, niedostępnym dla innych aplikacji. */
+        /** Stany RetroArcha wspólne dla wszystkich urządzeń: <profil>/states/shared/retroarch/<rdzeń>/…
+         *  (emustart/rastates.py). Każde urządzenie zgłasza swój układ w .layouts.json. */
+        const val SHARED_RA = "states/shared/retroarch"
+
+        /** „Beetle PSX HW” = „beetle_psx_hw” — porównanie folderów rdzeni. */
+        fun normCore(s: String) = s.lowercase().replace(Regex("[^a-z0-9]"), "")
+
         val RA_PS1 = Fam("retroarch_ps1", "RetroArch (PS1)", "save/duckstation/memcards", Kind.PS1_SRM,
                          rx("^retroarch$"), dirs = "retroarch")
         const val CARD_SIZE = 131072L
@@ -279,7 +286,9 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
         }
         for (d in dirs) {
             for (x in d.listFiles() ?: emptyArray()) {
-                if (x.isDirectory && f.ra && d != g.dir) x.listFiles()?.forEach { take(it) }
+                if (x.isDirectory && f.ra && d != g.dir) x.listFiles()?.forEach { y ->
+                    if (y.isDirectory && f.kind == Kind.RA_STATES) y.listFiles()?.forEach { take(it) } else take(y)
+                }
                 else take(x)
             }
         }
@@ -450,6 +459,8 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
             val n = rel.substringAfterLast('/')
             if (!matches(f, g, n)) continue
             if (f.kind == Kind.PS1_SRM && (n != g.name + "_1.mcd" || v[0].toLong() != CARD_SIZE)) continue
+            // stany RetroArcha: tylko z folderu rdzenia tej gry (stany innych rdzeni się nie wczytują)
+            if (f.kind == Kind.RA_STATES && normCore(rel.substringBefore('/', "")) != normCore(coreDir(g))) continue
             val cur = byName[n]
             if (cur == null || v[1] > nas.getValue(cur)[1]) byName[n] = rel
         }
@@ -506,6 +517,20 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
     private fun newTargets(f: Fam, g: Game, dirs: List<File>, rel: String): List<File> {
         val name = toPhone(f, g, rel.substringAfterLast('/'))
         if (!f.ra) return listOfNotNull(dirs.firstOrNull()?.let { File(it, name) })
+        if (f.kind == Kind.RA_STATES) {
+            val root = File(prefs.learnedDir(f.dirs).ifEmpty { prefs.saveDir(f.dirs) }
+                .ifEmpty { File(ext, "RetroArch/states").absolutePath })
+            fun coreSub(base: File) = base.listFiles()?.firstOrNull { it.isDirectory && normCore(it.name) == normCore(coreDir(g)) }
+                ?.name ?: coreDir(g)
+            return when (prefs.learnedDir("layout:" + f.id)) {
+                "flat" -> listOf(File(root, name))
+                "core" -> listOf(File(File(root, coreSub(root)), name))
+                "content" -> listOf(File(File(root, g.dir.name), name))
+                "content+core" -> File(root, g.dir.name).let { listOf(File(File(it, coreSub(it)), name)) }
+                // układ jeszcze nieznany (pierwsza gra): oba typowe miejsca
+                else -> listOf(File(File(root, coreSub(root)), name), File(root, name))
+            }
+        }
         val learned = prefs.learnedDir(f.dirs).ifEmpty { prefs.saveDir(f.dirs) }
         val pick = if (learned.isNotEmpty() && File(learned).isDirectory) listOf(File(learned)) else dirs
         return pick.map { d ->
@@ -533,6 +558,7 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
                         addPending(profile, f, g)
                     }
                 }
+                if (layoutChanged) registerLayout(profile)
                 try { unlockProfile(profile) } catch (e: Exception) { }
             }
         } finally { busy = "" }
@@ -566,6 +592,20 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
         }
         for (d in cands.filter { it.isDirectory }) {
             val hit = phoneFiles(f, g, listOf(d)).values.firstOrNull { it.lastModified() >= startedAt - 2000 } ?: continue
+            if (f.kind == Kind.RA_STATES) {
+                val parts = hit.parentFile!!.absolutePath.removePrefix(d.absolutePath).trim('/').split('/').filter { it.isNotEmpty() }
+                val lay = when {
+                    parts.isEmpty() -> "flat"
+                    parts.size == 1 && normCore(parts[0]) == normCore(coreDir(g)) -> "core"
+                    parts.size == 1 -> "content"
+                    else -> "content+core"
+                }
+                if (prefs.learnedDir("layout:" + f.id) != lay) {
+                    prefs.setLearnedDir("layout:" + f.id, lay)
+                    layoutChanged = true
+                    Log.i(tag, "układ stanów RetroArcha: $lay ($d)")
+                }
+            }
             val dir = if (f.ra && hit.parentFile != d) d else hit.parentFile!!
             if (prefs.learnedDir(f.dirs) != dir.absolutePath) {
                 prefs.setLearnedDir(f.dirs, dir.absolutePath)
@@ -576,6 +616,32 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
     }
 
     private val pendingIndex = HashSet<String>()
+    @Volatile private var layoutChanged = false
+
+    /** Folder rdzenia tej gry (nazwa jak w RetroArchu: corename, np. „bsnes”, „Beetle PSX HW”). */
+    private fun coreDir(g: Game): String {
+        val core = g.core.removeSuffix("_libretro_android").removeSuffix("_libretro")
+        return CORE_DIR[core] ?: core
+    }
+
+    /** Folder rdzenia we wspólnym miejscu na serwerze (istniejący o tej samej nazwie po normalizacji). */
+    private fun sharedFolder(g: Game, nas: Map<String, DoubleArray>): String =
+        nas.keys.map { it.substringBefore('/', "") }.firstOrNull { it.isNotEmpty() && normCore(it) == normCore(coreDir(g)) }
+            ?: coreDir(g)
+
+    /** Układ stanów RetroArcha tego telefonu → .layouts.json na serwerze (serwer i komputery go widzą). */
+    private fun registerLayout(profile: String) {
+        val lay = prefs.learnedDir("layout:retroarch_states").ifEmpty { return }
+        try {
+            val rel = "$profile/$SHARED_RA/.layouts.json"
+            val o = server.nasRead(rel)?.let { JSONObject(String(it)) } ?: JSONObject()
+            o.put(device, JSONObject().put("device", "telefon").put("layout", lay)
+                .put("base", prefs.learnedDir("retroarch_states")).put("content", lay.startsWith("content"))
+                .put("core", lay.endsWith("core")).put("time", System.currentTimeMillis() / 1000.0))
+            server.nasPut(rel, o.toString(1).toByteArray(), System.currentTimeMillis() / 1000.0)
+            layoutChanged = false
+        } catch (e: Exception) { Log.w(tag, "układ stanów na serwer: $e") }
+    }
 
     private fun push(profile: String, f: Fam, g: Game) {
         if (f.kind == Kind.PS2_STATES && f.id in pendingIndex) {
@@ -607,7 +673,8 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
         if (m != null && same(m.optJSONArray("p"), pSig)) return false            // bez zmian w telefonie
         if (f.kind == Kind.PS1_SRM && x.length() != CARD_SIZE) return false       // nie surowa karta 128 KB
         val nasName = toNas(f, g, name)
-        val rel = m?.optString("rel")?.takeIf { it.isNotEmpty() && nas.containsKey(it) }
+        val rel = if (f.kind == Kind.RA_STATES) "${sharedFolder(g, nas)}/$nasName"
+            else m?.optString("rel")?.takeIf { it.isNotEmpty() && nas.containsKey(it) }
             ?: nas.keys.firstOrNull { it.substringAfterLast('/') == nasName }
             ?: newRel(f, g, x, nas)
         val v = nas[rel]
