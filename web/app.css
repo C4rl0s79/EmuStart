@@ -373,14 +373,15 @@ body.phone {
 .phone .screen { inset: 38px 0 38px 0; }
 
 /* systemy */
-.phone .carousel { top: max(1%, calc(29% - var(--car-h) / 2)); height: var(--car-h); }
+/* karuzela wyżej (22 % zamiast 29 %) — pod nią opis platformy w 3 liniach */
+.phone .carousel { top: max(1%, calc(22% - var(--car-h) / 2)); height: var(--car-h); }
 .phone .syscard .txt { font-size: 5vw; }
-.phone .sysinfo { top: calc(max(1%, calc(29% - var(--car-h) / 2)) + var(--car-h) + 1%); }
+.phone .sysinfo { top: calc(max(1%, calc(22% - var(--car-h) / 2)) + var(--car-h) + 1%); }
 .phone .sysinfo h1 { font-size: calc(1.6em * var(--fs-sys)); margin-bottom: .1em; }
 .phone .sysinfo p { font-size: calc(1em * var(--fs-sysdesc)); }
-.phone .sysabout { width: 80%; margin-top: .35em; }
+.phone .sysabout { width: 86%; margin-top: .35em; }
 .phone .sysfacts { margin: 0 0 .25em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.phone .sysdesc { -webkit-line-clamp: 1; }
+.phone .sysdesc { -webkit-line-clamp: 3; line-height: 1.4; }
 
 /* lista gier */
 .phone #games { grid-template-columns: minmax(0, var(--list-w)) minmax(0, 1fr); gap: 1.6vw; padding: 0 1.6vw; }
