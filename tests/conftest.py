@@ -1,0 +1,58 @@
+r"""Izolacja testów od prawdziwych danych EmuStart.
+
+Testy uruchamiane są z folderu programu (np. D:\emustart) — tego samego, w którym leżą
+config.json, data\ i profiles\ działającego EmuStart. Bez izolacji test, który zapisuje
+konfigurację, nadpisywał prawdziwy config.json (2026-10-12: klucz testowy zamiast ustawień,
+EmuStart pokazywał „pierwsze uruchomienie”). Każdy test dostaje więc własny, tymczasowy
+folder programu, a po wszystkich testach sprawdzamy, że prawdziwe pliki się nie zmieniły.
+"""
+
+from __future__ import annotations
+
+import hashlib
+
+import pytest
+
+from emustart import paths
+
+_REAL = {"config": paths.CONFIG_PATH, "db": paths.DB_PATH}
+_BEFORE: dict = {}
+
+
+def _digest(p) -> str:
+    try:
+        return hashlib.sha1(p.read_bytes()).hexdigest()
+    except OSError:
+        return "brak"
+
+
+def pytest_sessionstart(session):
+    for k, p in _REAL.items():
+        _BEFORE[k] = _digest(p)
+
+
+def pytest_sessionfinish(session, exitstatus):
+    changed = [str(p) for k, p in _REAL.items() if _digest(p) != _BEFORE.get(k)]
+    if changed:
+        session.exitstatus = 1
+        print("\n\nBŁĄD: testy zmieniły prawdziwe pliki EmuStart: " + ", ".join(changed))
+
+
+@pytest.fixture(autouse=True)
+def _isolated_app(tmp_path_factory, monkeypatch):
+    from emustart import library, profiles, server
+    base = tmp_path_factory.mktemp("emustart-app")
+    monkeypatch.setattr(paths, "APP", base)
+    monkeypatch.setattr(paths, "DATA", base / "data")
+    monkeypatch.setattr(paths, "MEDIA", base / "data" / "media")
+    monkeypatch.setattr(paths, "DB_PATH", base / "data" / "library.sqlite")
+    monkeypatch.setattr(paths, "CONFIG_PATH", base / "config.json")
+    monkeypatch.setattr(paths, "LOGS", base / "logs")
+    monkeypatch.setattr(paths, "DEFAULT_CACHE", base / "cache")
+    monkeypatch.setattr(paths, "RUN_TMP", base / "run")
+    monkeypatch.setattr(profiles, "LOCAL", base / "profiles")
+    if "/media/" in getattr(server, "ROUTES", {}):
+        monkeypatch.setitem(server.ROUTES, "/media/", base / "data" / "media")
+    library._local.con = None
+    yield
+    library._local.con = None

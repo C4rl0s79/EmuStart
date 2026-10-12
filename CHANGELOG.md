@@ -8,6 +8,12 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+### Poprawione
+- Testy nie zapisują już prawdziwych plików EmuStart: uruchamiane z folderu programu
+  nadpisywały `config.json` (klucz testowy zamiast ustawień — EmuStart pokazywał „pierwsze
+  uruchomienie”). Każdy test dostaje własny, tymczasowy folder programu (`tests/conftest.py`),
+  a po testach sprawdzane jest, że prawdziwe `config.json` i baza się nie zmieniły.
+
 ## [0.31.1] — 2026-10-12
 
 Zakres: stany RetroArcha (`emustart/rastates.py` — nowy, `emustart/launcher.py`,
