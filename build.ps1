@@ -1,9 +1,13 @@
 ﻿# build.ps1 — buduje przenośny EmuStart (PyInstaller, wersja katalogowa) + ZIP.
-# Użycie:  powershell -ExecutionPolicy Bypass -File build.ps1 [-Deploy]
+# Użycie:  powershell -ExecutionPolicy Bypass -File build.ps1 [-Deploy] [-Target <katalog programu>]
 # Wynik:   dist\EmuStart\EmuStart.exe i dist\EmuStart-<wersja>-win64.zip
 #          (portable — config/data/cache/logs powstają obok exe)
 
-param([switch]$Deploy)   # -Deploy: po budowie kopiuje binarkę do katalogu programu
+param(
+    [switch]$Deploy,               # -Deploy: po budowie kopiuje program do katalogu programu
+    # katalog zainstalowanego programu (osobno od repozytorium): -Target albo EMUSTART_HOME
+    [string]$Target = $(if ($env:EMUSTART_HOME) { $env:EMUSTART_HOME } else { "D:\emustart" })
+)
 $ErrorActionPreference = "Stop"
 Set-Location -Path $PSScriptRoot
 
@@ -28,15 +32,21 @@ $mb = [math]::Round((Get-Item $zip).Length / 1MB, 1)
 Write-Host "OK: $zip ($mb MB)" -ForegroundColor Green
 
 if ($Deploy) {
-    # Kopia do katalogu programu (obok config.json, data\, profiles\) — tam
-    # binarka korzysta z ustawień i biblioteki, a kolejne budowanie jej nie kasuje.
+    # Kopia do katalogu programu (obok config.json, data\, profiles\) — tam binarka korzysta
+    # z ustawień i biblioteki. Repozytorium i program są w osobnych katalogach.
+    $full = [System.IO.Path]::GetFullPath($Target).TrimEnd('\')
+    if ($full -eq $PSScriptRoot.TrimEnd('\')) {
+        Write-Host "Katalog programu nie może być katalogiem repozytorium ($full)." -ForegroundColor Red
+        exit 1
+    }
     $running = Get-Process -Name EmuStart -ErrorAction SilentlyContinue |
-        Where-Object { $_.Path -like "$PSScriptRoot\*" }
+        Where-Object { $_.Path -like "$full\*" }
     if ($running) {
-        Write-Host "EmuStart działa z $PSScriptRoot — zamknij go i uruchom ponownie z -Deploy." -ForegroundColor Yellow
+        Write-Host "EmuStart działa z $full — zamknij go i uruchom ponownie z -Deploy." -ForegroundColor Yellow
         exit 2
     }
-    robocopy (Join-Path $PSScriptRoot "dist\EmuStart") $PSScriptRoot /E /NFL /NDL /NJH /NJS /NP | Out-Null
+    New-Item -ItemType Directory -Force -Path $full | Out-Null
+    robocopy (Join-Path $PSScriptRoot "dist\EmuStart") $full /E /NFL /NDL /NJH /NJS /NP | Out-Null
     if ($LASTEXITCODE -ge 8) { Write-Host "BŁĄD kopiowania (robocopy $LASTEXITCODE)" -ForegroundColor Red; exit 1 }
-    Write-Host "Skopiowano do $PSScriptRoot\EmuStart.exe" -ForegroundColor Green
+    Write-Host "Skopiowano do $full\EmuStart.exe" -ForegroundColor Green
 }
