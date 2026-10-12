@@ -848,6 +848,36 @@ def _send_file(handler, gid: int, rel: str) -> None:
             srvadmin.sent(ip, gid, g.get("title") or rel, len(buf))
 
 
+FW_TLS = "EmuStart Server (szyfrowany)"
+
+
+def ensure_firewall(port: int) -> None:
+    """Reguła zapory dla portu szyfrowanego — serwer działa jako SYSTEM (zadanie Harmonogramu),
+    więc dopisuje ją sam przy starcie; bez uprawnień nic się nie dzieje (wpis w logu)."""
+    if os.name != "nt":
+        return
+    import subprocess
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    try:
+        r = subprocess.run(["netsh", "advfirewall", "firewall", "show", "rule", f"name={FW_TLS}"],
+                           capture_output=True, text=True, creationflags=flags, timeout=20)
+        if r.returncode == 0 and f"{port}" in r.stdout:
+            return
+        if r.returncode == 0:                          # reguła na inny port — od nowa
+            subprocess.run(["netsh", "advfirewall", "firewall", "delete", "rule", f"name={FW_TLS}"],
+                           capture_output=True, creationflags=flags, timeout=20)
+        r = subprocess.run(["netsh", "advfirewall", "firewall", "add", "rule", f"name={FW_TLS}", "dir=in",
+                            "action=allow", "protocol=TCP", f"localport={port}"],
+                           capture_output=True, text=True, creationflags=flags, timeout=20)
+        if r.returncode == 0:
+            log.info("zapora: dopuszczony port szyfrowany %d", port)
+        else:
+            log.warning("zapora: nie udało się dopuścić portu %d (%s) — uruchom serwer jako administrator "
+                        "albo dodaj regułę ręcznie", port, (r.stdout + r.stderr).strip()[:200])
+    except (OSError, subprocess.SubprocessError) as ex:
+        log.warning("zapora: %s", ex)
+
+
 def install_autostart(exe: str, port: int) -> list:
     """Zadanie Harmonogramu (przy starcie systemu) i reguła zapory — uruchamiane
     przez użytkownika na komputerze z grami (wymaga uprawnień administratora)."""
@@ -868,6 +898,8 @@ def install_autostart(exe: str, port: int) -> list:
          f"$s.TargetPath='{exe}';$s.Arguments='--server-panel';$s.IconLocation='{exe},0';$s.Save()"],
         ["netsh", "advfirewall", "firewall", "add", "rule", "name=EmuStart Server", "dir=in",
          "action=allow", "protocol=TCP", f"localport={port}"],
+        ["netsh", "advfirewall", "firewall", "add", "rule", f"name={FW_TLS}", "dir=in",
+         "action=allow", "protocol=TCP", f"localport={port + 1}"],
     ]
     out = []
     for c in cmds:

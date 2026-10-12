@@ -218,6 +218,7 @@ def _start_tls(api, port: int, log) -> None:
                     raise
                 time.sleep(0.5)
         remote.TLS = {"port": tport, "fp": fp}
+        remote.ensure_firewall(tport)
         log.info("port szyfrowany %d (certyfikat %s…)", tport, fp[:16])
     except Exception:
         log.exception("port szyfrowany")
