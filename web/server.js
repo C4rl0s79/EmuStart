@@ -175,7 +175,8 @@ async function refreshDevices() {
   $("enrBox").hidden = !enr.length;
   $("enroll").innerHTML = enr.map((q) =>
     `<tr><td>${esc(q.name)}<div class="muted">${esc(KIND[q.class] || q.class)} · ${esc(q.ip)} · ${ago(q.created)}</div></td>` +
-    `<td>${q.mode === "new" ? "nowe konto" : "konto"} <b>${esc(q.account)}</b></td>` +
+    `<td>${q.mode === "new" ? "nowe konto" : "konto"} <b>${esc(q.account)}</b>` +
+    `${(q.replaces || []).length ? `<div class="muted">zastąpi: ${esc(q.replaces.join(", "))}</div>` : ""}</td>` +
     `<td><code style="font-size:18px;letter-spacing:.08em">${esc(q.code)}</code></td>` +
     `<td class="n"><button class="primary" data-eg="${esc(q.id)}">Zatwierdź z grami</button> ` +
     `<button data-es="${esc(q.id)}">Bez gier</button> <button class="danger" data-en="${esc(q.id)}">Odrzuć</button></td></tr>`).join("");

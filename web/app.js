@@ -870,7 +870,8 @@ async function enrollCheck() {
             ["Odrzuć", () => decide(false, false)], ["Później", () => {}]];
   S.menuIdx = 0; S.modal = "menu";
   $("menu").querySelector("h2").textContent =
-    `${q.mode === "new" ? "Nowe konto" : "Nowe urządzenie konta"} „${q.account}”: ${q.name} (${kind}) · ${q.ip} · ${when} · kod ${q.code}`;
+    `${q.mode === "new" ? "Nowe konto" : "Nowe urządzenie konta"} „${q.account}”: ${q.name} (${kind}) · ${q.ip} · ${when} · kod ${q.code}` +
+    ((q.replaces || []).length ? ` · zastąpi wcześniejszą rejestrację tego sprzętu (${q.replaces.join(", ")})` : "");
   $("menu").classList.remove("hidden");
   renderMenu();
 }

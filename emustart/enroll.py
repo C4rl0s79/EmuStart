@@ -123,7 +123,7 @@ def _safe_account(name: str) -> str:
 
 # ── prośby ──
 def request(mode: str, account: str, name: str, cls: str, ip: str, version: str, pubkey: str,
-            accounts: list) -> dict:
+            accounts: list, hw: str = "") -> dict:
     """Nowa instalacja prosi o dołączenie. `accounts` — istniejące konta (profile)."""
     from emustart import devices
     if mode not in ("new", "existing"):
@@ -157,7 +157,7 @@ def request(mode: str, account: str, name: str, cls: str, ip: str, version: str,
                      "name": (str(name).strip() or "urządzenie")[:40],
                      "class": cls if cls in devices.CLASSES else "pc", "ip": ip, "version": version[:20],
                      "pubkey": pubkey, "code": code, "created": now, "expires": now + ENROLL_TTL,
-                     "status": "pending", "device": "", "decided_by": ""}
+                     "status": "pending", "device": "", "decided_by": "", "hw": devices._valid_hw(hw)}
         _save()
     log.info("prośba o dołączenie: %s (%s) — %s „%s”, %s, kod %s", name, cls,
              "nowe konto" if mode == "new" else "konto", acc, ip, pretty(code))
@@ -204,7 +204,7 @@ def pending(viewer: str) -> list:
             if not _visible(q, viewer) or (_admin_only(q) and viewer and not devices.is_admin(viewer)):
                 continue
             out.append({k: q[k] for k in ("id", "mode", "account", "name", "class", "ip", "created", "expires")}
-                       | {"code": pretty(q["code"])})
+                       | {"code": pretty(q["code"]), "replaces": devices.same_hw(q.get("hw", ""))})
     return sorted(out, key=lambda q: q["created"])
 
 
@@ -228,7 +228,7 @@ def decide(req_id: str, allow: bool, games: bool, viewer: str, create_account=No
         if q["mode"] == "new" and create_account:
             create_account(q["account"])
         did = devices.add_keyed(q["name"], q["class"], q["ip"], q["version"], q["pubkey"], q["account"],
-                                role="user", games=bool(games), by=by)
+                                role="user", games=bool(games), by=by, hw=q.get("hw", ""))
         q.update(status="approved", device=did, decided_by=by)
         _save()
     log.info("zatwierdzono %s dla konta %s (%s, gry: %s) — %s", q["name"], q["account"], q["ip"],

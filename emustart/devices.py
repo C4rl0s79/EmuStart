@@ -96,7 +96,7 @@ def _norm_code(code: str) -> str:
     return "".join(ch for ch in str(code).upper() if ch in PAIR_ALPHABET)
 
 
-def pair(code: str, name: str, cls: str, ip: str = "", version: str = "") -> dict:
+def pair(code: str, name: str, cls: str, ip: str = "", version: str = "", hw: str = "") -> dict:
     """Wymiana jednorazowego kodu na klucz urządzenia. {"ok", "id", "key"} albo {"ok": False, "reason"}."""
     now = time.time()
     with _lock:
@@ -110,11 +110,11 @@ def pair(code: str, name: str, cls: str, ip: str = "", version: str = "") -> dic
             fails.append(now)
             return {"ok": False, "reason": "Nieprawidłowy albo wygasły kod — wygeneruj nowy w panelu serwera."}
         _codes.pop(c, None)                       # kod jednorazowy
-        did, key = _add(name, cls, ip, version, now)
+        did, key = _add(name, cls, ip, version, now, hw=hw)
     return {"ok": True, "id": did, "key": key}
 
 
-def _add(name: str, cls: str, ip: str, version: str, now: float, by: str = "") -> tuple:
+def _add(name: str, cls: str, ip: str, version: str, now: float, by: str = "", hw: str = "") -> tuple:
     """Nowe urządzenie w rejestrze (wołający trzyma _lock) → (id, klucz)."""
     key = secrets.token_urlsafe(32)
     did = secrets.token_hex(6)
@@ -125,6 +125,9 @@ def _add(name: str, cls: str, ip: str, version: str, now: float, by: str = "") -
                  "role": "admin"}
     if by:
         devs[did]["approved_by"] = by
+    if _valid_hw(hw):
+        devs[did]["hw"] = _valid_hw(hw)
+        replace_same_hw(did, hw)
     _save()
     log.info("sparowano urządzenie %s (%s, %s)%s", devs[did]["name"], devs[did]["class"], ip,
              f" — zatwierdził {by}" if by else "")
@@ -242,14 +245,52 @@ def verify(key: str) -> str:
     return ""
 
 
-def touch(did: str, ip: str = "", version: str = "") -> None:
-    """Ostatni kontakt urządzenia (na dysk najwyżej co SEEN_SAVE s)."""
+def _valid_hw(hw: str) -> str:
+    hw = (hw or "").strip().lower()
+    return hw if len(hw) == 32 and all(c in "0123456789abcdef" for c in hw) else ""
+
+
+def replace_same_hw(did: str, hw: str) -> list:
+    """Jedna rejestracja na sprzęt: inne aktywne rejestracje tego samego sprzętu (ponowne
+    dołączenie, nowa instalacja aplikacji) są unieważniane. Wołający trzyma _lock. Zwraca nazwy.
+    Bez sięgania po blokadę próśb (emustart/enroll.py) — odwrotna kolejność blokad niż w
+    enroll.pending / decide groziłaby zakleszczeniem; sesji unieważnionych i tak nie przyjmie
+    `verify` (sprawdza `revoked`)."""
+    hw = _valid_hw(hw)
+    if not hw:
+        return []
+    gone = []
+    for other, d in _load().items():
+        if other != did and not d.get("revoked") and d.get("hw") == hw:
+            d["revoked"] = time.time()
+            d["replaced_by"] = did
+            gone.append(d.get("name", other))
+    if gone:
+        log.info("ten sam sprzęt — zastąpione rejestracje: %s", ", ".join(gone))
+    return gone
+
+
+def same_hw(hw: str) -> list:
+    """Nazwy aktywnych rejestracji tego sprzętu (do prośby o dołączenie: „zastąpi …”)."""
+    hw = _valid_hw(hw)
+    with _lock:
+        return [d.get("name", k) for k, d in _load().items() if hw and not d.get("revoked") and d.get("hw") == hw]
+
+
+def touch(did: str, ip: str = "", version: str = "", hw: str = "") -> None:
+    """Ostatni kontakt urządzenia (na dysk najwyżej co SEEN_SAVE s). `hw` — skrót
+    identyfikatora sprzętu: zapamiętywany (także dla rejestracji sprzed 0.38.2)."""
     global _dirty_at
     with _lock:
         d = _load().get(did)
         if not d:
             return
         now = time.time()
+        hw = _valid_hw(hw)
+        if hw and d.get("hw") != hw:
+            d["hw"] = hw
+            replace_same_hw(did, hw)
+            _save()
         d["last_seen"] = now
         if ip:
             d["ip"] = ip
@@ -332,7 +373,7 @@ def pubkey_of(did: str) -> str:
 
 
 def add_keyed(name: str, cls: str, ip: str, version: str, pubkey: str, account: str,
-              role: str = "user", games: bool = False, by: str = "") -> str:
+              role: str = "user", games: bool = False, by: str = "", hw: str = "") -> str:
     """Urządzenie z kluczem publicznym (logowanie podpisem), przypisane do konta."""
     did = secrets.token_hex(6)
     now = time.time()
@@ -341,6 +382,9 @@ def add_keyed(name: str, cls: str, ip: str, version: str, pubkey: str, account: 
                         "pubkey": pubkey, "account": account, "role": role if role in ("admin", "user") else "user",
                         "games": bool(games), "created": now, "last_seen": now, "ip": ip, "version": version,
                         "approved_by": by}
+        if _valid_hw(hw):
+            _load()[did]["hw"] = _valid_hw(hw)
+            replace_same_hw(did, hw)
         _save()
     return did
 

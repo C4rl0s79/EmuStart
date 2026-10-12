@@ -377,7 +377,32 @@ def auth_headers(key: str) -> dict:
     from emustart import __version__
     if key.startswith(DEV):
         key = session_token(key[len(DEV):]) or "brak-tokenu"
-    return {"Authorization": f"Bearer {key}", "X-EmuStart-Version": __version__}
+    return {"Authorization": f"Bearer {key}", "X-EmuStart-Version": __version__, "X-EmuStart-Hw": hw_id()}
+
+
+_hw: list = []
+
+
+def hw_id() -> str:
+    """Skrót identyfikatora sprzętu (serwer: jedna rejestracja na sprzęt). Windows: MachineGuid
+    + konto Windows (dwa konta na jednym komputerze to dwa urządzenia); inne systemy:
+    /etc/machine-id. Wysyłany jest tylko skrót SHA-256, nie sam identyfikator."""
+    if _hw:
+        return _hw[0]
+    import os
+    raw = ""
+    try:
+        if os.name == "nt":
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Cryptography",
+                                0, winreg.KEY_READ | winreg.KEY_WOW64_64KEY) as k:
+                raw = str(winreg.QueryValueEx(k, "MachineGuid")[0]) + "|" + os.environ.get("USERNAME", "")
+        else:
+            raw = Path("/etc/machine-id").read_text().strip() + "|" + os.environ.get("USER", "")
+    except OSError:
+        raw = ""
+    _hw.append(hashlib.sha256(("emustart-hw|" + raw).encode()).hexdigest()[:32] if raw else "")
+    return _hw[0]
 
 
 # ── logowanie podpisem (emustart/enroll.py, emustart/keystore.py) ──
@@ -615,7 +640,7 @@ def pair(url: str, code: str, name: str, cls: str = "pc") -> dict:
     u = urllib.parse.urlsplit(url)
     if not u.hostname:
         return {"ok": False, "reason": "Podaj adres serwera (np. http://100.85.254.31:8740)."}
-    body = json.dumps({"code": code, "name": name, "class": cls, "version": __version__}).encode("utf-8")
+    body = json.dumps({"code": code, "name": name, "class": cls, "version": __version__, "hw": hw_id()}).encode("utf-8")
     c = http.client.HTTPConnection(u.hostname, u.port or 8740, timeout=15)
     try:
         c.request("POST", "/v1/pair", body=body, headers={"Content-Type": "application/json"})

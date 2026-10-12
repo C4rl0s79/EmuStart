@@ -80,7 +80,8 @@ def authorized(handler) -> bool:
     did = devices.verify(got)
     if did:
         handler.device = did
-        devices.touch(did, handler.client_address[0], handler.headers.get("X-EmuStart-Version") or "")
+        devices.touch(did, handler.client_address[0], handler.headers.get("X-EmuStart-Version") or "",
+                      handler.headers.get("X-EmuStart-Hw") or "")
         return True
     return False
 
@@ -94,7 +95,7 @@ def pair(handler) -> None:
     except ValueError:
         d = {}
     r = devices.pair(str(d.get("code", "")), str(d.get("name", "")), str(d.get("class", "")),
-                     handler.client_address[0], str(d.get("version", "")))
+                     handler.client_address[0], str(d.get("version", "")), str(d.get("hw", "")))
     if r.get("ok"):
         r.update(server=socket.gethostname(), **_trust())
     return _json(handler, r, 200 if r.get("ok") else 403)
@@ -189,7 +190,7 @@ def enroll_flow(handler, op: str) -> None:
     if op == "request":
         r = enroll.request(str(d.get("mode", "")), str(d.get("account", "")), str(d.get("name", "")),
                            str(d.get("class", "")), ip, str(d.get("version", "")), str(d.get("pubkey", "")),
-                           profile_names())
+                           profile_names(), str(d.get("hw", "")))
         return _json(handler, r, 200 if r.get("ok") else 400)
     if op == "poll":
         return _json(handler, enroll.poll(str(d.get("rid", ""))))

@@ -11,6 +11,10 @@ class Server(private val prefs: Prefs) {
 
     class HttpError(val code: Int, msg: String) : Exception(msg)
 
+    /** Skrót identyfikatora sprzętu (ANDROID_ID — stały dla aplikacji na tym telefonie, także po
+     *  ponownej instalacji); serwer trzyma jedną rejestrację na sprzęt. Ustawia Bridge. */
+    @Volatile var hwId: String = ""
+
     /** Profil, którego dotyczy zapytanie (parametr p= / profile=). */
     private fun profileOf(path: String): String {
         val q = path.substringAfter('?', "")
@@ -218,6 +222,7 @@ class Server(private val prefs: Prefs) {
         profileToken(c, path)
         c.setRequestProperty("User-Agent", "EmuStart-Android/" + BuildConfig.VERSION_NAME)
         c.setRequestProperty("X-EmuStart-Version", BuildConfig.VERSION_NAME)      // panel serwera: wersje urządzeń
+        if (hwId.isNotEmpty()) c.setRequestProperty("X-EmuStart-Hw", hwId)          // jedna rejestracja na sprzęt
         if (range != null) c.setRequestProperty("Range", range)
         val code = try { c.responseCode } catch (e: java.io.IOException) { forgetBase(); throw e }
         if (code == 401 && retry && prefs.deviceId.isNotEmpty()) {

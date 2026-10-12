@@ -206,6 +206,14 @@ class Bridge(private val act: MainActivity) {
     private fun cacheFile(name: String) = File(act.filesDir, "lista-$name.json")
 
     @Volatile private var learnedAt = 0L
+
+    init {
+        try {
+            val raw = android.provider.Settings.Secure.getString(act.contentResolver, android.provider.Settings.Secure.ANDROID_ID) ?: ""
+            if (raw.isNotEmpty()) server.hwId = MessageDigest.getInstance("SHA-256")
+                .digest(("emustart-hw|" + raw).toByteArray()).joinToString("") { "%02x".format(it) }.take(32)
+        } catch (e: Exception) { Log.w(tag, "identyfikator sprzętu: $e") }
+    }
     private val sysInfo = HashMap<String, JSONObject>()
 
     // ── wybór emulatora / rdzenia na koncie (<profil>/settings/android/emulators.json) ──
@@ -595,7 +603,8 @@ class Bridge(private val act: MainActivity) {
         }
         val r = try {
             server.postJson(url, "/v1/enroll/request", JSONObject().put("mode", mode).put("account", account)
-                .put("name", saves.device).put("class", "phone").put("version", BuildConfig.VERSION_NAME).put("pubkey", pem),
+                .put("name", saves.device).put("class", "phone").put("version", BuildConfig.VERSION_NAME).put("pubkey", pem)
+                .put("hw", server.hwId),
                 ca = !url.startsWith("http://"))
         } catch (e: Exception) { JSONObject().put("ok", false).put("reason", explain(e)) }
         if (!r.optBoolean("ok")) {
@@ -695,7 +704,7 @@ class Bridge(private val act: MainActivity) {
             c.requestMethod = "POST"; c.doOutput = true
             c.setRequestProperty("Content-Type", "application/json")
             val body = JSONObject().put("code", code).put("name", saves.device).put("class", "phone")
-                .put("version", BuildConfig.VERSION_NAME).toString().toByteArray()
+                .put("version", BuildConfig.VERSION_NAME).put("hw", server.hwId).toString().toByteArray()
             c.outputStream.use { it.write(body) }
             val code2 = c.responseCode
             val txt = (if (code2 in 200..299) c.inputStream else c.errorStream)?.bufferedReader()?.readText() ?: "{}"

@@ -17,6 +17,24 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   RetroArchu na Androidzie; ocena „wyświetlania nad innymi aplikacjami” i usługi ułatwień
   dostępu dla pozostałych emulatorów na Androidzie.
 
+## [0.38.2] — 2026-10-12
+
+Zakres: serwer (`emustart/devices.py`, `enroll.py`, `remote.py`), komputer (`netsrc.py`,
+`api.py`), aplikacja na Androida (`Server.kt`, `Bridge.kt`), interfejs i panel serwera.
+
+### Poprawione
+- **Ten sam telefon (komputer) zarejestrowany kilka razy** — np. stare parowanie wspólnym
+  kluczem i nowe dołączenie przez internet. Urządzenia wysyłają teraz **skrót
+  identyfikatora sprzętu** (Android: `ANDROID_ID` — stały dla aplikacji na tym telefonie,
+  także po ponownej instalacji; Windows: `MachineGuid` + konto Windows, więc dwa konta na
+  jednym komputerze to dwa urządzenia; wysyłany jest tylko skrót SHA-256). Serwer trzyma
+  **jedną rejestrację na sprzęt**: nowa rejestracja tego samego sprzętu (dołączenie,
+  parowanie) unieważnia poprzednią, a rejestracje sprzed tej wersji dostają identyfikator
+  przy najbliższym kontakcie. Dwa różne telefony tego samego modelu (ta sama nazwa) zostają
+  osobno.
+- Prośba o dołączenie pokazuje zatwierdzającemu (aplikacja i panel serwera), którą
+  wcześniejszą rejestrację tego sprzętu zastąpi.
+
 ## [0.38.1] — 2026-10-12
 
 ### Poprawione
