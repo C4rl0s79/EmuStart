@@ -1,6 +1,7 @@
 # EmuStart 2.0 — koncepcja
 
-Stan: **wersja robocza 2** (2026-10-12), po decyzjach z rozmowy i odpowiedziach na otwarte sprawy. Zastępuje podejście
+Stan: **wersja robocza 3** (2026-10-12) — dopisane: stany jak w Steam (5.5), nowy stan kombinacją
+pada (5.6), „Kontynuuj” jako najnowszy niezmienny stan (5.3). Wcześniej: decyzje z rozmowy i odpowiedzi na otwarte sprawy. Zastępuje podejście
 z `CONCEPT.md` (klient z dostępem SMB do NAS-a) — tamten dokument zostaje jako historia 0.x.
 
 ---
@@ -105,19 +106,75 @@ w nagłówku `.sav`; RetroArch: nagłówek stanu rdzenia — gdy rdzeń jej nie 
 rdzenia zgłoszona przez urządzenie), zrzut ekranu. **Historia**: ostatnie N wersji każdego
 pliku, przywracanie z interfejsu („cofnij do wczoraj”).
 
-### 5.3 Wspólny autozapis — „Kontynuuj”
+### 5.3 „Kontynuuj” — najnowszy stan wczytuje się sam
 - Przy wyjściu z gry autozapis (`.state.auto`, ARMSX2 `.autosave.p2s`, PCSX2 `.resume.p2s`)
-  idzie na serwer.
-- Przy starcie gry na dowolnym urządzeniu najnowszy zgodny autozapis wczytuje się sam.
+  idzie na serwer **jako nowy, niezmienny stan** (5.5) — nie nadpisuje poprzedniego.
+- Przy starcie gry na dowolnym urządzeniu **najnowszy zgodny stan** (ręczny albo z wyjścia)
+  wczytuje się sam — urządzenie podkłada go w miejsce autozapisu emulatora.
 - W podglądzie gry: **„Kontynuuj z telefonu · bsnes v115 · 12 min temu”**.
-- **Konflikt** (grano na dwóch urządzeniach bez połączenia): ekran z oboma autozapisami
-  (zrzut, urządzenie, czas, wersja) — gracz wybiera, który zostaje; drugi trafia do historii.
+- Jednoczesna gra na jednym koncie w dwóch miejscach jest niemożliwa (blokada profilu),
+  więc kolejność stanów jest jednoznaczna. Gra bez serwera: stany dochodzą później jako
+  nowe wpisy — nic nie ginie i nic się nie nadpisuje; „Kontynuuj” pokazuje oba najnowsze
+  (urządzenie, czas, zrzut), gracz wybiera.
 - Niezgodność wersji (inny rdzeń, inny format stanu) — ostrzeżenie zamiast cichej porażki.
 
 ### 5.4 Rdzeń dla platformy
 Serwer trzyma **zalecany rdzeń RetroArcha dla platformy** (np. SNES → bsnes) i wyjątki dla
 gier. Klient z innym rdzeniem dostaje ostrzeżenie („stany z bsnes się nie wczytają”).
 Brak rdzenia: PC instaluje go sam, telefon pokazuje „pobierz bsnes w RetroArchu”.
+
+### 5.5 Stany jak w Steam — tylko dochodzą, nigdy się nie nadpisują
+**Zasada:** każdy zapis stanu to **nowy, niezmienny wpis na serwerze** (urządzenie, czas,
+wersja emulatora / formatu, zrzut). Przed grą urządzenie **wypełnia sloty emulatora
+najnowszymi zgodnymi stanami** tej gry (ze wszystkich urządzeń konta). Po grze każdy plik
+stanu o zawartości nieznanej serwerowi trafia na serwer jako nowy wpis.
+
+- **RetroArch** — natywnie: `savestate_auto_index = true` (każdy zapis = kolejny numer,
+  `.state13`, `.state14`…), wczytanie najnowszego przy starcie. Numer jest **globalny dla
+  konta**: przed grą urządzenie ma wszystkie stany, więc RetroArch bierze następny wolny.
+  Kolizja po grze bez serwera (dwa urządzenia zrobiły `.state13`) — **serwer przy wysyłce
+  nadaje pierwszy wolny numer**, gdy taki już ma z inną zawartością. Limit:
+  `savestate_max_keep` na urządzeniu + serwer trzyma ostatnie N stanów gry (np. 30), starsze
+  w historii.
+- **PCSX2 / ARMSX2** — 10 stałych slotów (`<serial> (<crc>).<slot>.p2s`), bez automatycznego
+  numeru → **warstwa EmuStart**: przed grą sloty 1–9 = 9 najnowszych **zgodnych** stanów
+  (wg `Savestate Version.id` odczytanego ze stanu), slot 0 / `.resume` = najnowszy („Kontynuuj”);
+  po grze nowe i zmienione sloty → nowe wpisy. Stany ze starszej wersji formatu zostają
+  w historii i nie są podsuwane nowszemu emulatorowi (spójne z §6). PCSX2 ↔ ARMSX2: ten sam
+  format, zgodność wg wersji — mechanizm sam pokaże, które stany przechodzą.
+- **Dolphin** (sloty 1–10, ma „zapis do najstarszego slotu”), **PPSSPP** (5 slotów),
+  **DuckStation na PC** — ta sama warstwa slotów.
+- **Koszt:** numer slotu nie jest stały (sloty posortowane od najnowszego) — w menu EmuStart
+  w grze i w menedżerze zapisów przy każdym slocie data, urządzenie i miniatura.
+- **Zapisy w grze** (karty pamięci, `.srm`, `.mcd`) — jeden plik na grę, nie da się ich
+  „dokładać”: zostają przy blokadzie profilu, porównaniu trzech wersji i kopii przy konflikcie.
+- **Miejsce:** stany PS2 5–50 MB — limit N na grę i kompresja historii; przed grą
+  pobierane są tylko stany tej gry i tego emulatora / rdzenia, których urządzenie nie ma.
+
+### 5.6 Nowy stan jedną kombinacją pada — na każdej platformie
+Globalna kombinacja (domyślnie **LB + Y**, do zmiany w ustawieniach konta) robi **nowy stan**
+(5.5) w trakcie gry, bez otwierania menu — razem z automatycznym numerem i wczytaniem
+najnowszego przy starcie daje to „zapisz i wyjdź” wszędzie tak samo.
+
+- **Windows:** EmuStart czyta pada sam (XInput, także gdy emulator jest na wierzchu — jak menu
+  A+Y) → zapis w emulatorze: RetroArch komendą sieciową `SAVE_STATE`, pozostałe skrótem
+  klawiszowym emulatora (jak menu w grze dziś); krótki komunikat nad grą „Zapisano stan #14”.
+- **Android — RetroArch:** bez dodatkowych uprawnień — EmuStart ustawia w pliku ustawień
+  profilu (już podawanym RetroArchowi) skrót zapisu stanu na tę kombinację (przycisk
+  „hotkey” + przycisk zapisu) i `savestate_auto_index`; RetroArch sam pokazuje komunikat.
+- **Android — inne emulatory (ARMSX2…):** *„wyświetlanie nad innymi aplikacjami”* pozwala
+  tylko **rysować** nad emulatorem (komunikat), **nie czytać pada**. Odczyt kombinacji
+  przy emulatorze na wierzchu wymaga **usługi ułatwień dostępu** (filtr klawiszy — przyciski
+  pada to zdarzenia klawiszy), a i ona **nie może nacisnąć nic w emulatorze** — zapis musi
+  wywołać sam emulator. Dlatego: najpierw własne skróty emulatora (ARMSX2 — do sprawdzenia,
+  czy pozwala przypisać zapis stanu do kombinacji pada), usługa ułatwień dostępu tylko jako
+  opcja (gracz włącza ją sam w ustawieniach Androida), gdy emulator ma inny sposób wywołania
+  zapisu.
+- **Czy wtedy rezygnujemy z autozapisu?** Nie całkiem — autozapis przy wyjściu zostaje jako
+  **zabezpieczenie** (awaria, rozładowana bateria, zapomniany zapis), ale nie jest już
+  wyjątkiem: staje się kolejnym niezmiennym stanem (5.3). Nic nie jest nadpisywane, a gracz
+  może grać wyłącznie na kombinacji.
+
 
 ---
 
@@ -188,7 +245,7 @@ Każdy etap zostawia działający program; migracja automatyczna.
 | **2. Cienki klient** | biblioteka i grafiki z serwera (różnicowo), bez SMB i folderów z grami na klientach, tryb offline |
 | **3. Aktualizacje z serwera** | EmuStart PC/APK z serwera; emulatory PC przypięte na serwerze; zgodność PCSX2 ↔ ARMSX2 |
 | **4. Ustawienia warstwowe** | ustawienia emulatorów, BIOS-y, rdzeń zalecany dla platformy, grafiki dla klas urządzeń |
-| **5. Zapisy 2.0** | tożsamość gry, magazyn z historią, „Kontynuuj” ze wspólnym autozapisem, wybór przy konflikcie |
+| **5. Zapisy 2.0** | tożsamość gry, magazyn z historią, **stany jak w Steam** (RetroArch: auto-indeks + numer na serwerze; PCSX2/ARMSX2/Dolphin/PPSSPP: warstwa slotów), „Kontynuuj” = najnowszy stan, **nowy stan kombinacją pada** (Windows, RetroArch na Androidzie), wybór przy konflikcie |
 | **6. Dopracowanie** | panel zdrowia, statystyki, kopie katalogu serwera |
 
 Test integracyjny „trzech urządzeń” powstaje w etapie 1 i rośnie z każdym kolejnym.
