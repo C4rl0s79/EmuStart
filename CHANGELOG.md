@@ -8,6 +8,20 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.34.2] — 2026-10-12
+
+### Poprawione
+- **Aktualizacja serwera z panelu pobierała, zamykała serwer i na tym koniec.** Skrypt
+  podmiany startował jako proces potomny serwera uruchomionego z Harmonogramu zadań i ginął
+  razem z nim, zanim zdążył cokolwiek zrobić (brak `logs\update.log`), a serwer już się nie
+  podnosił. Teraz skrypt startuje jako osobne, jednorazowe zadanie Harmonogramu „EmuStart
+  Update” (konto SYSTEM), niezależne od serwera, i usuwa je po sobie.
+- **Serwer zamyka się dopiero po potwierdzeniu startu skryptu** (wpis w `logs\update.log`).
+  Gdy potwierdzenie nie przyjdzie w 30 s, serwer działa dalej na obecnej wersji, a panel
+  pokazuje błąd — nigdy więcej wyłączonego serwera po nieudanej aktualizacji.
+- Uwaga: aktualizację *do* tej wersji wykonuje jeszcze skrypt poprzedniej; jeśli serwer nie
+  wróci, uruchom zadanie „EmuStart Server” ręcznie (albo uruchom komputer ponownie).
+
 ## [0.34.1] — 2026-10-12
 
 ### Poprawione

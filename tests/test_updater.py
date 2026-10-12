@@ -94,3 +94,13 @@ def test_panel_flow(tmp_path, monkeypatch):
     assert (tmp_path / "update" / "new" / "EmuStart.exe").is_file()
     r = srvadmin.update_apply(None)                           # poza EmuStart.exe na Windows — odmowa
     assert r["ok"] is False and "EmuStart.exe" in r["reason"]
+
+
+def test_script_runs_as_own_task_and_confirms_start(tmp_path):
+    s = updater.write_script(tmp_path, tmp_path / "app", 4321, ["--server"]).read_text(encoding="utf-8-sig")
+    assert "New-Item -ItemType Directory" in s and "PID 4321" in s
+    assert "schtasks /Delete /TN 'EmuStart Update'" in s           # jednorazowe zadanie sprząta po sobie
+    log = tmp_path / "update.log"
+    assert not updater._confirmed(log, 0, "PID 4321", seconds=0.6)  # skrypt nie ruszył — proces zostaje
+    log.write_text("2026-10-12 aktualizacja: czekam na zamknięcie serwera (PID 4321)\n", encoding="utf-8")
+    assert updater._confirmed(log, 0, "PID 4321", seconds=1)

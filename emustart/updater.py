@@ -22,6 +22,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -125,17 +126,70 @@ class Job:
         if os.name != "nt" or not getattr(sys, "frozen", False):
             return {"ok": False, "reason": "Podmiana działa tylko w EmuStart.exe na Windows."}
         script = write_script(update_dir(), paths.APP, os.getpid(), argv, server=server)
-        flags = (subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
-                 | subprocess.CREATE_NO_WINDOW)
-        cmd = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script)]
-        try:          # poza zadaniem Harmonogramu (job object) — inaczej zginąłby razem z serwerem
-            subprocess.Popen(cmd, creationflags=flags | getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", 0),
-                             close_fds=True, cwd=str(update_dir()))
-        except OSError:
-            subprocess.Popen(cmd, creationflags=flags, close_fds=True, cwd=str(update_dir()))
+        ulog = paths.APP / "logs" / "update.log"
+        before = ulog.stat().st_size if ulog.is_file() else 0
+        how = _launch(script, server)
+        # proces kończy się dopiero, gdy skrypt potwierdzi start — inaczej zostaje włączony
+        # (0.32–0.34: skrypt ginął razem z serwerem, a serwer już się nie podnosił)
+        if not _confirmed(ulog, before, f"PID {os.getpid()}"):
+            log.error("aktualizacja %s: skrypt podmiany nie wystartował (%s) — serwer działa dalej",
+                      self.info["version"], how)
+            return {"ok": False, "reason": "Skrypt podmiany nie wystartował — EmuStart działa dalej na obecnej "
+                                           "wersji. Szczegóły w logach."}
         self.phase = "applying"
-        log.info("aktualizacja %s: podmiana plików po zamknięciu serwera", self.info["version"])
+        log.info("aktualizacja %s: podmiana plików po zamknięciu (%s)", self.info["version"], how)
         return {"ok": True}
+
+
+UPD_TASK = "EmuStart Update"
+
+
+def _confirmed(ulog: Path, before: int, mark: str, seconds: float = 30) -> bool:
+    """Skrypt podmiany zapisał w update.log, że czeka na ten proces."""
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
+        try:
+            if ulog.is_file() and ulog.stat().st_size > before and \
+                    mark in ulog.read_bytes()[before:].decode("utf-8", "replace"):
+                return True
+        except OSError:
+            pass
+        time.sleep(0.5)
+    return False
+
+
+def _task_exists(name: str) -> bool:
+    r = subprocess.run(["schtasks", "/Query", "/TN", name], capture_output=True,
+                       creationflags=subprocess.CREATE_NO_WINDOW)
+    return r.returncode == 0
+
+
+def _launch(script: Path, server: bool) -> str:
+    """Start skryptu podmiany niezależnie od tego procesu. Serwer z Harmonogramu: jednorazowe
+    zadanie „EmuStart Update” (SYSTEM) — proces potomny zadania serwera ginął razem z nim.
+    Zwraca sposób uruchomienia (do logu)."""
+    nowin = subprocess.CREATE_NO_WINDOW
+    if server and _task_exists(TASK):
+        tr = f'powershell -NoProfile -ExecutionPolicy Bypass -File "{script}"'
+        r = subprocess.run(["schtasks", "/Create", "/F", "/TN", UPD_TASK, "/SC", "ONCE", "/ST", "00:00",
+                            "/RU", "SYSTEM", "/RL", "HIGHEST", "/TR", tr],
+                           capture_output=True, text=True, creationflags=nowin)
+        if r.returncode == 0:
+            r = subprocess.run(["schtasks", "/Run", "/TN", UPD_TASK], capture_output=True, text=True,
+                               creationflags=nowin)
+            if r.returncode == 0:
+                return "zadanie Harmonogramu"
+        log.warning("zadanie aktualizacji: %s — uruchamiam skrypt bezpośrednio",
+                    (r.stdout + r.stderr).strip()[:200])
+    flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP | nowin
+    cmd = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script)]
+    try:
+        subprocess.Popen(cmd, creationflags=flags | getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", 0),
+                         close_fds=True, cwd=str(script.parent))
+        return "proces poza zadaniem"
+    except OSError:
+        subprocess.Popen(cmd, creationflags=flags, close_fds=True, cwd=str(script.parent))
+        return "proces"
 
 
 def _extract(zp: Path, new: Path) -> None:
@@ -178,6 +232,7 @@ def write_script(udir: Path, app: Path, pid: int, argv: list, server: bool = Tru
     script.write_text(f"""$ErrorActionPreference = 'Continue'
 $app = {_ps(app)}; $new = {_ps(udir / 'new')}; $bak = {_ps(udir / 'backup')}
 $log = Join-Path $app 'logs\\update.log'
+New-Item -ItemType Directory -Force -Path (Split-Path $log) | Out-Null
 function L($m) {{ Add-Content -LiteralPath $log -Value ("{{0:yyyy-MM-dd HH:mm:ss}} {{1}}" -f (Get-Date), $m) }}
 L 'aktualizacja: czekam na zamknięcie serwera (PID {pid})'
 Wait-Process -Id {pid} -Timeout 60 -ErrorAction SilentlyContinue
@@ -228,5 +283,6 @@ if (-not $started -and {use_task}) {{
   else {{ Start-Process -FilePath $exe -WorkingDirectory $app }}
   L 'EmuStart uruchomiony ponownie'
 }}
+schtasks /Delete /TN {_ps(UPD_TASK)} /F 2>$null | Out-Null
 """, encoding="utf-8-sig")
     return script
