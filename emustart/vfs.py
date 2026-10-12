@@ -19,7 +19,6 @@ import os
 import string
 import threading
 import time
-from ctypes import wintypes
 from pathlib import Path
 
 log = logging.getLogger("emustart.vfs")

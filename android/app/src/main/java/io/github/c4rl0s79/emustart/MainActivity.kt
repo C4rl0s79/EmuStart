@@ -50,16 +50,21 @@ class MainActivity : Activity() {
         askStorage()
     }
 
-    /** Interfejs z zasobów aplikacji; /remote/… — grafiki z serwera. */
+    /** Interfejs z zasobów aplikacji; /remote/… — grafiki z serwera. Adres emustart.local
+     *  nigdy nie idzie do sieci (null = WebView zapytałby sieć, a nazwę .local w sieci lokalnej
+     *  może podać ktokolwiek — obca treść z dostępem do mostu EmuAndroid). */
     private fun serve(uri: Uri): WebResourceResponse? {
         if (uri.host != "emustart.local") return null
         val path = uri.path ?: "/"
-        if (path.startsWith("/remote/")) return bridge.media(uri)
+        if (path.startsWith("/remote/")) return bridge.media(uri) ?: notFound()
         val asset = "web" + (if (path == "/") "/index.html" else path)
         return try {
             WebResourceResponse(Bridge.mime(asset), "utf-8", assets.open(asset))
-        } catch (e: Exception) { null }
+        } catch (e: Exception) { notFound() }
     }
+
+    private fun notFound() = WebResourceResponse("text/plain", "utf-8", 404, "Not Found", emptyMap(),
+                                                 java.io.ByteArrayInputStream(ByteArray(0)))
 
     /** Gry w publicznym folderze, żeby emulatory mogły je czytać — prośba raz przy starcie. */
     private fun askStorage() {

@@ -8,9 +8,7 @@ import sys
 import time
 from pathlib import Path
 
-import pytest
-
-from emustart import hotkey, ingame, launcher, library, paths, scanner
+from emustart import hotkey, ingame, launcher, library, scanner
 
 from test_core import _write, env  # noqa: F401  (fixture)
 

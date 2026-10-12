@@ -81,7 +81,8 @@ def test_panel_flow(tmp_path, monkeypatch):
             return False
 
     monkeypatch.setattr(updater, "latest", lambda: {"version": "9.9.9", "current": "0.31.0", "newer": True,
-                                                    "url": "https://example.invalid/EmuStart-9.9.9-win64.zip", "size": len(blob), "notes": "", "published": "",
+                                                    "url": updater.DOWNLOAD_PREFIX + "v9.9.9/EmuStart-9.9.9-win64.zip", "size": len(blob), "notes": "", "published": "",
+                                                    "sha256": __import__("hashlib").sha256(blob).hexdigest(),
                                                     "page": "", "tag": "v9.9.9"})
     monkeypatch.setattr(updater.urllib.request, "urlopen", lambda req, timeout=0: R(blob))
     srvadmin._update.update(info=None, job=None)
@@ -94,6 +95,35 @@ def test_panel_flow(tmp_path, monkeypatch):
     assert (tmp_path / "update" / "new" / "EmuStart.exe").is_file()
     r = srvadmin.update_apply(None)                           # poza EmuStart.exe na Windows — odmowa
     assert r["ok"] is False and "EmuStart.exe" in r["reason"]
+
+
+def test_download_checks_address_and_sha256(tmp_path, monkeypatch):
+    """Plik tylko z wydań repozytorium i zgodny ze skrótem SHA-256 podanym przez GitHub."""
+    import hashlib
+    monkeypatch.setattr(updater.paths, "APP", tmp_path)
+    blob = b"archiwum"
+
+    class R(io.BytesIO):
+        headers = {"Content-Length": str(len(blob))}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(updater.urllib.request, "urlopen", lambda req, timeout=0: R(blob))
+    good = updater.DOWNLOAD_PREFIX + "v9.9.9/EmuStart-9.9.9-win64.zip"
+    job = updater.Job({"version": "9.9.9", "url": "https://evil.example/EmuStart-9.9.9-win64.zip", "size": len(blob)})
+    with pytest.raises(RuntimeError, match="adres"):
+        job._download(job.info["url"], tmp_path / "a.zip")
+    job = updater.Job({"version": "9.9.9", "url": good, "size": len(blob), "sha256": "0" * 64})
+    with pytest.raises(RuntimeError, match="SHA-256"):
+        job._download(good, tmp_path / "b.zip")
+    assert not (tmp_path / "b.zip").exists()
+    job = updater.Job({"version": "9.9.9", "url": good, "size": len(blob), "sha256": hashlib.sha256(blob).hexdigest()})
+    job._download(good, tmp_path / "c.zip")
+    assert (tmp_path / "c.zip").read_bytes() == blob
 
 
 def test_script_runs_as_own_task_and_confirms_start(tmp_path):
@@ -121,8 +151,8 @@ def test_powershell_really_runs_in_background(tmp_path):
     script = tmp_path / "t.ps1"
     script.write_text(f"Set-Content -LiteralPath '{out}' -Value 'ok'\n", encoding="utf-8-sig")
     updater.spawn_powershell(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script)], tmp_path)
-    for _ in range(40):
-        if out.exists():
-            break
+    # pierwszy start PowerShella na świeżej maszynie CI potrafi trwać kilkanaście sekund
+    end = time.monotonic() + 60
+    while time.monotonic() < end and not (out.exists() and out.stat().st_size):
         time.sleep(0.25)
     assert out.read_text(encoding="utf-8-sig").strip() == "ok"

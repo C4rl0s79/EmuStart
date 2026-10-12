@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import logging
 import os
-import subprocess
 import sys
 import threading
 from pathlib import Path
@@ -167,7 +166,7 @@ def _server_mode() -> None:
     log = logging.getLogger("emustart")
     api = api_mod.Api()
     remote.API = api
-    token = remote.ensure_token(api._cfg)
+    remote.ensure_token(api._cfg)           # wspólny klucz serwera (tylko ten komputer)
     port = int(api._cfg.get("server_port") or remote.DEFAULT_PORT)
     if "--server-key" in sys.argv:
         # od 0.39 urządzenia łączą się tylko kluczem urządzenia — zamiast klucza serwera

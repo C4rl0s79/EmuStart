@@ -40,6 +40,7 @@ IP_WINDOW, IP_MAX = 600.0, 20         # złe hasła z jednego adresu (wszystkie 
 RULES = "Hasło: co najmniej 10 znaków, w tym wielka litera, cyfra i znak specjalny."
 
 _lock = threading.Lock()
+_kdf = threading.BoundedSemaphore(2)  # scrypt naraz — zalew zapytań nie wyczerpie pamięci
 _db: dict | None = None               # konto (małe litery) → rekord
 _fails: dict = {}                     # konto (małe litery) → (liczba, czas ostatniej)
 _ip_fails: dict = {}                  # adres → [czasy złych prób]
@@ -67,7 +68,8 @@ def make(pw: str) -> dict:
     if why:
         raise ValueError(why)
     salt = secrets.token_bytes(16)
-    h = hashlib.scrypt(pw.encode("utf-8"), salt=salt, n=N, r=R, p=P, dklen=32, maxmem=64 << 20)
+    with _kdf:
+        h = hashlib.scrypt(pw.encode("utf-8"), salt=salt, n=N, r=R, p=P, dklen=32, maxmem=64 << 20)
     return {"v": 1, "alg": "scrypt", "n": N, "r": R, "p": P, "salt": salt.hex(), "hash": h.hex(),
             "set": time.time()}
 
@@ -80,7 +82,8 @@ def _check(rec: dict, pw: str) -> bool:
         return False
     if not pw or len(pw) > MAX_LEN:
         return False
-    got = hashlib.scrypt(pw.encode("utf-8"), salt=salt, n=n, r=r, p=p, dklen=len(want), maxmem=64 << 20)
+    with _kdf:
+        got = hashlib.scrypt(pw.encode("utf-8"), salt=salt, n=n, r=r, p=p, dklen=len(want), maxmem=64 << 20)
     return hmac.compare_digest(got, want)
 
 

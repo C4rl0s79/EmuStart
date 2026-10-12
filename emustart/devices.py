@@ -9,8 +9,9 @@ jako tekst i kod QR (`emustart://pair?u=<adres>&c=<kod>`). Urządzenie wysyła k
 `POST /v1/pair` i dostaje swój klucz. Serwer trzyma tylko skrót klucza (SHA-256), więc
 plik `devices.json` nie zdradza kluczy.
 
-Rejestr: `<katalog serwera>\\devices.json` (paths.SERVER). Stary wspólny klucz serwera
-(`server_token`) działa dalej — dla urządzeń sprzed parowania.
+Rejestr: `<katalog serwera>\\devices.json` (paths.SERVER). Od 0.39 urządzenia łączą się
+tylko kluczem urządzenia (klucz publiczny w rejestrze, logowanie podpisem — emustart/enroll.py);
+wspólny klucz serwera (`server_token`) działa wyłącznie na komputerze serwera.
 """
 
 from __future__ import annotations
@@ -323,7 +324,10 @@ def same_hw(hw: str) -> list:
 
 def touch(did: str, ip: str = "", version: str = "", hw: str = "") -> None:
     """Ostatni kontakt urządzenia (na dysk najwyżej co SEEN_SAVE s). `hw` — skrót
-    identyfikatora sprzętu: zapamiętywany (także dla rejestracji sprzed 0.38.2)."""
+    identyfikatora sprzętu: zapamiętywany raz, gdy rejestracja go jeszcze nie ma (sprzed
+    0.38.2). Bez unieważniania innych rejestracji — nagłówek ustawia samo urządzenie, więc
+    dowolne urządzenie mogłoby tak odciąć cudze; zastępowanie robi tylko dołączanie
+    (parowanie / prośba, którą ktoś zatwierdza i widzi „zastąpi: …”)."""
     global _dirty_at
     with _lock:
         d = _load().get(did)
@@ -331,9 +335,8 @@ def touch(did: str, ip: str = "", version: str = "", hw: str = "") -> None:
             return
         now = time.time()
         hw = _valid_hw(hw)
-        if hw and d.get("hw") != hw:
+        if hw and not d.get("hw"):
             d["hw"] = hw
-            replace_same_hw(did, hw)
             _save()
         d["last_seen"] = now
         if ip:

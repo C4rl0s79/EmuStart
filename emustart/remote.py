@@ -21,9 +21,10 @@ Folder profili (zapisy, ustawienia, blokady — EmuStart na Windows i Androidzie
                                          kopii zapasowej (przycinanej do ostatnich 10)
     DELETE /v1/nas/file?p=…
 
-Każde zapytanie wymaga klucza serwera: nagłówek `Authorization: Bearer <klucz>`
-albo parametr `?k=<klucz>` (dla <img> w WebView). Klucz powstaje przy pierwszym
-starcie serwera (config.json → server_token); `--server-key` go wypisuje.
+Każde zapytanie wymaga nagłówka `Authorization: Bearer <token sesji>` — token z logowania
+podpisem kluczem urządzenia (emustart/enroll.py, emustart/devices.py). Wspólny klucz serwera
+(config.json → server_token) działa wyłącznie na tym komputerze. Konta: zakres urządzenia
+i hasła (emustart/accounts.py).
 """
 
 from __future__ import annotations
@@ -59,17 +60,13 @@ def ensure_token(cfg: dict) -> str:
 
 
 def authorized(handler) -> bool:
-    """Klucz urządzenia (sparowanego kodem QR, emustart/devices.py) albo — dla urządzeń
-    sprzed parowania — wspólny klucz serwera. handler.device = id urządzenia ('' = wspólny)."""
+    """Token sesji urządzenia (logowanie podpisem kluczem urządzenia, emustart/enroll.py);
+    wspólny klucz serwera — tylko z tego komputera. handler.device = id urządzenia ('' = ten
+    komputer). Stary klucz-hasło (sprzed 0.39) — tylko /v1/info i przejście na klucz urządzenia."""
     if API is None:
         return False
-    got = ""
     auth = handler.headers.get("Authorization") or ""
-    if auth.startswith("Bearer "):
-        got = auth[7:].strip()
-    else:
-        q = urllib.parse.parse_qs(urllib.parse.urlsplit(handler.path).query)
-        got = (q.get("k") or [""])[0]
+    got = auth[7:].strip() if auth.startswith("Bearer ") else ""
     if not got:
         return False
     token = API._cfg.get("server_token") or ""
@@ -187,6 +184,11 @@ def pair_flow(handler, op: str) -> None:
     if op == "approve":
         if not authorized(handler):
             return _json(handler, {"ok": False, "reason": "Zatwierdzać może tylko sparowane urządzenie."}, 401)
+        if not _admin(handler):
+            # nowe urządzenie z tej drogi ma pełny dostęp — zatwierdza tylko administrator
+            # (urządzenia kont: Dołącz przez internet → zatwierdzenie w ramach konta)
+            return _json(handler, {"ok": False, "reason": "Zatwierdzać prośby z sieci lokalnej może tylko "
+                                                           "urządzenie administratora."}, 403)
         code = str(d.get("code", ""))
         if d.get("allow") is None:
             p = devices.pending(code)
@@ -357,10 +359,10 @@ def handle(handler) -> None:
         return _json(handler, {"error": "nieznany adres"}, 404)
     except (BrokenPipeError, ConnectionResetError):
         pass
-    except Exception as ex:
+    except Exception:
         log.exception("API zdalne %s", path)
         try:
-            _json(handler, {"error": str(ex)}, 500)
+            _json(handler, {"error": "błąd serwera (szczegóły w logu serwera)"}, 500)
         except OSError:
             pass
 
@@ -436,11 +438,11 @@ def handle_write(handler, method: str) -> None:
         return _nas(handler, method, parts[1:])
     except (BrokenPipeError, ConnectionResetError):
         pass
-    except Exception as ex:
+    except Exception:
         log.exception("API zdalne %s %s", method, path)
         handler.close_connection = True
         try:
-            _json(handler, {"error": str(ex)}, 500)
+            _json(handler, {"error": "błąd serwera (szczegóły w logu serwera)"}, 500)
         except OSError:
             pass
 
@@ -545,7 +547,7 @@ def _system_put(handler) -> None:
 
 
 def _nas(handler, method: str, parts: list) -> None:
-    from emustart import nasfs, pinauth
+    from emustart import nasfs
     import time as _time
     q = urllib.parse.parse_qs(urllib.parse.urlsplit(handler.path).query)
     arg = lambda k: (q.get(k) or [""])[0]      # noqa: E731
@@ -573,7 +575,7 @@ def _nas(handler, method: str, parts: list) -> None:
         return _json(handler, {"files": files})
     if method == "GET" and op == "list":
         try:
-            ents = [[e.name, e.is_dir()] for e in os.scandir(target) if e.name != pinauth.AUTH
+            ents = [[e.name, e.is_dir()] for e in os.scandir(target) if not _is_auth(e.name)
                     and (rel or _scope_ok(handler, e.name))]
         except OSError:
             return _json(handler, {"error": "nie ma"}, 404)
@@ -641,7 +643,7 @@ def _nas(handler, method: str, parts: list) -> None:
 
 def _is_auth(rel: str) -> bool:
     from emustart import pinauth
-    return rel.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1] == pinauth.AUTH
+    return rel.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1].lower() == pinauth.AUTH
 
 
 def _secret() -> str:
@@ -794,8 +796,13 @@ def _who(handler) -> str:
 
 
 def _safe_profile_name(name: str) -> str:
-    n = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "_", name).strip(" .")[:32]
-    return "" if not n or n.startswith(("_", ".")) else n
+    from emustart import nasfs
+    n = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "_", name).strip(" .")[:32].strip(" .")
+    try:
+        ok = bool(n) and nasfs.clean_rel(n) == n and not n.startswith(("_", "."))
+    except ValueError:
+        ok = False
+    return n if ok else ""
 
 
 def _find(handler) -> None:

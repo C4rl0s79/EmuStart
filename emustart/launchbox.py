@@ -25,7 +25,7 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
-from emustart import art_sources, paths, systems
+from emustart import art_sources, paths
 
 log = logging.getLogger("emustart.launchbox")
 
