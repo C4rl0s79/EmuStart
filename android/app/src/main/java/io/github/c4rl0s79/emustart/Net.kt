@@ -18,10 +18,11 @@ import javax.net.ssl.X509TrustManager
 object Net {
     private val factories = HashMap<String, SSLSocketFactory>()
 
-    /** Połączenie z adresem serwera; `fp` — odcisk certyfikatu (wymagany dla https). */
-    fun open(url: String, fp: String): HttpURLConnection {
+    /** Połączenie z adresem serwera; `fp` — odcisk certyfikatu (wymagany dla https z własnym
+     *  certyfikatem serwera); `ca` — zwykłe sprawdzanie certyfikatu (tunel Cloudflare). */
+    fun open(url: String, fp: String, ca: Boolean = false): HttpURLConnection {
         val c = URL(url).openConnection() as HttpURLConnection
-        if (c is HttpsURLConnection) {
+        if (c is HttpsURLConnection && !ca) {
             if (fp.isEmpty()) throw javax.net.ssl.SSLException("brak zapamiętanego certyfikatu serwera — połącz telefon z serwerem ponownie")
             c.sslSocketFactory = factory(fp)
             c.hostnameVerifier = javax.net.ssl.HostnameVerifier { _, _ -> true }   // o zaufaniu decyduje odcisk

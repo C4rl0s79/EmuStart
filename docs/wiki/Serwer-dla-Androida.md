@@ -124,6 +124,27 @@ i Tailscale nie odpowiadają — np. telefon na danych komórkowych bez Tailscal
   zewnętrzny albo gdy przyszło połączenie z internetu. Najprościej: otwórz EmuStart na
   telefonie na danych komórkowych z wyłączonym Tailscale.
 
+## Tunel Cloudflare (0.36)
+
+Gdy port publiczny nie wystarcza (np. sieć, w której telefon jest, blokuje nietypowe porty),
+urządzenia mogą łączyć się przez **Cloudflare Tunnel** na własnej domenie:
+
+1. Cloudflare Zero Trust → tunel na komputerze z serwerem (`cloudflared`) → *Published
+   application*: np. `emustart.twojadomena.org`, usługa **`https://localhost:8742`**
+   (port publiczny), *Additional application settings → TLS → Disable TLS certificate
+   verification* — włączone (połączenie `cloudflared` → serwer nie wychodzi poza komputer).
+   Nie kieruj tunelu na 8740 (zwykły port — ruch z tunelu wygląda na lokalny).
+2. Panel serwera → *Dostęp z internetu* → **Adres tunelu** → *Zapisz*. Panel sprawdza, czy
+   tunel działa.
+3. Urządzenia dostają adres tunelu razem z innymi adresami serwera i biorą go **na końcu**
+   (sieć lokalna → Tailscale → port publiczny → tunel) — gry idą bezpośrednio, gdy się da.
+   Nowe urządzenie można też połączyć, wpisując sam adres tunelu jako adres serwera.
+
+Przez tunel obowiązują te same zasady co na porcie publicznym (tylko z kluczem urządzenia,
+bez parowania); blokada za złe klucze działa po prawdziwym adresie klienta (nagłówek
+`CF-Connecting-IP`). W Cloudflare nie włączaj *Bot Fight Mode* ani wyzwań dla tej
+subdomeny — aplikacje nie są przeglądarkami.
+
 ## Katalog serwera (0.32)
 
 Serwer trzyma wszystko poza grami w podkatalogu `server\` obok `EmuStart.exe`: ustawienia

@@ -222,6 +222,8 @@ def _start_tls(api, port: int, log) -> None:
         from emustart import public          # dostęp z internetu (UPnP), gdy włączony w panelu
         public.CTX = tls.server_context(cert, key)
         public.start(api._cfg, public.CTX)
+        if api._cfg.get("server_tunnel_url"):
+            public.set_tunnel(api._cfg["server_tunnel_url"])
         log.info("port szyfrowany %d (certyfikat %s…)", tport, fp[:16])
     except Exception:
         log.exception("port szyfrowany")

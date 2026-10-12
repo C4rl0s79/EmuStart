@@ -91,6 +91,13 @@
       i bez Tailscale pobierają gry prosto z serwera. Tylko dla sparowanych urządzeń (klucz).</div>
     <div class="actions" style="margin-top:8px"><button id="bPublic">Włącz dostęp z internetu</button></div>
     <dl id="pubInfo" style="margin-top:8px"></dl>
+    <div class="muted" style="margin-top:10px">Tunel Cloudflare (opcjonalnie): adres, pod którym tunel prowadzi do portu
+      publicznego (usługa <code>https://localhost:8742</code>, „Disable TLS verification” włączone). Urządzenia używają go
+      dopiero, gdy nic innego nie odpowiada.</div>
+    <div class="actions" style="margin-top:6px">
+      <input id="tunUrl" placeholder="https://emustart.emucloud.org" style="flex:1;min-width:240px">
+      <button id="bTunnel">Zapisz adres tunelu</button></div>
+    <div id="tunInfo" class="muted" style="margin-top:6px"></div>
   </section>
   <section>
     <h2>Sparowane urządzenia</h2>

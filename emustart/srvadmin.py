@@ -306,6 +306,18 @@ def public_set(api, args: dict) -> dict:
     return {"ok": True, **public.status()}
 
 
+def tunnel_set(api, args: dict) -> dict:
+    """Panel: adres tunelu Cloudflare (np. https://emustart.emucloud.org) — '' wyłącza."""
+    from emustart import config, public
+    try:
+        url = public.set_tunnel(str(args.get("url", "")))
+    except ValueError as ex:
+        return {"ok": False, "reason": str(ex)}
+    api._cfg["server_tunnel_url"] = url
+    config.save(api._cfg)
+    return {"ok": True, "url": url}
+
+
 def pair_approve(_api, args: dict) -> dict:
     """Panel: zatwierdzenie / odrzucenie prośby o dołączenie nowego urządzenia."""
     from emustart import devices
@@ -401,7 +413,7 @@ def profiles_migrate_status(_api) -> dict:
 
 ACTIONS_ARGS = {"device_revoke": device_revoke, "device_rename": device_rename,
                 "profiles_migrate": profiles_migrate, "pair_approve": pair_approve,
-                "public_set": public_set}
+                "public_set": public_set, "tunnel_set": tunnel_set}
 ACTIONS.update({"public_status": public_status, "devices": devices_list, "pair_code": pair_code, "profiles_migrate_status": profiles_migrate_status})
 
 

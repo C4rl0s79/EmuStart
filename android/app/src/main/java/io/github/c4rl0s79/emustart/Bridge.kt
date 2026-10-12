@@ -406,8 +406,7 @@ class Bridge(private val act: MainActivity) {
             when {
                 k == "server_url" -> {
                     var u = d.getString(k).trim()
-                    if (u.isNotEmpty() && !u.startsWith("http")) u = "http://$u"
-                    if (u.isNotEmpty() && !Regex(":\\d+$").containsMatchIn(u.removePrefix("http://").removePrefix("https://"))) u += ":8740"
+                    if (u.isNotEmpty()) u = normUrl(u)
                     // inny serwer: adresy i certyfikat poprzedniego nie obowiązują (nauczy się od nowa)
                     if (u.trimEnd('/') != prefs.serverUrl) { prefs.serverEndpoints = ""; prefs.serverFp = ""; server.forgetBase() }
                     prefs.serverUrl = u; systemsCache = null
@@ -461,6 +460,19 @@ class Bridge(private val act: MainActivity) {
 
     /** Parowanie: kod z panelu serwera albo link z kodu QR (emustart://pair?u=…&c=…) →
      *  własny klucz tego telefonu (zamiast przepisywania wspólnego klucza serwera). */
+    /** Adres serwera wpisany przez gracza: nazwa domeny (np. emustart.emucloud.org — tunel)
+     *  → https (port 443), adres IP / nazwa komputera → http z portem 8740. */
+    private fun normUrl(s: String): String {
+        var u = s.trim().trimEnd('/')
+        if (!u.startsWith("http://") && !u.startsWith("https://")) {
+            val host = u.substringBefore('/').substringBefore(':')
+            val domain = host.contains('.') && !Regex("""^\d+(\.\d+){3}$""").matches(host)
+            u = (if (domain) "https://" else "http://") + u
+        }
+        if (u.startsWith("http://") && !Regex(""":\d+$""").containsMatchIn(u.removePrefix("http://"))) u += ":8740"
+        return u
+    }
+
     /** Zatwierdzenie nowego urządzenia kodem z jego ekranu albo linkiem z jego kodu QR
      *  (emustart://approve?u=…&c=…). allow == null — tylko podgląd prośby (nazwa, rodzaj, adres). */
     private fun approveDevice(text: String, allow: Boolean?): JSONObject {
@@ -484,8 +496,7 @@ class Bridge(private val act: MainActivity) {
             code = u.getQueryParameter("c") ?: ""
         }
         if (url.isBlank()) return JSONObject().put("ok", false).put("reason", "Podaj adres serwera albo zeskanuj kod QR.")
-        if (!url.startsWith("http")) url = "http://$url"
-        if (!Regex(":\\d+$").containsMatchIn(url.removePrefix("http://").removePrefix("https://"))) url += ":8740"
+        url = normUrl(url)
         return try {
             val c = java.net.URL(url.trimEnd('/') + "/v1/pair").openConnection() as java.net.HttpURLConnection
             c.connectTimeout = 8000; c.readTimeout = 15000

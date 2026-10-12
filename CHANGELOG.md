@@ -8,6 +8,30 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.36.0] — 2026-10-12
+
+Zakres: serwer (`emustart/public.py`, `remote.py`, `srvadmin.py`, `main.py`), panel serwera
+(`web/server.*`), klient na Windows (`netsrc.py`), aplikacja na Androida (`Net.kt`,
+`Server.kt`, `Bridge.kt`).
+
+### Dodane
+- **Tunel Cloudflare jako adres serwera.** Panel serwera → *Dostęp z internetu* → *Adres
+  tunelu* (`server_tunnel_url`, np. `https://emustart.emucloud.org`; tunel prowadzi do portu
+  publicznego `https://localhost:8742`). Serwer sprawdza, czy tunel działa, i podaje go
+  urządzeniom w liście adresów jako rodzaj „tunnel” — ze zwykłym certyfikatem (Cloudflare),
+  bez przypinania. Urządzenia biorą go na końcu: sieć lokalna → Tailscale → port publiczny →
+  tunel, więc gry idą bezpośrednio, gdy tylko się da.
+- Komputer i telefon: adres serwera wpisany jako nazwa domeny (np. `emustart.emucloud.org`)
+  to https na porcie 443; adres IP / nazwa komputera — jak dotąd http na 8740.
+
+### Bezpieczeństwo
+- **Prawdziwy adres klienta przez tunel.** `cloudflared` łączy się z serwerem z 127.0.0.1,
+  więc blokada za serię złych kluczy zablokowałaby wszystkich przychodzących tunelem. Teraz
+  dla połączeń z tego komputera serwer bierze adres z nagłówka `CF-Connecting-IP` (blokady,
+  „ostatnio z internetu”).
+- Adres https wpisany ręcznie, którego serwer nie podał jako własny, jest sprawdzany
+  zwykłym trybem certyfikatów (nie przypinaniem).
+
 ## [0.35.3] — 2026-10-12
 
 ### Bezpieczeństwo
