@@ -468,7 +468,7 @@ class Bridge(private val act: MainActivity) {
         }
         if (url.isBlank()) return JSONObject().put("ok", false).put("reason", "Podaj adres serwera albo zeskanuj kod QR.")
         if (!url.startsWith("http")) url = "http://$url"
-        if (!Regex(":\d+$").containsMatchIn(url.removePrefix("http://").removePrefix("https://"))) url += ":8740"
+        if (!Regex(":\\d+$").containsMatchIn(url.removePrefix("http://").removePrefix("https://"))) url += ":8740"
         return try {
             val c = java.net.URL(url.trimEnd('/') + "/v1/pair").openConnection() as java.net.HttpURLConnection
             c.connectTimeout = 8000; c.readTimeout = 15000
