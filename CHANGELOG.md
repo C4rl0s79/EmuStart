@@ -8,6 +8,27 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.37.4] — 2026-10-12
+
+### Bezpieczeństwo
+- **Nowa instalacja niczego nie zakłada.** Domyślne ustawienia zawierały ścieżki z pierwszej
+  instalacji — folder z grami `Z:\ROMS\ROMS`, emulatory `D:\emu\emulatory`, folder
+  profili `Z:\emustart\Profiles` — więc świeży EmuStart od razu sięgał po gry, emulatory
+  i profile z udziału NAS i dysku. Teraz domyślne są puste: bez folderów z grami, bez
+  wykrywania emulatorów, bez folderu profili przez SMB. Istniejące ustawienia, które na tych
+  wartościach polegały, zachowują je (dopisywane przy wczytaniu).
+- **Folder profili przeniesiony na serwer nie jest już używany przez SMB.** Stary folder
+  (ze znacznikiem `.emustart-moved`, panel serwera → przeniesienie profili) jest traktowany
+  jako niedostępny — żadnych odczytów ani zapisów (wcześniej świeża instalacja wysłała tam
+  pliki profilu).
+- Uwaga: dostęp do gier i zapisów przez sam udział SMB (np. zamapowany dysk z zapisanym
+  hasłem) omija serwer EmuStart — do zamknięcia po stronie udziału.
+
+### Poprawione
+- **Część logo gier nie trafiała na serwer (błąd 400).** Grafiki są zapisywane jako `*.png`,
+  ale część źródeł daje WebP albo JPEG — serwer przyjmował wyłącznie PNG (np. 1602 logo gier
+  z Amigi). Teraz przyjmuje PNG, JPEG, WebP i GIF.
+
 ## [0.37.3] — 2026-10-12
 
 ### Zmienione
