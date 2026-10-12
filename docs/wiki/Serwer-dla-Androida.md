@@ -106,6 +106,24 @@ z domowego Wi-Fi na sieć komórkową sam przełącza się na Tailscale.
 Komputer trzyma nauczone adresy w `data\serwer-adresy.json`, telefon — w ustawieniach
 aplikacji. Port publiczny (otwierany przez UPnP) i dostęp spoza Tailscale — kolejne wersje.
 
+## Dostęp z internetu (0.35)
+
+Panel serwera → **Dostęp z internetu** → **Włącz**. Serwer otwiera osobny port szyfrowany
+(`8742`) i prosi router (UPnP) o przekierowanie go; odczytuje adres zewnętrzny i podaje go
+urządzeniom jako adres „publiczny”. Urządzenie używa go tylko wtedy, gdy sieć lokalna
+i Tailscale nie odpowiadają — np. telefon na danych komórkowych bez Tailscale.
+
+- Port publiczny przyjmuje tylko API urządzeń i grafiki, **zawsze z kluczem urządzenia**;
+  bez parowania (to tylko w sieci lokalnej / Tailscale), bez panelu i interfejsu.
+- Seria złych kluczy z jednego adresu = blokada tego adresu na 30 minut; najwyżej 32
+  połączenia naraz z jednego adresu.
+- Przekierowanie jest odnawiane co 20 minut i wygasa samo po wyłączeniu serwera.
+- **CGNAT**: gdy router ma adres za NAT-em operatora, panel to pokazuje — z internetu nie
+  da się wtedy dojść do serwera (zostaje Tailscale; od 0.36 tunel).
+- **Osiągalność**: panel pokazuje „działa”, gdy serwer połączył się sam ze sobą przez adres
+  zewnętrzny albo gdy przyszło połączenie z internetu. Najprościej: otwórz EmuStart na
+  telefonie na danych komórkowych z wyłączonym Tailscale.
+
 ## Katalog serwera (0.32)
 
 Serwer trzyma wszystko poza grami w podkatalogu `server\` obok `EmuStart.exe`: ustawienia

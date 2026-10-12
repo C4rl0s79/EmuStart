@@ -222,6 +222,38 @@ $("bPair").addEventListener("click", async () => {
   pairTimer = setInterval(tick, 3000);
 });
 
+/* ── dostęp z internetu: port publiczny przez UPnP (emustart/public.py) ── */
+let pubOn = false;
+async function refreshPublic() {
+  const r = await admin("public_status").catch(() => null);
+  if (!r) return;
+  pubOn = !!r.enabled;
+  $("bPublic").textContent = pubOn ? "Wyłącz dostęp z internetu" : "Włącz dostęp z internetu";
+  if (!pubOn) { $("pubInfo").innerHTML = r.error ? `<dt>Błąd</dt><dd>${esc(r.error)}</dd>` : ""; return; }
+  const rows = [
+    ["Port", String(r.port)],
+    ["Router (UPnP)", r.router ? "znaleziony" : (r.checked ? "nie znaleziono" : "szukam…")],
+    ["Adres zewnętrzny", r.ext_ip ? r.ext_ip + (r.cgnat ? " (za NAT-em operatora)" : "") : "—"],
+    ["Przekierowanie", r.mapped ? (r.lease ? `otwarte (odnawiane, ważne ${Math.round(r.lease / 60)} min)` : "otwarte (stałe)") : "nie"],
+    ["Osiągalność", r.reach === "ok" ? "działa (sprawdzone z serwera)" :
+      r.last_inbound ? "działa (połączenie z internetu " + ago(r.last_inbound) + ")" :
+      "nie potwierdzona — otwórz EmuStart na telefonie poza Wi-Fi i bez Tailscale"],
+  ];
+  if (r.last_inbound && r.reach === "ok") rows.push(["Ostatnio z internetu", ago(r.last_inbound) + " (" + r.last_ip + ")"]);
+  if (r.banned) rows.push(["Zablokowane adresy", `${r.banned} (seria złych kluczy)`]);
+  if (r.error) rows.push(["Uwaga", r.error]);
+  $("pubInfo").innerHTML = rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("");
+}
+$("bPublic").addEventListener("click", async () => {
+  if (!pubOn && !confirm("Włączyć dostęp z internetu? Serwer otworzy port na routerze (UPnP). " +
+                         "Wejdą tylko sparowane urządzenia z kluczem.")) return;
+  $("bPublic").disabled = true;
+  const r = await admin("public_set", { enabled: !pubOn }).catch(() => null);
+  $("bPublic").disabled = false;
+  if (!r?.ok) msg(r?.reason || "Serwer nie odpowiada.");
+  refreshPublic();
+});
+
 /* ── przeniesienie profili z udziału do katalogu serwera (2.0) ── */
 let migrPoll = null;
 async function migrTick() {
@@ -263,6 +295,8 @@ Każdy plik zostanie skopiowany i sprawdzony; ` +
 
 refresh();
 refreshDevices();
+refreshPublic();
+setInterval(refreshPublic, 5000);
 migrTick();
 setInterval(refresh, 2000);
 setInterval(refreshDevices, 4000);          // prośby o dołączenie pojawiają się od razu

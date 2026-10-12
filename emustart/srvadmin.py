@@ -284,6 +284,28 @@ def devices_list(_api) -> dict:
     return {"ok": True, "devices": devices.listing(), "requests": devices.pending_list(), "now": time.time()}
 
 
+def public_status(_api) -> dict:
+    from emustart import public
+    return {"ok": True, **public.status()}
+
+
+def public_set(api, args: dict) -> dict:
+    """Panel: dostęp z internetu (port publiczny przez UPnP) — włącz / wyłącz."""
+    from emustart import config, public
+    on = bool(args.get("enabled"))
+    api._cfg["server_public"] = on
+    config.save(api._cfg)
+    if on:
+        if public.CTX is None:
+            return {"ok": False, "reason": "Port szyfrowany nie działa (brak certyfikatu) — sprawdź logi serwera."}
+        st = public.start(api._cfg, public.CTX)
+        if not st["enabled"]:
+            return {"ok": False, "reason": st.get("error") or "Nie udało się otworzyć portu."}
+    else:
+        public.stop()
+    return {"ok": True, **public.status()}
+
+
 def pair_approve(_api, args: dict) -> dict:
     """Panel: zatwierdzenie / odrzucenie prośby o dołączenie nowego urządzenia."""
     from emustart import devices
@@ -378,8 +400,9 @@ def profiles_migrate_status(_api) -> dict:
 
 
 ACTIONS_ARGS = {"device_revoke": device_revoke, "device_rename": device_rename,
-                "profiles_migrate": profiles_migrate, "pair_approve": pair_approve}
-ACTIONS.update({"devices": devices_list, "pair_code": pair_code, "profiles_migrate_status": profiles_migrate_status})
+                "profiles_migrate": profiles_migrate, "pair_approve": pair_approve,
+                "public_set": public_set}
+ACTIONS.update({"public_status": public_status, "devices": devices_list, "pair_code": pair_code, "profiles_migrate_status": profiles_migrate_status})
 
 
 # ── po stronie panelu (osobny proces) ──

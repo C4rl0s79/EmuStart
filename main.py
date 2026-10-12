@@ -219,6 +219,9 @@ def _start_tls(api, port: int, log) -> None:
                 time.sleep(0.5)
         remote.TLS = {"port": tport, "fp": fp}
         remote.ensure_firewall(tport)
+        from emustart import public          # dostęp z internetu (UPnP), gdy włączony w panelu
+        public.CTX = tls.server_context(cert, key)
+        public.start(api._cfg, public.CTX)
         log.info("port szyfrowany %d (certyfikat %s…)", tport, fp[:16])
     except Exception:
         log.exception("port szyfrowany")

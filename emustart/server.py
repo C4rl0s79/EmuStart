@@ -55,6 +55,10 @@ class _Handler(BaseHTTPRequestHandler):
         pass
 
     def do_POST(self):
+        if getattr(self.server, "public", False):
+            from emustart import public      # port z internetu: tylko /v1 i grafiki, z kluczem
+            if not public.gate(self):
+                return
         p = urllib.parse.urlsplit(self.path).path
         if p == "/v1/pair":
             from emustart import remote      # parowanie urządzenia jednorazowym kodem (z sieci)
@@ -83,6 +87,10 @@ class _Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_PUT(self):
+        if getattr(self.server, "public", False):
+            from emustart import public      # port z internetu: tylko /v1 i grafiki, z kluczem
+            if not public.gate(self):
+                return
         if urllib.parse.urlsplit(self.path).path.startswith("/v1/"):
             from emustart import remote      # zapis w folderze profili (z kluczem)
             return remote.handle_write(self, "PUT")
@@ -90,6 +98,10 @@ class _Handler(BaseHTTPRequestHandler):
         return self.send_error(405)
 
     def do_DELETE(self):
+        if getattr(self.server, "public", False):
+            from emustart import public      # port z internetu: tylko /v1 i grafiki, z kluczem
+            if not public.gate(self):
+                return
         if urllib.parse.urlsplit(self.path).path.startswith("/v1/"):
             from emustart import remote
             return remote.handle_write(self, "DELETE")
@@ -97,6 +109,10 @@ class _Handler(BaseHTTPRequestHandler):
         return self.send_error(405)
 
     def do_GET(self):
+        if getattr(self.server, "public", False):
+            from emustart import public      # port z internetu: tylko /v1 i grafiki, z kluczem
+            if not public.gate(self):
+                return
         raw = urllib.parse.urlsplit(self.path).path
         if raw.startswith("/v1/"):
             from emustart import remote      # API dla Androida — klucz zamiast sprawdzania Host
@@ -169,6 +185,45 @@ def start_tls(port: int, ctx: ssl.SSLContext, dev_api=None, bind: str = "0.0.0.0
     srv = _TLSServer((bind, port), _Handler, ctx)
     threading.Thread(target=srv.serve_forever, daemon=True, name="https").start()
     return srv.server_address[1]
+
+
+class _PublicServer(_TLSServer):
+    """Port z internetu (emustart/public.py): jak szyfrowany, plus limit połączeń naraz
+    z jednego adresu i odrzucanie zablokowanych adresów jeszcze przed uzgodnieniem TLS."""
+    public = True
+
+    def process_request(self, request, client_address):
+        from emustart import public
+        if not public.conn_open(client_address[0]):
+            self.shutdown_request(request)
+            return
+        super().process_request(request, client_address)
+
+    def process_request_thread(self, request, client_address):
+        from emustart import public
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            public.conn_close(client_address[0])
+
+
+_PUBLIC = None
+
+
+def start_public(port: int, ctx: ssl.SSLContext, bind: str = "0.0.0.0") -> int:
+    global _PUBLIC
+    srv = _PublicServer((bind, port), _Handler, ctx)
+    threading.Thread(target=srv.serve_forever, daemon=True, name="https-public").start()
+    _PUBLIC = srv
+    return srv.server_address[1]
+
+
+def stop_public() -> None:
+    global _PUBLIC
+    if _PUBLIC is not None:
+        _PUBLIC.shutdown()
+        _PUBLIC.server_close()
+        _PUBLIC = None
 
 
 def start(port: int = 0, dev_api=None, bind: str = "127.0.0.1") -> str:
