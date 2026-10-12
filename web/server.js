@@ -203,7 +203,7 @@ async function refreshDevices() {
     `<td>${esc(d.version || "—")}</td>` +
     `<td class="n">${d.revoked ? "unieważnione" : ago(d.last_seen)}</td>` +
     `<td class="n">${d.revoked ? "" : `<button data-ren="${esc(d.id)}">Nazwa</button> <button class="danger" data-rev="${esc(d.id)}">Unieważnij</button>`}</td></tr>`).join("")
-    : `<tr><td colspan="6" class="muted">Brak sparowanych urządzeń — „Dodaj urządzenie”. Urządzenia ze wspólnym kluczem serwera działają dalej.</td></tr>`;
+    : `<tr><td colspan="6" class="muted">Brak sparowanych urządzeń — „Dodaj urządzenie”.</td></tr>`;
   $("devices").querySelectorAll("[data-acc]").forEach((b) => b.addEventListener("click", async () => {
     const make = b.dataset.adm !== "1";
     if (!confirm(make ? "Nadać temu urządzeniu rolę administratora (zatwierdza wszystkie prośby, widzi wszystkie konta)?"
@@ -226,6 +226,42 @@ async function refreshDevices() {
     refreshDevices();
   }));
 }
+/* ── konta i hasła (emustart/accounts.py) ── */
+function pwPolicy(pw) {
+  const miss = [];
+  if (pw.length < 10) miss.push("co najmniej 10 znaków");
+  if (!/[A-ZĄĆĘŁŃÓŚŹŻ]/.test(pw)) miss.push("wielka litera");
+  if (!/\d/.test(pw)) miss.push("cyfra");
+  if (!/[^\p{L}\p{N}\s]|_/u.test(pw)) miss.push("znak specjalny");
+  return miss.length ? `Hasło musi mieć: ${miss.join(", ")}.` : "";
+}
+async function refreshAccounts() {
+  const r = await admin("accounts").catch(() => null);
+  if (!r) return;
+  $("accounts").innerHTML = r.accounts.length ? r.accounts.map((a) =>
+    `<tr><td>${esc(a.name)}</td><td>${a.password ? `ustawione <span class="muted">${a.set ? ago(a.set) : ""}</span>` : "<b>brak</b>"}</td>` +
+    `<td class="n">${a.devices}</td><td class="n"><button data-pw="${esc(a.name)}">${a.password ? "Nowe hasło" : "Ustaw hasło"}</button></td></tr>`).join("")
+    : `<tr><td colspan="4" class="muted">Brak kont.</td></tr>`;
+  $("accounts").querySelectorAll("[data-pw]").forEach((b) => b.addEventListener("click", () => askAccountPassword(b.dataset.pw)));
+}
+function askAccountPassword(name) {
+  $("pwName").textContent = `„${name}”`;
+  $("pw1").value = ""; $("pw2").value = ""; $("pwWhy").textContent = "";
+  const dlg = $("pwDlg");
+  dlg.onclose = async () => {
+    if (dlg.returnValue !== "ok") return;
+    const pw = $("pw1").value;
+    const why = pwPolicy(pw) || (pw !== $("pw2").value ? "Hasła się różnią." : "");
+    if (why) { msg(why); return; }
+    const r = await admin("account_password", { name, password: pw }).catch(() => null);
+    msg(r?.ok ? `Hasło konta „${r.name}” ustawione. Urządzenia innych użytkowników tego konta zapytają o nowe.` : (r?.reason || "Serwer nie odpowiada."), r?.ok);
+    refreshAccounts();
+  };
+  dlg.showModal();
+}
+refreshAccounts();
+setInterval(refreshAccounts, 30000);
+
 let pairTimer = null;
 $("bPair").addEventListener("click", async () => {
   const r = await admin("pair_code").catch(() => null);

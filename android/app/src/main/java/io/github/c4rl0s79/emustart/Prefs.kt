@@ -64,16 +64,36 @@ class Prefs(ctx: Context) {
         get() = sp.getString("profile", "") ?: ""
         set(v) = sp.edit().putString("profile", v).apply()
 
-    /** Tokeny profili z PIN-em (od serwera po podaniu PIN-u; do wylogowania). */
-    fun token(profile: String): String = try {
-        org.json.JSONObject(sp.getString("profile_tokens", "{}") ?: "{}").optString(profile.lowercase())
-    } catch (e: Exception) { "" }
+    /** Tokeny kont (od serwera po podaniu hasła konta — inny użytkownik na tym telefonie;
+     *  do wylogowania). */
+    fun token(profile: String): String = obj("profile_tokens").optString(profile.lowercase())
 
     fun setToken(profile: String, token: String) {
-        val o = try { org.json.JSONObject(sp.getString("profile_tokens", "{}") ?: "{}") } catch (e: Exception) { org.json.JSONObject() }
-        if (token.isEmpty()) o.remove(profile.lowercase()) else o.put(profile.lowercase(), token)
-        sp.edit().putString("profile_tokens", o.toString()).apply()
+        val o = obj("profile_tokens")
+        val names = obj("profile_token_names")
+        if (token.isEmpty()) { o.remove(profile.lowercase()); names.remove(profile.lowercase()) }
+        else { o.put(profile.lowercase(), token); names.put(profile.lowercase(), profile) }
+        sp.edit().putString("profile_tokens", o.toString()).putString("profile_token_names", names.toString()).apply()
     }
+
+    /** Konta zalogowane hasłem na tym telefonie (nazwy jak na serwerze). */
+    fun tokenAccounts(): List<String> {
+        val t = obj("profile_tokens")
+        val n = obj("profile_token_names")
+        return t.keys().asSequence().map { n.optString(it, it) }.toList()
+    }
+
+    /** PIN tylko na tym telefonie (skrót PBKDF2 — serwer go nie zna); '' = bez PIN-u. */
+    fun pinHash(profile: String): String = obj("local_pins").optString(profile.lowercase())
+
+    fun setPinHash(profile: String, hash: String) {
+        val o = obj("local_pins")
+        if (hash.isEmpty()) o.remove(profile.lowercase()) else o.put(profile.lowercase(), hash)
+        sp.edit().putString("local_pins", o.toString()).apply()
+    }
+
+    private fun obj(key: String): org.json.JSONObject =
+        try { org.json.JSONObject(sp.getString(key, "{}") ?: "{}") } catch (e: Exception) { org.json.JSONObject() }
 
     /** Profil, do którego należą zapisy zastane w emulatorach (pierwszy wybrany). */
     var phoneOwner: String

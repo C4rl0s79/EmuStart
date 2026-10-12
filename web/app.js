@@ -804,12 +804,15 @@ function enrollStart() {
   });
 }
 function enrollAccount(url, mode) {
-  oskOpen(mode === "new" ? "Nazwa nowego konta" : "Nazwa twojego konta", "", async (acc) => {
+  oskOpen(mode === "new" ? "Nazwa nowego konta" : "Nazwa twojego konta", "", (acc) => {
     if (!acc.trim()) return;
-    toast("Łączę z serwerem…", 10000);
-    const r = await api().server_enroll(url, mode, acc.trim());
-    if (!r.ok) return toast(r.reason, 7000);
-    enrollWait(r.code, r.account, mode);
+    // hasło konta: nowe konto je ustawia, „Mam konto” je sprawdza — i tak czeka na zatwierdzenie
+    setTimeout(() => askPassword(mode === "new" ? `Hasło nowego konta „${acc.trim()}”` : `Hasło konta „${acc.trim()}”`, async (pw) => {
+      toast("Łączę z serwerem…", 10000);
+      const r = await api().server_enroll(url, mode, acc.trim(), pw);
+      if (!r.ok) return toast(r.reason, 7000);
+      enrollWait(r.code, r.account, mode);
+    }, mode === "new"), 50);
   });
 }
 let enrollTimer = null;
@@ -1523,7 +1526,8 @@ window.addEventListener("pywebviewready", async () => {
   // profil zablokowany na tym urządzeniu (PIN zmieniony gdzie indziej / wylogowany)
   api().profile_pin_check().then((pc) => {
     if (pc && pc.state && pc.state !== "ok" && S.screen === "systems") {
-      toast(pc.state === "need_pin" ? `Profil „${pc.name}” — podaj PIN.` : `Ustaw PIN profilu „${pc.name}”.`, 5000);
+      toast(pc.state === "need_pin" ? `Profil „${pc.name}” — podaj PIN.`
+        : pc.state === "need_password" ? `Konto „${pc.name}” — podaj hasło.` : `Ustaw hasło konta „${pc.name}”.`, 5000);
       openProfiles(true);
     }
   }).catch(() => {});

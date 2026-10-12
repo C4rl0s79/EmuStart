@@ -377,29 +377,48 @@ class Server(private val prefs: Prefs) {
     // ── profile z PIN-em (/v1/profiles) ──
 
     /** [(nazwa, czy ma PIN)]; null — serwer bez PIN-ów profili (starszy niż 0.27). */
+    /** Konta (nazwa, czy ma hasło) — urządzenie konta widzi swoje; null = starszy serwer. */
     fun profiles(): List<Pair<String, Boolean>>? = try {
         val a = JSONObject(text("/v1/profiles")).optJSONArray("profiles") ?: JSONArray()
-        (0 until a.length()).map { val o = a.getJSONObject(it); Pair(o.getString("name"), o.optBoolean("pin")) }
+        (0 until a.length()).map { val o = a.getJSONObject(it); Pair(o.getString("name"), o.optBoolean("password", o.optBoolean("pin"))) }
     } catch (e: HttpError) { if (e.code == 404) null else throw e }
 
-    /** login | create | pin — odpowiedź serwera także przy błędzie (403 zły PIN, 409 nazwa zajęta). */
-    fun profileOp(op: String, q: Map<String, String>): JSONObject {
-        val c = conn("/v1/profiles/$op?" + query(q))
-        try {
-            c.connectTimeout = 8000
-            c.readTimeout = 30000
-            c.requestMethod = "PUT"
-            c.doOutput = true
-            c.setFixedLengthStreamingMode(0)
-            c.setRequestProperty("Authorization", "Bearer " + bearer())
-            c.outputStream.close()
-            val code = c.responseCode
-            if (code == 401) throw HttpError(code, "zły klucz serwera")
-            val body = (if (code in 200..299) c.inputStream else c.errorStream)?.bufferedReader(Charsets.UTF_8)?.readText() ?: "{}"
-            val o = try { JSONObject(body) } catch (e: Exception) { JSONObject().put("error", "błąd serwera $code") }
-            if (code == 409) o.put("exists", true)
-            return o
-        } finally { c.disconnect() }
+    /** Adres do operacji z hasłem konta: ten sam komputer na porcie HTTPS z przypiętym
+     *  certyfikatem, gdy jest (zwykły port przyjmuje tylko sieć lokalną i Tailscale). */
+    private fun secureBase(): String {
+        val b = baseUrl()
+        if (b.startsWith("https") || prefs.serverFp.isEmpty()) return b
+        val host = b.substringAfter("://").substringBefore('/').substringBeforeLast(':')
+        return candidates().firstOrNull {
+            it.url.startsWith("https") && !it.ca && it.url.substringAfter("://").substringBefore('/').substringBeforeLast(':') == host
+        }?.url ?: b
+    }
+
+    /** login | create | password — hasło w treści JSON (nigdy w adresie); odpowiedź serwera
+     *  także przy błędzie (403 złe hasło, 409 nazwa zajęta, 429 za dużo prób). */
+    fun profileOp(op: String, body: JSONObject): JSONObject {
+        for (attempt in 0..1) {
+            val b = secureBase()
+            val c = Net.open("$b/v1/profiles/$op", prefs.serverFp, b in caUrls)
+            try {
+                c.connectTimeout = 8000
+                c.readTimeout = 30000
+                c.requestMethod = "PUT"
+                c.doOutput = true
+                c.setRequestProperty("Content-Type", "application/json")
+                c.setRequestProperty("Authorization", "Bearer " + bearer())
+                c.outputStream.use { it.write(body.toString().toByteArray()) }
+                val code = c.responseCode
+                if (code == 401 && prefs.deviceId.isNotEmpty() && attempt == 0) { dropToken(); continue }
+                if (code == 401) throw HttpError(code, "zły klucz serwera")
+                val txt = (if (code in 200..299) c.inputStream else c.errorStream)?.bufferedReader(Charsets.UTF_8)?.readText() ?: "{}"
+                val o = try { JSONObject(txt) } catch (e: Exception) { JSONObject().put("error", "błąd serwera $code") }
+                if (code == 404 && !o.has("error")) o.put("error", "Serwer ma starszą wersję EmuStart — zaktualizuj go.")
+                if (code == 409) o.put("exists", true)
+                return o
+            } finally { c.disconnect() }
+        }
+        throw HttpError(401, "zły klucz serwera")
     }
 
     /** Zatwierdzenie nowego urządzenia (POST /v1/pair/approve); allow == null — podgląd prośby. */

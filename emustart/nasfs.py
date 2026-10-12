@@ -307,7 +307,7 @@ class RemoteFs:
         if st == 404:
             return None
         if st == 403 and b'"pin"' in data:
-            raise PinRequired(f"profil wymaga PIN-u ({q.get('p', '')})")
+            raise PinRequired(f"konto wymaga hasła ({q.get('p', '')})")
         if st != 200:
             raise OSError(f"serwer: {path} {st} {data[:200]!r}")
         return json.loads(data)
@@ -384,7 +384,7 @@ class RemoteFs:
     def prune(self, rel: str) -> None:
         pass                    # serwer przycina kopie zapasowe sam po każdym zapisie z kopią
 
-    # profile z PIN-em (emustart/pinauth.py)
+    # konta z hasłem (emustart/accounts.py)
     def profiles(self) -> list:
         st, data, _h = self._req("GET", "/v1/profiles", {})
         if st != 200:
@@ -392,12 +392,31 @@ class RemoteFs:
         return json.loads(data).get("profiles") or []
 
     def profile_op(self, op: str, q: dict) -> dict:
-        st, data, _h = self._req("PUT", f"/v1/profiles/{op}", q, body=b"")
+        """login | create | password — hasło w treści JSON, połączeniem szyfrowanym, gdy się da."""
+        from emustart import netsrc
+        body = json.dumps(q).encode("utf-8")
+        for attempt in range(2):
+            c = netsrc.secure_conn(self.host, self.port, 30)
+            try:
+                c.request("PUT", f"/v1/profiles/{op}", body=body,
+                          headers={**netsrc.auth_headers(self.key), "Content-Type": "application/json"})
+                r = c.getresponse()
+                data = r.read()
+            except (OSError, http.client.HTTPException) as ex:
+                raise OSError(f"serwer: konto {op}: {ex}")
+            finally:
+                c.close()
+            if r.status == 401 and self.key.startswith(netsrc.DEV) and attempt == 0:
+                netsrc.drop_token()
+                continue
+            break
         try:
             out = json.loads(data)
         except ValueError:
-            raise OSError(f"serwer: profil {op} {st}")
-        if st == 409:
+            raise OSError(f"serwer: konto {op} {r.status}")
+        if r.status == 404 and "error" not in out:
+            out["error"] = "Serwer ma starszą wersję EmuStart — zaktualizuj go."
+        if r.status == 409:
             out["exists"] = True
         return out
 

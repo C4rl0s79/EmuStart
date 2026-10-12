@@ -78,6 +78,19 @@ def conn(host: str, port: int, timeout: float = TIMEOUT) -> http.client.HTTPConn
     return http.client.HTTPConnection(host, port, timeout=timeout)
 
 
+def secure_conn(host: str, port: int, timeout: float = TIMEOUT) -> http.client.HTTPConnection:
+    """Połączenie do operacji z hasłem konta: szyfrowane, gdy się da — ten sam komputer na
+    porcie HTTPS z przypiętym certyfikatem (zwykły port przyjmuje tylko sieć lokalną i
+    Tailscale; z internetu i tak tylko HTTPS)."""
+    if (host, port) in _CA or (host, port) in _PINS or not _cfg_ref:
+        return conn(host, port, timeout)
+    fp = server_fp(_cfg_ref[0])
+    for sp in candidates(_cfg_ref[0]):
+        if sp[0] == "https" and sp[1] == host and fp and _mode(sp) == "pin":
+            return PinnedHTTPS(sp[1], sp[2], fp, timeout)
+    return conn(host, port, timeout)
+
+
 class RemoteFile:
     """Plik gry na serwerze: /v1/games/<id>/file/<rel>."""
 

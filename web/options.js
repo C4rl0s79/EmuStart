@@ -505,9 +505,10 @@ function renderProfiles() {
   const cards = PR.list.map((p, i) =>
     `<div class="pcard${i === PR.idx ? " sel" : ""}${p.id === PR.current ? " cur" : ""}" data-i="${i}">` +
     `<div class="pav">${esc((p.name[0] || "?").toUpperCase())}</div><div class="pname">${esc(p.name)}` +
-    `${p.pin === "need_pin" ? " 🔒" : p.pin === "set_pin" ? " ⚠" : ""}</div></div>`).join("") +
-    // urządzenie przypisane do konta: tylko to konto — bez zakładania, zmiany nazwy i usuwania
-    (PR.account ? "" : `<div class="pcard add${PR.idx === PR.list.length ? " sel" : ""}" data-i="${PR.list.length}"><div class="pav">+</div><div class="pname">Nowy profil</div></div>`);
+    `${p.pin === "need_pin" || p.pin === "need_password" ? " 🔒" : p.pin === "set_password" ? " ⚠" : ""}</div></div>`).join("") +
+    // urządzenie przypisane do konta: bez zakładania kont — zamiast tego inny użytkownik (jego hasło)
+    `<div class="pcard add${PR.idx === PR.list.length ? " sel" : ""}" data-i="${PR.list.length}"><div class="pav">+</div>` +
+    `<div class="pname">${PR.account ? "Inny użytkownik" : "Nowy profil"}</div></div>`;
   const rejected = S.state?.server?.key_rejected;
   $("profCards").innerHTML = rejected
     // serwer odrzuca klucz: nie ma czego wybrać ani gdzie założyć profilu — tylko wyjaśnienie
@@ -517,14 +518,14 @@ function renderProfiles() {
     : cards;
   $("profCards").querySelectorAll(".pcard").forEach((el) => el.addEventListener("click", () => { PR.idx = +el.dataset.i; profilesInput("a"); }));
   const onProfile = PR.idx < PR.list.length;
-  if (PR.account) return setHints([["a", "Graj jako"], ["b", "Wstecz"]]);
+  if (PR.account) return setHints(onProfile ? [["a", "Graj jako"], ["start", "Hasło / PIN"], ["b", "Wstecz"]] : [["a", "Zaloguj"], ["b", "Wstecz"]]);
   if (setup) return setHints([["a", onProfile ? "To mój profil" : "Utwórz"], ["y", `Pytaj przy starcie: ${PR.ask ? "tak" : "nie"}`]]);
-  if (S.platform === "android") return setHints(onProfile ? [["a", "Graj jako"], ["start", "PIN / wyloguj"], ["b", "Wstecz"]] : [["a", "Utwórz"], ["b", "Wstecz"]]);
+  if (S.platform === "android") return setHints(onProfile ? [["a", "Graj jako"], ["start", "Hasło / PIN"], ["b", "Wstecz"]] : [["a", "Utwórz"], ["b", "Wstecz"]]);
   setHints(onProfile ? [["a", "Graj jako"], ["start", "Opcje profilu"], ["y", "Zmień nazwę"], ["x", "Usuń"], ["b", "Wstecz"]] : [["a", "Utwórz"], ["b", "Wstecz"]]);
 }
 async function profilesInput(a) {
-  if (PR.account && ["start", "x", "y"].includes(a)) return;      // konto z serwera — bez zmian profili tutaj
-  const n = PR.list.length + (PR.account ? 0 : 1);
+  if (PR.account && ["x", "y"].includes(a)) return;      // konto z serwera — bez zmian nazw i usuwania tutaj
+  const n = PR.list.length + 1;
   const p = PR.list[PR.idx];
   const setup = PR.startup === "setup";
   if (a === "left" || a === "up") PR.idx = (PR.idx - 1 + n) % n;
@@ -532,27 +533,32 @@ async function profilesInput(a) {
   else if (setup && a === "y") PR.ask = !PR.ask;
   else if (setup && a === "a" && p) {
     const r0 = await api().profile_setup(p.id, PR.ask);
-    if (r0 && r0.need) return pinFlow(p, r0.need, () => profilesInput("a"));
+    if (r0 && r0.need) return accessFlow(p, r0.need, () => profilesInput("a"));
     const st = await refreshState();
     applyLook(st.look || {}, true);
     toast(`Ten komputer: ${p.name}`);
     return show("systems");
   } else if (setup && !["a"].includes(a)) return;   // wybór jest wymagany
   else if (a === "b") { await refreshState(); return show("systems"); }
-  else if (a === "a" && !p) {
+  else if (a === "a" && !p && PR.account) {
+    return oskOpen("Nazwa konta innego użytkownika", "", (name) => { if (name.trim()) setTimeout(() => joinExisting(name.trim(), true), 50); });
+  } else if (a === "a" && !p) {
     return oskOpen("Nazwa nowego profilu", "", (name) => {
       if (!name.trim()) return;
-      setTimeout(() => askPin(`PIN profilu „${name.trim()}” (4–8 cyfr)`, async (pin) => {
-        const r = await api().profile_create(name, pin);
+      const create = async (pw) => {
+        const r = await api().profile_create(name, pw);
         if (r.exists) return joinExisting(r.exists);
-        if (!r.ok) return toast(r.reason);
-        toast(`Utworzono profil: ${r.profile.name}. Zapamiętaj PIN — będzie potrzebny na innych urządzeniach.`, 6000);
+        if (!r.ok) return toast(r.reason, 6000);
+        toast(`Utworzono profil: ${r.profile.name}.` + (pw ? " Zapamiętaj hasło — będzie potrzebne na innych urządzeniach." : ""), 6000);
         openProfiles(PR.startup);
-      }, true), 50);
+      };
+      // z serwerem: konto z hasłem (emustart/accounts.py); bez serwera — profil lokalny / NAS
+      if (!S.state?.server) return create("");
+      setTimeout(() => askPassword(`Hasło nowego konta „${name.trim()}”`, create, true), 50);
     });
   } else if (a === "a") {
     const r0 = await api().profile_select(p.id);
-    if (r0 && r0.need) return pinFlow(p, r0.need, () => profilesInput("a"));
+    if (r0 && r0.need) return accessFlow(p, r0.need, () => profilesInput("a"));
     const st = await refreshState();
     applyLook(st.look || {}, true);         // wygląd zapisany w profilu
     toast(`Gra: ${p.name}`);
@@ -583,7 +589,7 @@ async function profilesInput(a) {
 }
 
 
-// PIN profilu: raz na urządzeniu (emustart/pinauth.py)
+// PIN — tylko to urządzenie (blokada profilu); hasło konta — na serwerze (emustart/accounts.py)
 function askPin(title, onPin, twice = false) {
   oskOpen(title, "", (pin) => {
     pin = (pin || "").trim();
@@ -595,30 +601,60 @@ function askPin(title, onPin, twice = false) {
     }, false, true), 50);
   }, false, true);
 }
-/** Profil zablokowany na tym urządzeniu: podanie PIN-u albo ustawienie (stary profil). */
-function pinFlow(p, need, then) {
-  if (need === "set_pin") {
-    toast(`Profil „${p.name}” nie ma jeszcze PIN-u — ustaw go (będzie potrzebny raz na każdym urządzeniu).`, 6000);
-    return askPin(`Nowy PIN profilu „${p.name}” (4–8 cyfr)`, async (pin) => {
-      const r = await api().profile_set_pin(p.id, pin, "");
-      if (!r.ok) return toast(r.reason);
-      toast(`PIN profilu „${p.name}” ustawiony.`);
+/** Wymagania hasła — te same co na serwerze (emustart/accounts.py: policy). */
+function pwPolicy(pw) {
+  const miss = [];
+  if (pw.length < 10) miss.push("co najmniej 10 znaków");
+  if (!/[A-ZĄĆĘŁŃÓŚŹŻ]/.test(pw)) miss.push("wielka litera");
+  if (!/\d/.test(pw)) miss.push("cyfra");
+  if (!/[^\p{L}\p{N}\s]|_/u.test(pw)) miss.push("znak specjalny");
+  return miss.length ? `Hasło musi mieć: ${miss.join(", ")}.` : "";
+}
+/** Hasło konta; `isNew` — nowe hasło: wymagania i powtórzenie. */
+function askPassword(title, onPw, isNew = false) {
+  oskOpen(title + (isNew ? " — min. 10 znaków, wielka litera, cyfra, znak specjalny" : ""), "", (pw) => {
+    if (!pw) return;
+    if (!isNew) return onPw(pw);
+    const why = pwPolicy(pw);
+    if (why) return toast(why, 6000);
+    setTimeout(() => oskOpen("Powtórz hasło", "", (again) => {
+      if (again !== pw) return toast("Hasła się różnią — spróbuj jeszcze raz.");
+      onPw(pw);
+    }, false, true), 50);
+  }, false, true);
+}
+/** Profil niedostępny na tym urządzeniu: hasło konta (inny użytkownik), nowe hasło (konto
+ *  bez hasła) albo PIN tego urządzenia. */
+function accessFlow(p, need, then) {
+  if (need === "set_password") {
+    toast(`Konto „${p.name}” nie ma jeszcze hasła — ustaw je (serwer pyta o nie nowe urządzenia i innych użytkowników).`, 7000);
+    return askPassword(`Nowe hasło konta „${p.name}”`, async (pw) => {
+      const r = await api().profile_set_password(p.id, pw, "");
+      if (!r.ok) return toast(r.reason, 6000);
+      toast(`Hasło konta „${p.name}” ustawione.`);
       then();
     }, true);
   }
-  askPin(`PIN profilu „${p.name}”`, async (pin) => {
+  if (need === "need_password") {
+    return askPassword(`Hasło konta „${p.name}”`, async (pw) => {
+      const r = await api().profile_login(p.id, pw);
+      if (!r.ok) return toast(r.reason || "Złe hasło.", 5000);
+      then();
+    });
+  }
+  askPin(`PIN profilu „${p.name}” (to urządzenie)`, async (pin) => {
     const r = await api().profile_unlock(p.id, pin);
     if (!r.ok) return toast(r.reason || "Zły PIN.", 5000);
     then();
   });
 }
-/** Nazwa zajęta: PIN tego profilu (to Ty z innego urządzenia) albo inna nazwa. */
-function joinExisting(name) {
-  toast(`Profil „${name}” już istnieje. Jeśli to Twój — podaj jego PIN; inaczej (B) wybierz inną nazwę.`, 7000);
-  setTimeout(() => askPin(`PIN profilu „${name}”`, async (pin) => {
-    const r = await api().profile_join(name, pin);
-    if (!r.ok) return toast((r.reason || "Zły PIN.") + " Wybierz inną nazwę profilu.", 6000);
-    toast(`Profil „${r.profile.name}” jest teraz na tym urządzeniu.`);
+/** Konto innego użytkownika (albo nazwa zajęta przy zakładaniu): jego hasło. */
+function joinExisting(name, asked = false) {
+  if (!asked) toast(`Profil „${name}” już istnieje. Jeśli to Twój — podaj hasło konta; inaczej (B) wybierz inną nazwę.`, 7000);
+  setTimeout(() => askPassword(`Hasło konta „${name}”`, async (pw) => {
+    const r = await api().profile_join(name, pw);
+    if (!r.ok) return toast(r.reason || "Złe hasło.", 6000);
+    toast(`Konto „${r.profile.name}” jest teraz na tym urządzeniu.`);
     openProfiles(PR.startup);
   }), 50);
 }
@@ -660,17 +696,38 @@ async function profileMenu(p) {
   renderMenu();
 }
 function pinMenuItems(p, items) {
-  if (p.pin === "set_pin") items.push(["Ustaw PIN profilu", () => pinFlow(p, "set_pin", () => openProfiles(PR.startup))]);
-  else items.push(["Zmień PIN", () => askPin(`Dotychczasowy PIN „${p.name}”`, (old) => setTimeout(() =>
-    askPin("Nowy PIN (4–8 cyfr)", async (pin) => {
-      const r = await api().profile_set_pin(p.id, pin, old);
-      toast(r.ok ? "PIN zmieniony. Inne urządzenia zapytają o nowy." : r.reason, 5000);
-    }, true), 50))]);
-  items.push(["Wyloguj z tego urządzenia", async () => {
-    await api().profile_logout(p.id);
-    toast(`Profil „${p.name}” wylogowany — następnym razem PIN.`);
+  if (S.state?.server) {
+    if (p.pin === "set_password") items.push(["Ustaw hasło konta", () => accessFlow(p, "set_password", () => openProfiles(PR.startup))]);
+    else items.push(["Zmień hasło konta", () => askPassword(`Dotychczasowe hasło „${p.name}”`, (old) => setTimeout(() =>
+      askPassword("Nowe hasło konta", async (pw) => {
+        const r = await api().profile_set_password(p.id, pw, old);
+        toast(r.ok ? "Hasło zmienione. Inni użytkownicy tego konta na innych urządzeniach podadzą nowe." : r.reason, 6000);
+      }, true), 50))]);
+  }
+  if (!p.has_pin) items.push(["Ustaw PIN na tym urządzeniu", () => askPin(`PIN profilu „${p.name}” (4–8 cyfr, tylko to urządzenie)`, async (pin) => {
+    const r = await api().profile_set_pin(p.id, pin, "");
+    toast(r.ok ? "PIN ustawiony — to urządzenie zapyta o niego przy wyborze profilu." : r.reason, 5000);
     openProfiles(PR.startup);
-  }]);
+  }, true)]);
+  else {
+    items.push(["Zmień PIN tego urządzenia", () => askPin(`Dotychczasowy PIN „${p.name}”`, (old) => setTimeout(() =>
+      askPin("Nowy PIN (4–8 cyfr)", async (pin) => {
+        const r = await api().profile_set_pin(p.id, pin, old);
+        toast(r.ok ? "PIN zmieniony." : r.reason, 5000);
+      }, true), 50))]);
+    items.push(["Usuń PIN z tego urządzenia", () => askPin(`PIN profilu „${p.name}”`, async (pin) => {
+      const r = await api().profile_clear_pin(p.id, pin);
+      toast(r.ok ? "PIN usunięty." : r.reason, 5000);
+      openProfiles(PR.startup);
+    })]);
+  }
+  if (S.state?.server && (p.nas_name || p.name).toLowerCase() !== (PR.account || "").toLowerCase()) {
+    items.push(["Wyloguj konto z tego urządzenia", async () => {
+      await api().profile_logout(p.id);
+      toast(`Konto „${p.name}” wylogowane — następnym razem hasło.`);
+      openProfiles(PR.startup);
+    }]);
+  }
 }
 function raLogin(p) {
   oskOpen(`RetroAchievements — nazwa użytkownika (${p.name})`, "", (user) => {

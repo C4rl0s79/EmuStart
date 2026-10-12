@@ -1,0 +1,209 @@
+"""accounts — hasła kont na serwerze EmuStart (0.40).
+
+Konto = profil gracza w folderze profili. Hasło konta potwierdza użytkownika na serwerze:
+przy dołączaniu nowego urządzenia („Nowe konto” ustawia hasło, „Mam konto” je sprawdza —
+i nadal czeka na zatwierdzenie) i gdy na urządzeniu gra inny użytkownik niż właściciel.
+Urządzenie przypisane do konta nie podaje hasła przy każdym zapytaniu — loguje się kluczem
+urządzenia (emustart/enroll.py). PIN jest tylko lokalną blokadą profilu na urządzeniu.
+
+Skrót hasła: scrypt (N=2^15, r=8, p=1, losowa sól 16 B), w danych serwera
+(`accounts.json` obok `devices.json`) — nie w folderze profili na udziale sieciowym. Serwer
+nigdy go nie wydaje. Złe hasła: rosnące opóźnienie na konto i limit na adres.
+
+Token konta (nagłówek X-Profile-Token) = HMAC(sekret serwera, konto + skrót hasła): zmiana
+hasła unieważnia tokeny na wszystkich urządzeniach.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import hmac
+import json
+import logging
+import os
+import re
+import secrets
+import threading
+import time
+
+from emustart import paths
+
+log = logging.getLogger("emustart.accounts")
+
+MIN_LEN = 10
+MAX_LEN = 128
+N, R, P = 2 ** 15, 8, 1               # scrypt: ok. 100 ms na sprawdzenie
+FREE_TRIES = 3                        # tyle złych haseł bez czekania (na konto)
+MAX_WAIT = 600.0
+IP_WINDOW, IP_MAX = 600.0, 20         # złe hasła z jednego adresu (wszystkie konta) w 10 min
+
+RULES = "Hasło: co najmniej 10 znaków, w tym wielka litera, cyfra i znak specjalny."
+
+_lock = threading.Lock()
+_db: dict | None = None               # konto (małe litery) → rekord
+_fails: dict = {}                     # konto (małe litery) → (liczba, czas ostatniej)
+_ip_fails: dict = {}                  # adres → [czasy złych prób]
+
+
+def policy(pw: str) -> str:
+    """'' = hasło spełnia wymagania; inaczej powód (po polsku, do pokazania)."""
+    pw = pw or ""
+    missing = []
+    if len(pw) < MIN_LEN:
+        missing.append(f"co najmniej {MIN_LEN} znaków")
+    if not re.search(r"[A-ZĄĆĘŁŃÓŚŹŻ]", pw):
+        missing.append("wielka litera")
+    if not re.search(r"\d", pw):
+        missing.append("cyfra")
+    if not re.search(r"[^\w\s]|_", pw):
+        missing.append("znak specjalny")
+    if len(pw) > MAX_LEN:
+        return f"Hasło może mieć najwyżej {MAX_LEN} znaków."
+    return ("Hasło musi mieć: " + ", ".join(missing) + ".") if missing else ""
+
+
+def make(pw: str) -> dict:
+    why = policy(pw)
+    if why:
+        raise ValueError(why)
+    salt = secrets.token_bytes(16)
+    h = hashlib.scrypt(pw.encode("utf-8"), salt=salt, n=N, r=R, p=P, dklen=32, maxmem=64 << 20)
+    return {"v": 1, "alg": "scrypt", "n": N, "r": R, "p": P, "salt": salt.hex(), "hash": h.hex(),
+            "set": time.time()}
+
+
+def _check(rec: dict, pw: str) -> bool:
+    try:
+        salt, want = bytes.fromhex(rec["salt"]), bytes.fromhex(rec["hash"])
+        n, r, p = int(rec.get("n", N)), int(rec.get("r", R)), int(rec.get("p", P))
+    except (KeyError, ValueError, TypeError):
+        return False
+    if not pw or len(pw) > MAX_LEN:
+        return False
+    got = hashlib.scrypt(pw.encode("utf-8"), salt=salt, n=n, r=r, p=p, dklen=len(want), maxmem=64 << 20)
+    return hmac.compare_digest(got, want)
+
+
+# ── zapis ──
+def _path():
+    return paths.SERVER / "accounts.json"
+
+
+def _load() -> dict:
+    global _db
+    if _db is None:
+        try:
+            _db = json.loads(_path().read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            _db = {}
+    return _db
+
+
+def _save() -> None:
+    p = _path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_name(p.name + ".tmp")
+    tmp.write_text(json.dumps(_load(), ensure_ascii=False, indent=1), encoding="utf-8")
+    os.replace(tmp, p)
+
+
+def reset() -> None:
+    """Dla testów."""
+    global _db
+    with _lock:
+        _db = None
+        _fails.clear()
+        _ip_fails.clear()
+
+
+def record(name: str) -> dict | None:
+    with _lock:
+        rec = _load().get((name or "").lower())
+    return dict(rec) if rec else None
+
+
+def has_password(name: str) -> bool:
+    return record(name) is not None
+
+
+def names_with_password() -> set:
+    with _lock:
+        return set(_load())
+
+
+def set_record(name: str, rec: dict, by: str = "") -> None:
+    """Zapisuje gotowy skrót (np. z prośby o dołączenie — hasło nie jest tam trzymane)."""
+    with _lock:
+        _load()[name.lower()] = {**rec, "name": name}
+        _save()
+        _fails.pop(name.lower(), None)
+    log.info("hasło konta %s ustawione%s", name, f" — {by}" if by else "")
+
+
+def set_password(name: str, pw: str, by: str = "") -> str:
+    """'' = ustawione; inaczej powód."""
+    try:
+        rec = make(pw)
+    except ValueError as ex:
+        return str(ex)
+    set_record(name, rec, by)
+    return ""
+
+
+def rename(old: str, new: str) -> None:
+    with _lock:
+        rec = _load().pop(old.lower(), None)
+        if rec:
+            _load()[new.lower()] = {**rec, "name": new}
+            _save()
+
+
+# ── sprawdzanie z opóźnieniem ──
+def wait_left(name: str, ip: str = "") -> float:
+    now = time.time()
+    with _lock:
+        n, last = _fails.get(name.lower(), (0, 0.0))
+        recent = [t for t in _ip_fails.get(ip, []) if now - t < IP_WINDOW] if ip else []
+    acc = 0.0 if n < FREE_TRIES else max(0.0, last + min(MAX_WAIT, 2.0 ** (n - FREE_TRIES + 1)) - now)
+    by_ip = max(0.0, recent[0] + IP_WINDOW - now) if len(recent) >= IP_MAX else 0.0
+    return max(acc, by_ip)
+
+
+def _failed(name: str, ip: str) -> None:
+    now = time.time()
+    with _lock:
+        n, _t = _fails.get(name.lower(), (0, 0.0))
+        _fails[name.lower()] = (n + 1, now)
+        if ip:
+            _ip_fails[ip] = [t for t in _ip_fails.get(ip, []) if now - t < IP_WINDOW] + [now]
+
+
+def verify(name: str, pw: str, ip: str = "") -> tuple[bool, str, float]:
+    """(dobre hasło?, powód, ile czekać). Konto bez hasła: (False, "brak", 0)."""
+    left = wait_left(name, ip)
+    if left > 0:
+        return False, f"Za dużo złych haseł — spróbuj za {int(left) + 1} s.", left
+    rec = record(name)
+    if rec is None:
+        return False, "brak", 0.0
+    if _check(rec, pw):
+        with _lock:
+            _fails.pop(name.lower(), None)
+        return True, "", 0.0
+    _failed(name, ip)
+    log.warning("złe hasło konta %s (%s)", name, ip or "?")
+    return False, "Złe hasło.", wait_left(name, ip)
+
+
+# ── token konta (inny użytkownik na urządzeniu) ──
+def token(secret: str, name: str) -> str:
+    rec = record(name)
+    if rec is None:
+        return ""
+    msg = ("konto\n" + name.lower() + "\n" + rec.get("hash", "")).encode()
+    return hmac.new(secret.encode(), msg, hashlib.sha256).hexdigest()
+
+
+def token_ok(secret: str, name: str, got: str) -> bool:
+    want = token(secret, name)
+    return bool(got and want) and hmac.compare_digest(want, got)

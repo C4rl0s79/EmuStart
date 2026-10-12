@@ -284,10 +284,10 @@ def set_tunnel(url: str) -> str:
 
 
 def check_tunnel() -> None:
-    """Czy serwer odpowiada przez tunel (zapytanie z kluczem serwera przez internet)."""
+    """Czy serwer odpowiada przez tunel (zapytanie przez internet; bez klucza — 401 od naszego
+    serwera też potwierdza drogę)."""
     import ssl
     import urllib.request
-    from emustart import remote
     url = TUNNEL["url"]
     if not url:
         return
