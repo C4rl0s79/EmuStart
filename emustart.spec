@@ -60,6 +60,12 @@ for dist in ("pywebview", "pythonnet", "clr_loader"):
 
 # własne moduły jawnie — PyInstaller potrafi przeoczyć importy leniwe
 hiddenimports += collect_submodules("emustart")
+# kod QR parowania (emustart/qr.py, import leniwy) — w paczce programu, żeby komputer
+# z serwerem nie musiał mieć Pythona ani biblioteki
+try:
+    hiddenimports += collect_submodules("segno")
+except Exception:
+    pass
 
 a = Analysis(
     ["main.py"],
