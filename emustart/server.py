@@ -36,6 +36,40 @@ def local_url(root: Path, file: Path) -> str:
 DEV_API = None
 
 
+def _near(handler) -> bool:
+    """Zwykły i szyfrowany port: tylko ten komputer, sieć lokalna i Tailscale (także tunel —
+    łączy się lokalnie). Z internetu wolno wyłącznie na port publiczny (emustart/public.py) —
+    nawet gdy router przekierowuje tu ruch (DMZ, zakres portów)."""
+    import ipaddress
+    ip = handler.client_address[0]
+    try:
+        a = ipaddress.ip_address(ip)
+        if a.version == 6 and a.ipv4_mapped:
+            a = a.ipv4_mapped
+        ok = a.is_private or a.is_loopback or a.is_link_local or a in ipaddress.ip_network("100.64.0.0/10")
+    except ValueError:
+        ok = False
+    if not ok:
+        handler.close_connection = True
+        handler.send_error(403)
+        _warn_public(ip, handler.server.server_address[1])
+    return ok
+
+
+_warned: dict = {}
+
+
+def _warn_public(ip: str, port: int) -> None:
+    import logging
+    import time
+    now = time.time()
+    if now - _warned.get(port, 0) > 3600:            # raz na godzinę na port
+        _warned[port] = now
+        logging.getLogger("emustart.server").warning(
+            "port %d: zapytanie z internetu (%s) odrzucone — router przekierowuje tu ruch z zewnątrz; "
+            "z internetu tylko port publiczny (panel → Dostęp z internetu)", port, ip)
+
+
 def _host_ok(handler) -> bool:
     """Tylko nasz adres w nagłówku Host — strona z internetu przepięta przez DNS
     na 127.0.0.1 (DNS rebinding) wysyła własną nazwę hosta i dostaje odmowę."""
@@ -59,6 +93,8 @@ class _Handler(BaseHTTPRequestHandler):
             from emustart import public      # port z internetu: tylko /v1 i grafiki, z kluczem
             if not public.gate(self):
                 return
+        elif not _near(self):
+            return
         p = urllib.parse.urlsplit(self.path).path
         if p == "/v1/pair":
             from emustart import remote      # parowanie urządzenia jednorazowym kodem (z sieci)
@@ -91,6 +127,8 @@ class _Handler(BaseHTTPRequestHandler):
             from emustart import public      # port z internetu: tylko /v1 i grafiki, z kluczem
             if not public.gate(self):
                 return
+        elif not _near(self):
+            return
         if urllib.parse.urlsplit(self.path).path.startswith("/v1/"):
             from emustart import remote      # zapis w folderze profili (z kluczem)
             return remote.handle_write(self, "PUT")
@@ -102,6 +140,8 @@ class _Handler(BaseHTTPRequestHandler):
             from emustart import public      # port z internetu: tylko /v1 i grafiki, z kluczem
             if not public.gate(self):
                 return
+        elif not _near(self):
+            return
         if urllib.parse.urlsplit(self.path).path.startswith("/v1/"):
             from emustart import remote
             return remote.handle_write(self, "DELETE")
@@ -113,6 +153,8 @@ class _Handler(BaseHTTPRequestHandler):
             from emustart import public      # port z internetu: tylko /v1 i grafiki, z kluczem
             if not public.gate(self):
                 return
+        elif not _near(self):
+            return
         raw = urllib.parse.urlsplit(self.path).path
         if raw.startswith("/v1/"):
             from emustart import remote      # API dla Androida — klucz zamiast sprawdzania Host

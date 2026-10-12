@@ -38,12 +38,31 @@ class UpnpError(Exception):
         self.code = code
 
 
-def discover(timeout: float = 3.0) -> list:
-    """Adresy opisów (LOCATION) bram internetowych w sieci lokalnej."""
+def lan_addresses() -> list:
+    """Adresy IPv4 tego komputera w sieciach lokalnych (bez Tailscale i pętli zwrotnej)."""
+    import ipaddress
+    out = []
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            a = info[4][0]
+            ip = ipaddress.ip_address(a)
+            if ip.is_private and not ip.is_loopback and ip not in ipaddress.ip_network("100.64.0.0/10") \
+                    and a not in out:
+                out.append(a)
+    except OSError:
+        pass
+    return out
+
+
+def _search(src: str, timeout: float) -> list:
+    """M-SEARCH z jednej karty sieciowej (src = jej adres; '' = domyślna)."""
     found: list = []
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
     try:
         s.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 2)
+        if src:
+            s.bind((src, 0))
+            s.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, socket.inet_aton(src))
         s.settimeout(timeout)
         for st in TARGETS:
             msg = ("M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\n"
@@ -59,8 +78,25 @@ def discover(timeout: float = 3.0) -> list:
                 loc = m.group(1).decode("ascii", "replace")
                 if loc not in found:
                     found.append(loc)
+    except OSError as ex:
+        log.info("SSDP z %s: %s", src or "domyślnej karty", ex)
     finally:
         s.close()
+    return found
+
+
+def discover(timeout: float = 3.0, rounds: int = 3) -> list:
+    """Adresy opisów (LOCATION) bram internetowych w sieci lokalnej — zapytanie z każdej karty
+    sieciowej osobno (domyślna bywa kartą Tailscale albo wirtualną), kilka prób (UDP ginie)."""
+    found: list = []
+    srcs = lan_addresses() or [""]
+    for _ in range(rounds):
+        for src in srcs:
+            for loc in _search(src, timeout):
+                if loc not in found:
+                    found.append(loc)
+        if found:
+            break
     return found
 
 
@@ -152,8 +188,14 @@ class Gateway:
         self._soap("DeletePortMapping", {"NewRemoteHost": "", "NewExternalPort": ext_port, "NewProtocol": "TCP"})
 
 
-def find_gateway(timeout: float = 3.0) -> Gateway:
+def find_gateway(timeout: float = 3.0, known: str = "") -> Gateway:
+    """Router z UPnP: najpierw zapamiętany adres opisu (`known`), potem wyszukiwanie."""
     errors = []
+    if known:
+        try:
+            return Gateway.from_location(known)
+        except (UpnpError, OSError, ET.ParseError) as ex:
+            errors.append(f"{known}: {ex}")
     for loc in discover(timeout):
         try:
             return Gateway.from_location(loc)
