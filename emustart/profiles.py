@@ -444,7 +444,8 @@ def attach(pid: int, family: str, emu_dir: Path) -> None:
 # ── NAS ──
 
 def nas_root(cfg: dict) -> Path:
-    return Path(cfg.get("profiles_nas") or r"Z:\emustart\Profiles")
+    # bez ustawionego folderu — brak (nie „Z:\…” z pierwszej instalacji); SmbFs: niedostępny
+    return Path(cfg.get("profiles_nas") or "")
 
 
 def _nas_dir(cfg: dict, prof: dict) -> Path:

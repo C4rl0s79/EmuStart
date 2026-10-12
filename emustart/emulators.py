@@ -170,6 +170,8 @@ def forget_scan() -> None:
 
 def _scan_root(root: Path) -> tuple:
     """(exe, {retroarch.exe: info rdzeni}) — skan dysku raz, nie na każdy system."""
+    if str(root) in ("", "."):
+        return [], {}                  # folder emulatorów nie ustawiony — nic nie wykrywamy
     key = str(root).lower()
     if key not in _scan_memo:
         bins = _binaries(root)

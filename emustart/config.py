@@ -13,9 +13,12 @@ from pathlib import Path
 from emustart import paths
 
 DEFAULTS: dict = {
-    "rom_root": r"Z:\ROMS\ROMS",   # stary klucz (jeden folder) — patrz rom_roots()
+    # nowa instalacja niczego nie zakłada: bez folderów z grami, emulatorów i folderu profili
+    # na NAS (wcześniej domyślne były ścieżki z pierwszej instalacji — Z:\…, D:\emu\…)
+    "rom_root": "",                 # stary klucz (jeden folder) — patrz rom_roots()
     "rom_roots": [],                # foldery z grami, kolejność = pierwszeństwo przy duplikatach
-    "emu_root": r"D:\emu\emulatory",
+    "emu_root": "",
+    "profiles_nas": "",             # folder profili przez SMB ("" = brak; z serwerem — przez serwer)
     "cache_dir": "",                # "" → <program>\cache
     "cache_recent": 10,             # ile ostatnio uruchomionych gier trzymać
     "network_mode": "auto",         # auto | lan | remote
@@ -37,7 +40,7 @@ def load() -> dict:
     try:
         data = json.loads(paths.CONFIG_PATH.read_text(encoding="utf-8"))
         if isinstance(data, dict):
-            cfg.update(data)
+            cfg.update(_legacy_defaults(data))
     except FileNotFoundError:
         pass
     except Exception:
@@ -55,6 +58,20 @@ def save(cfg: dict) -> None:
         tmp = paths.CONFIG_PATH.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
         tmp.replace(paths.CONFIG_PATH)
+
+
+LEGACY = {"rom_root": r"Z:\ROMS\ROMS", "emu_root": r"D:\emu\emulatory", "profiles_nas": r"Z:\emustart\Profiles"}
+
+
+def _legacy_defaults(data: dict) -> dict:
+    """Ustawienia sprzed 0.37.4 polegały na domyślnych ścieżkach pierwszej instalacji —
+    istniejący plik ich nie miał, a zachowanie ma zostać takie samo. Nowa instalacja
+    (bez pliku) dostaje puste wartości."""
+    out = dict(data)
+    for k, v in LEGACY.items():
+        if k not in out:
+            out[k] = v
+    return out
 
 
 def rom_roots(cfg: dict) -> list:

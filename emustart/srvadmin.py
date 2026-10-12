@@ -414,7 +414,7 @@ def _migrate_run(api, src, dst, files: dict) -> None:
         cfg = api._cfg
         cfg["profiles_nas"] = str(dst)
         config.save(cfg)
-        (src / ".emustart-moved").write_text(json.dumps({"to": str(dst), "time": time.time()}), encoding="utf-8")
+        (src / nasfs.MOVED_MARK).write_text(json.dumps({"to": str(dst), "time": time.time()}), encoding="utf-8")
         remote.NAS_ROOT, remote.NAS_ID = dst, new_id
         _migr["phase"] = "done"
         log.info("profile przeniesione: %s → %s (%d plików)", src, dst, len(files))

@@ -169,6 +169,13 @@ def _valid_es(es: str) -> bool:
     return bool(re.fullmatch(r"[A-Za-z0-9_-]{1,40}", es or ""))
 
 
+def _is_image(data: bytes) -> bool:
+    """Grafiki zapisywane są jako *.png, ale część źródeł daje WebP / JPEG — przeglądarka
+    i telefon pokazują je bez względu na rozszerzenie."""
+    return (data.startswith(b"\x89PNG\r\n\x1a\n") or data.startswith(b"\xff\xd8\xff")
+            or (data[:4] == b"RIFF" and data[8:12] == b"WEBP") or data[:6] in (b"GIF87a", b"GIF89a"))
+
+
 def server_put(es: str, fname: str, data: bytes) -> tuple[int, str]:
     """Zapis grafiki z komputera. (kod HTTP, opis)."""
     import os
@@ -179,8 +186,8 @@ def server_put(es: str, fname: str, data: bytes) -> tuple[int, str]:
     stem = fname[: -len(f".{kind}.png")] if kind else ""
     if not kind or not stem or "/" in fname or "\\" in fname or fname.startswith("."):
         return 400, "zła nazwa pliku"
-    if not data.startswith(b"\x89PNG\r\n\x1a\n") or len(data) > MAX_FILE:
-        return 400, "to nie jest obraz PNG"
+    if not _is_image(data) or len(data) > MAX_FILE:
+        return 400, "to nie jest obraz (PNG, JPEG, WebP, GIF)"
     ids = _games_by_thumb(es).get(stem)
     if not ids:
         return 404, "serwer nie ma takiej gry"

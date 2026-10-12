@@ -156,6 +156,9 @@ def root_id(root: Path, create: bool) -> str:
         return ""
 
 
+MOVED_MARK = ".emustart-moved"      # folder profili przeniesiony do katalogu serwera (srvadmin)
+
+
 class SmbFs:
     """Folder profili przez SMB (albo dysk lokalny)."""
 
@@ -164,11 +167,24 @@ class SmbFs:
     def __init__(self, root: Path):
         self.root = Path(root)
 
+    def _usable(self) -> str:
+        """'' = folder do użycia; inaczej powód (brak folderu, przeniesiony na serwer)."""
+        if str(self.root) in ("", "."):
+            return "folder profili nie jest ustawiony"
+        if (self.root / MOVED_MARK).exists():
+            return "folder profili przeniesiony na serwer EmuStart — połącz się z serwerem"
+        return ""
+
     def _p(self, rel: str) -> Path:
+        why = self._usable()
+        if why:
+            raise OSError(why)               # nigdy zapisu do „.” ani do starego, przeniesionego folderu
         r = clean_rel(rel)
         return self.root / r if r else self.root
 
     def online(self) -> bool:
+        if self._usable():
+            return False
         try:
             self.root.mkdir(parents=True, exist_ok=True)
             return self.root.is_dir()
