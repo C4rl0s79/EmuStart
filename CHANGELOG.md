@@ -8,6 +8,31 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.34.0] — 2026-10-12
+
+Zakres: serwer (`emustart/tls.py`, `server.py`, `remote.py`, `main.py`), klient na Windows
+(`netsrc.py`, `nasfs.py`, `logos.py`, `api.py`), aplikacja na Androida (`Net.kt`,
+`Server.kt`, `Prefs.kt`, `Bridge.kt`). Pierwszy krok do dostępu spoza Tailscale.
+
+### Dodane
+- **Port szyfrowany serwera (HTTPS, domyślnie 8741)** obok zwykłego. Serwer tworzy przy
+  pierwszym starcie własny certyfikat (EC P-256, `server\tls-cert.pem`); urządzenia ufają mu
+  po odcisku SHA-256 zapamiętanym przy parowaniu (przypięcie), więc HTTPS działa także pod
+  gołym adresem IP. Uzgadnianie TLS w wątku połączenia — obcy klient nie blokuje serwera.
+  Port: `server_tls_port` w ustawieniach serwera.
+- **Lista adresów serwera i automatyczny wybór.** `/v1/info` i odpowiedzi parowania podają
+  adresy serwera (sieć lokalna, Tailscale; zwykły i szyfrowany) oraz odcisk certyfikatu.
+  Komputer i telefon sprawdzają je równolegle i biorą najlepszy działający (sieć lokalna →
+  Tailscale → publiczny, zwykły port przed szyfrowanym), bez czekania na nieosiągalne;
+  ponowny wybór co 5 minut i po błędzie połączenia.
+- Biblioteka `cryptography` w EmuStart.exe (certyfikat serwera).
+
+### Bezpieczeństwo
+- Adres HTTPS bez zapamiętanego odcisku nie jest używany; niezgodny certyfikat = odmowa
+  połączenia z komunikatem „połącz urządzenie z serwerem ponownie”.
+- Adresy nauczone od serwera komputer trzyma w osobnym pliku `data\serwer-adresy.json`
+  (nie w `config.json`).
+
 ## [0.33.0] — 2026-10-12
 
 Zakres: parowanie urządzeń (`emustart/devices.py`, `remote.py`, `server.py`, `netsrc.py`,

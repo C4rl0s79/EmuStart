@@ -408,6 +408,8 @@ class Bridge(private val act: MainActivity) {
                     var u = d.getString(k).trim()
                     if (u.isNotEmpty() && !u.startsWith("http")) u = "http://$u"
                     if (u.isNotEmpty() && !Regex(":\\d+$").containsMatchIn(u.removePrefix("http://").removePrefix("https://"))) u += ":8740"
+                    // inny serwer: adresy i certyfikat poprzedniego nie obowiązują (nauczy się od nowa)
+                    if (u.trimEnd('/') != prefs.serverUrl) { prefs.serverEndpoints = ""; prefs.serverFp = ""; server.forgetBase() }
                     prefs.serverUrl = u; systemsCache = null
                 }
                 k == "server_key" -> { prefs.serverKey = d.getString(k); systemsCache = null }
@@ -499,6 +501,7 @@ class Bridge(private val act: MainActivity) {
             if (!d.optBoolean("ok")) return JSONObject().put("ok", false).put("reason", d.optString("reason", "Serwer odrzucił kod."))
             prefs.serverUrl = url
             prefs.serverKey = d.getString("key")
+            server.learn(d)                        // adresy serwera i odcisk certyfikatu (HTTPS)
             systemsCache = null
             online = true
             JSONObject().put("ok", true).put("server", d.optString("server")).put("url", url)

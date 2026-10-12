@@ -1367,6 +1367,7 @@ class Api:
             return r
         self._cfg["server_url"], self._cfg["server_key"] = r["url"], r["key"]
         config.save(self._cfg)
+        netsrc.learn(self._cfg, r)                 # adresy serwera i odcisk certyfikatu
         netsrc._info.clear()
         nasfs.reset()
         return {"ok": True, "server": r.get("server", ""), "url": r["url"]}
@@ -1399,6 +1400,7 @@ class Api:
         if st == "approved":
             self._cfg["server_url"], self._cfg["server_key"] = j["url"], r["key"]
             config.save(self._cfg)
+            netsrc.learn(self._cfg, r)
             netsrc._info.clear()
             nasfs.reset()
         if st in ("approved", "denied", "expired"):

@@ -293,7 +293,7 @@ def push_to_server(cfg: dict, only: list | None = None) -> int:
                 q = {"es": es, "logo": logo, "glow": "1" if glow else "0", "name": name}
                 if logo == "custom":
                     q["ext"] = f.suffix.lower().lstrip(".")
-                c = http.client.HTTPConnection(ep[0], ep[1], timeout=20)
+                c = netsrc.conn(ep[0], ep[1], 20)
                 try:
                     c.request("PUT", "/v1/system?" + urllib.parse.urlencode(q), body=data,
                               headers={"Authorization": f"Bearer {ep[2]}"})

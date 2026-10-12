@@ -8,13 +8,20 @@ w każdym innym przypadku (brak serwera, brak gry, inny rozmiar, błąd) jak dot
 
 `RemoteFile` udaje ścieżkę źródła w partial/cache; `open_src()` otwiera ją
 jako plik do czytania (seek/read), każdy uchwyt = własne połączenie HTTP/1.1.
+
+Adresy serwera (0.34): serwer podaje w /v1/info listę adresów (sieć lokalna, Tailscale,
+zwykły port i szyfrowany) i odcisk swojego certyfikatu. Klient sprawdza je równolegle
+i bierze najlepszy działający (sieć lokalna → Tailscale → publiczny; w obrębie rodzaju
+zwykły port przed szyfrowanym). HTTPS — z przypiętym odciskiem (`conn`).
 """
 
 from __future__ import annotations
 
+import hashlib
 import http.client
 import json
 import logging
+import ssl
 import threading
 import time
 import urllib.parse
@@ -28,8 +35,41 @@ TIMEOUT = 30
 INFO_TTL = 60               # wynik sprawdzenia serwera ważny tyle s
 LAN_RTT = 0.004             # odpowiedź serwera szybsza = ta sama sieć lokalna
 
+BEST_TTL = 300              # wybrany adres serwera ważny tyle s (potem ponowne sprawdzenie)
+PROBE_TIMEOUT = 2.5
+KIND_ORDER = {"lan": 0, "tailscale": 1, "public": 2}
+
 _info: dict = {}
 _info_lock = threading.Lock()
+_PINS: dict = {}            # (host, port) → odcisk certyfikatu serwera (HTTPS)
+_best: dict = {}
+_best_lock = threading.Lock()
+_learned: dict = {}         # pamięć serwer-adresy.json
+
+
+class PinnedHTTPS(http.client.HTTPSConnection):
+    """HTTPS do serwera EmuStart: zaufanie = zgodny odcisk certyfikatu (emustart/tls.py)."""
+
+    def __init__(self, host: str, port: int, fp: str, timeout: float = TIMEOUT):
+        from emustart import tls
+        super().__init__(host, port, timeout=timeout, context=tls.client_context())
+        self.fp = fp
+
+    def connect(self):
+        super().connect()
+        der = self.sock.getpeercert(binary_form=True) or b""
+        if not self.fp or hashlib.sha256(der).hexdigest() != self.fp:
+            self.close()
+            raise ssl.SSLError(f"certyfikat serwera {self.host} nie zgadza się z zapamiętanym — "
+                               "połącz urządzenie z serwerem ponownie")
+
+
+def conn(host: str, port: int, timeout: float = TIMEOUT) -> http.client.HTTPConnection:
+    """Połączenie z serwerem: HTTPS z przypiętym certyfikatem, gdy ten adres jest szyfrowany."""
+    fp = _PINS.get((host, port))
+    if fp is not None:
+        return PinnedHTTPS(host, port, fp, timeout)
+    return http.client.HTTPConnection(host, port, timeout=timeout)
 
 
 class RemoteFile:
@@ -57,7 +97,7 @@ class RemoteReader:
 
     def _connect(self) -> http.client.HTTPConnection:
         if self.conn is None:
-            self.conn = http.client.HTTPConnection(self.f.host, self.f.port, timeout=TIMEOUT)
+            self.conn = conn(self.f.host, self.f.port, TIMEOUT)
         return self.conn
 
     def seek(self, off: int, whence: int = 0) -> int:
@@ -127,18 +167,170 @@ def is_remote(src) -> bool:
 
 
 # ── serwer ──
-def endpoint(cfg: dict) -> tuple[str, int, str] | None:
-    """(host, port, klucz) z ustawień albo None, gdy serwer nie jest skonfigurowany."""
-    url = (cfg.get("server_url") or "").strip()
-    key = (cfg.get("server_key") or "").strip()
-    if not url or not key:
+def _split(url: str) -> tuple[str, str, int] | None:
+    """(schemat, host, port) adresu serwera."""
+    url = (url or "").strip()
+    if not url:
         return None
     if "://" not in url:
         url = "http://" + url
     u = urllib.parse.urlsplit(url)
     if not u.hostname:
         return None
-    return u.hostname, u.port or 8740, key
+    return u.scheme, u.hostname, u.port or (8741 if u.scheme == "https" else 8740)
+
+
+def _kind(host: str) -> int:
+    from emustart.remote import kind_of
+    return KIND_ORDER.get(kind_of(host), 2)
+
+
+def candidates(cfg: dict) -> list:
+    """Adresy serwera do sprawdzenia: wpisany + podane przez serwer. HTTPS tylko z odciskiem."""
+    fp = server_fp(cfg)
+    out, seen = [], set()
+    for url in [cfg.get("server_url") or ""] + [e.get("url", "") for e in _store().get("endpoints") or []]:
+        sp = _split(url)
+        if not sp or (sp[0] == "https" and not fp) or sp in seen:
+            continue
+        seen.add(sp)
+        out.append(sp)
+    return out
+
+
+def _probe(sp, key: str, fp: str) -> float | None:
+    scheme, host, port = sp
+    t = time.monotonic()
+    if scheme == "https":
+        c = PinnedHTTPS(host, port, fp, PROBE_TIMEOUT)
+    else:
+        c = http.client.HTTPConnection(host, port, timeout=PROBE_TIMEOUT)
+    try:
+        c.request("GET", "/v1/info", headers=auth_headers(key))
+        r = c.getresponse()
+        r.read()
+        return time.monotonic() - t if r.status == 200 else None
+    except (OSError, http.client.HTTPException):
+        return None
+    finally:
+        c.close()
+
+
+def best(cfg: dict, fresh: bool = False):
+    """Najlepszy działający adres serwera (schemat, host, port); bez sprawdzania, gdy jest jeden."""
+    cands = candidates(cfg)
+    if len(cands) <= 1:
+        return cands[0] if cands else None
+    key, fp = cfg.get("server_key") or "", server_fp(cfg)
+    sig = (tuple(cands), key, fp)
+    with _best_lock:
+        if not fresh and _best.get("sig") == sig and time.monotonic() - _best.get("t", 0) < BEST_TTL:
+            return _best["sp"]
+    res: dict = {}
+    done = threading.Condition()
+
+    def rank(sp):
+        return _kind(sp[1]), sp[0] == "https"
+
+    def one(sp):
+        r = _probe(sp, key, fp)
+        with done:
+            res[sp] = r
+            done.notify_all()
+
+    for sp in cands:
+        threading.Thread(target=one, args=(sp,), daemon=True).start()
+    # koniec, gdy odpowiedział adres, od którego żaden niesprawdzony nie byłby lepszy
+    # (sieć lokalna odpowiada w milisekundach — nie czekamy na nieosiągalne)
+    end = time.monotonic() + PROBE_TIMEOUT + 1
+    with done:
+        while True:
+            ok = [sp for sp in cands if res.get(sp) is not None]
+            waiting = [sp for sp in cands if sp not in res]
+            if not waiting or (ok and min(map(rank, ok)) <= min(map(rank, waiting))):
+                break
+            left = end - time.monotonic()
+            if left <= 0:
+                break
+            done.wait(left)
+        ok = [sp for sp in cands if res.get(sp) is not None]
+        pick = min(ok, key=lambda sp: (rank(sp), res[sp])) if ok else cands[0]
+        res = dict(res)
+    with _best_lock:
+        if _best.get("sp") != pick:
+            seen = ", ".join(f"{s[0]}://{s[1]}:{s[2]} " + (f"{1000 * res[s]:.0f} ms" if res.get(s) is not None else "brak")
+                             for s in cands)
+            log.info("serwer: wybrany adres %s://%s:%d (%s)", pick[0], pick[1], pick[2], seen)
+        _best.update(sig=sig, t=time.monotonic(), sp=pick)
+    return pick
+
+
+def forget_best() -> None:
+    """Adres przestał odpowiadać — następne zapytanie sprawdzi wszystkie od nowa."""
+    with _best_lock:
+        _best.clear()
+
+
+def endpoint(cfg: dict) -> tuple[str, int, str] | None:
+    """(host, port, klucz) najlepszego adresu serwera albo None, gdy serwer nie jest ustawiony."""
+    key = (cfg.get("server_key") or "").strip()
+    if not key:
+        return None
+    sp = best(cfg)
+    if not sp:
+        return None
+    scheme, host, port = sp
+    if scheme == "https":
+        _PINS[(host, port)] = server_fp(cfg)
+    return host, port, key
+
+
+def _store_path():
+    from emustart import paths
+    return paths.DATA / "serwer-adresy.json"
+
+
+def _store() -> dict:
+    """Adresy i odcisk certyfikatu nauczone od serwera (osobny plik — nie config.json)."""
+    with _best_lock:
+        if "store" not in _learned:
+            try:
+                _learned["store"] = json.loads(_store_path().read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                _learned["store"] = {}
+        return _learned["store"]
+
+
+def server_fp(cfg: dict) -> str:
+    return cfg.get("server_fp") or _store().get("fp") or ""
+
+
+def learn(cfg: dict, d: dict) -> bool:
+    """Adresy i odcisk certyfikatu z odpowiedzi serwera → serwer-adresy.json. True = zmienione."""
+    eps = [e for e in (d.get("endpoints") or []) if isinstance(e, dict) and e.get("url")]
+    tls = d.get("tls") if isinstance(d.get("tls"), dict) else {}
+    fp = tls.get("fp") or ""
+    st = dict(_store())
+    changed = False
+    if eps and eps != st.get("endpoints"):
+        st["endpoints"] = eps
+        changed = True
+    if fp and fp != st.get("fp"):
+        if st.get("fp"):
+            log.warning("serwer ma nowy certyfikat (%s… → %s…)", st["fp"][:12], fp[:12])
+        st["fp"] = fp
+        changed = True
+    if changed:
+        with _best_lock:
+            _learned["store"] = st
+        try:
+            path = _store_path()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(st, ensure_ascii=False, indent=1), encoding="utf-8")
+        except OSError as ex:
+            log.info("adresy serwera: %s", ex)
+        forget_best()
+    return changed
 
 
 def auth_headers(key: str) -> dict:
@@ -150,7 +342,7 @@ def auth_headers(key: str) -> dict:
 def _request(ep, path: str, timeout: float = 5) -> tuple[int, bytes, float]:
     host, port, key = ep
     t = time.monotonic()
-    c = http.client.HTTPConnection(host, port, timeout=timeout)
+    c = conn(host, port, timeout)
     try:
         c.request("GET", path, headers=auth_headers(key))
         r = c.getresponse()
@@ -175,10 +367,12 @@ def info(cfg: dict, fresh: bool = False) -> dict:
             res = {"ok": False, "reason": f"serwer odpowiedział {st}"}
         else:
             d = json.loads(body)
+            learn(cfg, d)
             res = {"ok": True, "name": d.get("name", ""), "version": d.get("version", ""),
                    "features": d.get("features") or [], "nas_id": d.get("nas_id", ""), "rtt": rtt}
     except (OSError, http.client.HTTPException, ValueError) as ex:
         res = {"ok": False, "reason": f"brak połączenia z {ep[0]}:{ep[1]} ({ex})"}
+        forget_best()
     with _info_lock:
         _info.update(ep=ep, t=time.monotonic(), res=res)
     return res
@@ -247,7 +441,7 @@ def push_roots(cfg: dict) -> list:
     if not rels:
         return []
     body = json.dumps({"roots": rels}).encode("utf-8")
-    c = http.client.HTTPConnection(ep[0], ep[1], timeout=20)
+    c = conn(ep[0], ep[1], 20)
     try:
         c.request("PUT", "/v1/roots", body=body, headers={"Authorization": f"Bearer {ep[2]}",
                                                           "Content-Type": "application/json"})
@@ -295,7 +489,8 @@ def pair(url: str, code: str, name: str, cls: str = "pc") -> dict:
         c.close()
     if not d.get("ok"):
         return {"ok": False, "reason": d.get("reason") or d.get("error") or "Serwer odrzucił kod."}
-    return {"ok": True, "key": d["key"], "url": f"http://{u.hostname}:{u.port or 8740}", "server": d.get("server", "")}
+    return {"ok": True, "key": d["key"], "url": f"http://{u.hostname}:{u.port or 8740}", "server": d.get("server", ""),
+            "endpoints": d.get("endpoints") or [], "tls": d.get("tls")}
 
 
 def _post(url: str, path: str, data: dict, key: str = "") -> dict:

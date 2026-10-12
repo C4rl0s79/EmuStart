@@ -190,10 +190,37 @@ def _server_mode() -> None:
             if time.monotonic() >= end:
                 raise
             time.sleep(0.5)
+    remote.PORT = port
+    _start_tls(api, port, log)
     log.info("serwer %s: API dla Androida na porcie %d; administracja: %s/index.html?dev",
              __import__("emustart").__version__, port, base.replace("0.0.0.0", "127.0.0.1"))
     while True:
         time.sleep(3600)
+
+
+def _start_tls(api, port: int, log) -> None:
+    """Port szyfrowany (domyślnie zwykły + 1) z własnym certyfikatem serwera (emustart/tls.py)."""
+    import time
+    from emustart import paths, remote, tls
+    try:
+        got = tls.ensure(paths.SERVER)
+        if not got:
+            return
+        cert, key, fp = got
+        tport = int(api._cfg.get("server_tls_port") or port + 1)
+        end = time.monotonic() + (30 if "--restarted" in sys.argv else 0)
+        while True:
+            try:
+                tport = server.start_tls(tport, tls.server_context(cert, key), bind="0.0.0.0")
+                break
+            except OSError:
+                if time.monotonic() >= end:
+                    raise
+                time.sleep(0.5)
+        remote.TLS = {"port": tport, "fp": fp}
+        log.info("port szyfrowany %d (certyfikat %s…)", tport, fp[:16])
+    except Exception:
+        log.exception("port szyfrowany")
 
 
 def _log_versions() -> None:

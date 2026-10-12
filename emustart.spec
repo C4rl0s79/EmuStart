@@ -66,6 +66,10 @@ try:
     hiddenimports += collect_submodules("segno")
 except Exception:
     pass
+# certyfikat portu szyfrowanego serwera (emustart/tls.py, import leniwy)
+hiddenimports += ["cryptography.x509", "cryptography.x509.oid", "cryptography.hazmat.primitives.hashes",
+                  "cryptography.hazmat.primitives.serialization",
+                  "cryptography.hazmat.primitives.asymmetric.ec"]
 
 a = Analysis(
     ["main.py"],

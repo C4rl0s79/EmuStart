@@ -51,8 +51,14 @@ def _isolated_app(tmp_path_factory, monkeypatch):
     monkeypatch.setattr(paths, "DEFAULT_CACHE", base / "cache")
     monkeypatch.setattr(paths, "RUN_TMP", base / "run")
     monkeypatch.setattr(paths, "SERVER", base / "server")
-    from emustart import devices
+    from emustart import devices, netsrc, remote
     devices.reset_cache()
+    netsrc._learned.clear()
+    netsrc.forget_best()
+    netsrc._PINS.clear()
+    monkeypatch.setattr(remote, "TLS", {})
+    from emustart import srvadmin            # adresy tego komputera — testy podają je same
+    monkeypatch.setattr(srvadmin, "_addresses", lambda: [])
     monkeypatch.setattr(profiles, "LOCAL", base / "profiles")
     if "/media/" in getattr(server, "ROUTES", {}):
         monkeypatch.setitem(server.ROUTES, "/media/", base / "data" / "media")

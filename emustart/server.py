@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import mimetypes
+import ssl
 import threading
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -133,6 +134,41 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Referrer-Policy", "no-referrer")
         self.end_headers()
         self.wfile.write(data)
+
+
+class _TLSServer(ThreadingHTTPServer):
+    """Port szyfrowany (emustart/tls.py). Uzgadnianie TLS w wątku połączenia — wolny albo
+    obcy klient (skaner portów) nie blokuje przyjmowania kolejnych."""
+    daemon_threads = True
+
+    def __init__(self, addr, handler, ctx: ssl.SSLContext):
+        super().__init__(addr, handler)
+        self.ctx = ctx
+
+    def get_request(self):
+        sock, addr = self.socket.accept()
+        return self.ctx.wrap_socket(sock, server_side=True, do_handshake_on_connect=False), addr
+
+    def finish_request(self, request, client_address):
+        try:
+            request.settimeout(15)
+            request.do_handshake()
+        except (OSError, ssl.SSLError):
+            return                                   # nie TLS, zły klient, przerwane
+        super().finish_request(request, client_address)
+
+    def handle_error(self, request, client_address):
+        pass                                         # zerwane połączenia z internetu — bez śladu w konsoli
+
+
+def start_tls(port: int, ctx: ssl.SSLContext, dev_api=None, bind: str = "0.0.0.0") -> int:
+    """HTTPS obok zwykłego portu (tryb serwera). Zwraca numer portu."""
+    global DEV_API
+    if dev_api is not None:
+        DEV_API = dev_api
+    srv = _TLSServer((bind, port), _Handler, ctx)
+    threading.Thread(target=srv.serve_forever, daemon=True, name="https").start()
+    return srv.server_address[1]
 
 
 def start(port: int = 0, dev_api=None, bind: str = "127.0.0.1") -> str:
