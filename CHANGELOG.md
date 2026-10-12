@@ -8,6 +8,44 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.37.0] — 2026-10-12
+
+Zakres: serwer (`emustart/enroll.py` — nowy, `devices.py`, `remote.py`, `public.py`,
+`server.py`, `srvadmin.py`), klient na Windows (`emustart/keystore.py` — nowy, `netsrc.py`,
+`nasfs.py`, `api.py`), interfejs (`web/app.js`), panel serwera (`web/server.*`), aplikacja na
+Androida (`DeviceKey.kt` — nowy, `Server.kt`, `Bridge.kt`, `Prefs.kt`).
+
+### Dodane
+- **Nowe urządzenie przez internet, znając tylko adres serwera** (np. tunelu). Ustawienia →
+  *Dołącz przez internet* → *Mam konto* / *Nowe konto*. Urządzenie tworzy własną parę
+  kluczy EC P-256 — klucz prywatny nie opuszcza urządzenia: **Windows — TPM** (gdy jest
+  i działa), bez niego klucz zaszyfrowany **DPAPI**; **Android — Keystore** (StrongBox, gdy
+  telefon go ma); przyszły Linux — plik tylko dla właściciela. Serwer zna tylko klucz
+  publiczny.
+- **Zatwierdzanie z kodem weryfikacyjnym** (z klucza publicznego — ten sam na obu
+  ekranach). Prośbę widać w aplikacji EmuStart przy otwarciu (i co minutę) oraz w panelu
+  serwera: czas, IP, nazwa, rodzaj urządzenia, konto, kod. Zatwierdzenie *z grami* albo
+  *tylko zapisy i profil*. Nowe konto — tylko administrator; „Mam konto” — inne urządzenie
+  tego konta, a gdy konto nie ma żadnego — administrator. Prośba czeka 24 h (na dysku
+  serwera — przetrwa restart i aktualizację), urządzenie sprawdza jej stan samo.
+- **Logowanie podpisem:** wyzwanie od serwera → podpis kluczem urządzenia → token sesji
+  (1 h, odnawiany sam; po restarcie serwera — nowe logowanie). Skopiowane dane aplikacji nie
+  wystarczą do podszycia się bez klucza prywatnego z tego urządzenia.
+- **Konta i role:** *administrator* (urządzenie zero — sparowane kodem z panelu; rolę nadaje
+  panel) i *użytkownik* — tylko swoje konto: folder profilu, menedżer zapisów, lista
+  profili; gry z serwera — tylko z uprawnieniem; bez zmian w ustawieniach serwera.
+  Dla urządzenia z kluczem PIN profilu nie jest potrzebny na serwerze (PIN — lokalnie).
+- Panel serwera: sekcja *Nowe instalacje z internetu* (Zatwierdź z grami / Bez gier /
+  Odrzuć), kolumna *Konto / rola*, nadawanie i odbieranie roli administratora.
+- API: `/v1/enroll/request|poll` i `/v1/auth/challenge|token` — bez klucza (także przez
+  tunel i port publiczny), `/v1/enroll/pending|decide` — z kluczem.
+
+### Bezpieczeństwo
+- Wyzwania logowania jednorazowe (kilka naraz na urządzenie), zły podpis liczy się do blokady
+  adresu; unieważnienie urządzenia kończy jego sesje.
+- Urządzenia sparowane przed 0.37 działają jak dotąd (pełny dostęp) — przejście na klucze
+  urządzeń, wyłączenie wspólnego klucza serwera i PIN tylko lokalnie: 0.38.
+
 ## [0.36.1] — 2026-10-12
 
 ### Poprawione

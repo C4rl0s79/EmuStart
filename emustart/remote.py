@@ -177,6 +177,53 @@ def pair_flow(handler, op: str) -> None:
     return _json(handler, {"ok": False, "reason": "nieznana operacja"}, 404)
 
 
+def enroll_flow(handler, op: str) -> None:
+    """Nowe instalacje i logowanie podpisem (emustart/enroll.py):
+    POST /v1/enroll/request {mode, account, name, class, version, pubkey}   — bez klucza
+    POST /v1/enroll/poll {rid}                                               — bez klucza
+    POST /v1/auth/challenge {device}, /v1/auth/token {device, nonce, sig}    — bez klucza
+    POST /v1/enroll/pending, /v1/enroll/decide {id, allow, games}            — z kluczem"""
+    from emustart import enroll, public
+    d = _body(handler)
+    ip = public.client_ip(handler)
+    if op == "request":
+        r = enroll.request(str(d.get("mode", "")), str(d.get("account", "")), str(d.get("name", "")),
+                           str(d.get("class", "")), ip, str(d.get("version", "")), str(d.get("pubkey", "")),
+                           profile_names())
+        return _json(handler, r, 200 if r.get("ok") else 400)
+    if op == "poll":
+        return _json(handler, enroll.poll(str(d.get("rid", ""))))
+    if op == "challenge":
+        r = enroll.challenge(str(d.get("device", "")))
+        return _json(handler, r, 200 if r.get("ok") else 403)
+    if op == "token":
+        r = enroll.token(str(d.get("device", "")), str(d.get("nonce", "")), str(d.get("sig", "")))
+        if not r.get("ok"):
+            public._fail(ip)
+        return _json(handler, r, 200 if r.get("ok") else 403)
+    if not authorized(handler):
+        return _json(handler, {"ok": False, "reason": "brak lub zły klucz"}, 401)
+    viewer = getattr(handler, "device", "")
+    if op == "pending":
+        return _json(handler, {"ok": True, "requests": enroll.pending(viewer)})
+    if op == "decide":
+        return _json(handler, enroll.decide(str(d.get("id", "")), bool(d.get("allow")), bool(d.get("games")),
+                                            viewer, create_account))
+    return _json(handler, {"ok": False, "reason": "nieznana operacja"}, 404)
+
+
+def create_account(name: str) -> None:
+    """Nowe konto zatwierdzone przez administratora — folder profilu (bez PIN-u na serwerze:
+    PIN jest lokalny, dostęp daje klucz urządzenia)."""
+    from emustart import nasfs
+    if NAS_ROOT is None:
+        return
+    fs = nasfs.SmbFs(NAS_ROOT)
+    if not fs.exists(f"{name}/emustart.json"):
+        fs.write(f"{name}/emustart.json", b"{}")
+    log.info("nowe konto %s", name)
+
+
 def _seen(handler) -> None:
     """Klient z kluczem — do listy urządzeń w panelu serwera."""
     from emustart import srvadmin
@@ -215,6 +262,8 @@ def handle(handler) -> None:
         if parts and parts[0] == "nas":
             return _nas(handler, "GET", parts[1:])
         if parts == ["find"]:
+            if not _games_ok(handler):
+                return _json(handler, {"error": "To konto nie pobiera gier z serwera."}, 403)
             return _find(handler)
         if parts == ["media", "have"]:                 # grafiki gier, które serwer ma (artsync)
             from emustart import artsync
@@ -260,6 +309,9 @@ def handle(handler) -> None:
             d["kind"] = info["kind"]
             d["exts"] = sorted(systems.ext_set(info))          # ROM w rozpakowanym ZIP-ie
             return _json(handler, d)
+        if len(parts) >= 4 and parts[0] == "games" and parts[1].isdigit() and parts[2] == "file" \
+                and not _games_ok(handler):
+            return _json(handler, {"error": "To konto nie pobiera gier z serwera."}, 403)
         if len(parts) >= 4 and parts[0] == "games" and parts[1].isdigit() and parts[2] == "file":
             return _send_file(handler, int(parts[1]), "/".join(parts[3:]))
         return _json(handler, {"error": "nieznany adres"}, 404)
@@ -311,6 +363,18 @@ def handle_write(handler, method: str) -> None:
     _seen(handler)
     path = urllib.parse.unquote(urllib.parse.urlsplit(handler.path).path)
     parts = [p for p in path.split("/") if p][1:]
+    if method == "PUT" and parts in (["system"], ["roots"], ["media"]) and not _admin(handler):
+        n = int(handler.headers.get("Content-Length") or 0)
+        if n:
+            handler.rfile.read(min(n, 10 << 20))
+        return _json(handler, {"error": "Tylko urządzenie administratora."}, 403)
+    if method == "PUT" and len(parts) == 2 and parts[0] == "profiles" and _scope(handler):
+        name = (_savemgr_args(handler).get("name") or "").strip()
+        if parts[1] == "create" or not _scope_ok(handler, name):
+            n = int(handler.headers.get("Content-Length") or 0)
+            if n:
+                handler.rfile.read(min(n, 1 << 16))
+            return _json(handler, {"error": "To urządzenie ma dostęp tylko do swojego konta."}, 403)
     if method == "PUT" and parts == ["system"]:
         return _system_put(handler)
     if method == "PUT" and parts == ["roots"]:
@@ -462,6 +526,8 @@ def _nas(handler, method: str, parts: list) -> None:
     if not rel and op == "scan":
         return _json(handler, {"error": "cały folder profili jest niedostępny"}, 403)
     for r in (rel, arg("backup")):
+        if r and not _scope_ok(handler, r.replace("\\", "/").split("/")[0]):
+            return _json(handler, {"error": "To urządzenie ma dostęp tylko do swojego konta."}, 403)
         if r and not _profile_ok(handler, r.replace("\\", "/").split("/")[0]):
             return _json(handler, {"error": "profil wymaga PIN-u", "pin": True}, 403)
     if method == "GET" and op == "scan":
@@ -469,7 +535,8 @@ def _nas(handler, method: str, parts: list) -> None:
         return _json(handler, {"files": files})
     if method == "GET" and op == "list":
         try:
-            ents = [[e.name, e.is_dir()] for e in os.scandir(target) if e.name != pinauth.AUTH]
+            ents = [[e.name, e.is_dir()] for e in os.scandir(target) if e.name != pinauth.AUTH
+                    and (rel or _scope_ok(handler, e.name))]
         except OSError:
             return _json(handler, {"error": "nie ma"}, 404)
         return _json(handler, {"entries": ents})
@@ -547,10 +614,37 @@ def _secret() -> str:
     return cfg["profile_secret"]
 
 
+def _scope(handler) -> str:
+    """Konto, do którego ogranicza się urządzenie zapytania ('' = wszystkie: administrator,
+    urządzenia sprzed 0.37, wspólny klucz serwera)."""
+    from emustart import devices
+    return devices.account_of(getattr(handler, "device", ""))
+
+
+def _scope_ok(handler, profile: str) -> bool:
+    sc = _scope(handler)
+    return not sc or profile.lower() == sc.lower()
+
+
+def _admin(handler) -> bool:
+    from emustart import devices
+    return devices.is_admin(getattr(handler, "device", ""))
+
+
+def _games_ok(handler) -> bool:
+    from emustart import devices
+    did = getattr(handler, "device", "")
+    return not did or devices.games_ok(did)
+
+
 def _profile_ok(handler, profile: str) -> bool:
     """Profil bez PIN-u — dostępny (stare profile, do czasu ustawienia PIN-u);
-    z PIN-em — tylko z tokenem tego profilu."""
+    z PIN-em — tylko z tokenem tego profilu. Urządzenie przypisane do konta (0.37): tylko
+    swoje konto, a klucz urządzenia zastępuje PIN serwera (PIN jest lokalny)."""
     from emustart import nasfs, pinauth
+    sc = _scope(handler)
+    if sc:
+        return bool(profile) and profile.lower() == sc.lower()
     if not profile or profile.startswith((".", "_")) or NAS_ROOT is None:
         return True
     rec = pinauth.read(nasfs.SmbFs(NAS_ROOT), profile)
@@ -577,7 +671,7 @@ def _profiles_get(handler) -> None:
         return _json(handler, {"error": "serwer nie ma folderu profili"}, 404)
     fs = nasfs.SmbFs(NAS_ROOT)
     return _json(handler, {"profiles": [{"name": n, "pin": pinauth.read(fs, n) is not None}
-                                        for n in profile_names()]})
+                                        for n in profile_names() if _scope_ok(handler, n)]})
 
 
 def _profiles_put(handler, op: str) -> None:
@@ -692,6 +786,8 @@ def _savemgr_catalog(handler) -> None:
         return _json(handler, {"error": str(ex)}, 400)
     if not prof or "/" in prof or not a.get("es") or not a.get("name"):
         return _json(handler, {"error": "brak profile/es/name"}, 400)
+    if not _scope_ok(handler, prof):
+        return _json(handler, {"error": "To urządzenie ma dostęp tylko do swojego konta."}, 403)
     if not _profile_ok(handler, prof):
         return _json(handler, {"error": "profil wymaga PIN-u", "pin": True}, 403)
     stems, serial = _savemgr_game(a["es"], a["name"])
@@ -718,6 +814,8 @@ def _savemgr_copy(handler) -> None:
         return _json(handler, {"error": str(ex)}, 400)
     if not prof or "/" in prof:
         return _json(handler, {"error": "brak profile"}, 400)
+    if not _scope_ok(handler, prof):
+        return _json(handler, {"error": "To urządzenie ma dostęp tylko do swojego konta."}, 403)
     if not _profile_ok(handler, prof):
         return _json(handler, {"error": "profil wymaga PIN-u", "pin": True}, 403)
     out = savemgr.copy(nasfs.SmbFs(NAS_ROOT), prof, src, a.get("platform", ""), a.get("emu", ""),

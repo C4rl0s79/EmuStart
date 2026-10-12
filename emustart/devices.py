@@ -121,7 +121,8 @@ def _add(name: str, cls: str, ip: str, version: str, now: float, by: str = "") -
     devs = _load()
     devs[did] = {"name": (str(name).strip() or "urządzenie")[:40],
                  "class": cls if cls in CLASSES else "pc",
-                 "key": _h(key), "created": now, "last_seen": now, "ip": ip, "version": version}
+                 "key": _h(key), "created": now, "last_seen": now, "ip": ip, "version": version,
+                 "role": "admin"}
     if by:
         devs[did]["approved_by"] = by
     _save()
@@ -223,9 +224,16 @@ def approve_uri(base_url: str, code: str) -> str:
 
 
 def verify(key: str) -> str:
-    """Id urządzenia dla klucza ('' = nieznany / unieważniony)."""
+    """Id urządzenia dla klucza albo tokenu sesji (logowanie podpisem, emustart/enroll.py);
+    '' = nieznany / unieważniony / wygasły."""
     if not key:
         return ""
+    from emustart import enroll
+    did = enroll.token_device(key)
+    if did:
+        with _lock:
+            d = _load().get(did)
+        return did if d and not d.get("revoked") else ""
     h = _h(key)
     with _lock:
         for did, d in _load().items():
@@ -262,7 +270,8 @@ def flush() -> None:
 
 def listing() -> list:
     with _lock:
-        out = [{"id": did, **{k: v for k, v in d.items() if k != "key"}} for did, d in _load().items()]
+        out = [{"id": did, **{k: v for k, v in d.items() if k not in ("key", "pubkey")},
+                "keyed": bool(d.get("pubkey")), "admin": _is_admin(d)} for did, d in _load().items()]
     out.sort(key=lambda d: -d.get("last_seen", 0))
     return out
 
@@ -274,7 +283,78 @@ def revoke(did: str) -> bool:
             return False
         d["revoked"] = time.time()
         _save()
+    from emustart import enroll
+    enroll.drop_tokens(did)
     log.info("unieważniono urządzenie %s", d.get("name"))
+    return True
+
+
+# ── konta i role (emustart/enroll.py) ──
+def _is_admin(d: dict) -> bool:
+    # urządzenia sprzed 0.37 (bez konta i klucza publicznego) — pełny dostęp jak dotąd
+    return d.get("role") == "admin" or (not d.get("account") and not d.get("pubkey"))
+
+
+def is_admin(did: str) -> bool:
+    if not did:
+        return True                    # wspólny klucz serwera / panel
+    with _lock:
+        d = _load().get(did)
+    return bool(d) and not d.get("revoked") and _is_admin(d)
+
+
+def account_of(did: str) -> str:
+    """Konto, do którego urządzenie jest ograniczone ('' = wszystkie)."""
+    if not did:
+        return ""
+    with _lock:
+        d = _load().get(did) or {}
+    return "" if _is_admin(d) else d.get("account", "")
+
+
+def games_ok(did: str) -> bool:
+    with _lock:
+        d = _load().get(did) or {}
+    return _is_admin(d) or bool(d.get("games"))
+
+
+def of_account(account: str) -> list:
+    """Aktywne urządzenia konta."""
+    with _lock:
+        return [did for did, d in _load().items()
+                if not d.get("revoked") and (d.get("account") or "").lower() == account.lower()]
+
+
+def pubkey_of(did: str) -> str:
+    with _lock:
+        d = _load().get(did) or {}
+    return "" if d.get("revoked") else d.get("pubkey", "")
+
+
+def add_keyed(name: str, cls: str, ip: str, version: str, pubkey: str, account: str,
+              role: str = "user", games: bool = False, by: str = "") -> str:
+    """Urządzenie z kluczem publicznym (logowanie podpisem), przypisane do konta."""
+    did = secrets.token_hex(6)
+    now = time.time()
+    with _lock:
+        _load()[did] = {"name": (str(name).strip() or "urządzenie")[:40], "class": cls if cls in CLASSES else "pc",
+                        "pubkey": pubkey, "account": account, "role": role if role in ("admin", "user") else "user",
+                        "games": bool(games), "created": now, "last_seen": now, "ip": ip, "version": version,
+                        "approved_by": by}
+        _save()
+    return did
+
+
+def set_access(did: str, role: str | None = None, games: bool | None = None) -> bool:
+    with _lock:
+        d = _load().get(did)
+        if not d:
+            return False
+        if role in ("admin", "user"):
+            d["role"] = role
+        if games is not None:
+            d["games"] = bool(games)
+        _save()
     return True
 
 

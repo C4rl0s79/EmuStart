@@ -750,6 +750,7 @@ setInterval(async () => {
 
 /* ───────────── menu Start ───────────── */
 function openMenu() {
+  $("menu").querySelector("h2").textContent = "Menu";
   const items = [
     ["Ustawienia", () => openSettings()],
     ["Wygląd (logo, czcionki, kolory)", () => openLook()],
@@ -789,6 +790,91 @@ function menuInput(a) {
   renderMenu();
 }
 
+/* ───────────── nowa instalacja przez internet (konta, klucz urządzenia — emustart/enroll.py) ───────────── */
+function enrollStart() {
+  oskOpen("Adres serwera", S.settings.server_url || "", (url) => {
+    url = url.trim();
+    if (!url) return;
+    S.menu = [["Mam konto", () => enrollAccount(url, "existing")], ["Nowe konto", () => enrollAccount(url, "new")],
+              ["Anuluj", () => {}]];
+    S.menuIdx = 0; S.modal = "menu";
+    $("menu").querySelector("h2").textContent = "Dołączenie do serwera";
+    $("menu").classList.remove("hidden");
+    renderMenu();
+  });
+}
+function enrollAccount(url, mode) {
+  oskOpen(mode === "new" ? "Nazwa nowego konta" : "Nazwa twojego konta", "", async (acc) => {
+    if (!acc.trim()) return;
+    toast("Łączę z serwerem…", 10000);
+    const r = await api().server_enroll(url, mode, acc.trim());
+    if (!r.ok) return toast(r.reason, 7000);
+    enrollWait(r.code, r.account, mode);
+  });
+}
+let enrollTimer = null;
+function enrollWait(code, account, mode) {
+  $("joinQr").innerHTML = ""; $("joinQr").style.display = "none";
+  $("join").querySelector("h2").textContent = mode === "new" ? `Nowe konto „${account}”` : `Konto „${account}” — nowe urządzenie`;
+  $("join").querySelector("p").innerHTML = mode === "new"
+    ? "Czeka na zatwierdzenie przez administratora serwera (aplikacja EmuStart albo panel serwera)."
+    : "Zatwierdź na innym urządzeniu tego konta (albo administrator). Sprawdź, czy kod się zgadza.";
+  $("joinCode").textContent = code;
+  $("joinText").textContent = "Możesz zamknąć to okno albo aplikację — prośba czeka do 24 godzin.";
+  S.modal = "join"; S.joinEnroll = true;
+  $("join").classList.remove("hidden");
+  setHints([["b", "Zamknij (prośba czeka)"], ["x", "Wycofaj prośbę"]]);
+  const tick = async () => {
+    const p = await api().server_enroll_poll();
+    if (p.status === "approved") {
+      enrollStop(); S.settings = await api().get_settings(); await refreshState();
+      toast(`Zatwierdzono — konto „${p.account}” na tym urządzeniu.`, 6000);
+      return openProfiles(true);
+    }
+    if (p.status === "denied") { enrollStop(); return toast("Prośba odrzucona.", 6000); }
+    if (p.status === "expired" || p.status === "none") { enrollStop(); return toast("Prośba wygasła — wyślij ją ponownie.", 6000); }
+  };
+  clearInterval(enrollTimer);
+  enrollTimer = setInterval(tick, 4000);
+  tick();
+}
+function enrollStop(keepTimer) {
+  if (!keepTimer) { clearInterval(enrollTimer); enrollTimer = null; }
+  S.joinEnroll = false;
+  if (S.modal === "join") { S.modal = null; $("join").classList.add("hidden"); show(S.screen); }
+}
+async function enrollResume() {
+  // prośba wysłana wcześniej (aplikacja była zamknięta) — sprawdzenie przy starcie
+  const p = await api().server_enroll_poll().catch(() => null);
+  if (!p || p.status === "none") return;
+  if (p.status === "pending") return enrollWait(p.code, p.account, "existing");
+  if (p.status === "approved") { await refreshState(); toast(`Zatwierdzono — konto „${p.account}”.`, 6000); }
+  else if (p.status === "denied") toast("Prośba o dołączenie została odrzucona.", 6000);
+}
+const enrollSeen = new Set();
+async function enrollCheck() {
+  // prośby, które to urządzenie może zatwierdzić — przy otwarciu aplikacji i co minutę
+  const r = await api().enroll_pending().catch(() => null);
+  const q = (r?.requests || []).find((x) => !enrollSeen.has(x.id));
+  if (!q || S.modal) return;
+  enrollSeen.add(q.id);
+  const kind = { pc: "komputer", phone: "telefon" }[q.class] || q.class;
+  const when = new Date(q.created * 1000).toLocaleString("pl-PL", { dateStyle: "short", timeStyle: "short" });
+  const decide = async (allow, games) => {
+    const x = await api().enroll_decide(q.id, allow, games);
+    toast(x.ok ? (allow ? `Zatwierdzono: ${q.name}` : `Odrzucono: ${q.name}`) : x.reason, 6000);
+    setTimeout(enrollCheck, 1500);
+  };
+  S.menu = [[`Zatwierdź — z grami z serwera`, () => decide(true, true)],
+            [`Zatwierdź — tylko zapisy i profil`, () => decide(true, false)],
+            ["Odrzuć", () => decide(false, false)], ["Później", () => {}]];
+  S.menuIdx = 0; S.modal = "menu";
+  $("menu").querySelector("h2").textContent =
+    `${q.mode === "new" ? "Nowe konto" : "Nowe urządzenie konta"} „${q.account}”: ${q.name} (${kind}) · ${q.ip} · ${when} · kod ${q.code}`;
+  $("menu").classList.remove("hidden");
+  renderMenu();
+}
+
 /* ───────────── dołączenie do serwera z zatwierdzeniem na telefonie ───────────── */
 let joinTimer = null;
 async function joinOpen(url) {
@@ -798,6 +884,9 @@ async function joinOpen(url) {
   if (!r.ok) return toast(r.reason, 7000);
   $("joinQr").innerHTML = r.svg || "";
   $("joinQr").style.display = r.svg ? "" : "none";
+  $("join").querySelector("h2").textContent = "Dołącz do serwera";
+  $("join").querySelector("p").innerHTML = "Na telefonie z EmuStart: <b>Ustawienia → Zatwierdź nowe urządzenie</b> → zeskanuj kod.<br>" +
+    "Albo w panelu serwera: <b>Proszą o dołączenie</b> → Zatwierdź.";
   $("joinCode").textContent = r.pretty;
   const until = Date.now() + 1000 * (r.expires_in || 600);
   S.modal = "join";
@@ -824,6 +913,11 @@ function joinClose() {
   S.modal = null; $("join").classList.add("hidden"); show(S.screen);
 }
 function joinInput(a) {
+  if (S.joinEnroll) {
+    if (a === "x") { api().server_enroll_cancel(); enrollStop(); return toast("Prośba wycofana.", 4000); }
+    if (a === "b" || a === "start") enrollStop();
+    return;
+  }
   if (a === "b" || a === "start") { api().server_join_cancel(); joinClose(); }
 }
 /** Sparowane urządzenie zatwierdza nowe: podgląd prośby (nazwa, rodzaj, adres) → wybór. */
@@ -929,6 +1023,9 @@ function buildSetRowsAndroid() {
               run: () => oskOpen("Kod z panelu serwera", "", async (v) => {
                 if (!v.trim()) return; toast("Łączę z serwerem…", 10000);
                 pairDone(await api().server_pair(v.trim(), S.settings.server_url || "")); }) });
+  rows.push({ k: "Dołącz przez internet (nowa instalacja)", type: "action",
+              fmt: () => (S.settings.enroll ? `czeka na zatwierdzenie — kod ${S.settings.enroll.code}` : "tylko adres serwera, np. emustart.twojadomena.org"),
+              run: () => enrollStart() });
   rows.push({ k: "Zatwierdź nowe urządzenie (kod QR)", type: "action", fmt: () => "nowy komputer: Ustawienia → Dołącz do serwera → zeskanuj jego kod",
               run: async () => { const s = await api().server_scan(); if (!s.ok) return toast(s.reason, 5000); approveFlow(s.text); } });
   rows.push({ k: "Zatwierdź nowe urządzenie (kod)", type: "action", fmt: () => "kod z ekranu nowego urządzenia wpisany ręcznie",
@@ -990,6 +1087,9 @@ function buildSetRows() {
                 S.settings = await api().get_settings(); renderSettings();
                 toast(`Połączono z serwerem ${r.server || r.url} — ten komputer ma własny klucz.`, 5000);
               }) });
+  rows.push({ k: "Dołącz przez internet (nowa instalacja)", type: "action",
+              fmt: () => (S.settings.enroll ? `czeka na zatwierdzenie — kod ${S.settings.enroll.code}` : "tylko adres serwera, np. emustart.twojadomena.org"),
+              run: () => enrollStart() });
   rows.push({ k: "Dołącz do serwera (zatwierdź telefonem)", type: "action",
               fmt: () => "kod na tym ekranie zatwierdzasz sparowanym telefonem albo w panelu serwera",
               run: () => oskOpen("Adres serwera", S.settings.server_url || S.settings.server_url_guess || "", (v) => joinOpen(v.trim())) });
@@ -1405,6 +1505,9 @@ window.addEventListener("pywebviewready", async () => {
   else if (st.setup_needed) openProfiles("setup");      // nowy komputer: kto tu gra
   else if (st.ask_profile) openProfiles(true);
   else show("systems");
+  enrollResume();
+  setTimeout(enrollCheck, 4000);
+  setInterval(() => { if (!S.modal) enrollCheck(); }, 60000);
   // profil zablokowany na tym urządzeniu (PIN zmieniony gdzie indziej / wylogowany)
   api().profile_pin_check().then((pc) => {
     if (pc && pc.state && pc.state !== "ok" && S.screen === "systems") {

@@ -1344,6 +1344,9 @@ class Api:
                 "server_url": cfg.get("server_url", ""),
                 "server_url_guess": netsrc.guess_url(config.rom_roots(cfg)) if not cfg.get("server_url") else "",
                 "server_key": cfg.get("server_key", ""),
+                "server_account": cfg.get("server_account", ""),
+                "enroll": ({k: cfg["enroll_pending"].get(k) for k in ("url", "code", "account", "mode")}
+                           if cfg.get("enroll_pending") else None),
                 "server_games": cfg.get("server_games", True),
                 "server_profiles": cfg.get("server_profiles", True),
                 **{k: bool(cfg.get(k)) for k in self.HIDE_KEYS},
@@ -1414,6 +1417,85 @@ class Api:
     def server_join_cancel(self) -> dict:
         self._join = None
         return {"ok": True}
+
+    # ── nowa instalacja przez internet (emustart/enroll.py, emustart/keystore.py) ──
+    def server_enroll(self, url: str, mode: str, account: str) -> dict:
+        """Nowa instalacja zna tylko adres serwera (np. tunel): klucz urządzenia (TPM, bez niego
+        DPAPI) i prośba o dołączenie — nowe konto albo istniejące. Zatwierdza ją administrator
+        albo inne urządzenie tego konta; stan prośby przetrwa restart (24 h)."""
+        import secrets
+        import socket
+        from emustart import keystore
+        url, account = (url or "").strip(), (account or "").strip()
+        if not url or not account or mode not in ("new", "existing"):
+            return {"ok": False, "reason": "Podaj adres serwera i nazwę konta."}
+        old = self._cfg.get("enroll_pending")
+        if old and (old.get("url") != url or old.get("account") != account or old.get("mode") != mode):
+            self.server_enroll_cancel()
+            old = None
+        if old:
+            name, kind, pem = old["keyname"], old["keykind"], old["pubkey"]
+        else:
+            name = f"EmuStart-{secrets.token_hex(6)}"
+            try:
+                kind, pem = keystore.create(name)
+            except Exception as ex:
+                log.exception("klucz urządzenia")
+                return {"ok": False, "reason": f"Nie udało się utworzyć klucza urządzenia: {ex}"}
+        r = netsrc._post(url, "/v1/enroll/request", {"mode": mode, "account": account, "name": socket.gethostname(),
+                                                     "class": "pc", "version": __version__, "pubkey": pem})
+        if not r.get("ok"):
+            if not old:
+                keystore.delete(name, kind)
+            return {"ok": False, "reason": r.get("reason", "")}
+        self._cfg["enroll_pending"] = {"url": r["url"], "rid": r["rid"], "code": r["pretty"], "account": account,
+                                       "mode": mode, "keyname": name, "keykind": kind, "pubkey": pem,
+                                       "expires": r["expires"]}
+        config.save(self._cfg)
+        log.info("prośba o dołączenie do %s (%s, konto %s, klucz: %s)", r["url"], mode, account, kind)
+        return {"ok": True, "code": r["pretty"], "account": account, "url": r["url"], "key": kind,
+                "expires_in": max(0, r["expires"] - time.time())}
+
+    def server_enroll_poll(self) -> dict:
+        p = self._cfg.get("enroll_pending")
+        if not p:
+            return {"ok": False, "status": "none"}
+        r = netsrc._post(p["url"], "/v1/enroll/poll", {"rid": p["rid"]})
+        st = r.get("status") if r.get("ok") else "error"
+        if st == "approved":
+            self._cfg.update(server_url=p["url"], server_key=netsrc.DEV + r["device"], server_keyname=p["keyname"],
+                             server_keykind=p["keykind"], server_account=r.get("account") or p["account"])
+            self._cfg.pop("enroll_pending", None)
+            config.save(self._cfg)
+            netsrc._info.clear()
+            netsrc.drop_token()
+            netsrc.use_device(self._cfg)
+            nasfs.reset()
+            threading.Thread(target=lambda: netsrc.info(self._cfg, fresh=True), daemon=True,
+                             name="adresy-serwera").start()
+            log.info("dołączono do serwera %s (konto %s)", p["url"], self._cfg["server_account"])
+        elif st in ("denied", "expired"):
+            self.server_enroll_cancel()
+        return {"ok": True, "status": st, "account": p["account"], "code": p["code"], "reason": r.get("reason", "")}
+
+    def server_enroll_cancel(self) -> dict:
+        from emustart import keystore
+        p = self._cfg.pop("enroll_pending", None)
+        if p:
+            keystore.delete(p.get("keyname", ""), p.get("keykind", ""))
+            config.save(self._cfg)
+        return {"ok": True}
+
+    def enroll_pending(self) -> dict:
+        """Prośby o dołączenie, które to urządzenie może zatwierdzić (pokazywane przy otwarciu)."""
+        if not self._cfg.get("server_url") or not self._cfg.get("server_key"):
+            return {"ok": True, "requests": []}
+        r = netsrc.authed_post(self._cfg, "/v1/enroll/pending", {})
+        return r if r.get("ok") else {"ok": True, "requests": []}
+
+    def enroll_decide(self, req_id: str, allow: bool, games: bool = False) -> dict:
+        return netsrc.authed_post(self._cfg, "/v1/enroll/decide", {"id": req_id, "allow": bool(allow),
+                                                                  "games": bool(games)})
 
     def server_approve(self, text: str, allow=None) -> dict:
         """Zatwierdzenie nowego urządzenia kodem z jego ekranu (allow=None — podgląd prośby)."""
