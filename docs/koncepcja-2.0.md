@@ -1,6 +1,6 @@
 # EmuStart 2.0 — koncepcja
 
-Stan: **wersja robocza 1** (2026-10-12), po decyzjach z rozmowy. Zastępuje podejście
+Stan: **wersja robocza 2** (2026-10-12), po decyzjach z rozmowy i odpowiedziach na otwarte sprawy. Zastępuje podejście
 z `CONCEPT.md` (klient z dostępem SMB do NAS-a) — tamten dokument zostaje jako historia 0.x.
 
 ---
@@ -20,7 +20,10 @@ lokalnie tylko pamięć podręczna gier i to, co dotyczy danego sprzętu.
 | Konflikt autozapisu | **pokazać oba** (urządzenie, czas, zrzut ekranu, wersja rdzenia/emulatora) i dać wybrać, który zostaje; drugi trafia do historii |
 | Własne grafiki na kliencie | wybór dla **klasy urządzeń** (wszystkie telefony / wszystkie komputery) |
 | Parowanie urządzeń | **kod QR** z panelu serwera (zamiast przepisywania klucza) |
-| Aktualizacje | **z serwera**: program (PC, APK) i **emulatory** — z pilnowaniem zgodności formatów stanów |
+| Aktualizacje | **z serwera**: program (PC, APK) i **emulatory** — z pilnowaniem zgodności formatów stanów; **emulator aktualizowany dopiero po potwierdzeniu gracza** |
+| Tożsamość gry | sumy kontrolne z plików DAT (No-Intro / Redump) — pliki na serwerze są sprawdzone względem DAT-ów, sumy z nagłówków (CHD) są zgodne; bez liczenia sum całych plików |
+| Wersja formatu stanu | **odczytywana ze stanu** (nagłówek pliku stanu) |
+| Instalacja emulatorów na Androidzie | serwer podaje APK i **prosi o instalację**, gracz potwierdza |
 
 ---
 
@@ -86,16 +89,20 @@ ARMSX2 ma inny format ustawień niż PCSX2; DuckStation trzyma dane w niedostęp
 ## 5. Zapisy i stany 2.0
 
 ### 5.1 Tożsamość gry
-Gra rozpoznawana po **identyfikatorze nadanym przez serwer** (CRC/MD5 ROM-u, dla płyt numer
-seryjny), nie po nazwie pliku. Klient pyta serwer: *„gdzie na tym urządzeniu ma leżeć zapis /
+Gra rozpoznawana po **identyfikatorze z pliku DAT** (No-Intro / Redump: CRC/SHA-1 wpisu DAT),
+nie po nazwie pliku. Pliki na serwerze są sprawdzone względem DAT-ów, więc sumy zapisane
+w nagłówkach (CHD: SHA-1 danych) i w ZIP-ach (CRC) są zgodne z DAT-em — serwer odczytuje je
+raz, bez liczenia sum całych, dużych plików. Klient pyta serwer: *„gdzie na tym urządzeniu ma leżeć zapis /
 stan gry X dla emulatora/rdzenia Y?”* — serwer odpowiada wg układu zgłoszonego przez
 urządzenie (płasko, folder rdzenia, folder gry…; jak `rastates` w 0.31.1, dla wszystkich
 emulatorów). Koniec problemów ZIP vs ROM w środku, `_` vs spacja, folder rdzenia.
 
 ### 5.2 Magazyn na serwerze
 `profiles\<profil>\saves\<gra>\` — zapisy w grze (wspólne) i stany wg `<emulator lub rdzeń>`,
-każdy plik z opisem: urządzenie, czas, **wersja rdzenia/emulatora**, **wersja formatu stanu**
-(PCSX2/ARMSX2: `Savestate Version.id`), zrzut ekranu. **Historia**: ostatnie N wersji każdego
+każdy plik z opisem: urządzenie, czas, **wersja rdzenia/emulatora**, **wersja formatu stanu
+odczytana ze stanu** (PCSX2/ARMSX2: `Savestate Version.id` w pliku `.p2s`; DuckStation: wersja
+w nagłówku `.sav`; RetroArch: nagłówek stanu rdzenia — gdy rdzeń jej nie zapisuje, wersja
+rdzenia zgłoszona przez urządzenie), zrzut ekranu. **Historia**: ostatnie N wersji każdego
 pliku, przywracanie z interfejsu („cofnij do wczoraj”).
 
 ### 5.3 Wspólny autozapis — „Kontynuuj”
@@ -128,11 +135,22 @@ Format stanu PCSX2/ARMSX2 ma numer wersji (`Savestate Version.id`). Serwer zna:
   zgłaszanej przez telefon),
 - wersję formatu **PCSX2**, który rozdaje komputerom.
 
-Zasada: **PCSX2 na PC aktualizuje się dopiero, gdy ARMSX2 ma ten sam format stanów**.
-Nowa wersja PCSX2 ze zmienionym formatem czeka w panelu jako „wstrzymana — niezgodna
-z ARMSX2 (format X ≠ Y)”, aż ARMSX2 się zrówna (albo gracz świadomie ją zatwierdzi —
-wtedy ostrzeżenie przy przenoszeniu stanów). ARMSX2 na telefonie aktualizuje się sam
-(sklep / APK) — serwer go nie wstrzyma, ale widzi jego wersję i ostrzega.
+Zasady:
+- **Emulator nie aktualizuje się bez potwierdzenia gracza.** Serwer sprawdza nowe wydania,
+  ale instalacja następuje dopiero po zatwierdzeniu.
+- **Nowa wersja ze zmienionym formatem stanów** (np. PCSX2) → ostrzeżenie w panelu serwera
+  i w EmuStart na urządzeniach: *„Wyszedł PCSX2 X. Jego stany są niezgodne z obecnymi —
+  po aktualizacji obecne stany się nie wczytają.”* Razem z listą gier, które mają stany.
+  Zanim gracz potwierdzi aktualizację, ma **wczytać obecne stany i zapisać grę normalnie na
+  karcie pamięci** (zapisy w grze przechodzą między wersjami, stany nie). EmuStart pomaga:
+  przy każdej grze z listy „Uruchom ze stanem → zapisz na karcie”, odhaczanie zrobionych.
+  Dopiero potwierdzenie gracza uruchamia aktualizację; stare stany trafiają do historii
+  (nie są kasowane — wrócą, gdyby wrócić do starej wersji).
+- **PCSX2 ↔ ARMSX2**: serwer pokazuje, czy po aktualizacji formaty na PC i telefonie będą
+  zgodne (format X ≠ Y → stany nie przejdą między urządzeniami, dopóki drugi emulator się
+  nie zrówna). Zalecenie: aktualizować, gdy oba mają ten sam format.
+- ARMSX2 na telefonie aktualizuje się sam (sklep / APK) — serwer go nie wstrzyma, ale widzi
+  jego wersję (format odczytany ze stanów) i ostrzega o niezgodności tak samo.
 
 To samo dla rdzeni RetroArcha: serwer pamięta wersję rdzenia, z którą powstał stan.
 
@@ -177,11 +195,11 @@ Test integracyjny „trzech urządzeń” powstaje w etapie 1 i rośnie z każdy
 
 ---
 
-## 10. Otwarte sprawy
+## 10. Ustalenia z otwartych spraw
 
-- Identyfikator gry dla dużych plików (CHD, RVZ): MD5 całego pliku jest kosztowny — wariant:
-  suma z nagłówka / numer seryjny z płyty, liczony raz na serwerze.
-- Wersje rdzeni RetroArcha na Androidzie: aplikacja ich nie widzi (prywatny folder RetroArcha);
-  wersję można odczytać z nagłówka stanu, który zapisze rdzeń.
-- Emulatory na Androidzie nie dają się instalować bez udziału użytkownika — serwer może
-  jedynie podać plik APK i poprosić o instalację.
+- **Tożsamość dużych plików** (CHD, RVZ): sumy z DAT-ów i z nagłówków — pliki na serwerze
+  były sprawdzone względem DAT-ów, więc sumy w nagłówkach są zgodne (bez liczenia sum
+  całych plików).
+- **Wersja rdzenia / formatu na Androidzie**: odczytywana ze stanu.
+- **Instalacja emulatorów na Androidzie**: serwer podaje APK, EmuStart prosi o instalację,
+  gracz potwierdza (Android nie pozwala instalować bez udziału użytkownika).
