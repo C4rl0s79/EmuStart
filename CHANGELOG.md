@@ -8,6 +8,15 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.36.1] — 2026-10-12
+
+### Poprawione
+- **Telefon bez Tailscale nie łączył się z serwerem.** Aplikacja na Androida uczyła się listy
+  adresów serwera (sieć lokalna, port publiczny, tunel) tylko przy ręcznym „Sprawdź
+  połączenie” — telefon sparowany wcześniej znał wyłącznie adres Tailscale. Teraz po każdym
+  udanym połączeniu (najwyżej raz na godzinę) pobiera aktualną listę adresów i odcisk
+  certyfikatu serwera, jak EmuStart na Windows.
+
 ## [0.36.0] — 2026-10-12
 
 Zakres: serwer (`emustart/public.py`, `remote.py`, `srvadmin.py`, `main.py`), panel serwera
