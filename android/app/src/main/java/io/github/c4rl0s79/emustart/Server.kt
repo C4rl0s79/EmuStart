@@ -4,7 +4,6 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.InputStream
 import java.net.HttpURLConnection
-import java.net.URL
 import java.net.URLEncoder
 
 /** Klient serwera EmuStart (komputer z grami, `EmuStart.exe --server`). */
@@ -29,8 +28,91 @@ class Server(private val prefs: Prefs) {
         if (t.isNotEmpty()) c.setRequestProperty("X-Profile-Token", t)
     }
 
+    // ── adres serwera: najlepszy z podanych przez serwer (sieć lokalna → Tailscale → publiczny) ──
+    private data class Ep(val url: String, val rank: Int)
+    @Volatile private var base = ""
+    @Volatile private var baseAt = 0L
+    @Volatile private var baseSig = ""
+
+    private fun rankOf(url: String): Int {
+        val host = url.substringAfter("://").substringBefore('/').substringBeforeLast(':')
+        val kind = when {
+            host.matches(Regex("""100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\..*""")) -> 1
+            host.matches(Regex("""(10\..*|192\.168\..*|172\.(1[6-9]|2\d|3[01])\..*|169\.254\..*)""")) -> 0
+            !host.contains('.') -> 0
+            else -> 2
+        }
+        return kind * 2 + (if (url.startsWith("https")) 1 else 0)
+    }
+
+    private fun candidates(): List<Ep> {
+        val urls = LinkedHashSet<String>()
+        if (prefs.serverUrl.isNotBlank()) urls += prefs.serverUrl.trimEnd('/')
+        try {
+            val a = JSONArray(prefs.serverEndpoints.ifBlank { "[]" })
+            for (i in 0 until a.length()) a.optJSONObject(i)?.optString("url")?.takeIf { it.isNotBlank() }?.let { urls += it.trimEnd('/') }
+        } catch (e: Exception) { }
+        return urls.filter { !it.startsWith("https") || prefs.serverFp.isNotEmpty() }.map { Ep(it, rankOf(it)) }
+    }
+
+    /** Czy adres odpowiada (GET /v1/info z kluczem) — czas w ms albo null. */
+    private fun probe(url: String): Long? = try {
+        val t = System.nanoTime()
+        val c = Net.open("$url/v1/info", prefs.serverFp)
+        c.connectTimeout = 2500; c.readTimeout = 2500
+        c.setRequestProperty("Authorization", "Bearer " + prefs.serverKey)
+        val ok = c.responseCode == 200
+        try { c.inputStream.close() } catch (e: Exception) { }
+        c.disconnect()
+        if (ok) (System.nanoTime() - t) / 1_000_000 else null
+    } catch (e: Exception) { null }
+
+    /** Adres serwera do zapytań; sprawdzanie co 5 minut albo po błędzie połączenia. */
+    fun baseUrl(): String {
+        val cands = candidates()
+        if (cands.size <= 1) return cands.firstOrNull()?.url ?: prefs.serverUrl
+        val sig = cands.joinToString("|") { it.url } + prefs.serverKey + prefs.serverFp
+        if (base.isNotEmpty() && sig == baseSig && System.currentTimeMillis() - baseAt < 300_000) return base
+        val res = java.util.concurrent.ConcurrentHashMap<String, Long>()
+        val doneSet = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+        val lock = Object()
+        for (e in cands) Thread {
+            probe(e.url)?.let { res[e.url] = it }
+            doneSet += e.url
+            synchronized(lock) { lock.notifyAll() }
+        }.apply { isDaemon = true }.start()
+        val end = System.currentTimeMillis() + 3500
+        synchronized(lock) {
+            while (true) {
+                val ok = cands.filter { res.containsKey(it.url) }
+                val waiting = cands.filter { it.url !in doneSet }
+                // dość, gdy odpowiedział adres, od którego żaden niesprawdzony nie byłby lepszy
+                if (waiting.isEmpty() || (ok.isNotEmpty() && ok.minOf { it.rank } <= waiting.minOf { it.rank })) break
+                val left = end - System.currentTimeMillis()
+                if (left <= 0) break
+                lock.wait(left)
+            }
+        }
+        val ok = cands.filter { res.containsKey(it.url) }
+        val pick = ok.minWithOrNull(compareBy<Ep>({ it.rank }, { res[it.url] ?: 0L }))?.url ?: cands.first().url
+        if (pick != base) android.util.Log.i("EmuStart", "serwer: adres $pick")
+        base = pick; baseAt = System.currentTimeMillis(); baseSig = sig
+        return pick
+    }
+
+    /** Adres przestał odpowiadać — następne zapytanie sprawdzi wszystkie od nowa. */
+    fun forgetBase() { baseAt = 0L }
+
+    /** Adresy i odcisk certyfikatu z odpowiedzi serwera (info, parowanie) → ustawienia. */
+    fun learn(d: JSONObject) {
+        d.optJSONArray("endpoints")?.let { if (it.length() > 0 && it.toString() != prefs.serverEndpoints) { prefs.serverEndpoints = it.toString(); forgetBase() } }
+        d.optJSONObject("tls")?.optString("fp")?.takeIf { it.isNotEmpty() && it != prefs.serverFp }?.let { prefs.serverFp = it; forgetBase() }
+    }
+
+    private fun conn(path: String): HttpURLConnection = Net.open(baseUrl() + path, prefs.serverFp)
+
     fun open(path: String, range: String? = null, timeoutMs: Int = 20000): HttpURLConnection {
-        val c = URL(prefs.serverUrl + path).openConnection() as HttpURLConnection
+        val c = conn(path)
         c.connectTimeout = 8000
         c.readTimeout = timeoutMs
         c.setRequestProperty("Authorization", "Bearer " + prefs.serverKey)
@@ -38,7 +120,7 @@ class Server(private val prefs: Prefs) {
         c.setRequestProperty("User-Agent", "EmuStart-Android/" + BuildConfig.VERSION_NAME)
         c.setRequestProperty("X-EmuStart-Version", BuildConfig.VERSION_NAME)      // panel serwera: wersje urządzeń
         if (range != null) c.setRequestProperty("Range", range)
-        val code = c.responseCode
+        val code = try { c.responseCode } catch (e: java.io.IOException) { forgetBase(); throw e }
         if (code !in 200..299) {
             val msg = try { c.errorStream?.bufferedReader()?.readText() ?: "" } catch (e: Exception) { "" }
             c.disconnect()
@@ -54,7 +136,7 @@ class Server(private val prefs: Prefs) {
         try { return c.inputStream.bufferedReader(Charsets.UTF_8).readText() } finally { c.disconnect() }
     }
 
-    fun info(): JSONObject = JSONObject(text("/v1/info"))
+    fun info(): JSONObject = JSONObject(text("/v1/info")).also { learn(it) }
     fun systems(): JSONArray = JSONArray(text("/v1/systems"))
     fun games(es: String): JSONArray = JSONArray(text("/v1/systems/" + enc(es) + "/games"))
     /** Szczegóły gry; ścieżki plików zawsze z „/” (serwer na Windows sprzed 0.30.6 wysyłał „\\”,
@@ -124,7 +206,7 @@ class Server(private val prefs: Prefs) {
     /** Zapis pliku na serwerze; `backup` — gdzie serwer odkłada poprzednią wersję. */
     fun nasPut(p: String, data: ByteArray, mtimeSec: Double, backup: String = "") {
         val extra = "&mtime=$mtimeSec" + (if (backup.isNotEmpty()) "&backup=" + enc(backup) else "")
-        val c = URL(prefs.serverUrl + nasPath("file", p, extra)).openConnection() as HttpURLConnection
+        val c = conn(nasPath("file", p, extra))
         try {
             c.connectTimeout = 8000
             c.readTimeout = 60000
@@ -149,7 +231,7 @@ class Server(private val prefs: Prefs) {
 
     /** Kopia stanu na drugą platformę (w folderze profili na serwerze). */
     fun saveCopy(q: Map<String, String>): JSONObject {
-        val c = URL(prefs.serverUrl + "/v1/savemgr/copy?" + query(q)).openConnection() as HttpURLConnection
+        val c = conn("/v1/savemgr/copy?" + query(q))
         try {
             c.connectTimeout = 8000
             c.readTimeout = 120000
@@ -193,7 +275,7 @@ class Server(private val prefs: Prefs) {
 
     /** login | create | pin — odpowiedź serwera także przy błędzie (403 zły PIN, 409 nazwa zajęta). */
     fun profileOp(op: String, q: Map<String, String>): JSONObject {
-        val c = URL(prefs.serverUrl + "/v1/profiles/$op?" + query(q)).openConnection() as HttpURLConnection
+        val c = conn("/v1/profiles/$op?" + query(q))
         try {
             c.connectTimeout = 8000
             c.readTimeout = 30000
@@ -213,7 +295,7 @@ class Server(private val prefs: Prefs) {
 
     /** Zatwierdzenie nowego urządzenia (POST /v1/pair/approve); allow == null — podgląd prośby. */
     fun approve(code: String, allow: Boolean?): JSONObject {
-        val c = URL(prefs.serverUrl + "/v1/pair/approve").openConnection() as HttpURLConnection
+        val c = conn("/v1/pair/approve")
         try {
             c.connectTimeout = 8000
             c.readTimeout = 15000
@@ -232,7 +314,7 @@ class Server(private val prefs: Prefs) {
     }
 
     fun nasDelete(p: String) {
-        val c = URL(prefs.serverUrl + nasPath("file", p)).openConnection() as HttpURLConnection
+        val c = conn(nasPath("file", p))
         try {
             c.connectTimeout = 8000
             c.readTimeout = 20000

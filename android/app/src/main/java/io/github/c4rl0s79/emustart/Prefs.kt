@@ -18,6 +18,16 @@ class Prefs(ctx: Context) {
         get() = sp.getString("server_key", "") ?: ""
         set(v) = sp.edit().putString("server_key", v.trim()).apply()
 
+    /** Adresy serwera podane przez serwer (JSON: [{url, kind, tls}]) — klient wybiera najlepszy. */
+    var serverEndpoints: String
+        get() = sp.getString("server_endpoints", "") ?: ""
+        set(v) = sp.edit().putString("server_endpoints", v).apply()
+
+    /** Odcisk SHA-256 certyfikatu serwera (port szyfrowany) — przypięty przy parowaniu. */
+    var serverFp: String
+        get() = sp.getString("server_fp", "") ?: ""
+        set(v) = sp.edit().putString("server_fp", v.trim().lowercase()).apply()
+
     var cacheRecent: Int
         get() = sp.getInt("cache_recent", 10)
         set(v) = sp.edit().putInt("cache_recent", v.coerceIn(1, 100)).apply()

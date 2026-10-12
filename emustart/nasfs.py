@@ -251,7 +251,8 @@ class RemoteFs:
     def _conn(self) -> http.client.HTTPConnection:
         c = getattr(self._local, "c", None)
         if c is None:
-            c = http.client.HTTPConnection(self.host, self.port, timeout=60)
+            from emustart import netsrc
+            c = netsrc.conn(self.host, self.port, 60)
             self._local.c = c
         return c
 

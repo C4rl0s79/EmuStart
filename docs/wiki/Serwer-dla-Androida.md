@@ -90,6 +90,22 @@ Panel pokazuje urządzenia z rodzajem, wersją EmuStart i ostatnim kontaktem; **
 odcina tylko to jedno urządzenie, **Nazwa** zmienia nazwę. Serwer trzyma tylko skróty kluczy
 (SHA-256). Wspólny klucz serwera działa dalej — dla urządzeń sprzed parowania.
 
+## Adresy serwera i szyfrowanie (0.34)
+
+Serwer ma dwa porty: zwykły (`8740`) i **szyfrowany** (`8741`, HTTPS). Certyfikat serwer
+tworzy sam przy pierwszym starcie (`server\tls-cert.pem`); urządzenia nie sprawdzają go
+w urzędzie certyfikacji, tylko porównują jego odcisk z zapamiętanym przy parowaniu
+(„przypięcie”) — podszycie się pod serwer wymagałoby jego klucza prywatnego.
+
+Serwer podaje urządzeniom listę swoich adresów (sieć lokalna, Tailscale; zwykły port
+i szyfrowany). Urządzenie sprawdza je równolegle i wybiera najlepszy działający: najpierw
+sieć lokalna, potem Tailscale, na końcu adres publiczny; w obrębie rodzaju zwykły port przed
+szyfrowanym. Wybór jest odświeżany co 5 minut i po błędzie połączenia — telefon przechodzący
+z domowego Wi-Fi na sieć komórkową sam przełącza się na Tailscale.
+
+Komputer trzyma nauczone adresy w `data\serwer-adresy.json`, telefon — w ustawieniach
+aplikacji. Port publiczny (otwierany przez UPnP) i dostęp spoza Tailscale — kolejne wersje.
+
 ## Katalog serwera (0.32)
 
 Serwer trzyma wszystko poza grami w podkatalogu `server\` obok `EmuStart.exe`: ustawienia

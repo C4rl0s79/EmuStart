@@ -46,6 +46,8 @@ API = None                    # emustart.api.Api (tryb serwera)
 NAS_ROOT: Path | None = None  # folder profili na tym komputerze (None = nie znaleziono)
 NAS_ID = ""
 DEFAULT_PORT = 8740
+TLS: dict = {}                # {"port", "fp"} — port szyfrowany (emustart/tls.py), gdy działa
+PORT = DEFAULT_PORT
 CHUNK = 1024 * 1024
 
 
@@ -94,8 +96,40 @@ def pair(handler) -> None:
     r = devices.pair(str(d.get("code", "")), str(d.get("name", "")), str(d.get("class", "")),
                      handler.client_address[0], str(d.get("version", "")))
     if r.get("ok"):
-        r["server"] = socket.gethostname()
+        r.update(server=socket.gethostname(), **_trust())
     return _json(handler, r, 200 if r.get("ok") else 403)
+
+
+def _trust() -> dict:
+    """Do odpowiedzi parowania: adresy serwera i odcisk certyfikatu (przypinany w kliencie)."""
+    return {"endpoints": endpoints(), "tls": {"port": TLS["port"], "fp": TLS["fp"]} if TLS else None}
+
+
+def kind_of(host: str) -> str:
+    """lan / tailscale / public — rodzaj adresu (kolejność wyboru w klientach)."""
+    import ipaddress
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return "public" if "." in host else "lan"            # nazwa komputera w sieci lokalnej
+    if ip in ipaddress.ip_network("100.64.0.0/10"):
+        return "tailscale"
+    if ip.is_private or ip.is_link_local:
+        return "lan"
+    return "public"
+
+
+def endpoints() -> list:
+    """Adresy, pod którymi klienci mogą dosięgnąć serwer (klient wybiera najlepszy):
+    sieć lokalna, Tailscale — zwykły port i szyfrowany. Port publiczny: etap 0.35."""
+    from emustart import srvadmin
+    out = []
+    for a in srvadmin._addresses():
+        k = kind_of(a)
+        out.append({"url": f"http://{a}:{PORT}", "kind": k, "tls": False})
+        if TLS:
+            out.append({"url": f"https://{a}:{TLS['port']}", "kind": k, "tls": True})
+    return out
 
 
 def _body(handler) -> dict:
@@ -122,7 +156,10 @@ def pair_flow(handler, op: str) -> None:
             r["server"] = socket.gethostname()
         return _json(handler, r, 200 if r.get("ok") else 429)
     if op == "poll":
-        return _json(handler, devices.poll(str(d.get("rid", ""))))
+        r = devices.poll(str(d.get("rid", "")))
+        if r.get("status") == "approved":
+            r.update(server=socket.gethostname(), **_trust())
+        return _json(handler, r)
     if op == "approve":
         if not authorized(handler):
             return _json(handler, {"ok": False, "reason": "Zatwierdzać może tylko sparowane urządzenie."}, 401)
@@ -169,7 +206,8 @@ def handle(handler) -> None:
         if parts == ["info"]:
             feats = ["find", "system", "bios"] + (["nas", "roots", "savemgr", "profiles"] if NAS_ROOT else [])
             return _json(handler, {"name": socket.gethostname(), "version": __version__, "api": 1,
-                                   "features": feats, "nas_id": NAS_ID})
+                                   "features": feats, "nas_id": NAS_ID, "endpoints": endpoints(),
+                                   "tls": {"port": TLS["port"], "fp": TLS["fp"]} if TLS else None})
         if parts and parts[0] == "nas":
             return _nas(handler, "GET", parts[1:])
         if parts == ["find"]:
