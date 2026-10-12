@@ -8,6 +8,17 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.31.2] — 2026-10-12
+
+Zakres: nagłówek listy gier i podgląd na komputerze (`web/index.html`, `web/app.css`, `web/app.js`);
+testy (`tests/conftest.py`). Bez zmian: telefon (logo gry zostaje w nagłówku listy).
+
+### Zmienione
+- **Logo gry nad okładką** — na szerokość okładki, od górnej krawędzi ekranu do okładki
+  (obok logo platformy było za małe i nieczytelne).
+- **Nagłówek listy gier**: większe logo platformy, bez nazwy platformy (jest na logo) —
+  zostaje liczba gier. Gdy system nie ma logo, nazwa jest jak dotąd.
+
 ### Poprawione
 - Testy nie zapisują już prawdziwych plików EmuStart: uruchamiane z folderu programu
   nadpisywały `config.json` (klucz testowy zamiast ustawień — EmuStart pokazywał „pierwsze

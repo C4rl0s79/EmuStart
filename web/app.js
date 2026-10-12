@@ -508,10 +508,12 @@ function renderDesc(m) {
   $("pvDesc").innerHTML = parts.join("<br><br>");
 }
 function setTitleArt(g, title) {
-  // logo zaznaczonej gry zawsze w nagłówku listy, obok logo platformy
-  const el = $("listGameLogo");
-  el.classList.toggle("hidden", !g.logo);
-  if (g.logo && el.getAttribute("src") !== g.logo) { el.src = g.logo; el.alt = title; }
+  // logo zaznaczonej gry: komputer — nad okładką (pvGameLogo), telefon — w nagłówku listy
+  for (const id of ["listGameLogo", "pvGameLogo"]) {
+    const el = $(id);
+    el.classList.toggle("hidden", !g.logo);
+    if (g.logo && el.getAttribute("src") !== g.logo) { el.src = g.logo; el.alt = title; }
+  }
 }
 // Okładka i zrzut: ta sama wysokość (równe górne i dolne krawędzie), ale razem nie
 // szersze, niż pozwala miejsce — szczegóły gry pomiędzy nimi mają min. 30% szerokości.
@@ -543,6 +545,20 @@ function layoutPreview() {
   const minMeta = Math.max(220, pv.clientWidth * 0.3);
   const fit = (pv.clientWidth - minMeta - 2 * gap) / (arBox + arSnap);
   pv.style.setProperty("--pv-h", `${Math.max(80, Math.min(mediaH, fit))}px`);
+  placeGameLogo();
+}
+
+// logo gry nad okładką: na szerokość okładki, od górnej krawędzi ekranu do okładki
+// (położenie względem ekranu — podgląd ucina wszystko, co wychodzi poza jego krawędź)
+function placeGameLogo() {
+  const el = $("pvGameLogo");
+  const box = document.querySelector(".pv3 .box");
+  if (!el || !box || document.body.classList.contains("phone")) return;
+  requestAnimationFrame(() => {
+    const r = box.getBoundingClientRect(), top = 0.006 * window.innerHeight, gap = 0.012 * window.innerHeight;
+    Object.assign(el.style, { left: `${r.left}px`, width: `${r.width}px`, top: `${top}px`,
+                              height: `${Math.max(24, r.top - gap - top)}px` });
+  });
 }
 $("pvBox").addEventListener("load", layoutPreview);
 $("pvSnap").addEventListener("load", layoutPreview);
