@@ -81,9 +81,11 @@ class Device:
 
 
 def _admin_key(srv):
-    code = srvadmin.pair_code(None)["code"]          # urządzenie zero — kod z panelu serwera
-    st, d = _req(srv, "POST", "/v1/pair", body={"code": code, "name": "PC admina", "class": "pc"})
-    return d["key"], d["id"]
+    """Urządzenie zero — kod z panelu serwera i klucz urządzenia → (token sesji, id)."""
+    import keyhelp
+    host, port, _nas = srv
+    tok, did, _k = keyhelp.pair(host, port, "PC admina", "pc")
+    return tok, did
 
 
 def test_new_account_needs_admin_and_scopes_device(srv):
@@ -290,9 +292,10 @@ def test_one_registration_per_hardware(srv):
     hw = "a" * 32
     admin_key, _ = _admin_key(srv)
     # stare parowanie kodem — identyfikator sprzętu przychodzi z pierwszym zapytaniem
-    code = srvadmin.pair_code(None)["code"]
-    old = _req(srv, "POST", "/v1/pair", body={"code": code, "name": "Telefon 25102PCBEG", "class": "phone"})[1]
+    import keyhelp
     host, port, _n = srv
+    old_tok, old_id, _k = keyhelp.pair(host, port, "Telefon 25102PCBEG", "phone")
+    old = {"key": old_tok, "id": old_id}
     c = http.client.HTTPConnection(host, port, timeout=10)
     c.request("GET", "/v1/info", headers={"Authorization": f"Bearer {old['key']}", "X-EmuStart-Hw": hw})
     assert c.getresponse().status == 200

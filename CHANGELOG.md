@@ -17,6 +17,25 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   RetroArchu na Androidzie; ocena „wyświetlania nad innymi aplikacjami” i usługi ułatwień
   dostępu dla pozostałych emulatorów na Androidzie.
 
+## [0.39.0] — 2026-10-12
+
+### Zmienione
+- **Tylko klucze urządzeń — wszędzie** (komputer, telefon, serwer, panel). Każde połączenie
+  z serwerem to klucz urządzenia (TPM/DPAPI na Windows, Android Keystore) i logowanie
+  podpisem; serwer nie wydaje już kluczy-haseł:
+  - parowanie kodem (panel, QR, `EmuStart.exe --server-key`) i dołączanie z zatwierdzeniem
+    na telefonie tworzą urządzenie z kluczem; starsza wersja dostaje „Zaktualizuj EmuStart”,
+  - urządzenia ze starym kluczem-hasłem **same przechodzą** na klucz urządzenia przy starcie
+    (ten sam wpis w panelu — nazwa, konto, rola; bez duplikatów); do tego czasu stary klucz
+    otwiera tylko sprawdzenie serwera i przejście,
+  - wspólny klucz serwera działa tylko na komputerze serwera (nie z sieci, nie przez tunel);
+    samosprawdzanie portu publicznego i tunelu obywa się bez niego.
+- `EmuStart.exe --server-key` pokazuje jednorazowy **kod parowania** zamiast wspólnego klucza.
+
+### Usunięte
+- Panel serwera: przycisk **Pokaż klucz**. Aplikacje (PC i Android): pole **Klucz serwera**
+  i **Wklej klucz ze schowka** — zamiast nich wiersz **Klucz** z rodzajem klucza urządzenia.
+
 ## [0.38.3] — 2026-10-12
 
 ### Poprawione

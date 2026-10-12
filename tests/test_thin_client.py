@@ -30,9 +30,8 @@ def srv(tmp_path, monkeypatch):
     netsrc._info.clear()
     nasfs.reset()
     host, port = url.removeprefix("http://").split(":")
-    code = srvadmin.pair_code(None)["code"]
-    key = netsrc.pair(f"{host}:{port}", code, "Nowy PC")["key"]
-    return {"server_url": f"http://{host}:{port}", "server_key": key}, media
+    import keyhelp
+    return keyhelp.pc_cfg(host, port, "Nowy PC"), media
 
 
 SERVER_GAMES = {

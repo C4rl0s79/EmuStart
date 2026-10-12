@@ -31,6 +31,7 @@ class Bridge(private val act: MainActivity) {
 
     init {
         pool.execute {
+            try { upgradeLegacyKey() } catch (e: Exception) { Log.w(tag, "klucz urządzenia: $e") }
             try { saves.retryPending() } catch (e: Exception) { Log.w(tag, "zaległe zapisy: $e") }
             // blokada profilu z poprzedniego uruchomienia (aplikację zamknięto w trakcie gry)
             try { if (launch == null) saves.releaseStaleLock(prefs.profile) } catch (e: Exception) { }
@@ -513,6 +514,7 @@ class Bridge(private val act: MainActivity) {
         }
         return JSONObject()
             .put("server_url", prefs.serverUrl).put("server_key", prefs.serverKey.ifEmpty { if (prefs.deviceId.isNotEmpty()) "dev:" + prefs.deviceId else "" })
+            .put("server_keykind", if (prefs.deviceId.isNotEmpty()) "Android Keystore" else "")
             .put("server_account", prefs.serverAccount)
             .put("enroll", prefs.enrollPending.takeIf { it.isNotEmpty() }?.let { val o = JSONObject(it)
                 JSONObject().put("url", o.optString("url")).put("code", o.optString("code")).put("account", o.optString("account"))
@@ -537,8 +539,6 @@ class Bridge(private val act: MainActivity) {
                     if (u.trimEnd('/') != prefs.serverUrl) { prefs.serverEndpoints = ""; prefs.serverFp = ""; server.forgetBase() }
                     prefs.serverUrl = u; systemsCache = null
                 }
-                k == "server_key" -> if (!d.getString(k).startsWith("dev:")) {   // klucz urządzenia — nie do edycji
-                    prefs.serverKey = d.getString(k); prefs.deviceId = ""; server.dropToken(); systemsCache = null }
                 k == "cache_recent" -> prefs.cacheRecent = d.getInt(k)
                 k == "streams" -> prefs.streams = d.getInt(k)
                 k == "games_logo" -> prefs.gamesLogo = d.getBoolean(k)
@@ -701,28 +701,67 @@ class Bridge(private val act: MainActivity) {
         }
         if (url.isBlank()) return JSONObject().put("ok", false).put("reason", "Podaj adres serwera albo zeskanuj kod QR.")
         url = normUrl(url)
+        // klucz urządzenia w Android Keystore — serwer nie wydaje już kluczy-haseł (0.39)
+        val alias = "emustart-" + java.util.UUID.randomUUID().toString().take(12)
+        val pem = try { DeviceKey.create(alias).second } catch (e: Exception) {
+            return JSONObject().put("ok", false).put("reason", "Nie udało się utworzyć klucza urządzenia: ${e.message}")
+        }
         return try {
             val c = java.net.URL(url.trimEnd('/') + "/v1/pair").openConnection() as java.net.HttpURLConnection
             c.connectTimeout = 8000; c.readTimeout = 15000
             c.requestMethod = "POST"; c.doOutput = true
             c.setRequestProperty("Content-Type", "application/json")
             val body = JSONObject().put("code", code).put("name", saves.device).put("class", "phone")
-                .put("version", BuildConfig.VERSION_NAME).put("hw", server.hwId).toString().toByteArray()
+                .put("version", BuildConfig.VERSION_NAME).put("hw", server.hwId).put("pubkey", pem).toString().toByteArray()
             c.outputStream.use { it.write(body) }
             val code2 = c.responseCode
             val txt = (if (code2 in 200..299) c.inputStream else c.errorStream)?.bufferedReader()?.readText() ?: "{}"
             c.disconnect()
             val d = JSONObject(txt)
-            if (!d.optBoolean("ok")) return JSONObject().put("ok", false).put("reason", d.optString("reason", "Serwer odrzucił kod."))
+            if (!d.optBoolean("ok")) {
+                DeviceKey.delete(alias)
+                return JSONObject().put("ok", false).put("reason", d.optString("reason", "Serwer odrzucił kod."))
+            }
             prefs.serverUrl = url
-            prefs.serverKey = d.getString("key")
-            if (prefs.deviceId.isNotEmpty()) { DeviceKey.delete(prefs.deviceKey); prefs.deviceId = ""; prefs.deviceKey = ""; server.dropToken() }
+            useDeviceKey(d.getString("id"), alias)
             server.learn(d)                        // adresy serwera i odcisk certyfikatu (HTTPS)
             systemsCache = null
             online = true
             JSONObject().put("ok", true).put("server", d.optString("server")).put("url", url)
         } catch (e: Exception) {
+            DeviceKey.delete(alias)
             JSONObject().put("ok", false).put("reason", explain(e))
+        }
+    }
+
+    /** Ten telefon łączy się kluczem urządzenia `did` (stary klucz-hasło i poprzedni klucz — usunięte). */
+    private fun useDeviceKey(did: String, alias: String) {
+        val old = prefs.deviceKey
+        prefs.deviceId = did
+        prefs.deviceKey = alias
+        prefs.serverKey = ""
+        if (old.isNotEmpty() && old != alias) DeviceKey.delete(old)
+        server.dropToken(); server.forgetBase()
+        systemsCache = null
+    }
+
+    /** Stary klucz-hasło → klucz urządzenia (ten sam wpis na serwerze) — przy starcie aplikacji. */
+    private fun upgradeLegacyKey() {
+        if (prefs.serverKey.isEmpty() || prefs.deviceId.isNotEmpty() || prefs.serverUrl.isEmpty()) return
+        val alias = "emustart-" + java.util.UUID.randomUUID().toString().take(12)
+        try {
+            val pem = DeviceKey.create(alias).second
+            val r = server.postAuthed("/v1/auth/upgrade", JSONObject().put("pubkey", pem).put("hw", server.hwId))
+            if (r.optBoolean("ok")) {
+                useDeviceKey(r.getString("id"), alias)
+                Log.i(tag, "telefon przeszedł na klucz urządzenia")
+            } else {
+                DeviceKey.delete(alias)
+                Log.w(tag, "przejście na klucz urządzenia: ${r.optString("reason")}")
+            }
+        } catch (e: Exception) {
+            DeviceKey.delete(alias)
+            Log.w(tag, "przejście na klucz urządzenia: $e")
         }
     }
 
@@ -731,7 +770,7 @@ class Bridge(private val act: MainActivity) {
         val url = prefs.serverUrl.ifBlank { "(brak adresu)" }
         return when (e) {
             is Server.HttpError -> if (e.code == 401)
-                "Serwer $url odpowiada, ale klucz jest nieprawidłowy. Skopiuj klucz z komputera z grami (EmuStart.exe --server-key)."
+                "Serwer $url odpowiada, ale nie przyjmuje klucza tego telefonu — połącz ponownie: Dołącz przez internet albo kod z panelu serwera."
                 else "Serwer $url odpowiedział błędem ${e.code}: ${e.message}"
             is java.net.UnknownHostException -> "Nieznany adres serwera: $url. Wpisz adres Tailscale komputera z grami, np. 100.85.254.31."
             is java.net.SocketTimeoutException, is java.net.ConnectException, is java.net.NoRouteToHostException ->

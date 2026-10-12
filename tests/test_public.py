@@ -148,7 +148,15 @@ def test_public_port_only_api_with_key_and_bans_guessers(monkeypatch):
     for _ in range(5):
         _req(port, fp, "GET", "/v1/info", "zgaduje", {"CF-Connecting-IP": "81.2.69.10"})
     assert _req(port, fp, "GET", "/v1/info", KEY, {"CF-Connecting-IP": "81.2.69.10"}) == 403
-    assert _req(port, fp, "GET", "/v1/info", KEY, {"CF-Connecting-IP": "81.2.69.11"}) == 200
+    # wspólny klucz serwera przez tunel nie działa (0.39 — tylko na komputerze serwera); bez blokady
+    assert _req(port, fp, "GET", "/v1/info", KEY, {"CF-Connecting-IP": "81.2.69.11"}) == 401
+    import time
+    import keyhelp
+    from emustart import devices, enroll
+    with devices._lock:
+        did = devices._add_keyed_locked("Telefon", "phone", "", "", keyhelp.new_key()[1], time.time())
+    enroll._tokens["sesja-telefonu"] = (did, time.time() + 600)         # zalogowany kluczem urządzenia
+    assert _req(port, fp, "GET", "/v1/info", "sesja-telefonu", {"CF-Connecting-IP": "81.2.69.11"}) == 200
     assert public.status()["banned"] == 1
     assert public.STATE["last_ip"] == "81.2.69.11"
 

@@ -74,16 +74,33 @@ def authorized(handler) -> bool:
         return False
     token = API._cfg.get("server_token") or ""
     if token and hmac.compare_digest(got.encode(), token.encode()):
+        # wspólny klucz serwera — tylko na tym komputerze (nie z sieci, nie przez tunel)
+        if not _local_peer(handler):
+            return False
         handler.device = ""
         return True
     from emustart import devices
     did = devices.verify(got)
+    if did and devices.is_legacy(did):
+        # stary klucz-hasło: wyłącznie przejście na klucz urządzenia (i sprawdzenie serwera)
+        path = urllib.parse.urlsplit(handler.path).path
+        if path not in ("/v1/auth/upgrade", "/v1/info"):
+            return False
     if did:
         handler.device = did
         devices.touch(did, handler.client_address[0], handler.headers.get("X-EmuStart-Version") or "",
                       handler.headers.get("X-EmuStart-Hw") or "")
         return True
     return False
+
+
+def _local_peer(handler) -> bool:
+    import ipaddress
+    try:
+        local = ipaddress.ip_address(handler.client_address[0]).is_loopback
+    except ValueError:
+        local = False
+    return local and not handler.headers.get("CF-Connecting-IP")
 
 
 def pair(handler) -> None:
@@ -95,7 +112,8 @@ def pair(handler) -> None:
     except ValueError:
         d = {}
     r = devices.pair(str(d.get("code", "")), str(d.get("name", "")), str(d.get("class", "")),
-                     handler.client_address[0], str(d.get("version", "")), str(d.get("hw", "")))
+                     handler.client_address[0], str(d.get("version", "")), str(d.get("hw", "")),
+                     str(d.get("pubkey", "")))
     if r.get("ok"):
         r.update(server=socket.gethostname(), **_trust())
     return _json(handler, r, 200 if r.get("ok") else 403)
@@ -156,7 +174,8 @@ def pair_flow(handler, op: str) -> None:
     d = _body(handler)
     if op == "request":
         r = devices.request(str(d.get("name", "")), str(d.get("class", "")),
-                            handler.client_address[0], str(d.get("version", "")))
+                            handler.client_address[0], str(d.get("version", "")),
+                            str(d.get("pubkey", "")), str(d.get("hw", "")))
         if r.get("ok"):
             r["server"] = socket.gethostname()
         return _json(handler, r, 200 if r.get("ok") else 429)
@@ -205,6 +224,11 @@ def enroll_flow(handler, op: str) -> None:
     if not authorized(handler):
         return _json(handler, {"ok": False, "reason": "brak lub zły klucz"}, 401)
     viewer = getattr(handler, "device", "")
+    if op == "upgrade":                     # stary klucz-hasło → klucz urządzenia (ten sam wpis)
+        from emustart import devices
+        if not viewer or not devices.is_legacy(viewer):
+            return _json(handler, {"ok": False, "reason": "to urządzenie nie ma starego klucza"}, 400)
+        return _json(handler, devices.upgrade(viewer, str(d.get("pubkey", "")), str(d.get("hw", ""))))
     if op == "pending":
         return _json(handler, {"ok": True, "requests": enroll.pending(viewer)})
     if op == "decide":

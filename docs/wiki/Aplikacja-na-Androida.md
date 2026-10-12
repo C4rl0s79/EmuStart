@@ -8,8 +8,9 @@ w emulatorze zainstalowanym w telefonie.
 
 ## Instalacja
 
-1. Na komputerze z grami uruchom [serwer EmuStart](Serwer-dla-Androida) i zanotuj
-   klucz (`EmuStart.exe --server-key`).
+1. Na komputerze z grami uruchom [serwer EmuStart](Serwer-dla-Androida). Telefon łączy się
+   **kluczem urządzenia** (Android Keystore): kod z panelu serwera albo **Dołącz przez
+   internet** z zatwierdzeniem na innym urządzeniu (0.39 — wspólnego klucza się nie wpisuje).
 2. Pobierz `EmuStart-<wersja>-android.apk` z
    [Releases](https://github.com/C4rl0s79/EmuStart/releases) i zainstaluj (zgoda na
    instalację z nieznanych źródeł).

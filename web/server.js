@@ -104,13 +104,6 @@ $("bRestart").addEventListener("click", async () => {
   if (r?.ok) { restarting = true; msg("Restartuję serwer…", true); }
   else msg(r?.reason || "Serwer nie odpowiada.");
 });
-$("bKey").addEventListener("click", async () => {
-  const r = await admin("key").catch(() => null);
-  if (!r) return msg("Serwer nie odpowiada.");
-  $("key").textContent = r.key;
-  $("keyBox").hidden = false;
-  try { await navigator.clipboard.writeText(r.key); msg("Klucz skopiowany do schowka.", true); } catch (e) { /* bez schowka */ }
-});
 $("bLogs").addEventListener("click", async () => {
   // okno panelu otwiera folder samo (serwer na koncie SYSTEM zrobiłby to niewidocznie)
   const local = window.pywebview?.api?.open_logs;

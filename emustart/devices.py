@@ -96,8 +96,21 @@ def _norm_code(code: str) -> str:
     return "".join(ch for ch in str(code).upper() if ch in PAIR_ALPHABET)
 
 
-def pair(code: str, name: str, cls: str, ip: str = "", version: str = "", hw: str = "") -> dict:
-    """Wymiana jednorazowego kodu na klucz urządzenia. {"ok", "id", "key"} albo {"ok": False, "reason"}."""
+def _pubkey_ok(pubkey: str) -> bool:
+    from emustart import enroll
+    try:
+        enroll.verify_code(pubkey)
+        return True
+    except Exception:
+        return False
+
+
+def pair(code: str, name: str, cls: str, ip: str = "", version: str = "", hw: str = "",
+         pubkey: str = "") -> dict:
+    """Jednorazowy kod z panelu + klucz publiczny urządzenia → urządzenie z kluczem (logowanie
+    podpisem). {"ok", "id"} albo {"ok": False, "reason"}. Kluczy-haseł serwer już nie wydaje."""
+    if not _pubkey_ok(pubkey):
+        return {"ok": False, "reason": "Zaktualizuj EmuStart — parowanie wymaga klucza urządzenia (wersja 0.39 lub nowsza)."}
     now = time.time()
     with _lock:
         fails = [t for t in _fails.get(ip, []) if now - t < FAIL_WINDOW]
@@ -110,28 +123,56 @@ def pair(code: str, name: str, cls: str, ip: str = "", version: str = "", hw: st
             fails.append(now)
             return {"ok": False, "reason": "Nieprawidłowy albo wygasły kod — wygeneruj nowy w panelu serwera."}
         _codes.pop(c, None)                       # kod jednorazowy
-        did, key = _add(name, cls, ip, version, now, hw=hw)
-    return {"ok": True, "id": did, "key": key}
+        did = _add_keyed_locked(name, cls, ip, version, pubkey, now, hw=hw)
+    return {"ok": True, "id": did}
 
 
-def _add(name: str, cls: str, ip: str, version: str, now: float, by: str = "", hw: str = "") -> tuple:
-    """Nowe urządzenie w rejestrze (wołający trzyma _lock) → (id, klucz)."""
-    key = secrets.token_urlsafe(32)
+def _add_keyed_locked(name: str, cls: str, ip: str, version: str, pubkey: str, now: float,
+                      by: str = "", hw: str = "") -> str:
+    """Urządzenie z kluczem i pełnym dostępem (kod z panelu / zatwierdzenie na urządzeniu
+    administratora — jak dawniej). Wołający trzyma _lock."""
     did = secrets.token_hex(6)
-    devs = _load()
-    devs[did] = {"name": (str(name).strip() or "urządzenie")[:40],
-                 "class": cls if cls in CLASSES else "pc",
-                 "key": _h(key), "created": now, "last_seen": now, "ip": ip, "version": version,
-                 "role": "admin"}
+    _load()[did] = {"name": (str(name).strip() or "urządzenie")[:40], "class": cls if cls in CLASSES else "pc",
+                    "pubkey": pubkey, "role": "admin", "created": now, "last_seen": now, "ip": ip,
+                    "version": version}
     if by:
-        devs[did]["approved_by"] = by
+        _load()[did]["approved_by"] = by
     if _valid_hw(hw):
-        devs[did]["hw"] = _valid_hw(hw)
+        _load()[did]["hw"] = _valid_hw(hw)
         replace_same_hw(did, hw)
     _save()
-    log.info("sparowano urządzenie %s (%s, %s)%s", devs[did]["name"], devs[did]["class"], ip,
-             f" — zatwierdził {by}" if by else "")
-    return did, key
+    log.info("sparowano urządzenie %s (%s, %s, klucz urządzenia)%s", name, cls, ip, f" — zatwierdził {by}" if by else "")
+    return did
+
+
+def upgrade(did: str, pubkey: str, hw: str = "") -> dict:
+    """Urządzenie ze starym kluczem-hasłem przechodzi na klucz urządzenia: ten sam wpis (konto,
+    rola, nazwa), stary klucz przestaje działać. Dawne urządzenia miały pełny dostęp — rola admin."""
+    if not _pubkey_ok(pubkey):
+        return {"ok": False, "reason": "zły klucz urządzenia"}
+    with _lock:
+        d = _load().get(did)
+        if not d or d.get("revoked"):
+            return {"ok": False, "reason": "nieznane urządzenie"}
+        if d.get("pubkey"):
+            return {"ok": False, "reason": "urządzenie ma już klucz"}
+        d["pubkey"] = pubkey
+        d.pop("key", None)
+        d.setdefault("role", "admin")
+        if _valid_hw(hw):
+            d["hw"] = _valid_hw(hw)
+            replace_same_hw(did, hw)
+        d["upgraded"] = time.time()
+        _save()
+    log.info("urządzenie %s przeszło na klucz urządzenia", d.get("name"))
+    return {"ok": True, "id": did}
+
+
+def is_legacy(did: str) -> bool:
+    """Wpis ze starym kluczem-hasłem (bez klucza urządzenia)."""
+    with _lock:
+        d = _load().get(did) or {}
+    return bool(d) and not d.get("pubkey")
 
 
 # ── prośba o dołączenie, zatwierdzana na sparowanym urządzeniu (jak logowanie telewizora) ──
@@ -148,8 +189,10 @@ def _gc(now: float) -> None:
             _reqs.pop(c, None)
 
 
-def request(name: str, cls: str, ip: str = "", version: str = "") -> dict:
+def request(name: str, cls: str, ip: str = "", version: str = "", pubkey: str = "", hw: str = "") -> dict:
     """Nowe urządzenie prosi o dołączenie → {"ok", "rid" (tajny, do odpytywania), "code", "pretty"}."""
+    if not _pubkey_ok(pubkey):
+        return {"ok": False, "reason": "Zaktualizuj EmuStart — parowanie wymaga klucza urządzenia (wersja 0.39 lub nowsza)."}
     now = time.time()
     with _lock:
         _gc(now)
@@ -159,7 +202,8 @@ def request(name: str, cls: str, ip: str = "", version: str = "") -> dict:
         rid = secrets.token_urlsafe(24)
         _reqs[code] = {"rid": rid, "name": (str(name).strip() or "urządzenie")[:40],
                        "class": cls if cls in CLASSES else "pc", "ip": ip, "version": version,
-                       "created": now, "expires": now + REQ_TTL, "status": "pending", "key": "", "id": ""}
+                       "created": now, "expires": now + REQ_TTL, "status": "pending", "key": "", "id": "",
+                       "pubkey": pubkey, "hw": _valid_hw(hw)}
     log.info("prośba o dołączenie: %s (%s, %s)", name, cls, ip)
     return {"ok": True, "rid": rid, "code": code, "pretty": f"{code[:4]}-{code[4:]}", "expires": now + REQ_TTL}
 
@@ -175,7 +219,7 @@ def poll(rid: str) -> dict:
                     return {"ok": True, "status": "pending"}
                 _reqs.pop(c, None)                # klucz i odmowa — tylko raz
                 if r["status"] == "approved":
-                    return {"ok": True, "status": "approved", "key": r["key"], "id": r["id"]}
+                    return {"ok": True, "status": "approved", "id": r["id"]}
                 return {"ok": True, "status": "denied"}
     return {"ok": True, "status": "expired"}
 
@@ -210,7 +254,7 @@ def approve(code: str, allow: bool, by: str = "") -> dict:
             r["status"] = "denied"
             log.info("odrzucono prośbę o dołączenie: %s (%s)", r["name"], r["ip"])
             return {"ok": True, "status": "denied", "name": r["name"]}
-        r["id"], r["key"] = _add(r["name"], r["class"], r["ip"], r["version"], now, by)
+        r["id"] = _add_keyed_locked(r["name"], r["class"], r["ip"], r["version"], r["pubkey"], now, by, r.get("hw", ""))
         r["status"] = "approved"
         return {"ok": True, "status": "approved", "name": r["name"], "id": r["id"]}
 

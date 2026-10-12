@@ -633,15 +633,17 @@ def parse_pair(text: str, url: str = "") -> tuple[str, str]:
     return url, text
 
 
-def pair(url: str, code: str, name: str, cls: str = "pc") -> dict:
-    """Parowanie z serwerem jednorazowym kodem → {"ok", "key", "url", "server"} albo {"ok": False, "reason"}."""
+def pair(url: str, code: str, name: str, cls: str = "pc", pubkey: str = "") -> dict:
+    """Parowanie z serwerem jednorazowym kodem i kluczem publicznym urządzenia →
+    {"ok", "id", "url", "server"} albo {"ok": False, "reason"}."""
     from emustart import __version__
     if "://" not in url:
         url = "http://" + url
     u = urllib.parse.urlsplit(url)
     if not u.hostname:
         return {"ok": False, "reason": "Podaj adres serwera (np. http://100.85.254.31:8740)."}
-    body = json.dumps({"code": code, "name": name, "class": cls, "version": __version__, "hw": hw_id()}).encode("utf-8")
+    body = json.dumps({"code": code, "name": name, "class": cls, "version": __version__, "hw": hw_id(),
+                       "pubkey": pubkey}).encode("utf-8")
     c = http.client.HTTPConnection(u.hostname, u.port or 8740, timeout=15)
     try:
         c.request("POST", "/v1/pair", body=body, headers={"Content-Type": "application/json"})
@@ -653,7 +655,7 @@ def pair(url: str, code: str, name: str, cls: str = "pc") -> dict:
         c.close()
     if not d.get("ok"):
         return {"ok": False, "reason": d.get("reason") or d.get("error") or "Serwer odrzucił kod."}
-    return {"ok": True, "key": d["key"], "url": f"http://{u.hostname}:{u.port or 8740}", "server": d.get("server", ""),
+    return {"ok": True, "id": d["id"], "url": f"http://{u.hostname}:{u.port or 8740}", "server": d.get("server", ""),
             "endpoints": d.get("endpoints") or [], "tls": d.get("tls")}
 
 
@@ -716,10 +718,11 @@ def authed_post(cfg: dict, path: str, data: dict) -> dict:
     return {"ok": False, "reason": "serwer nie przyjął klucza"}
 
 
-def join_request(url: str, name: str, cls: str = "pc") -> dict:
-    """Prośba o dołączenie (nowe urządzenie) → {"ok", "rid", "code", "pretty", "url"}."""
+def join_request(url: str, name: str, cls: str = "pc", pubkey: str = "") -> dict:
+    """Prośba o dołączenie (nowe urządzenie, z kluczem publicznym) → {"ok", "rid", "code", "pretty", "url"}."""
     from emustart import __version__
-    return _post(url, "/v1/pair/request", {"name": name, "class": cls, "version": __version__})
+    return _post(url, "/v1/pair/request", {"name": name, "class": cls, "version": __version__,
+                                           "pubkey": pubkey, "hw": hw_id()})
 
 
 def join_poll(url: str, rid: str) -> dict:

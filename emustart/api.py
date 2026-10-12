@@ -76,6 +76,7 @@ class Api:
         artsync.push_later(self._cfg)     # logo / okładki / zrzuty gier, których serwer nie ma
         threading.Thread(target=lambda: netsrc.push_roots(self._cfg), daemon=True,
                          name="foldery-serwer").start()   # foldery z grami → serwer
+        threading.Thread(target=self._upgrade_legacy_key, daemon=True, name="klucz-urzadzenia").start()
         threading.Thread(target=self._profiles_bootstrap, daemon=True, name="profiles").start()
         from emustart import libsync
         if libsync.thin(self._cfg):            # biblioteka z serwera przy starcie (tylko zmienione systemy)
@@ -1380,6 +1381,7 @@ class Api:
                 "server_url": cfg.get("server_url", ""),
                 "server_url_guess": netsrc.guess_url(config.rom_roots(cfg)) if not cfg.get("server_url") else "",
                 "server_key": cfg.get("server_key", ""),
+                "server_keykind": {"tpm": "TPM", "dpapi": "DPAPI", "plik": "plik"}.get(cfg.get("server_keykind", ""), ""),
                 "server_account": cfg.get("server_account", ""),
                 "enroll": ({k: cfg["enroll_pending"].get(k) for k in ("url", "code", "account", "mode")}
                            if cfg.get("enroll_pending") else None),
@@ -1405,15 +1407,62 @@ class Api:
         import socket
         url, code = netsrc.parse_pair(code, url or self._cfg.get("server_url") or
                                       netsrc.guess_url(config.rom_roots(self._cfg)))
-        r = netsrc.pair(url, code, socket.gethostname(), "pc")
+        try:
+            name, kind, pem = self._new_device_key()
+        except Exception as ex:
+            return {"ok": False, "reason": f"Nie udało się utworzyć klucza urządzenia: {ex}"}
+        r = netsrc.pair(url, code, socket.gethostname(), "pc", pem)
         if not r.get("ok"):
+            self._drop_device_key(name, kind)
             return r
-        self._cfg["server_url"], self._cfg["server_key"] = r["url"], r["key"]
-        config.save(self._cfg)
+        self._use_device_key(r["url"], r["id"], name, kind)
         netsrc.learn(self._cfg, r)                 # adresy serwera i odcisk certyfikatu
         netsrc._info.clear()
         nasfs.reset()
         return {"ok": True, "server": r.get("server", ""), "url": r["url"]}
+
+    # ── klucz urządzenia: każde połączenie z serwerem (0.39 — bez kluczy-haseł) ──
+    def _new_device_key(self) -> tuple:
+        import secrets
+        from emustart import keystore
+        name = f"EmuStart-{secrets.token_hex(6)}"
+        kind, pem = keystore.create(name)
+        return name, kind, pem
+
+    def _drop_device_key(self, name: str, kind: str) -> None:
+        from emustart import keystore
+        keystore.delete(name, kind)
+
+    def _use_device_key(self, url: str, did: str, name: str, kind: str) -> None:
+        """Ten komputer łączy się kluczem urządzenia `did` (logowanie podpisem)."""
+        from emustart import keystore
+        old = (self._cfg.get("server_keyname"), self._cfg.get("server_keykind"))
+        self._cfg.update(server_url=url, server_key=netsrc.DEV + did, server_keyname=name, server_keykind=kind)
+        config.save(self._cfg)
+        if old[0] and old[0] != name:
+            keystore.delete(old[0], old[1] or "")
+        netsrc.drop_token()
+        netsrc.use_device(self._cfg)
+        netsrc._info.clear()
+        nasfs.reset()
+
+    def _upgrade_legacy_key(self) -> None:
+        """Stary klucz-hasło → klucz urządzenia (ten sam wpis na serwerze), przy starcie."""
+        key = self._cfg.get("server_key") or ""
+        if not key or key.startswith(netsrc.DEV) or not self._cfg.get("server_url"):
+            return
+        try:
+            name, kind, pem = self._new_device_key()
+        except Exception:
+            log.exception("klucz urządzenia")
+            return
+        r = netsrc.authed_post(self._cfg, "/v1/auth/upgrade", {"pubkey": pem, "hw": netsrc.hw_id()})
+        if not r.get("ok"):
+            self._drop_device_key(name, kind)
+            log.info("przejście na klucz urządzenia: %s", r.get("reason", ""))
+            return
+        self._use_device_key(self._cfg["server_url"], r["id"], name, kind)
+        log.info("ten komputer przeszedł na klucz urządzenia (%s)", kind)
 
     def server_scan(self) -> dict:
         """Skan kodu QR — tylko na telefonie (aparat); na komputerze kod wpisuje się ręcznie."""
@@ -1425,10 +1474,15 @@ class Api:
         import socket
         from emustart import devices, qr
         url = (url or self._cfg.get("server_url") or netsrc.guess_url(config.rom_roots(self._cfg))).strip()
-        r = netsrc.join_request(url, socket.gethostname(), "pc")
+        try:
+            name, kind, pem = self._new_device_key()
+        except Exception as ex:
+            return {"ok": False, "reason": f"Nie udało się utworzyć klucza urządzenia: {ex}"}
+        r = netsrc.join_request(url, socket.gethostname(), "pc", pem)
         if not r.get("ok"):
+            self._drop_device_key(name, kind)
             return {"ok": False, "reason": r.get("reason", "")}
-        self._join = {"url": r["url"], "rid": r["rid"]}
+        self._join = {"url": r["url"], "rid": r["rid"], "keyname": name, "keykind": kind}
         uri = devices.approve_uri(r["url"], r["code"])
         return {"ok": True, "pretty": r["pretty"], "url": r["url"], "server": r.get("server", ""),
                 "svg": qr.svg(uri), "expires_in": max(0, r.get("expires", 0) - time.time())}
@@ -1441,16 +1495,18 @@ class Api:
         r = netsrc.join_poll(j["url"], j["rid"])
         st = r.get("status") if r.get("ok") else "error"
         if st == "approved":
-            self._cfg["server_url"], self._cfg["server_key"] = j["url"], r["key"]
-            config.save(self._cfg)
+            self._use_device_key(j["url"], r["id"], j["keyname"], j["keykind"])
             netsrc.learn(self._cfg, r)
-            netsrc._info.clear()
-            nasfs.reset()
+        elif st in ("denied", "expired"):
+            self._drop_device_key(j["keyname"], j["keykind"])
         if st in ("approved", "denied", "expired"):
             self._join = None
         return {"ok": True, "status": st, "url": j["url"], "reason": r.get("reason", "")}
 
     def server_join_cancel(self) -> dict:
+        j = getattr(self, "_join", None)
+        if j:
+            self._drop_device_key(j["keyname"], j["keykind"])
         self._join = None
         return {"ok": True}
 
@@ -1568,15 +1624,6 @@ class Api:
         r.pop("url", None)
         return r
 
-    def server_paste_key(self) -> dict:
-        """Klucz serwera ze schowka (EmuStart.exe --server-key na serwerze kopiuje go)."""
-        text = _clipboard_text().strip()
-        if not (16 <= len(text) <= 128) or any(ch.isspace() for ch in text):
-            return {"ok": False, "reason": "w schowku nie ma klucza serwera"}
-        self._cfg["server_key"] = text
-        config.save(self._cfg)
-        return {"ok": True}
-
     def emulator_options(self, es: str) -> list:
         return emulators.options_for(systems.info(es), self._cfg.get("emu_root", ""))
 
@@ -1601,13 +1648,12 @@ class Api:
                     pass
         if "bios_dir" in data:
             cfg["bios_dir"] = str(data["bios_dir"]).strip()
-        for k in ("server_url", "server_key"):
-            if k in data:
-                cfg[k] = str(data[k]).strip()
+        if "server_url" in data:
+            cfg["server_url"] = str(data["server_url"]).strip()
         for k in ("server_games", "server_profiles"):
             if k in data:
                 cfg[k] = bool(data[k])
-        if any(k in data for k in ("server_url", "server_key", "server_profiles")):
+        if any(k in data for k in ("server_url", "server_profiles")):
             nasfs.reset()
             netsrc._info.clear()
         if data.get("pad_backend") in ("python", "browser", "none"):
@@ -1800,30 +1846,6 @@ def clean_look(data) -> dict:
         elif isinstance(v, str) and _LOOK_STR.match(v):
             out[k] = v
     return out
-
-
-def _clipboard_text() -> str:
-    """Tekst ze schowka Windows (bez dodatkowych bibliotek)."""
-    import ctypes
-    from ctypes import wintypes
-    u, k = ctypes.windll.user32, ctypes.windll.kernel32
-    u.GetClipboardData.restype = wintypes.HANDLE
-    k.GlobalLock.restype = ctypes.c_void_p
-    k.GlobalLock.argtypes = [wintypes.HANDLE]
-    k.GlobalUnlock.argtypes = [wintypes.HANDLE]
-    if not u.OpenClipboard(None):
-        return ""
-    try:
-        h = u.GetClipboardData(13)          # CF_UNICODETEXT
-        if not h:
-            return ""
-        ptr = k.GlobalLock(h)
-        try:
-            return ctypes.wstring_at(ptr) if ptr else ""
-        finally:
-            k.GlobalUnlock(h)
-    finally:
-        u.CloseClipboard()
 
 
 def _recommended_option(es: str, cfg: dict) -> dict:

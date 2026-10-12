@@ -105,10 +105,11 @@ def test_https_without_known_fingerprint_is_never_used(srv):
 def test_pairing_response_carries_fingerprint(srv, monkeypatch):
     port, tport, fp = srv
     monkeypatch.setattr(srvadmin, "ENABLED", True)
+    import keyhelp
     code = srvadmin.pair_code(None)["code"]
-    r = netsrc.pair(f"127.0.0.1:{port}", code, "Laptop")
-    assert r["ok"] and r["tls"]["fp"] == fp
-    cfg = {"server_url": r["url"], "server_key": r["key"]}
+    r = netsrc.pair(f"127.0.0.1:{port}", code, "Laptop", "pc", keyhelp.new_key()[1])
+    assert r["ok"] and r["tls"]["fp"] == fp and "key" not in r
+    cfg = {"server_url": r["url"], "server_key": netsrc.DEV + r["id"]}
     netsrc.learn(cfg, r)
     assert netsrc.server_fp(cfg) == fp
 

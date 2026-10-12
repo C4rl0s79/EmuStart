@@ -203,7 +203,7 @@ def test_admin_panel_endpoints_local_only(env, monkeypatch):
     st = call("/admin/status", local, {"X-EmuStart": "1"})[1]
     assert st["transfers"][0]["title"] == "Chrono Trigger" and st["clients"][0]["ip"] == "100.64.0.7"
     assert call("/admin/rescan", local, {"X-EmuStart": "1"})[1]["ok"]
-    assert call("/admin/key", local, {"X-EmuStart": "1"})[1]["key"] == "k"
+    assert call("/admin/key", local, {"X-EmuStart": "1"})[0] == 404        # 0.39: wspólnego klucza nie wydaje
     assert call("/admin/nope", local, {"X-EmuStart": "1"})[0] == 404
     with urllib.request.urlopen(urllib.request.Request(base + "/server.html", headers={"Host": local}), timeout=5) as r:
         assert b"/admin/" not in r.read() and r.status == 200          # strona panelu; skrypt osobno (CSP)

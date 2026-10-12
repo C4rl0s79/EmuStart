@@ -119,7 +119,7 @@ class _Handler(BaseHTTPRequestHandler):
             from emustart import remote      # parowanie urządzenia jednorazowym kodem (z sieci)
             return remote.pair(self)
         if p in ("/v1/enroll/request", "/v1/enroll/poll", "/v1/enroll/pending", "/v1/enroll/decide",
-                 "/v1/auth/challenge", "/v1/auth/token"):
+                 "/v1/auth/challenge", "/v1/auth/token", "/v1/auth/upgrade"):
             from emustart import remote      # nowe instalacje przez internet, logowanie podpisem
             return remote.enroll_flow(self, p.rsplit("/", 1)[1])
         if p in ("/v1/pair/request", "/v1/pair/poll", "/v1/pair/approve"):
