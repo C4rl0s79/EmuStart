@@ -8,7 +8,7 @@ Włączany w panelu serwera („Dostęp z internetu”, config: `server_public`)
   go dopiero, gdy sieć lokalna i Tailscale nie odpowiadają);
 - wykrywa adres za NAT-em operatora (CGNAT) — wtedy port publiczny nie ma sensu.
 
-Port publiczny jest węższy niż pozostałe: tylko API /v1 i grafiki, każde zapytanie
+Port publiczny jest węższy niż pozostałe: tylko API /v1 i grafiki (/media, /assets, /local), każde zapytanie
 z kluczem urządzenia; bez parowania (kody przechodzą przez sieć lokalną, Tailscale albo —
 od 0.36 — tunel), bez panelu i interfejsu. Seria złych kluczy z jednego adresu = przerwa
 dla tego adresu; ograniczona liczba połączeń naraz z jednego adresu.
@@ -30,6 +30,8 @@ BAN_WINDOW = 600
 BAN_TIME = 1800
 MAX_CONN_IP = 32
 FW_NAME = "EmuStart Server (internet)"
+# API i grafiki (okładki, logo systemów: własne w /media/, wbudowane w /assets/, z paczki w /local/)
+ALLOWED = ("/v1/", "/media/", "/assets/", "/local/")
 OPEN_PATHS = ("/v1/enroll/request", "/v1/enroll/poll", "/v1/auth/challenge", "/v1/auth/token")
 
 STATE: dict = {"enabled": False, "port": 0, "router": "", "ext_ip": "", "mapped": False, "lease": 0,
@@ -114,7 +116,7 @@ def gate(handler) -> bool:
         handler.close_connection = True
         handler.send_error(403)
         return False
-    if not (path.startswith("/v1/") or path.startswith("/media/")) or path.startswith("/v1/pair"):
+    if not path.startswith(ALLOWED) or path.startswith("/v1/pair"):
         handler.close_connection = True
         handler.send_error(404)
         return False

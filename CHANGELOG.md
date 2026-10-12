@@ -8,6 +8,14 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.37.1] — 2026-10-12
+
+### Poprawione
+- **Brak logo platform na telefonie połączonym przez internet** (tunel / port publiczny).
+  Port publiczny przepuszczał tylko `/v1/` i `/media/`, a logo wbudowane w EmuStart (23
+  systemy) są pod `/assets/`, logo z paczki — pod `/local/`. Teraz przepuszcza też te
+  ścieżki (nadal tylko z kluczem urządzenia). Przez Tailscale i w sieci lokalnej działało.
+
 ## [0.37.0] — 2026-10-12
 
 Zakres: serwer (`emustart/enroll.py` — nowy, `devices.py`, `remote.py`, `public.py`,
