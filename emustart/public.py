@@ -30,6 +30,7 @@ BAN_WINDOW = 600
 BAN_TIME = 1800
 MAX_CONN_IP = 32
 FW_NAME = "EmuStart Server (internet)"
+OPEN_PATHS = ("/v1/enroll/request", "/v1/enroll/poll", "/v1/auth/challenge", "/v1/auth/token")
 
 STATE: dict = {"enabled": False, "port": 0, "router": "", "ext_ip": "", "mapped": False, "lease": 0,
                "error": "", "cgnat": False, "checked": 0.0, "reach": "", "last_inbound": 0.0, "last_ip": ""}
@@ -117,6 +118,8 @@ def gate(handler) -> bool:
         handler.close_connection = True
         handler.send_error(404)
         return False
+    if path in OPEN_PATHS:
+        return True                  # dołączanie i logowanie podpisem — bez klucza (emustart/enroll.py)
     if not remote.authorized(handler):
         _fail(ip)
         handler.close_connection = True

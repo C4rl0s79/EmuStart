@@ -81,7 +81,7 @@ class Server(private val prefs: Prefs) {
         val t = System.nanoTime()
         val c = Net.open("$url/v1/info", prefs.serverFp, url in caUrls)
         c.connectTimeout = 2500; c.readTimeout = 2500
-        c.setRequestProperty("Authorization", "Bearer " + prefs.serverKey)
+        c.setRequestProperty("Authorization", "Bearer " + bearer(url))
         val ok = c.responseCode == 200
         try { c.inputStream.close() } catch (e: Exception) { }
         c.disconnect()
@@ -92,7 +92,7 @@ class Server(private val prefs: Prefs) {
     fun baseUrl(): String {
         val cands = candidates()
         if (cands.size <= 1) return cands.firstOrNull()?.url ?: prefs.serverUrl
-        val sig = cands.joinToString("|") { it.url } + prefs.serverKey + prefs.serverFp
+        val sig = cands.joinToString("|") { it.url } + prefs.serverKey + prefs.deviceId + prefs.serverFp
         if (base.isNotEmpty() && sig == baseSig && System.currentTimeMillis() - baseAt < 300_000) return base
         val res = java.util.concurrent.ConcurrentHashMap<String, Long>()
         val doneSet = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
@@ -135,16 +135,96 @@ class Server(private val prefs: Prefs) {
         return Net.open(b + path, prefs.serverFp, b in caUrls)
     }
 
-    fun open(path: String, range: String? = null, timeoutMs: Int = 20000): HttpURLConnection {
+    // ── logowanie podpisem (klucz urządzenia w Android Keystore — DeviceKey.kt, emustart/enroll.py) ──
+    @Volatile private var tok = ""
+    @Volatile private var tokExp = 0L
+    private val loginLock = Any()
+
+    fun dropToken() { tok = ""; tokExp = 0L }
+
+    /** Nagłówek klucza: urządzenie z kluczem urządzenia — token sesji; inaczej klucz serwera. */
+    private fun bearer(via: String? = null): String =
+        if (prefs.deviceId.isEmpty()) prefs.serverKey else token(via).ifEmpty { "brak-tokenu" }
+
+    private fun token(via: String?): String {
+        val margin = 300_000L
+        if (tok.isNotEmpty() && System.currentTimeMillis() < tokExp - margin) return tok
+        synchronized(loginLock) {           // jedno logowanie naraz — reszta bierze ten sam token
+            if (tok.isNotEmpty() && System.currentTimeMillis() < tokExp - margin) return tok
+            val urls = (listOfNotNull(via) + listOf(base).filter { it.isNotEmpty() } + candidates().map { it.url }).distinct()
+            for (u in urls) {
+                try {
+                    val ch = postJson(u, "/v1/auth/challenge", JSONObject().put("device", prefs.deviceId), u in caUrls)
+                    if (!ch.optBoolean("ok")) { android.util.Log.w("EmuStart", "logowanie: ${ch.optString("reason")}"); continue }
+                    val nonce = ch.getString("nonce")
+                    val sig = DeviceKey.sign(prefs.deviceKey, "emustart-auth|${prefs.deviceId}|$nonce".toByteArray())
+                    val t = postJson(u, "/v1/auth/token", JSONObject().put("device", prefs.deviceId)
+                        .put("nonce", nonce).put("sig", sig), u in caUrls)
+                    if (t.optBoolean("ok")) {
+                        tok = t.getString("token")
+                        tokExp = (t.getDouble("expires") * 1000).toLong()
+                        return tok
+                    }
+                    android.util.Log.w("EmuStart", "logowanie: ${t.optString("reason")}")
+                } catch (e: Exception) { android.util.Log.w("EmuStart", "logowanie przez $u: $e") }
+            }
+            return ""
+        }
+    }
+
+    /** POST JSON bez klucza (dołączanie, logowanie); `ca` — zwykłe sprawdzanie certyfikatu (tunel). */
+    fun postJson(url: String, path: String, body: JSONObject, ca: Boolean = true): JSONObject {
+        val c = Net.open(url.trimEnd('/') + path, prefs.serverFp, ca)
+        try {
+            c.connectTimeout = 8000
+            c.readTimeout = 15000
+            c.requestMethod = "POST"
+            c.doOutput = true
+            c.setRequestProperty("Content-Type", "application/json")
+            c.outputStream.use { it.write(body.toString().toByteArray()) }
+            val status = c.responseCode
+            if (status == 404) return JSONObject().put("ok", false).put("reason", "Serwer ma starszą wersję EmuStart — zaktualizuj go.")
+            val txt = (if (status in 200..299) c.inputStream else c.errorStream)?.bufferedReader(Charsets.UTF_8)?.readText() ?: "{}"
+            return try { JSONObject(txt) } catch (e: Exception) { JSONObject().put("ok", false).put("reason", "błąd serwera $status") }
+        } finally { c.disconnect() }
+    }
+
+    /** POST JSON z kluczem urządzenia (zatwierdzanie próśb). */
+    fun postAuthed(path: String, body: JSONObject): JSONObject {
+        for (attempt in 0..1) {
+            val c = conn(path)
+            try {
+                c.connectTimeout = 8000
+                c.readTimeout = 15000
+                c.requestMethod = "POST"
+                c.doOutput = true
+                c.setRequestProperty("Content-Type", "application/json")
+                c.setRequestProperty("Authorization", "Bearer " + bearer())
+                c.outputStream.use { it.write(body.toString().toByteArray()) }
+                val status = c.responseCode
+                if (status == 401 && prefs.deviceId.isNotEmpty() && attempt == 0) { dropToken(); continue }
+                val txt = (if (status in 200..299) c.inputStream else c.errorStream)?.bufferedReader(Charsets.UTF_8)?.readText() ?: "{}"
+                return try { JSONObject(txt) } catch (e: Exception) { JSONObject().put("ok", false).put("reason", "błąd serwera $status") }
+            } finally { c.disconnect() }
+        }
+        return JSONObject().put("ok", false).put("reason", "serwer nie przyjął klucza urządzenia")
+    }
+
+    fun open(path: String, range: String? = null, timeoutMs: Int = 20000, retry: Boolean = true): HttpURLConnection {
         val c = conn(path)
         c.connectTimeout = 8000
         c.readTimeout = timeoutMs
-        c.setRequestProperty("Authorization", "Bearer " + prefs.serverKey)
+        c.setRequestProperty("Authorization", "Bearer " + bearer())
         profileToken(c, path)
         c.setRequestProperty("User-Agent", "EmuStart-Android/" + BuildConfig.VERSION_NAME)
         c.setRequestProperty("X-EmuStart-Version", BuildConfig.VERSION_NAME)      // panel serwera: wersje urządzeń
         if (range != null) c.setRequestProperty("Range", range)
         val code = try { c.responseCode } catch (e: java.io.IOException) { forgetBase(); throw e }
+        if (code == 401 && retry && prefs.deviceId.isNotEmpty()) {
+            c.disconnect()
+            dropToken()                          // token wygasł (np. restart serwera) — logowanie od nowa
+            return open(path, range, timeoutMs, false)
+        }
         if (code !in 200..299) {
             val msg = try { c.errorStream?.bufferedReader()?.readText() ?: "" } catch (e: Exception) { "" }
             c.disconnect()
@@ -237,7 +317,7 @@ class Server(private val prefs: Prefs) {
             c.requestMethod = "PUT"
             c.doOutput = true
             c.setFixedLengthStreamingMode(data.size)
-            c.setRequestProperty("Authorization", "Bearer " + prefs.serverKey)
+            c.setRequestProperty("Authorization", "Bearer " + bearer())
             profileToken(c, nasPath("file", p, extra))
             c.setRequestProperty("Content-Type", "application/octet-stream")
             c.outputStream.use { it.write(data) }
@@ -262,7 +342,7 @@ class Server(private val prefs: Prefs) {
             c.requestMethod = "PUT"
             c.doOutput = true
             c.setFixedLengthStreamingMode(0)
-            c.setRequestProperty("Authorization", "Bearer " + prefs.serverKey)
+            c.setRequestProperty("Authorization", "Bearer " + bearer())
             profileToken(c, "/v1/savemgr/copy?" + query(q))
             c.outputStream.close()
             val code = c.responseCode
@@ -306,7 +386,7 @@ class Server(private val prefs: Prefs) {
             c.requestMethod = "PUT"
             c.doOutput = true
             c.setFixedLengthStreamingMode(0)
-            c.setRequestProperty("Authorization", "Bearer " + prefs.serverKey)
+            c.setRequestProperty("Authorization", "Bearer " + bearer())
             c.outputStream.close()
             val code = c.responseCode
             if (code == 401) throw HttpError(code, "zły klucz serwera")
@@ -326,7 +406,7 @@ class Server(private val prefs: Prefs) {
             c.requestMethod = "POST"
             c.doOutput = true
             c.setRequestProperty("Content-Type", "application/json")
-            c.setRequestProperty("Authorization", "Bearer " + prefs.serverKey)
+            c.setRequestProperty("Authorization", "Bearer " + bearer())
             val b = JSONObject().put("code", code)
             if (allow != null) b.put("allow", allow)
             c.outputStream.use { it.write(b.toString().toByteArray()) }
@@ -343,7 +423,7 @@ class Server(private val prefs: Prefs) {
             c.connectTimeout = 8000
             c.readTimeout = 20000
             c.requestMethod = "DELETE"
-            c.setRequestProperty("Authorization", "Bearer " + prefs.serverKey)
+            c.setRequestProperty("Authorization", "Bearer " + bearer())
             profileToken(c, nasPath("file", p))
             val code = c.responseCode
             if (code != 200 && code != 404) throw HttpError(code, "usuwanie na serwerze: $code")

@@ -274,6 +274,10 @@ class RemoteFs:
                 if r.will_close:
                     c.close()
                     self._local.c = None
+                if r.status == 401 and self.key.startswith(netsrc.DEV) and attempt == 0:
+                    netsrc.drop_token()            # token sesji wygasł (np. restart serwera)
+                    h = {**netsrc.auth_headers(self.key), **{k: v for k, v in h.items() if k != "Authorization"}}
+                    continue
                 return r.status, data, {k.lower(): v for k, v in r.getheaders()}
             except (OSError, http.client.HTTPException) as ex:
                 last = ex

@@ -28,6 +28,21 @@ class Prefs(ctx: Context) {
         get() = sp.getString("server_fp", "") ?: ""
         set(v) = sp.edit().putString("server_fp", v.trim().lowercase()).apply()
 
+    /** Urządzenie z kluczem urządzenia (0.37): id na serwerze, alias klucza w Android Keystore, konto. */
+    var deviceId: String
+        get() = sp.getString("device_id", "") ?: ""
+        set(v) = sp.edit().putString("device_id", v).apply()
+    var deviceKey: String
+        get() = sp.getString("device_key", "") ?: ""
+        set(v) = sp.edit().putString("device_key", v).apply()
+    var serverAccount: String
+        get() = sp.getString("server_account", "") ?: ""
+        set(v) = sp.edit().putString("server_account", v).apply()
+    /** Prośba o dołączenie czekająca na zatwierdzenie (JSON; '' = brak) — przetrwa restart. */
+    var enrollPending: String
+        get() = sp.getString("enroll_pending", "") ?: ""
+        set(v) = sp.edit().putString("enroll_pending", v).apply()
+
     var cacheRecent: Int
         get() = sp.getInt("cache_recent", 10)
         set(v) = sp.edit().putInt("cache_recent", v.coerceIn(1, 100)).apply()
@@ -84,7 +99,7 @@ class Prefs(ctx: Context) {
     fun emulator(es: String): String = sp.getString("emu:$es", "") ?: ""
     fun setEmulator(es: String, id: String) = sp.edit().putString("emu:$es", id).apply()
 
-    val configured: Boolean get() = serverUrl.isNotBlank() && serverKey.isNotBlank()
+    val configured: Boolean get() = serverUrl.isNotBlank() && (serverKey.isNotBlank() || deviceId.isNotBlank())
 
     /** Gry w publicznym folderze — emulatory z dostępem do pamięci mogą je czytać. */
     fun gamesDir(ctx: Context): File {

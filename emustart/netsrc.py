@@ -235,7 +235,12 @@ def _probe(sp, key: str, fp: str) -> float | None:
     else:
         c = http.client.HTTPConnection(host, port, timeout=PROBE_TIMEOUT)
     try:
-        c.request("GET", "/v1/info", headers=auth_headers(key))
+        if key.startswith(DEV):
+            tok = session_token(key[len(DEV):], sp)
+            hdr = {**auth_headers(""), "Authorization": f"Bearer {tok}"}
+        else:
+            hdr = auth_headers(key)
+        c.request("GET", "/v1/info", headers=hdr)
         r = c.getresponse()
         r.read()
         return time.monotonic() - t if r.status == 200 else None
@@ -305,6 +310,8 @@ def endpoint(cfg: dict) -> tuple[str, int, str] | None:
     key = (cfg.get("server_key") or "").strip()
     if not key:
         return None
+    if key.startswith(DEV):
+        use_device(cfg)
     sp = best(cfg)
     if not sp:
         return None
@@ -365,9 +372,105 @@ def learn(cfg: dict, d: dict) -> bool:
 
 
 def auth_headers(key: str) -> dict:
-    """Klucz i wersja EmuStart (panel serwera pokazuje wersje sparowanych urządzeń)."""
+    """Klucz i wersja EmuStart (panel serwera pokazuje wersje sparowanych urządzeń).
+    Urządzenie z kluczem urządzenia („dev:<id>”, 0.37) — token sesji z logowania podpisem."""
     from emustart import __version__
+    if key.startswith(DEV):
+        key = session_token(key[len(DEV):]) or "brak-tokenu"
     return {"Authorization": f"Bearer {key}", "X-EmuStart-Version": __version__}
+
+
+# ── logowanie podpisem (emustart/enroll.py, emustart/keystore.py) ──
+DEV = "dev:"
+TOKEN_MARGIN = 300               # odnowienie tokenu tyle s przed wygaśnięciem
+_session: dict = {}              # {"did", "tok", "exp"}
+_signer: dict = {}               # id urządzenia → (nazwa klucza, rodzaj)
+_session_lock = threading.Lock()
+_login_lock = threading.Lock()   # jedno logowanie naraz — reszta wątków czeka i bierze ten sam token
+_hint: list = []                 # ostatni działający adres (schemat, host, port)
+_cfg_ref: list = []
+
+
+def use_device(cfg: dict) -> None:
+    """Klucz urządzenia z ustawień (server_key = „dev:<id>”)."""
+    key = cfg.get("server_key") or ""
+    if key.startswith(DEV) and cfg.get("server_keyname"):
+        _signer[key[len(DEV):]] = (cfg["server_keyname"], cfg.get("server_keykind") or "dpapi")
+        _cfg_ref[:] = [cfg]
+
+
+def drop_token() -> None:
+    with _session_lock:
+        _session.clear()
+
+
+def _conn_sp(sp, timeout: float):
+    scheme, host, port = sp
+    mode = _mode(sp)
+    if mode == "ca" or (scheme == "https" and mode != "pin"):
+        return http.client.HTTPSConnection(host, port, timeout=timeout, context=ssl.create_default_context())
+    if mode == "pin":
+        return PinnedHTTPS(host, port, (_cfg_ref and server_fp(_cfg_ref[0])) or "", timeout)
+    return http.client.HTTPConnection(host, port, timeout=timeout)
+
+
+def _post_sp(sp, path: str, data: dict, timeout: float = 10) -> dict:
+    c = _conn_sp(sp, timeout)
+    try:
+        c.request("POST", path, body=json.dumps(data).encode("utf-8"), headers={"Content-Type": "application/json"})
+        r = c.getresponse()
+        d = json.loads(r.read() or b"{}")
+        return d if isinstance(d, dict) else {}
+    finally:
+        c.close()
+
+
+def _login(did: str, sp) -> str:
+    """Wyzwanie → podpis kluczem urządzenia → token sesji (przez adres `sp`)."""
+    import base64
+    from emustart import keystore
+    name, kind = _signer[did]
+    ch = _post_sp(sp, "/v1/auth/challenge", {"device": did})
+    if not ch.get("ok"):
+        raise OSError(ch.get("reason") or "serwer nie zna tego urządzenia")
+    msg = f"emustart-auth|{did}|{ch['nonce']}".encode("utf-8")
+    sig = base64.b64encode(keystore.sign(name, kind, msg)).decode()
+    t = _post_sp(sp, "/v1/auth/token", {"device": did, "nonce": ch["nonce"], "sig": sig})
+    if not t.get("ok"):
+        raise OSError(t.get("reason") or "logowanie odrzucone")
+    with _session_lock:
+        _session.update(did=did, tok=t["token"], exp=float(t["expires"]))
+    return t["token"]
+
+
+def session_token(did: str, sp=None) -> str:
+    """Ważny token sesji urządzenia; logowanie przez `sp`, ostatni działający adres albo
+    kolejne adresy serwera."""
+    with _session_lock:
+        if _session.get("did") == did and _session.get("exp", 0) - TOKEN_MARGIN > time.time():
+            return _session["tok"]
+    if did not in _signer:
+        return ""
+    with _login_lock:
+        with _session_lock:
+            if _session.get("did") == did and _session.get("exp", 0) - TOKEN_MARGIN > time.time():
+                return _session["tok"]        # zalogował się inny wątek, gdy ten czekał
+        return _login_any(did, sp)
+
+
+def _login_any(did: str, sp) -> str:
+    tries = [sp] if sp else []
+    tries += [h for h in _hint if h not in tries]
+    if _cfg_ref:
+        tries += [c for c in candidates(_cfg_ref[0]) if c not in tries]
+    for t in tries:
+        try:
+            tok = _login(did, t)
+            _hint[:] = [t]
+            return tok
+        except (OSError, http.client.HTTPException, ValueError, KeyError) as ex:
+            log.info("logowanie urządzenia przez %s:%s: %s", t[1], t[2], ex)
+    return ""
 
 
 def _request(ep, path: str, timeout: float = 5) -> tuple[int, bytes, float]:
@@ -392,8 +495,12 @@ def info(cfg: dict, fresh: bool = False) -> dict:
             return _info["res"]
     try:
         st, body, rtt = _request(ep, "/v1/info")
+        if st == 401 and ep[2].startswith(DEV):
+            drop_token()
+            st, body, rtt = _request(ep, "/v1/info")
         if st == 401:
-            res = {"ok": False, "reason": "zły klucz serwera"}
+            res = {"ok": False, "reason": "zły klucz serwera" if not ep[2].startswith(DEV)
+                   else "serwer nie przyjął klucza urządzenia (unieważnione?)"}
         elif st != 200:
             res = {"ok": False, "reason": f"serwer odpowiedział {st}"}
         else:
@@ -526,14 +633,14 @@ def pair(url: str, code: str, name: str, cls: str = "pc") -> dict:
 
 def _post(url: str, path: str, data: dict, key: str = "") -> dict:
     """POST JSON na serwer → odpowiedź (z "url" — adres w postaci kanonicznej) albo {"ok": False, "reason"}."""
-    if "://" not in url:
-        url = "http://" + url
-    u = urllib.parse.urlsplit(url)
-    if not u.hostname:
-        return {"ok": False, "reason": "Podaj adres serwera (np. http://100.85.254.31:8740)."}
-    port = u.port or 8740
+    sp = _split(url)
+    if not sp:
+        return {"ok": False, "reason": "Podaj adres serwera (np. emustart.twojadomena.org albo 100.85.254.31)."}
+    scheme, host, port = sp
     h = {"Content-Type": "application/json", **(auth_headers(key) if key else {})}
-    c = http.client.HTTPConnection(u.hostname, port, timeout=15)
+    c = (http.client.HTTPSConnection(host, port, timeout=15, context=ssl.create_default_context())
+         if scheme == "https" else http.client.HTTPConnection(host, port, timeout=15))
+    u = urllib.parse.urlsplit(f"{scheme}://{host}:{port}")
     try:
         c.request("POST", path, body=json.dumps(data).encode("utf-8"), headers=h)
         r = c.getresponse()
@@ -549,8 +656,38 @@ def _post(url: str, path: str, data: dict, key: str = "") -> dict:
     d.setdefault("ok", False)
     if not d["ok"] and not d.get("reason"):
         d["reason"] = d.get("error") or f"Serwer odpowiedział {r.status}."
-    d["url"] = f"http://{u.hostname}:{port}"
+    d["url"] = f"{scheme}://{host}" + ("" if (scheme, port) in (("https", 443), ("http", 80)) else f":{port}")
     return d
+
+
+def authed_post(cfg: dict, path: str, data: dict) -> dict:
+    """POST JSON do serwera z ustawień (najlepszy adres, klucz / token urządzenia)."""
+    ep = endpoint(cfg)
+    if not ep:
+        return {"ok": False, "reason": "serwer nie jest ustawiony"}
+    for attempt in range(2):
+        c = conn(ep[0], ep[1], 15)
+        try:
+            c.request("POST", path, body=json.dumps(data).encode("utf-8"),
+                      headers={**auth_headers(ep[2]), "Content-Type": "application/json"})
+            r = c.getresponse()
+            body = r.read()
+        except (OSError, http.client.HTTPException) as ex:
+            forget_best()
+            return {"ok": False, "reason": f"brak połączenia z serwerem ({ex})"}
+        finally:
+            c.close()
+        if r.status == 401 and ep[2].startswith(DEV) and attempt == 0:
+            drop_token()
+            continue
+        try:
+            d = json.loads(body or b"{}")
+        except ValueError:
+            d = {}
+        if r.status == 404 and not d:
+            return {"ok": False, "reason": "Serwer ma starszą wersję EmuStart — zaktualizuj go (panel serwera)."}
+        return d if isinstance(d, dict) else {"ok": False}
+    return {"ok": False, "reason": "serwer nie przyjął klucza"}
 
 
 def join_request(url: str, name: str, cls: str = "pc") -> dict:

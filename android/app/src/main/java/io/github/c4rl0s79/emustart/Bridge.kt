@@ -91,6 +91,12 @@ class Bridge(private val act: MainActivity) {
         "server_scan" -> scanQr()
         "server_pair" -> pairServer(a.optString(0, ""), a.optString(1, ""))
         "server_approve" -> approveDevice(a.optString(0, ""), a.opt(1) as? Boolean)
+        "server_enroll" -> enrollStart(a.optString(0, ""), a.optString(1, ""), a.optString(2, ""))
+        "server_enroll_poll" -> enrollPoll()
+        "server_enroll_cancel" -> { enrollCancel(); JSONObject().put("ok", true) }
+        "enroll_pending" -> enrollPending()
+        "enroll_decide" -> server.postAuthed("/v1/enroll/decide", JSONObject().put("id", a.optString(0, ""))
+            .put("allow", a.optBoolean(1)).put("games", a.optBoolean(2)))
         "rescan" -> { systemsCache = null; synchronized(gamesCache) { gamesCache.clear() }; JSONObject().put("ok", true) }
         "launch" -> startLaunch(a.getInt(0), a.optBoolean(2, false))
         "launch_status" -> launchStatus()
@@ -404,7 +410,11 @@ class Bridge(private val act: MainActivity) {
                 .put("options", opts).put("emulator", chosenEmu(s)))
         }
         return JSONObject()
-            .put("server_url", prefs.serverUrl).put("server_key", prefs.serverKey)
+            .put("server_url", prefs.serverUrl).put("server_key", prefs.serverKey.ifEmpty { if (prefs.deviceId.isNotEmpty()) "dev:" + prefs.deviceId else "" })
+            .put("server_account", prefs.serverAccount)
+            .put("enroll", prefs.enrollPending.takeIf { it.isNotEmpty() }?.let { val o = JSONObject(it)
+                JSONObject().put("url", o.optString("url")).put("code", o.optString("code")).put("account", o.optString("account"))
+                    .put("mode", o.optString("mode")) } ?: JSONObject.NULL)
             .put("cache_recent", prefs.cacheRecent).put("streams", prefs.streams)
             .put("games_logo", prefs.gamesLogo).put("games_dir", prefs.gamesDir(act).absolutePath)
             .put("profile", prefs.profile).put("pending_saves", saves.pendingCount())
@@ -425,7 +435,8 @@ class Bridge(private val act: MainActivity) {
                     if (u.trimEnd('/') != prefs.serverUrl) { prefs.serverEndpoints = ""; prefs.serverFp = ""; server.forgetBase() }
                     prefs.serverUrl = u; systemsCache = null
                 }
-                k == "server_key" -> { prefs.serverKey = d.getString(k); systemsCache = null }
+                k == "server_key" -> if (!d.getString(k).startsWith("dev:")) {   // klucz urządzenia — nie do edycji
+                    prefs.serverKey = d.getString(k); prefs.deviceId = ""; server.dropToken(); systemsCache = null }
                 k == "cache_recent" -> prefs.cacheRecent = d.getInt(k)
                 k == "streams" -> prefs.streams = d.getInt(k)
                 k == "games_logo" -> prefs.gamesLogo = d.getBoolean(k)
@@ -474,6 +485,76 @@ class Bridge(private val act: MainActivity) {
 
     /** Parowanie: kod z panelu serwera albo link z kodu QR (emustart://pair?u=…&c=…) →
      *  własny klucz tego telefonu (zamiast przepisywania wspólnego klucza serwera). */
+    // ── nowa instalacja przez internet (emustart/enroll.py): klucz urządzenia, prośba, zatwierdzenie ──
+    private fun enrollStart(url0: String, mode: String, account: String): JSONObject {
+        if (url0.isBlank() || account.isBlank() || mode !in setOf("new", "existing"))
+            return JSONObject().put("ok", false).put("reason", "Podaj adres serwera i nazwę konta.")
+        val url = normUrl(url0)
+        val old = prefs.enrollPending.takeIf { it.isNotEmpty() }?.let { JSONObject(it) }
+        if (old != null && (old.optString("url") != url || old.optString("account") != account || old.optString("mode") != mode)) enrollCancel()
+        val keep = old != null && prefs.enrollPending.isNotEmpty()
+        val alias = if (keep) old!!.optString("alias") else "emustart-" + java.util.UUID.randomUUID().toString().take(12)
+        val (kind, pem) = if (keep) Pair(old!!.optString("kind"), old.optString("pubkey")) else try {
+            DeviceKey.create(alias)
+        } catch (e: Exception) {
+            return JSONObject().put("ok", false).put("reason", "Nie udało się utworzyć klucza urządzenia: ${e.message}")
+        }
+        val r = try {
+            server.postJson(url, "/v1/enroll/request", JSONObject().put("mode", mode).put("account", account)
+                .put("name", saves.device).put("class", "phone").put("version", BuildConfig.VERSION_NAME).put("pubkey", pem),
+                ca = !url.startsWith("http://"))
+        } catch (e: Exception) { JSONObject().put("ok", false).put("reason", explain(e)) }
+        if (!r.optBoolean("ok")) {
+            if (!keep) DeviceKey.delete(alias)
+            return JSONObject().put("ok", false).put("reason", r.optString("reason", "Serwer odrzucił prośbę."))
+        }
+        prefs.enrollPending = JSONObject().put("url", url).put("rid", r.getString("rid")).put("code", r.getString("pretty"))
+            .put("account", account).put("mode", mode).put("alias", alias).put("kind", kind).put("pubkey", pem).toString()
+        Log.i(tag, "prośba o dołączenie do $url ($mode, konto $account, klucz: $kind)")
+        return JSONObject().put("ok", true).put("code", r.getString("pretty")).put("account", account).put("url", url).put("key", kind)
+    }
+
+    private fun enrollPoll(): JSONObject {
+        val p = prefs.enrollPending.takeIf { it.isNotEmpty() }?.let { JSONObject(it) }
+            ?: return JSONObject().put("ok", false).put("status", "none")
+        val url = p.getString("url")
+        val r = try {
+            server.postJson(url, "/v1/enroll/poll", JSONObject().put("rid", p.getString("rid")), ca = !url.startsWith("http://"))
+        } catch (e: Exception) { JSONObject().put("ok", false).put("reason", explain(e)) }
+        val st = if (r.optBoolean("ok")) r.optString("status") else "error"
+        when (st) {
+            "approved" -> {
+                prefs.serverUrl = url
+                prefs.serverKey = ""
+                prefs.deviceId = r.getString("device")
+                prefs.deviceKey = p.getString("alias")
+                prefs.serverAccount = r.optString("account", p.optString("account"))
+                prefs.serverEndpoints = ""
+                prefs.enrollPending = ""
+                server.dropToken(); server.forgetBase()
+                systemsCache = null
+                learnedAt = 0L
+                Log.i(tag, "dołączono do serwera $url (konto ${prefs.serverAccount})")
+            }
+            "denied", "expired" -> enrollCancel()
+        }
+        return JSONObject().put("ok", true).put("status", st).put("account", p.optString("account"))
+            .put("code", p.optString("code")).put("reason", r.optString("reason"))
+    }
+
+    private fun enrollCancel() {
+        val p = prefs.enrollPending.takeIf { it.isNotEmpty() }?.let { JSONObject(it) } ?: return
+        DeviceKey.delete(p.optString("alias"))
+        prefs.enrollPending = ""
+    }
+
+    /** Prośby, które ten telefon może zatwierdzić (pokazywane przy otwarciu aplikacji). */
+    private fun enrollPending(): JSONObject {
+        if (!prefs.configured) return JSONObject().put("ok", true).put("requests", JSONArray())
+        val r = try { server.postAuthed("/v1/enroll/pending", JSONObject()) } catch (e: Exception) { JSONObject() }
+        return if (r.optBoolean("ok")) r else JSONObject().put("ok", true).put("requests", JSONArray())
+    }
+
     /** Adres serwera wpisany przez gracza: nazwa domeny (np. emustart.emucloud.org — tunel)
      *  → https (port 443), adres IP / nazwa komputera → http z portem 8740. */
     private fun normUrl(s: String): String {
@@ -490,7 +571,7 @@ class Bridge(private val act: MainActivity) {
     /** Zatwierdzenie nowego urządzenia kodem z jego ekranu albo linkiem z jego kodu QR
      *  (emustart://approve?u=…&c=…). allow == null — tylko podgląd prośby (nazwa, rodzaj, adres). */
     private fun approveDevice(text: String, allow: Boolean?): JSONObject {
-        if (prefs.serverUrl.isBlank() || prefs.serverKey.isBlank())
+        if (!prefs.configured)
             return JSONObject().put("ok", false).put("reason", "Ten telefon nie jest połączony z serwerem.")
         var code = text.trim()
         if (code.lowercase().startsWith("emustart://approve")) code = Uri.parse(code).getQueryParameter("c") ?: ""
@@ -526,6 +607,7 @@ class Bridge(private val act: MainActivity) {
             if (!d.optBoolean("ok")) return JSONObject().put("ok", false).put("reason", d.optString("reason", "Serwer odrzucił kod."))
             prefs.serverUrl = url
             prefs.serverKey = d.getString("key")
+            if (prefs.deviceId.isNotEmpty()) { DeviceKey.delete(prefs.deviceKey); prefs.deviceId = ""; prefs.deviceKey = ""; server.dropToken() }
             server.learn(d)                        // adresy serwera i odcisk certyfikatu (HTTPS)
             systemsCache = null
             online = true

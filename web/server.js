@@ -171,6 +171,20 @@ const KIND = { pc: "komputer", phone: "telefon" };
 async function refreshDevices() {
   const r = await admin("devices").catch(() => null);
   if (!r) return;
+  const enr = r.enroll || [];
+  $("enrBox").hidden = !enr.length;
+  $("enroll").innerHTML = enr.map((q) =>
+    `<tr><td>${esc(q.name)}<div class="muted">${esc(KIND[q.class] || q.class)} · ${esc(q.ip)} · ${ago(q.created)}</div></td>` +
+    `<td>${q.mode === "new" ? "nowe konto" : "konto"} <b>${esc(q.account)}</b></td>` +
+    `<td><code style="font-size:18px;letter-spacing:.08em">${esc(q.code)}</code></td>` +
+    `<td class="n"><button class="primary" data-eg="${esc(q.id)}">Zatwierdź z grami</button> ` +
+    `<button data-es="${esc(q.id)}">Bez gier</button> <button class="danger" data-en="${esc(q.id)}">Odrzuć</button></td></tr>`).join("");
+  $("enroll").querySelectorAll("[data-eg],[data-es],[data-en]").forEach((b) => b.addEventListener("click", async () => {
+    const id = b.dataset.eg || b.dataset.es || b.dataset.en;
+    const res = await admin("enroll_decide", { id, allow: !b.dataset.en, games: !!b.dataset.eg }).catch(() => null);
+    msg(res?.ok ? (b.dataset.en ? `Odrzucono: ${res.name}` : `Zatwierdzono: ${res.name}`) : (res?.reason || "Serwer nie odpowiada."), res?.ok);
+    refreshDevices();
+  }));
   const reqs = r.requests || [];
   $("reqBox").hidden = !reqs.length;
   $("requests").innerHTML = reqs.map((q) =>
@@ -186,10 +200,21 @@ async function refreshDevices() {
   }));
   $("devices").innerHTML = r.devices.length ? r.devices.map((d) =>
     `<tr class="${d.revoked ? "off" : ""}"><td>${esc(d.name)}<div class="muted">${esc(d.ip || "")}</div></td>` +
-    `<td>${esc(KIND[d.class] || d.class)}</td><td>${esc(d.version || "—")}</td>` +
+    `<td>${esc(KIND[d.class] || d.class)}</td>` +
+    `<td>${d.admin ? "administrator" : `${esc(d.account || "—")} · ${d.games ? "z grami" : "bez gier"}`}` +
+    `${d.keyed ? ' <span class="muted">(klucz urządzenia)</span>' : ""}` +
+    `${d.revoked ? "" : ` <button data-acc="${esc(d.id)}" data-adm="${d.admin ? 1 : 0}">${d.admin ? "Odbierz admina" : "Nadaj admina"}</button>`}</td>` +
+    `<td>${esc(d.version || "—")}</td>` +
     `<td class="n">${d.revoked ? "unieważnione" : ago(d.last_seen)}</td>` +
     `<td class="n">${d.revoked ? "" : `<button data-ren="${esc(d.id)}">Nazwa</button> <button class="danger" data-rev="${esc(d.id)}">Unieważnij</button>`}</td></tr>`).join("")
-    : `<tr><td colspan="5" class="muted">Brak sparowanych urządzeń — „Dodaj urządzenie”. Urządzenia ze wspólnym kluczem serwera działają dalej.</td></tr>`;
+    : `<tr><td colspan="6" class="muted">Brak sparowanych urządzeń — „Dodaj urządzenie”. Urządzenia ze wspólnym kluczem serwera działają dalej.</td></tr>`;
+  $("devices").querySelectorAll("[data-acc]").forEach((b) => b.addEventListener("click", async () => {
+    const make = b.dataset.adm !== "1";
+    if (!confirm(make ? "Nadać temu urządzeniu rolę administratora (zatwierdza wszystkie prośby, widzi wszystkie konta)?"
+                      : "Odebrać rolę administratora?")) return;
+    await admin("device_access", { id: b.dataset.acc, role: make ? "admin" : "user" }).catch(() => null);
+    refreshDevices();
+  }));
   $("devices").querySelectorAll("[data-rev]").forEach((b) => b.addEventListener("click", async () => {
     if (!confirm("Unieważnić to urządzenie? Straci dostęp do serwera, dopóki nie sparujesz go ponownie.")) return;
     await admin("device_revoke", { id: b.dataset.rev }).catch(() => null);

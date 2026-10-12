@@ -53,11 +53,19 @@ def _isolated_app(tmp_path_factory, monkeypatch):
     monkeypatch.setattr(paths, "SERVER", base / "server")
     from emustart import devices, netsrc, remote
     devices.reset_cache()
+    from emustart import enroll as _enroll
+    _enroll.reset()
     netsrc._learned.clear()
     netsrc.forget_best()
     netsrc._PINS.clear()
     netsrc._CA.clear()
     netsrc._EPINFO.clear()
+    netsrc._session.clear()
+    netsrc._signer.clear()
+    netsrc._hint.clear()
+    netsrc._cfg_ref.clear()
+    from emustart import keystore
+    monkeypatch.setattr(keystore, "USE_TPM", False)
     monkeypatch.setattr(remote, "TLS", {})
     from emustart import srvadmin            # adresy tego komputera — testy podają je same
     monkeypatch.setattr(srvadmin, "_addresses", lambda: [])

@@ -281,7 +281,24 @@ def handle(handler, api) -> None:
 # ── urządzenia (EmuStart 2.0: klucz na urządzenie, parowanie kodem QR) ──
 def devices_list(_api) -> dict:
     from emustart import devices
-    return {"ok": True, "devices": devices.listing(), "requests": devices.pending_list(), "now": time.time()}
+    from emustart import enroll
+    return {"ok": True, "devices": devices.listing(), "requests": devices.pending_list(),
+            "enroll": enroll.pending(""), "now": time.time()}
+
+
+def enroll_decide(_api, args: dict) -> dict:
+    """Panel: prośba nowej instalacji z internetu — zatwierdź (z grami / bez) albo odrzuć."""
+    from emustart import enroll, remote
+    return enroll.decide(str(args.get("id", "")), bool(args.get("allow")), bool(args.get("games")), "",
+                         remote.create_account)
+
+
+def device_access(_api, args: dict) -> dict:
+    """Panel: rola urządzenia (administrator / użytkownik) i pobieranie gier."""
+    from emustart import devices
+    role = args.get("role") if args.get("role") in ("admin", "user") else None
+    games = args.get("games") if isinstance(args.get("games"), bool) else None
+    return {"ok": devices.set_access(str(args.get("id", "")), role, games)}
 
 
 def public_status(_api) -> dict:
@@ -413,7 +430,8 @@ def profiles_migrate_status(_api) -> dict:
 
 ACTIONS_ARGS = {"device_revoke": device_revoke, "device_rename": device_rename,
                 "profiles_migrate": profiles_migrate, "pair_approve": pair_approve,
-                "public_set": public_set, "tunnel_set": tunnel_set}
+                "public_set": public_set, "tunnel_set": tunnel_set,
+                "enroll_decide": enroll_decide, "device_access": device_access}
 ACTIONS.update({"public_status": public_status, "devices": devices_list, "pair_code": pair_code, "profiles_migrate_status": profiles_migrate_status})
 
 
