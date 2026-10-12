@@ -43,7 +43,7 @@ def test_info_and_wrong_key(srv):
     i = netsrc.info(cfg, fresh=True)
     assert i["ok"] and "find" in i["features"] and i["rtt"] < 1
     bad = {**cfg, "server_key": "zly"}
-    assert netsrc.info(bad, fresh=True) == {"ok": False, "reason": "zły klucz serwera"}
+    assert netsrc.info(bad, fresh=True) == {"ok": False, "reason": "zły klucz serwera", "key_rejected": True}
     assert netsrc.sources({**cfg, "server_games": False}, {"es": "psx"}) == {}
     assert netsrc.info({}, fresh=True)["ok"] is False
 

@@ -508,7 +508,13 @@ function renderProfiles() {
     `${p.pin === "need_pin" ? " 🔒" : p.pin === "set_pin" ? " ⚠" : ""}</div></div>`).join("") +
     // urządzenie przypisane do konta: tylko to konto — bez zakładania, zmiany nazwy i usuwania
     (PR.account ? "" : `<div class="pcard add${PR.idx === PR.list.length ? " sel" : ""}" data-i="${PR.list.length}"><div class="pav">+</div><div class="pname">Nowy profil</div></div>`);
-  $("profCards").innerHTML = cards;
+  const rejected = S.state?.server?.key_rejected;
+  $("profCards").innerHTML = rejected
+    // serwer odrzuca klucz: nie ma czego wybrać ani gdzie założyć profilu — tylko wyjaśnienie
+    ? `<div class="empty"><h2>Klucz tego urządzenia jest nieważny</h2>` +
+      `<p>Serwer go nie przyjmuje (urządzenie unieważnione w panelu serwera albo zastąpione nową rejestracją). ` +
+      `Połącz ponownie: Ustawienia → Dołącz przez internet → Mam konto.</p></div>`
+    : cards;
   $("profCards").querySelectorAll(".pcard").forEach((el) => el.addEventListener("click", () => { PR.idx = +el.dataset.i; profilesInput("a"); }));
   const onProfile = PR.idx < PR.list.length;
   if (PR.account) return setHints([["a", "Graj jako"], ["b", "Wstecz"]]);

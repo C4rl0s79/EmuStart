@@ -17,6 +17,18 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   RetroArchu na Androidzie; ocena „wyświetlania nad innymi aplikacjami” i usługi ułatwień
   dostępu dla pozostałych emulatorów na Androidzie.
 
+## [0.38.3] — 2026-10-12
+
+### Poprawione
+- **Klucz urządzenia odrzucony przez serwer — sprzeczne informacje** (u góry profil, lista
+  profili pusta, „Nowy profil”, „Serwer niedostępny”). Teraz komputer i telefon rozpoznają
+  odrzucony klucz (401): pasek „Klucz urządzenia nieważny”, jednorazowy komunikat z drogą
+  naprawy (Ustawienia → Dołącz przez internet), a ekran profili zamiast pustej listy
+  wyjaśnia, co się stało.
+- **Panel serwera ostrzega przed unieważnieniem urządzenia w użyciu** — gdy łączyło się
+  w ostatnich 6 godzinach, potwierdzenie mówi, kiedy (łatwo pomylić dwie rejestracje
+  o tej samej nazwie).
+
 ## [0.38.2] — 2026-10-12
 
 Zakres: serwer (`emustart/devices.py`, `enroll.py`, `remote.py`), komputer (`netsrc.py`,

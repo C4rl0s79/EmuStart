@@ -168,9 +168,11 @@ async function updTick() {
 
 /* ── sparowane urządzenia i parowanie kodem QR (emustart/devices.py) ── */
 const KIND = { pc: "komputer", phone: "telefon" };
+let lastDevices = [];
 async function refreshDevices() {
   const r = await admin("devices").catch(() => null);
   if (!r) return;
+  lastDevices = r.devices;
   const enr = r.enroll || [];
   $("enrBox").hidden = !enr.length;
   $("enroll").innerHTML = enr.map((q) =>
@@ -217,7 +219,10 @@ async function refreshDevices() {
     refreshDevices();
   }));
   $("devices").querySelectorAll("[data-rev]").forEach((b) => b.addEventListener("click", async () => {
-    if (!confirm("Unieważnić to urządzenie? Straci dostęp do serwera, dopóki nie sparujesz go ponownie.")) return;
+    const d = (lastDevices || []).find((x) => x.id === b.dataset.rev) || {};
+    const recent = d.last_seen && Date.now() / 1000 - d.last_seen < 6 * 3600;
+    if (!confirm((recent ? `UWAGA: „${d.name}” łączyło się z serwerem ${ago(d.last_seen)} — to urządzenie jest w użyciu.\n\n` : "") +
+                 "Unieważnić to urządzenie? Straci dostęp do serwera, dopóki nie dołączy ponownie.")) return;
     await admin("device_revoke", { id: b.dataset.rev }).catch(() => null);
     refreshDevices();
   }));

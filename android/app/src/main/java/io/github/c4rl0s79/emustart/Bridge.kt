@@ -199,7 +199,8 @@ class Bridge(private val act: MainActivity) {
             .put("profile", JSONObject().put("id", profileId()).put("name", prefs.profile.ifEmpty { "—" }))
             .put("profiles", profList.size.coerceAtLeast(1))
             .put("account", if (prefs.deviceId.isNotEmpty()) prefs.serverAccount else "")
-            .put("server", if (prefs.configured) JSONObject().put("ok", online).put("name", "") else JSONObject.NULL)
+            .put("server", if (prefs.configured) JSONObject().put("ok", online).put("name", "")
+                .put("key_rejected", keyRejected) else JSONObject.NULL)
             .put("py_pad", false).put("pad_backend", "android")
     }
 
@@ -215,6 +216,7 @@ class Bridge(private val act: MainActivity) {
         } catch (e: Exception) { Log.w(tag, "identyfikator sprzętu: $e") }
     }
     private val sysInfo = HashMap<String, JSONObject>()
+    @Volatile private var keyRejected = false
 
     // ── wybór emulatora / rdzenia na koncie (<profil>/settings/android/emulators.json) ──
     private fun emuRel(): String? = prefs.profile.takeIf { it.isNotEmpty() }?.let { "$it/settings/android/emulators.json" }
@@ -283,9 +285,10 @@ class Bridge(private val act: MainActivity) {
         systemsCache?.let { return it }
         if (!prefs.configured) return JSONArray()
         val arr = try {
-            server.systems().also { online = true; cacheFile("systemy").writeText(it.toString()); learnAddresses() }
+            server.systems().also { online = true; keyRejected = false; cacheFile("systemy").writeText(it.toString()); learnAddresses() }
         } catch (e: Exception) {
             online = false
+            keyRejected = e is Server.HttpError && e.code == 401      // klucz unieważniony / nieznany
             Log.w(tag, "serwer: $e")
             val f = cacheFile("systemy")
             if (f.isFile) JSONArray(f.readText()) else JSONArray()

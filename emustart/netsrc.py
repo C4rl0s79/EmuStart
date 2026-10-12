@@ -524,7 +524,8 @@ def info(cfg: dict, fresh: bool = False) -> dict:
             drop_token()
             st, body, rtt = _request(ep, "/v1/info")
         if st == 401:
-            res = {"ok": False, "reason": "zły klucz serwera" if not ep[2].startswith(DEV)
+            res = {"ok": False, "key_rejected": True,
+                   "reason": "zły klucz serwera" if not ep[2].startswith(DEV)
                    else "serwer nie przyjął klucza urządzenia (unieważnione?)"}
         elif st != 200:
             res = {"ok": False, "reason": f"serwer odpowiedział {st}"}
