@@ -30,7 +30,12 @@ w katalogu tymczasowym) — nie dotykają prawdziwych ustawień.
 ```powershell
 powershell -ExecutionPolicy Bypass -File build.ps1           # dist\EmuStart-<wersja>-win64.zip
 powershell -ExecutionPolicy Bypass -File build.ps1 -Deploy   # + kopia do katalogu programu
+powershell -ExecutionPolicy Bypass -File build.ps1 -Deploy -Target E:\EmuStart
 ```
+
+Repozytorium i zainstalowany program są w **osobnych katalogach**: `-Deploy` kopiuje program
+do `-Target` (domyślnie zmienna `EMUSTART_HOME`, bez niej `D:\emustart`), obok jego
+`config.json`, `data\` i `profiles\`. Katalog programu nie może być katalogiem repozytorium.
 
 PyInstaller w trybie katalogu (onedir) z informacją o wersji w exe — wersja
 jednoplikowa była błędnie oznaczana przez Windows Defender.
