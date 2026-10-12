@@ -142,6 +142,7 @@ class Job:
 
 
 UPD_TASK = "EmuStart Update"
+PANEL_TASK = "EmuStart Panel"
 
 
 def _confirmed(ulog: Path, before: int, mark: str, seconds: float = 30) -> bool:
@@ -282,6 +283,20 @@ if (-not $started -and {use_task}) {{
   if ($a) {{ Start-Process -FilePath $exe -ArgumentList $a -WorkingDirectory $app }}
   else {{ Start-Process -FilePath $exe -WorkingDirectory $app }}
   L 'EmuStart uruchomiony ponownie'
+}}
+# panel serwera wraca w sesji użytkownika, który go zamknął (zadanie tylko interaktywne)
+$pu = Join-Path {_ps(udir)} 'panel-user.txt'
+if (Test-Path -LiteralPath $pu) {{
+  $u = (Get-Content -LiteralPath $pu -Raw).Trim()
+  Remove-Item -LiteralPath $pu -Force -ErrorAction SilentlyContinue
+  if ($u) {{
+    Start-Sleep 3
+    $tr = '"' + $exe + '" --server-panel'
+    schtasks /Create /F /TN {_ps(PANEL_TASK)} /SC ONCE /ST 00:00 /RU $u /IT /TR $tr 2>&1 | Out-Null
+    $c1 = $LASTEXITCODE
+    schtasks /Run /TN {_ps(PANEL_TASK)} 2>&1 | Out-Null
+    L "panel serwera: zadanie dla $u (utworzenie $c1, start $LASTEXITCODE)"
+  }}
 }}
 schtasks /Delete /TN {_ps(UPD_TASK)} /F 2>$null | Out-Null
 """, encoding="utf-8-sig")

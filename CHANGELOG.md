@@ -8,6 +8,20 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.35.2] — 2026-10-12
+
+### Poprawione
+- **Panel serwera nie wracał po aktualizacji** (serwer aktualizował się i startował sam od
+  0.34.2, okno panelu trzeba było otwierać ręcznie). Teraz panel przed zamknięciem zapisuje,
+  na czyim koncie działa, a skrypt aktualizacji po starcie serwera otwiera go w sesji tego
+  użytkownika jednorazowym zadaniem Harmonogramu „EmuStart Panel” (tylko gdy użytkownik jest
+  zalogowany). Zapasowo — jak dotąd — proces na koncie użytkownika czeka na nową wersję
+  serwera (do 10 minut); nie otwiera drugiego okna, gdy panel już działa.
+- Przebieg powrotu panelu w `logs\update.log` (wpisy „panel: …”), zamknięcie panelu
+  w `logs\panel.log`.
+- Uwaga: działa od aktualizacji *z* tej wersji (skrypt i panel poprzedniej wersji robią
+  to po staremu).
+
 ## [0.35.1] — 2026-10-12
 
 Zakres: interfejs (`web/look.js`, `web/app.js`, `web/app.css`, `web/index.html`), grafiki

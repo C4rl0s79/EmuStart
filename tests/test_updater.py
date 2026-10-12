@@ -104,3 +104,9 @@ def test_script_runs_as_own_task_and_confirms_start(tmp_path):
     assert not updater._confirmed(log, 0, "PID 4321", seconds=0.6)  # skrypt nie ruszył — proces zostaje
     log.write_text("2026-10-12 aktualizacja: czekam na zamknięcie serwera (PID 4321)\n", encoding="utf-8")
     assert updater._confirmed(log, 0, "PID 4321", seconds=1)
+
+
+def test_script_reopens_panel_in_user_session(tmp_path):
+    s = updater.write_script(tmp_path, tmp_path / "app", 1, ["--server"]).read_text(encoding="utf-8-sig")
+    assert "panel-user.txt" in s and "/IT" in s and "'EmuStart Panel'" in s
+    assert s.index("panel-user.txt") < s.index("schtasks /Delete /TN 'EmuStart Update'")

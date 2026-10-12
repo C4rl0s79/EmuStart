@@ -262,20 +262,44 @@ def _server_panel() -> None:
             os.startfile(str(paths.LOGS))      # type: ignore[attr-defined]
             return {"ok": True}
 
-        def close_for_update(self, version: str):
-            """Aktualizacja: okno panelu (ten sam exe) zwalnia pliki programu, a osobny
-            proces na koncie użytkownika otwiera panel, gdy wstanie serwer w nowej wersji."""
+        def close_for_update(self, version: str = ""):
+            """Aktualizacja: okno panelu (ten sam exe) zwalnia pliki programu. Panel wraca:
+            1) skrypt aktualizacji uruchamia go po starcie serwera jednorazowym zadaniem
+               Harmonogramu w sesji tego użytkownika (update\\panel-user.txt);
+            2) zapasowo — osobny proces na tym koncie czeka na nową wersję serwera.
+            Przebieg obu — logs\\update.log."""
+            from emustart import updater
             exe = sys.executable if getattr(sys, "frozen", False) else ""
+            log = logging.getLogger("emustart")
+            log.info("panel: zamknięcie na czas aktualizacji do %s", version or "?")
             if exe and os.name == "nt":
-                ps = ("$end=(Get-Date).AddMinutes(5); while((Get-Date) -lt $end){ Start-Sleep 3; try{ "
+                user = f"{os.environ.get('USERDOMAIN', '')}\\{os.environ.get('USERNAME', '')}".strip("\\")
+                try:
+                    updater.update_dir().mkdir(parents=True, exist_ok=True)
+                    (updater.update_dir() / "panel-user.txt").write_text(user, encoding="utf-8")
+                except OSError as ex:
+                    log.warning("panel: %s", ex)
+                ulog = str(paths.LOGS / "update.log").replace("'", "''")
+                ps = ("function L($m){ Add-Content -LiteralPath '" + ulog + "' -Value ('{0:yyyy-MM-dd HH:mm:ss} panel: {1}' -f (Get-Date),$m) }; "
+                      "L 'czekam na serwer w nowej wersji'; "
+                      "$end=(Get-Date).AddMinutes(10); $ok=$false; while((Get-Date) -lt $end){ Start-Sleep 3; try{ "
                       f"$r=Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:{port}/admin/status' "
-                      "-Headers @{'X-EmuStart'='1'} -TimeoutSec 2; "
-                      f"if($r.version -eq '{version}'){{ break }} }}catch{{}} }}; "
-                      f"Start-Process -FilePath '{exe}' -ArgumentList '--server-panel'")
-                subprocess.Popen(["powershell", "-NoProfile", "-WindowStyle", "Hidden", "-Command", ps],
-                                 close_fds=True, creationflags=subprocess.DETACHED_PROCESS
-                                 | subprocess.CREATE_NO_WINDOW)
-            threading.Timer(0.5, lambda: os._exit(0)).start()
+                      "-Headers @{'X-EmuStart'='1'} -Body '{}' -ContentType 'application/json' -TimeoutSec 3; "
+                      f"if('{version}' -eq '' -or $r.version -eq '{version}'){{ $ok=$true; break }} }}catch{{}} }}; "
+                      "L ('serwer ' + $(if($ok){'gotowy'}else{'nie potwierdził wersji w 10 min'})); "
+                      "Start-Sleep 6; "
+                      "$p = Get-CimInstance Win32_Process -Filter \"Name='EmuStart.exe'\" | "
+                      "Where-Object { $_.CommandLine -like '*--server-panel*' }; "
+                      "if($p){ L 'panel już działa (uruchomiony przez skrypt aktualizacji)' } "
+                      f"else {{ Start-Process -FilePath '{exe}' -ArgumentList '--server-panel'; L 'panel uruchomiony' }}")
+                flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
+                cmd = ["powershell", "-NoProfile", "-WindowStyle", "Hidden", "-Command", ps]
+                try:              # poza ewentualnym zadaniem/zadaniem systemu — przeżyje zamknięcie panelu
+                    subprocess.Popen(cmd, close_fds=True,
+                                     creationflags=flags | getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", 0))
+                except OSError:
+                    subprocess.Popen(cmd, close_fds=True, creationflags=flags)
+            threading.Timer(0.8, lambda: os._exit(0)).start()
             return {"ok": True}
 
     url = f"http://127.0.0.1:{port}/server.html"
