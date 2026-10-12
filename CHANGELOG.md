@@ -8,6 +8,24 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.33.0] — 2026-10-12
+
+Zakres: parowanie urządzeń (`emustart/devices.py`, `remote.py`, `server.py`, `netsrc.py`,
+`api.py`), interfejs (`web/app.js`, `web/index.html`), panel serwera (`web/server.*`),
+aplikacja na Androida (`Bridge.kt`, `Server.kt`).
+
+### Dodane
+- **Dołącz do serwera — zatwierdzenie telefonem** (jak logowanie telewizora). Nowy komputer
+  (Ustawienia → Serwer EmuStart → *Dołącz do serwera*) wysyła prośbę i pokazuje kod oraz QR;
+  sparowany telefon skanuje go (*Zatwierdź nowe urządzenie*), widzi nazwę i adres nowego
+  urządzenia i zatwierdza albo odrzuca. Komputer sam odbiera własny klucz — bez przepisywania
+  kodu z panelu serwera.
+- Zatwierdzanie także kodem na innym sparowanym komputerze i w panelu serwera (sekcja
+  *Proszą o dołączenie* z przyciskami Zatwierdź / Odrzuć). Panel odświeża listę co 4 s.
+- API: `POST /v1/pair/request`, `/v1/pair/poll` (bez klucza), `/v1/pair/approve` (tylko
+  sparowane urządzenie). Prośba ważna 10 minut, klucz oddawany raz, najwyżej 5
+  oczekujących próśb z jednego adresu; w rejestrze urządzeń zapisane, kto zatwierdził.
+
 ## [0.32.3] — 2026-10-12
 
 Zakres: stany RetroArcha wspólne dla urządzeń (`emustart/rastates.py`, `launcher.py`),

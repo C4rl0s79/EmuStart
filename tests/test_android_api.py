@@ -29,6 +29,8 @@ WINDOWS_ONLY = {
     "ra_hardcore", "ra_import", "ra_login", "ra_logout", "ra_status",
     # klucz serwera ze schowka Windows (na telefonie: pole tekstowe)
     "server_paste_key",
+    # nowy komputer prosi o dołączenie (kod na ekranie); telefon łączy się kodem QR z panelu
+    "server_join", "server_join_poll", "server_join_cancel",
 }
 
 

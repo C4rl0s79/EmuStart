@@ -98,6 +98,44 @@ def pair(handler) -> None:
     return _json(handler, r, 200 if r.get("ok") else 403)
 
 
+def _body(handler) -> dict:
+    n = int(handler.headers.get("Content-Length") or 0)
+    try:
+        d = json.loads(handler.rfile.read(min(n, 4096)) or b"{}") if n else {}
+    except ValueError:
+        d = {}
+    return d if isinstance(d, dict) else {}
+
+
+def pair_flow(handler, op: str) -> None:
+    """Prośba o dołączenie zatwierdzana na sparowanym urządzeniu (emustart/devices.py):
+    POST /v1/pair/request {name, class, version}  — nowe urządzenie, bez klucza
+    POST /v1/pair/poll {rid}                       — nowe urządzenie odbiera klucz po zatwierdzeniu
+    POST /v1/pair/approve {code, allow}            — sparowane urządzenie (z kluczem);
+                                                     allow pominięte = tylko podgląd prośby"""
+    from emustart import devices
+    d = _body(handler)
+    if op == "request":
+        r = devices.request(str(d.get("name", "")), str(d.get("class", "")),
+                            handler.client_address[0], str(d.get("version", "")))
+        if r.get("ok"):
+            r["server"] = socket.gethostname()
+        return _json(handler, r, 200 if r.get("ok") else 429)
+    if op == "poll":
+        return _json(handler, devices.poll(str(d.get("rid", ""))))
+    if op == "approve":
+        if not authorized(handler):
+            return _json(handler, {"ok": False, "reason": "Zatwierdzać może tylko sparowane urządzenie."}, 401)
+        code = str(d.get("code", ""))
+        if d.get("allow") is None:
+            p = devices.pending(code)
+            return _json(handler, {"ok": True, "request": p} if p else
+                         {"ok": False, "reason": "Nie ma takiej prośby (kod wygasł albo już użyty)."})
+        by = devices.name_of(handler.device) if getattr(handler, "device", "") else "urządzenie ze wspólnym kluczem"
+        return _json(handler, devices.approve(code, bool(d.get("allow")), by))
+    return _json(handler, {"ok": False, "reason": "nieznana operacja"}, 404)
+
+
 def _seen(handler) -> None:
     """Klient z kluczem — do listy urządzeń w panelu serwera."""
     from emustart import srvadmin

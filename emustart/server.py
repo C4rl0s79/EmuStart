@@ -54,9 +54,13 @@ class _Handler(BaseHTTPRequestHandler):
         pass
 
     def do_POST(self):
-        if urllib.parse.urlsplit(self.path).path == "/v1/pair":
+        p = urllib.parse.urlsplit(self.path).path
+        if p == "/v1/pair":
             from emustart import remote      # parowanie urządzenia jednorazowym kodem (z sieci)
             return remote.pair(self)
+        if p in ("/v1/pair/request", "/v1/pair/poll", "/v1/pair/approve"):
+            from emustart import remote      # prośba o dołączenie zatwierdzana na telefonie
+            return remote.pair_flow(self, p.rsplit("/", 1)[1])
         # API tylko dla naszego UI: właściwy Host i własny nagłówek (zwykła strona
         # z internetu nie wyśle go do 127.0.0.1 bez zgody CORS, której nie dajemy)
         if not _host_ok(self) or self.headers.get("X-EmuStart") != "1":

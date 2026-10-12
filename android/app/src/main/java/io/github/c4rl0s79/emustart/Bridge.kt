@@ -90,6 +90,7 @@ class Bridge(private val act: MainActivity) {
         "server_test" -> serverTest()
         "server_scan" -> scanQr()
         "server_pair" -> pairServer(a.optString(0, ""), a.optString(1, ""))
+        "server_approve" -> approveDevice(a.optString(0, ""), a.opt(1) as? Boolean)
         "rescan" -> { systemsCache = null; synchronized(gamesCache) { gamesCache.clear() }; JSONObject().put("ok", true) }
         "launch" -> startLaunch(a.getInt(0), a.optBoolean(2, false))
         "launch_status" -> launchStatus()
@@ -458,6 +459,20 @@ class Bridge(private val act: MainActivity) {
 
     /** Parowanie: kod z panelu serwera albo link z kodu QR (emustart://pair?u=…&c=…) →
      *  własny klucz tego telefonu (zamiast przepisywania wspólnego klucza serwera). */
+    /** Zatwierdzenie nowego urządzenia kodem z jego ekranu albo linkiem z jego kodu QR
+     *  (emustart://approve?u=…&c=…). allow == null — tylko podgląd prośby (nazwa, rodzaj, adres). */
+    private fun approveDevice(text: String, allow: Boolean?): JSONObject {
+        if (prefs.serverUrl.isBlank() || prefs.serverKey.isBlank())
+            return JSONObject().put("ok", false).put("reason", "Ten telefon nie jest połączony z serwerem.")
+        var code = text.trim()
+        if (code.lowercase().startsWith("emustart://approve")) code = Uri.parse(code).getQueryParameter("c") ?: ""
+        else if (code.lowercase().startsWith("emustart://pair"))
+            return JSONObject().put("ok", false).put("reason", "To kod do łączenia telefonu z serwerem — użyj „Połącz z serwerem (kod QR)”.")
+        return try { server.approve(code, allow) } catch (e: Exception) {
+            JSONObject().put("ok", false).put("reason", explain(e))
+        }
+    }
+
     private fun pairServer(text: String, url0: String): JSONObject {
         var url = url0.ifBlank { prefs.serverUrl }
         var code = text.trim()

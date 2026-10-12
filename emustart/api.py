@@ -1375,6 +1375,49 @@ class Api:
         """Skan kodu QR — tylko na telefonie (aparat); na komputerze kod wpisuje się ręcznie."""
         return {"ok": False, "reason": "Na komputerze wpisz kod z panelu serwera (Połącz kodem)."}
 
+    def server_join(self, url: str = "") -> dict:
+        """Ustawienia → Dołącz do serwera: prośba o dołączenie; kod i QR na ekranie tego
+        komputera zatwierdza sparowany telefon (albo panel serwera)."""
+        import socket
+        from emustart import devices, qr
+        url = (url or self._cfg.get("server_url") or netsrc.guess_url(config.rom_roots(self._cfg))).strip()
+        r = netsrc.join_request(url, socket.gethostname(), "pc")
+        if not r.get("ok"):
+            return {"ok": False, "reason": r.get("reason", "")}
+        self._join = {"url": r["url"], "rid": r["rid"]}
+        uri = devices.approve_uri(r["url"], r["code"])
+        return {"ok": True, "pretty": r["pretty"], "url": r["url"], "server": r.get("server", ""),
+                "svg": qr.svg(uri), "expires_in": max(0, r.get("expires", 0) - time.time())}
+
+    def server_join_poll(self) -> dict:
+        """Stan prośby o dołączenie; po zatwierdzeniu klucz tego komputera trafia do ustawień."""
+        j = getattr(self, "_join", None)
+        if not j:
+            return {"ok": False, "status": "none"}
+        r = netsrc.join_poll(j["url"], j["rid"])
+        st = r.get("status") if r.get("ok") else "error"
+        if st == "approved":
+            self._cfg["server_url"], self._cfg["server_key"] = j["url"], r["key"]
+            config.save(self._cfg)
+            netsrc._info.clear()
+            nasfs.reset()
+        if st in ("approved", "denied", "expired"):
+            self._join = None
+        return {"ok": True, "status": st, "url": j["url"], "reason": r.get("reason", "")}
+
+    def server_join_cancel(self) -> dict:
+        self._join = None
+        return {"ok": True}
+
+    def server_approve(self, text: str, allow=None) -> dict:
+        """Zatwierdzenie nowego urządzenia kodem z jego ekranu (allow=None — podgląd prośby)."""
+        code = netsrc.parse_approve(text)
+        if not self._cfg.get("server_url") or not self._cfg.get("server_key"):
+            return {"ok": False, "reason": "Ten komputer nie jest połączony z serwerem."}
+        r = netsrc.approve(self._cfg, code, allow)
+        r.pop("url", None)
+        return r
+
     def server_paste_key(self) -> dict:
         """Klucz serwera ze schowka (EmuStart.exe --server-key na serwerze kopiuje go)."""
         text = _clipboard_text().strip()

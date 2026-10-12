@@ -281,7 +281,13 @@ def handle(handler, api) -> None:
 # ── urządzenia (EmuStart 2.0: klucz na urządzenie, parowanie kodem QR) ──
 def devices_list(_api) -> dict:
     from emustart import devices
-    return {"ok": True, "devices": devices.listing(), "now": time.time()}
+    return {"ok": True, "devices": devices.listing(), "requests": devices.pending_list(), "now": time.time()}
+
+
+def pair_approve(_api, args: dict) -> dict:
+    """Panel: zatwierdzenie / odrzucenie prośby o dołączenie nowego urządzenia."""
+    from emustart import devices
+    return devices.approve(str(args.get("code", "")), bool(args.get("allow")), "panel serwera")
 
 
 def pair_code(api) -> dict:
@@ -372,7 +378,7 @@ def profiles_migrate_status(_api) -> dict:
 
 
 ACTIONS_ARGS = {"device_revoke": device_revoke, "device_rename": device_rename,
-                "profiles_migrate": profiles_migrate}
+                "profiles_migrate": profiles_migrate, "pair_approve": pair_approve}
 ACTIONS.update({"devices": devices_list, "pair_code": pair_code, "profiles_migrate_status": profiles_migrate_status})
 
 

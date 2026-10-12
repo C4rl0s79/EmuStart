@@ -171,6 +171,19 @@ const KIND = { pc: "komputer", phone: "telefon" };
 async function refreshDevices() {
   const r = await admin("devices").catch(() => null);
   if (!r) return;
+  const reqs = r.requests || [];
+  $("reqBox").hidden = !reqs.length;
+  $("requests").innerHTML = reqs.map((q) =>
+    `<tr><td>${esc(q.name)}<div class="muted">${esc(KIND[q.class] || q.class)} · ${esc(q.ip || "")}</div></td>` +
+    `<td><code style="font-size:20px;letter-spacing:.1em">${esc(q.pretty)}</code></td>` +
+    `<td class="n"><button class="primary" data-ok="${esc(q.code)}">Zatwierdź</button> ` +
+    `<button class="danger" data-no="${esc(q.code)}">Odrzuć</button></td></tr>`).join("");
+  $("requests").querySelectorAll("[data-ok],[data-no]").forEach((b) => b.addEventListener("click", async () => {
+    const allow = !!b.dataset.ok;
+    const res = await admin("pair_approve", { code: b.dataset.ok || b.dataset.no, allow }).catch(() => null);
+    msg(res?.ok ? (allow ? `Dołączono: ${res.name}` : `Odrzucono: ${res.name}`) : (res?.reason || "Serwer nie odpowiada."));
+    refreshDevices();
+  }));
   $("devices").innerHTML = r.devices.length ? r.devices.map((d) =>
     `<tr class="${d.revoked ? "off" : ""}"><td>${esc(d.name)}<div class="muted">${esc(d.ip || "")}</div></td>` +
     `<td>${esc(KIND[d.class] || d.class)}</td><td>${esc(d.version || "—")}</td>` +
@@ -252,4 +265,4 @@ refresh();
 refreshDevices();
 migrTick();
 setInterval(refresh, 2000);
-setInterval(refreshDevices, 15000);
+setInterval(refreshDevices, 4000);          // prośby o dołączenie pojawiają się od razu

@@ -207,6 +207,7 @@ function press(a, fromPad) {
   if (S.modal === "launch") return launchInput(a);
   if (S.modal === "menu") return menuInput(a);
   if (S.modal === "scan") return;
+  if (S.modal === "join") return joinInput(a);
   if (S.modal === "osk") return oskInput(a);
   if (S.modal === "inst") return instInput(a);
   if (S.modal === "fbrowse") return fbInput(a);
@@ -788,6 +789,60 @@ function menuInput(a) {
   renderMenu();
 }
 
+/* ───────────── dołączenie do serwera z zatwierdzeniem na telefonie ───────────── */
+let joinTimer = null;
+async function joinOpen(url) {
+  if (!url) return toast("Podaj adres serwera (np. 100.85.254.31).", 5000);
+  toast("Łączę z serwerem…", 10000);
+  const r = await api().server_join(url);
+  if (!r.ok) return toast(r.reason, 7000);
+  $("joinQr").innerHTML = r.svg || "";
+  $("joinQr").style.display = r.svg ? "" : "none";
+  $("joinCode").textContent = r.pretty;
+  const until = Date.now() + 1000 * (r.expires_in || 600);
+  S.modal = "join";
+  $("join").classList.remove("hidden");
+  setHints([["b", "Anuluj"]]);
+  const tick = async () => {
+    const left = Math.max(0, Math.ceil((until - Date.now()) / 60000));
+    $("joinText").textContent = `Serwer ${r.server || r.url} · czekam na zatwierdzenie · kod ważny jeszcze ${left} min`;
+    const p = await api().server_join_poll();
+    if (S.modal !== "join") return;
+    if (p.status === "approved") {
+      joinClose(); S.settings = await api().get_settings(); renderSettings(); await refreshState();
+      return toast(`Dołączono do serwera ${r.server || p.url} — ten komputer ma własny klucz.`, 6000);
+    }
+    if (p.status === "denied") { joinClose(); return toast("Prośba odrzucona na serwerze.", 6000); }
+    if (p.status === "expired" || p.status === "none") { joinClose(); return toast("Kod wygasł — spróbuj ponownie.", 6000); }
+  };
+  clearInterval(joinTimer);
+  joinTimer = setInterval(tick, 2000);
+  tick();
+}
+function joinClose() {
+  clearInterval(joinTimer); joinTimer = null;
+  S.modal = null; $("join").classList.add("hidden"); show(S.screen);
+}
+function joinInput(a) {
+  if (a === "b" || a === "start") { api().server_join_cancel(); joinClose(); }
+}
+/** Sparowane urządzenie zatwierdza nowe: podgląd prośby (nazwa, rodzaj, adres) → wybór. */
+async function approveFlow(text) {
+  const r = await api().server_approve(text, null);
+  if (!r.ok) return toast(r.reason, 6000);
+  const q = r.request || {};
+  const kind = { pc: "komputer", phone: "telefon" }[q.class] || q.class || "";
+  const act = async (allow) => {
+    const x = await api().server_approve(text, allow);
+    toast(x.ok ? (allow ? `Dołączono: ${x.name}` : `Odrzucono: ${x.name}`) : x.reason, 6000);
+  };
+  S.menu = [[`Zatwierdź: ${q.name} (${kind}${q.ip ? ", " + q.ip : ""})`, () => act(true)],
+            ["Odrzuć", () => act(false)], ["Nie teraz", () => {}]];
+  S.menuIdx = 0; S.modal = "menu";
+  $("menu").classList.remove("hidden");
+  renderMenu();
+}
+
 /* ───────────── aktualizacja EmuStart (menu Start) ───────────── */
 let updTimer = null;
 async function appUpdate() {
@@ -874,6 +929,10 @@ function buildSetRowsAndroid() {
               run: () => oskOpen("Kod z panelu serwera", "", async (v) => {
                 if (!v.trim()) return; toast("Łączę z serwerem…", 10000);
                 pairDone(await api().server_pair(v.trim(), S.settings.server_url || "")); }) });
+  rows.push({ k: "Zatwierdź nowe urządzenie (kod QR)", type: "action", fmt: () => "nowy komputer: Ustawienia → Dołącz do serwera → zeskanuj jego kod",
+              run: async () => { const s = await api().server_scan(); if (!s.ok) return toast(s.reason, 5000); approveFlow(s.text); } });
+  rows.push({ k: "Zatwierdź nowe urządzenie (kod)", type: "action", fmt: () => "kod z ekranu nowego urządzenia wpisany ręcznie",
+              run: () => oskOpen("Kod z ekranu nowego urządzenia", "", (v) => { if (v.trim()) approveFlow(v.trim()); }) });
   rows.push({ k: "Sprawdź połączenie", type: "action", run: async () => {
     toast("Łączę z serwerem…", 10000); const r = await api().server_test();
     toast(r.ok ? `Połączono: ${r.name} (EmuStart ${r.version}), ${r.systems} systemów` : `Błąd: ${r.reason}`, 6000);
@@ -931,6 +990,11 @@ function buildSetRows() {
                 S.settings = await api().get_settings(); renderSettings();
                 toast(`Połączono z serwerem ${r.server || r.url} — ten komputer ma własny klucz.`, 5000);
               }) });
+  rows.push({ k: "Dołącz do serwera (zatwierdź telefonem)", type: "action",
+              fmt: () => "kod na tym ekranie zatwierdzasz sparowanym telefonem albo w panelu serwera",
+              run: () => oskOpen("Adres serwera", S.settings.server_url || S.settings.server_url_guess || "", (v) => joinOpen(v.trim())) });
+  if (c.server_key) rows.push({ k: "Zatwierdź nowe urządzenie (kod)", type: "action", fmt: () => "kod z ekranu nowego urządzenia",
+              run: () => oskOpen("Kod z ekranu nowego urządzenia", "", (v) => { if (v.trim()) approveFlow(v.trim()); }) });
   rows.push({ k: "Wklej klucz ze schowka", type: "action", run: async () => {
     const r = await api().server_paste_key();
     if (!r.ok) return toast(r.reason, 4000);
