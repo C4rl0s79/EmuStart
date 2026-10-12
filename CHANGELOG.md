@@ -8,6 +8,31 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.35.0] — 2026-10-12
+
+Zakres: serwer (`emustart/upnp.py`, `public.py`, `server.py`, `remote.py`, `srvadmin.py`,
+`main.py`), panel serwera (`web/server.*`).
+
+### Dodane
+- **Dostęp z internetu** (panel serwera → *Dostęp z internetu*, `server_public`). Serwer
+  otwiera osobny port szyfrowany (domyślnie 8742, `server_public_port`), prosi router przez
+  UPnP o przekierowanie i odnawia je co 20 minut (wygasa samo po wyłączeniu serwera; routery
+  tylko ze stałymi przekierowaniami — obsłużone). Adres zewnętrzny trafia do listy adresów
+  serwera jako „publiczny” — urządzenia biorą go dopiero, gdy sieć lokalna i Tailscale nie
+  odpowiadają. Reguła zapory dla portu dodawana automatycznie.
+- UPnP bez dodatkowych bibliotek (`emustart/upnp.py`): SSDP, opis routera, SOAP
+  (adres zewnętrzny, dodanie i usunięcie przekierowania).
+- Panel: stan — router, adres zewnętrzny, przekierowanie, osiągalność (własna próba przez
+  adres zewnętrzny albo ostatnie połączenie z internetu), zablokowane adresy, błędy.
+- Wykrywanie CGNAT (adres zewnętrzny routera prywatny / 100.64.0.0/10) — panel wyjaśnia,
+  że z internetu się nie da.
+
+### Bezpieczeństwo
+- Port publiczny: tylko HTTPS z przypiętym certyfikatem, tylko API /v1 i grafiki, każde
+  zapytanie z kluczem urządzenia; bez parowania, panelu i interfejsu. 20 złych kluczy
+  w 10 minut z jednego adresu = blokada na 30 minut (zrywana jeszcze przed TLS); najwyżej
+  32 połączenia naraz z jednego adresu.
+
 ## [0.34.2] — 2026-10-12
 
 ### Poprawione

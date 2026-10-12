@@ -129,6 +129,10 @@ def endpoints() -> list:
         out.append({"url": f"http://{a}:{PORT}", "kind": k, "tls": False})
         if TLS:
             out.append({"url": f"https://{a}:{TLS['port']}", "kind": k, "tls": True})
+    from emustart import public
+    pub = public.endpoint()
+    if pub:
+        out.append(pub)
     return out
 
 
@@ -851,26 +855,27 @@ def _send_file(handler, gid: int, rel: str) -> None:
 FW_TLS = "EmuStart Server (szyfrowany)"
 
 
-def ensure_firewall(port: int) -> None:
+def ensure_firewall(port: int, name: str = "") -> None:
     """Reguła zapory dla portu szyfrowanego — serwer działa jako SYSTEM (zadanie Harmonogramu),
     więc dopisuje ją sam przy starcie; bez uprawnień nic się nie dzieje (wpis w logu)."""
     if os.name != "nt":
         return
     import subprocess
+    name = name or FW_TLS
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     try:
-        r = subprocess.run(["netsh", "advfirewall", "firewall", "show", "rule", f"name={FW_TLS}"],
+        r = subprocess.run(["netsh", "advfirewall", "firewall", "show", "rule", f"name={name}"],
                            capture_output=True, text=True, creationflags=flags, timeout=20)
         if r.returncode == 0 and f"{port}" in r.stdout:
             return
         if r.returncode == 0:                          # reguła na inny port — od nowa
-            subprocess.run(["netsh", "advfirewall", "firewall", "delete", "rule", f"name={FW_TLS}"],
+            subprocess.run(["netsh", "advfirewall", "firewall", "delete", "rule", f"name={name}"],
                            capture_output=True, creationflags=flags, timeout=20)
-        r = subprocess.run(["netsh", "advfirewall", "firewall", "add", "rule", f"name={FW_TLS}", "dir=in",
+        r = subprocess.run(["netsh", "advfirewall", "firewall", "add", "rule", f"name={name}", "dir=in",
                             "action=allow", "protocol=TCP", f"localport={port}"],
                            capture_output=True, text=True, creationflags=flags, timeout=20)
         if r.returncode == 0:
-            log.info("zapora: dopuszczony port szyfrowany %d", port)
+            log.info("zapora: dopuszczony port %d (%s)", port, name)
         else:
             log.warning("zapora: nie udało się dopuścić portu %d (%s) — uruchom serwer jako administrator "
                         "albo dodaj regułę ręcznie", port, (r.stdout + r.stderr).strip()[:200])
