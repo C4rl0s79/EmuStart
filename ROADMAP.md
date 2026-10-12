@@ -1,5 +1,8 @@
 # Plan rozwoju
 
+> **EmuStart 2.0** — koncepcja i etapy: [docs/koncepcja-2.0.md](docs/koncepcja-2.0.md)
+> (serwer jako jedyne źródło prawdy, parowanie QR, aktualizacje z serwera, zapisy 2.0).
+
 Kierunek: **serwer EmuStart jako centrum** — gry, zapisy, profile, ustawienia i biblioteka
 idą przez serwer (HTTP z kluczem, przez Tailscale), wspólnie dla Windows i Androida.
 Dostęp SMB do NAS-a zostaje jako zapas i do zarządzania.
