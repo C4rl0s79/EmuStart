@@ -199,15 +199,30 @@ if ($rc1 -ge 8 -or $rc2 -ge 8) {{
   robocopy (Join-Path $bak '_internal') (Join-Path $app '_internal') /MIR /R:30 /W:2 /NFL /NDL /NJH /NJS /NP | Out-Null
   Copy-Item -LiteralPath (Join-Path $bak 'EmuStart.exe') -Destination $exe -Force
 }} else {{
-  L 'podmiana zakończona'
+  L "podmiana zakończona (robocopy $rc1/$rc2)"
   Remove-Item -LiteralPath $new -Recurse -Force -ErrorAction SilentlyContinue
 }}
 $task = $false
 if ({use_task}) {{ schtasks /Query /TN {_ps(TASK)} 2>$null | Out-Null; $task = ($LASTEXITCODE -eq 0) }}
+$started = $false
 if ($task) {{
-  schtasks /Run /TN {_ps(TASK)} | Out-Null
-  L 'serwer uruchomiony (zadanie Harmonogramu)'
-}} else {{
+  # zadanie bywa jeszcze „uruchomione” (ten skrypt startował z jego procesu) — wtedy /Run
+  # nic nie robi (a /End zabiłby ten skrypt); sprawdzamy, czy nowy EmuStart.exe naprawdę ruszył
+  schtasks /Run /TN {_ps(TASK)} 2>$null | Out-Null
+  L "zadanie Harmonogramu: /Run (kod $LASTEXITCODE)"
+  for ($i = 0; $i -lt 30; $i++) {{
+    Start-Sleep 1
+    if (Get-Process -Name EmuStart -ErrorAction SilentlyContinue | Where-Object {{ $_.Path -eq $exe }}) {{ $started = $true; break }}
+  }}
+  if ($started) {{ L 'serwer uruchomiony (zadanie Harmonogramu)' }}
+  else {{ L 'zadanie Harmonogramu nie uruchomiło serwera — start bezpośredni' }}
+}}
+if (-not $started -and {use_task}) {{
+  $a = {_ps(args)}
+  if ($a) {{ Start-Process -FilePath $exe -ArgumentList $a -WorkingDirectory $app -WindowStyle Hidden }}
+  else {{ Start-Process -FilePath $exe -ArgumentList '--server' -WorkingDirectory $app -WindowStyle Hidden }}
+  L 'serwer uruchomiony bezpośrednio'
+}} elseif (-not $started) {{
   $a = {_ps(args)}
   if ($a) {{ Start-Process -FilePath $exe -ArgumentList $a -WorkingDirectory $app }}
   else {{ Start-Process -FilePath $exe -WorkingDirectory $app }}

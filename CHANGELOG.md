@@ -8,6 +8,30 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.32.3] — 2026-10-12
+
+Zakres: stany RetroArcha wspólne dla urządzeń (`emustart/rastates.py`, `launcher.py`),
+aplikacja na Androida (`EmuProfile.kt`), aktualizacja serwera (`updater.py`).
+
+### Poprawione
+- **Autozapis z telefonu nie wczytywał się na komputerze, a przy wyjściu był nadpisywany.**
+  Komputer kopiował autozapis (`.state.auto`) z serwera we właściwe miejsce, ale RetroArch
+  startował z wyłączonym autowczytywaniem (włączane tylko po „szybki zapis i wyjście”),
+  więc gra zaczynała się od nowa, a autozapis z tej sesji nadpisywał wspólny. Teraz, gdy
+  autozapis tej gry (ten sam rdzeń) jest na miejscu i aktualny, RetroArch wczytuje go przy
+  starcie.
+- **Stan z sesji nie nadpisuje innej wersji na serwerze.** Po grze stan trafia do wspólnego
+  miejsca tylko wtedy, gdy sesja wystartowała z wersji, która nadal jest na serwerze. Jeśli
+  wersja z serwera się nie pobrała, gra ruszyła bez serwera albo inne urządzenie zapisało
+  w międzyczasie — stan z komputera idzie do kopii zapasowej (`_backup/…/konflikt/`),
+  wspólny zostaje bez zmian, a przy następnym uruchomieniu gry pojawia się komunikat.
+- **Telefon: autozapis i autowczytywanie RetroArcha zawsze włączone** w pliku ustawień
+  profilu, który aplikacja podaje RetroArchowi (jak na komputerze). Telefon już wcześniej
+  nie nadpisywał nowszej wersji z serwera (zostaje serwer, wersja z telefonu w kopii).
+- **Aktualizacja serwera:** po podmianie plików skrypt sprawdza, czy serwer naprawdę ruszył
+  z zadania Harmonogramu; jeśli nie (zadanie wciąż „uruchomione”), uruchamia go
+  bezpośrednio. Log podmiany z kodami robocopy: `logs\update.log`.
+
 ## [0.32.2] — 2026-10-12
 
 Zakres: panel serwera (`web/server.js`). Bez zmian w działaniu serwera.
