@@ -145,6 +145,36 @@ bez parowania); blokada za złe klucze działa po prawdziwym adresie klienta (na
 `CF-Connecting-IP`). W Cloudflare nie włączaj *Bot Fight Mode* ani wyzwań dla tej
 subdomeny — aplikacje nie są przeglądarkami.
 
+## Nowe urządzenie przez internet, konta i role (0.37)
+
+Nowa instalacja (komputer albo telefon) potrzebuje **tylko adresu serwera** — np. adresu
+tunelu `emustart.twojadomena.org`:
+
+1. Ustawienia → **Dołącz przez internet (nowa instalacja)** → adres serwera → **Mam konto**
+   albo **Nowe konto** → nazwa konta.
+2. Urządzenie tworzy **własny klucz** (Windows: w TPM, a bez TPM — zaszyfrowany DPAPI;
+   Android: Android Keystore / StrongBox; klucza prywatnego nie da się skopiować na inny
+   sprzęt) i pokazuje **kod weryfikacyjny**, np. `K7Q2-9FMX`.
+3. Prośbę widzi zatwierdzający — w aplikacji EmuStart przy jej otwarciu (i co minutę) albo
+   w panelu serwera: czas, adres IP, nazwa i rodzaj urządzenia, konto, kod. **Kod musi się
+   zgadzać** z kodem na ekranie nowego urządzenia. Zatwierdzenie: *z grami z serwera* albo
+   *tylko zapisy i profil*; albo *Odrzuć*.
+4. Po zatwierdzeniu urządzenie loguje się samo (podpis kluczem urządzenia → token sesji na
+   godzinę, odnawiany) i od razu widzi swoje konto.
+
+Prośba czeka **24 godziny** (można zamknąć aplikację — przy następnym uruchomieniu sprawdzi
+stan sama). Do zatwierdzenia nowe urządzenie nie ma dostępu do niczego.
+
+**Kto zatwierdza:**
+- **nowe konto** — tylko administrator;
+- **Mam konto** — inne urządzenie tego konta; gdy konto nie ma jeszcze żadnego — administrator.
+
+**Role:** *administrator* — zatwierdza wszystko, widzi wszystkie konta (urządzenie
+sparowane kodem z panelu serwera = urządzenie zero; rolę nadaje / odbiera panel → *Sparowane
+urządzenia*). *Użytkownik* — tylko swoje konto (zapisy, stany, ustawienia), zatwierdza nowe
+urządzenia swojego konta; gry z serwera — jeśli zatwierdzający na to pozwolił. Urządzenia
+sparowane przed 0.37 działają jak dotąd (pełny dostęp) — przejście na klucze urządzeń: 0.38.
+
 ## Katalog serwera (0.32)
 
 Serwer trzyma wszystko poza grami w podkatalogu `server\` obok `EmuStart.exe`: ustawienia
