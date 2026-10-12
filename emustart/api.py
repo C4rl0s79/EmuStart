@@ -72,6 +72,8 @@ class Api:
         # pierwsze przejście na serwer); gra uruchomiona w tym czasie poczeka (post_busy)
         launcher.start_post(lambda: profiles.push_all(self._cfg), "zapisy profili")
         logos.push_later(self._cfg)       # wygląd systemów → serwer (Android pokazuje to samo)
+        from emustart import artsync
+        artsync.push_later(self._cfg)     # logo / okładki / zrzuty gier, których serwer nie ma
         threading.Thread(target=lambda: netsrc.push_roots(self._cfg), daemon=True,
                          name="foldery-serwer").start()   # foldery z grami → serwer
         threading.Thread(target=self._profiles_bootstrap, daemon=True, name="profiles").start()
@@ -1003,6 +1005,8 @@ class Api:
             return {"ok": False, "reason": "Nie udało się pobrać tej grafiki."}
         art.save(g["es"], g["name"], kind, data)
         library.set_art(g["id"], kind, art.HAS)
+        from emustart import artsync
+        artsync.push_later(self._cfg, g["es"], g["name"], kind)   # wybór ręczny — także na serwerze
         return {"ok": True, "url": art.media_url(g["es"], g["name"], kind)}   # z wersją pliku
 
     def art_clear(self, game_id: int, kind: str) -> dict:

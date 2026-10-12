@@ -509,8 +509,8 @@ function renderDesc(m) {
   $("pvDesc").innerHTML = parts.join("<br><br>");
 }
 function setTitleArt(g, title) {
-  // logo zaznaczonej gry: komputer — nad okładką (pvGameLogo), telefon — w nagłówku listy
-  for (const id of ["listGameLogo", "pvGameLogo"]) {
+  // logo zaznaczonej gry: komputer — nad okładką (pvGameLogo), telefon — pod szczegółami (pvMetaLogo)
+  for (const id of ["listGameLogo", "pvGameLogo", "pvMetaLogo"]) {
     const el = $(id);
     el.classList.toggle("hidden", !g.logo);
     if (g.logo && el.getAttribute("src") !== g.logo) { el.src = g.logo; el.alt = title; }

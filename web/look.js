@@ -111,10 +111,11 @@ function renderLook() {
     const v = lookGet(r);
     let val;
     if (r.opts) {
-      val = `<span class="ch">◀</span>${r.swatch ? `<span class="sw" style="background:${esc(v)}"></span>` : ""}<b>${esc(r.fmt(v))}</b><span class="ch">▶</span>`;
+      val = `<span class="ch" data-d="-1">◀</span>${r.swatch ? `<span class="sw" style="background:${esc(v)}"></span>` : ""}<b>${esc(r.fmt(v))}</b><span class="ch" data-d="1">▶</span>`;
     } else {
       const w = 100 * (v - r.min) / (r.max - r.min);
-      val = `<span class="track"><i style="width:${w.toFixed(1)}%"></i></span><b>${esc(isPhone() && r.ph ? pct(v / r.def * 100) : r.fmt(v))}</b>`;
+      val = `<span class="ch" data-d="-1">−</span><span class="track"><i style="width:${w.toFixed(1)}%"></i></span>` +
+            `<span class="ch" data-d="1">+</span><b>${esc(isPhone() && r.ph ? pct(v / r.def * 100) : r.fmt(v))}</b>`;
     }
     const chg = !r.cfg && v !== r.def;
     return `<div class="lkrow${i === LK.idx ? " sel" : ""}${chg ? " chg" : ""}" data-i="${i}"><span class="lk">${esc(r.t)}</span><span class="lv">${val}</span></div>`;
@@ -124,6 +125,18 @@ function renderLook() {
   list.querySelectorAll(".lkrow[data-i]").forEach((el) => {
     if (LOOK_SPEC[+el.dataset.i].head) return;
     el.addEventListener("click", () => { LK.idx = +el.dataset.i; renderLook(); });
+    // dotyk / mysz bez pada: −/+ i ◀/▶ zmieniają wartość, dotknięcie paska ustawia ją wprost
+    el.querySelectorAll(".ch[data-d]").forEach((b) => b.addEventListener("click", (e) => {
+      e.stopPropagation(); LK.idx = +el.dataset.i; lookStep(+b.dataset.d);
+    }));
+    el.querySelector(".track")?.addEventListener("click", (e) => {
+      e.stopPropagation(); LK.idx = +el.dataset.i;
+      const it = LOOK_SPEC[LK.idx], box = e.currentTarget.getBoundingClientRect();
+      const f = Math.min(1, Math.max(0, (e.clientX - box.left) / box.width));
+      const v = it.min + Math.round(f * (it.max - it.min) / it.step) * it.step;
+      LV[it.k] = +Math.min(it.max, Math.max(it.min, v)).toFixed(2);
+      applyLook(); lookRedraw(); renderLook();
+    });
     el.addEventListener("wheel", (e) => { LK.idx = +el.dataset.i; lookStep(e.deltaY < 0 ? 1 : -1); e.preventDefault(); }, { passive: false });
   });
   list.querySelector(".lkrow.sel")?.scrollIntoView({ block: "nearest" });
