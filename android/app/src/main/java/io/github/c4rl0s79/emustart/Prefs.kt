@@ -98,6 +98,12 @@ class Prefs(ctx: Context) {
 
     fun emulator(es: String): String = sp.getString("emu:$es", "") ?: ""
     fun setEmulator(es: String, id: String) = sp.edit().putString("emu:$es", id).apply()
+    /** Czas wyboru emulatora przez gracza (synchronizacja z kontem na serwerze; 0 = nie wybierał). */
+    fun emulatorTime(es: String): Long = sp.getLong("emu_t:$es", 0L)
+    fun setEmulatorChoice(es: String, id: String, t: Long = System.currentTimeMillis()) =
+        sp.edit().putString("emu:$es", id).putLong("emu_t:$es", t).apply()
+    fun emulatorChoices(): Map<String, Pair<String, Long>> = sp.all.keys.filter { it.startsWith("emu_t:") }
+        .associate { k -> val es = k.removePrefix("emu_t:"); es to Pair(emulator(es), emulatorTime(es)) }
 
     val configured: Boolean get() = serverUrl.isNotBlank() && (serverKey.isNotBlank() || deviceId.isNotBlank())
 

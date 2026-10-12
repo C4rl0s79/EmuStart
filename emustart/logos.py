@@ -267,6 +267,18 @@ def _system_state(cfg: dict, es: str):
     return logo, f, bool(lg["glow"]), name
 
 
+def _system_emu(cfg: dict, es: str) -> tuple[str, str]:
+    """(rodzina, rdzeń) emulatora systemu na tym komputerze: retroarch + rdzeń albo standalone."""
+    from emustart import rastates
+    sc = (cfg.get("systems") or {}).get(es) or {}
+    exe = Path(sc.get("exe") or "").stem.lower()
+    if not exe:
+        return "", ""
+    if exe == "retroarch":
+        return "retroarch", rastates.core_id(sc.get("args") or "")
+    return "standalone", ""
+
+
 def push_to_server(cfg: dict, only: list | None = None) -> int:
     """Logo, poświata i nazwa systemów z tego komputera → serwer EmuStart (tylko zmienione
     od ostatniego wysłania). Aplikacja na Androida pokazuje to, co ma serwer."""
@@ -286,11 +298,12 @@ def push_to_server(cfg: dict, only: list | None = None) -> int:
         for es in es_list:
             try:
                 logo, f, glow, name = _system_state(cfg, es)
+                fam, core = _system_emu(cfg, es)
                 data = f.read_bytes() if logo == "custom" and f else b""
-                sig = hashlib.sha1(f"{logo}|{int(glow)}|{name}".encode() + data).hexdigest()
+                sig = hashlib.sha1(f"{logo}|{int(glow)}|{name}|{fam}|{core}".encode() + data).hexdigest()
                 if library.meta_get(f"logo_pushed:{ep[0]}:{es}", "") == sig:
                     continue
-                q = {"es": es, "logo": logo, "glow": "1" if glow else "0", "name": name}
+                q = {"es": es, "logo": logo, "glow": "1" if glow else "0", "name": name, "emu": fam, "core": core}
                 if logo == "custom":
                     q["ext"] = f.suffix.lower().lstrip(".")
                 c = netsrc.conn(ep[0], ep[1], 20)

@@ -40,7 +40,10 @@ class Progress(val total: Long, val files: Int) {
 }
 
 class Downloader(private val server: Server, private val streams: Int) {
-    companion object { const val BLOCK = 4L * 1024 * 1024 }
+    companion object {
+        const val BLOCK = 4L * 1024 * 1024
+        init { System.setProperty("http.maxConnections", "16") }   // pula ≥ liczba strumieni (domyślnie 5)
+    }
 
     val cancel = AtomicBoolean(false)
 
@@ -98,7 +101,11 @@ class Downloader(private val server: Server, private val streams: Int) {
                                     prog.add(r.toLong())
                                 }
                             }
-                        } finally { c.disconnect() }
+                        } catch (e: Exception) {
+                            c.disconnect(); throw e
+                        }
+                        // bez disconnect(): połączenie wraca do puli i następny blok idzie nim
+                        // (nowe połączenie = TCP + TLS + wolny start — przez internet kilka razy wolniej)
                         synchronized(lock) {
                             done[i] = 1
                             if (++dirty >= 8) { mapf.writeBytes(done); dirty = 0 }
