@@ -272,3 +272,24 @@ def test_pc_pushes_missing_game_art_to_server(srv, tmp_path, monkeypatch):
     # telefon dostaje logo w liście gier (grafiki przez serwer)
     assert artsync.server_put("snes", "../zle.logo.png", png)[0] == 400
     assert artsync.server_put("snes", "Gra (USA).logo.png", b"nie png")[0] == 400
+
+
+def test_pc_core_becomes_server_recommendation(srv, monkeypatch):
+    from emustart import logos
+    host, port, _nas = srv
+    pc_key, _, _ = _pair(srv, "Komputer", "pc")
+    monkeypatch.setattr(remote.API, "_cfg", {"server_token": MASTER})
+    monkeypatch.setattr("emustart.config.save", lambda c: None)
+    st, _ = _req(srv, "PUT", "/v1/system?es=snes&logo=keep&glow=0&emu=retroarch&core=bsnes", pc_key, body=b"")
+    assert st == 200
+    sc = remote.API._cfg["systems"]["snes"]
+    assert sc["emu_rec"] == "retroarch" and sc["core_rec"] == "bsnes"
+    st, _ = _req(srv, "PUT", "/v1/system?es=ps2&logo=keep&emu=standalone&core=", pc_key, body=b"")
+    assert remote.API._cfg["systems"]["ps2"]["emu_rec"] == "standalone"
+    # komputer: rodzina i rdzeń z ustawień systemu
+    cfg = {"systems": {"snes": {"exe": r"D:\emu\RetroArch\retroarch.exe",
+                                "args": r'-L "D:\emu\RetroArch\cores\bsnes_libretro.dll" -f'},
+                       "ps2": {"exe": r"D:\emu\PCSX2\pcsx2-qt.exe", "args": "-nogui"}}}
+    assert logos._system_emu(cfg, "snes") == ("retroarch", "bsnes")
+    assert logos._system_emu(cfg, "ps2") == ("standalone", "")
+    assert logos._system_emu(cfg, "nes") == ("", "")

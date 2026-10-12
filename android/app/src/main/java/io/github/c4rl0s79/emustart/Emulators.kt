@@ -115,8 +115,9 @@ object Emulators {
                 val base = if (vs.size > 1) "${e.id}@${v.pkg}" else e.id
                 val src = if (vs.size > 1) (if (v.store) ", Sklep Play" else ", spoza Sklepu Play") else ""
                 if (coreList.isEmpty()) out += Pair(base, "${e.label} ${v.version}$src".replace("  ", " "))
-                coreList.forEachIndexed { i, c ->
-                    out += Pair(if (i == 0) base else "$base#$c", "${e.label} ${v.version}$src — rdzeń $c".replace("  ", " "))
+                // rdzeń zawsze w id — wybór nie zmienia znaczenia, gdy serwer poda rdzenie w innej kolejności
+                coreList.forEach { c ->
+                    out += Pair("$base#$c", "${e.label} ${v.version}$src — rdzeń $c".replace("  ", " "))
                 }
             }
         }

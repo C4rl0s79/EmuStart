@@ -8,6 +8,33 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.37.2] — 2026-10-12
+
+Zakres: aplikacja na Androida (`Bridge.kt`, `Emulators.kt`, `Downloader.kt`, `Prefs.kt`),
+serwer (`remote.py`), komputer (`logos.py`).
+
+### Poprawione
+- **Wolne pobieranie gier przez internet (ok. 30 zamiast 80 MB/s).** Telefon zamykał
+  połączenie po każdym bloku 4 MB — każdy blok to było nowe połączenie TCP, nowe uzgadnianie
+  TLS i wolny start. Teraz połączenia wracają do puli i kolejne bloki idą nimi (pula: 16
+  połączeń, było 5 przy 8 strumieniach).
+- **Telefon „sam zmieniał” rdzeń.** Wybór pierwszego rdzenia z listy zapisywał się jako sam
+  „retroarch” — gdy serwer podał rdzenie w innej kolejności, ten sam zapis oznaczał inny
+  rdzeń. Teraz rdzeń jest zawsze w zapisie; stare wybory są raz utrwalane.
+- **Brak szczegółów platformy na telefonie** (producent, lata, nośnik, opis) — telefon
+  pobiera je z serwera (`GET /v1/sysinfo`), jak komputer.
+
+### Dodane
+- **Rdzeń jak na komputerze.** Komputer zgłasza serwerowi emulator i rdzeń każdego systemu
+  (razem z wyglądem systemu); serwer podaje je telefonom jako zalecane. Telefon bez własnego
+  wyboru bierze zalecany (np. RetroArch z bsnes, jak na PC — stany zgodne).
+- **Ostrzeżenie o rozbieżności — od razu przy wyborze.** W ustawieniach emulatorów opcja
+  zgodna z komputerem ma dopisek „jak na komputerze”, inne — „⚠ inny rdzeń niż na
+  komputerze — stany z PC się nie wczytają”; to samo ostrzeżenie w opisie platformy.
+- **Wybór emulatora / rdzenia na koncie.** Wybór na telefonie zapisuje się na serwerze
+  (`<profil>/settings/android/emulators.json`, nowszy wygrywa) — nowy telefon tego konta
+  dostaje go od razu.
+
 ## [0.37.1] — 2026-10-12
 
 ### Poprawione

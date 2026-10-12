@@ -261,6 +261,9 @@ def handle(handler) -> None:
                                    "tls": {"port": TLS["port"], "fp": TLS["fp"]} if TLS else None})
         if parts and parts[0] == "nas":
             return _nas(handler, "GET", parts[1:])
+        if parts == ["sysinfo"]:                       # opis platformy (producent, lata, opis) dla telefonu
+            q = urllib.parse.parse_qs(urllib.parse.urlsplit(handler.path).query)
+            return _json(handler, API.system_info((q.get("es") or [""])[0]))
         if parts == ["find"]:
             if not _games_ok(handler):
                 return _json(handler, {"error": "To konto nie pobiera gier z serwera."}, 403)
@@ -284,7 +287,10 @@ def handle(handler) -> None:
                 d = {k: s_.get(k) for k in ("es", "display", "games", "logo", "logo_glow", "kind")}
                 plat = systems.info(s_["es"])["plat"]
                 d["plat"] = plat
-                d["core"] = installer.CORES.get(plat, "")     # rdzeń RetroArcha (Android: *_libretro_android.so)
+                sc = (API._cfg.get("systems") or {}).get(s_["es"]) or {}
+                # rdzeń RetroArcha (Android: *_libretro_android.so) — ten, którego używa komputer, gdy go zgłosił
+                d["core"] = sc.get("core_rec") or installer.CORES.get(plat, "")
+                d["emu_rec"] = sc.get("emu_rec", "")
                 d["cores"] = emulators.cores_for(plat)         # wszystkie pasujące — wybór na telefonie
                 out.append(d)
             return _json(handler, out)
@@ -496,6 +502,11 @@ def _system_put(handler) -> None:
         sc["logo"] = ""
     if arg("glow") in ("0", "1"):
         sc["logo_glow"] = arg("glow") == "1"
+    # emulator i rdzeń, których używa komputer — zalecane dla telefonów (stany zgodne)
+    if "emu" in q and arg("emu") in ("", "retroarch", "standalone"):
+        sc["emu_rec"] = arg("emu")
+        core = arg("core")
+        sc["core_rec"] = core if re.fullmatch(r"[a-z0-9_+.-]{0,40}", core) else ""
     if "name" in q:
         name = arg("name").strip()[:60]
         if name:

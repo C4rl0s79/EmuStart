@@ -122,7 +122,7 @@ class Bridge(private val act: MainActivity) {
         "post_status" -> saves.busy
         "art_status" -> null
         "art_for" -> JSONObject()
-        "system_info" -> JSONObject()
+        "system_info" -> systemInfo(a.optString(0, ""))
         "profiles_list" -> profilesList()
         "profile_select", "profile_setup" -> selectProfile(a.getInt(0))
         "profile_create" -> createProfile(a.getString(0), a.optString(1, ""))
@@ -199,6 +199,57 @@ class Bridge(private val act: MainActivity) {
     private fun cacheFile(name: String) = File(act.filesDir, "lista-$name.json")
 
     @Volatile private var learnedAt = 0L
+    private val sysInfo = HashMap<String, JSONObject>()
+
+    // ── wybór emulatora / rdzenia na koncie (<profil>/settings/android/emulators.json) ──
+    private fun emuRel(): String? = prefs.profile.takeIf { it.isNotEmpty() }?.let { "$it/settings/android/emulators.json" }
+
+    private fun pushEmuChoices() {
+        val rel = emuRel() ?: return
+        try {
+            val o = try { server.nasRead(rel)?.let { JSONObject(String(it)) } } catch (e: Exception) { null } ?: JSONObject()
+            for ((es, v) in prefs.emulatorChoices()) {
+                val cur = o.optJSONObject(es)
+                if (cur == null || cur.optLong("t") < v.second) o.put(es, JSONObject().put("id", v.first).put("t", v.second))
+            }
+            server.nasPut(rel, o.toString(1).toByteArray(), System.currentTimeMillis() / 1000.0)
+        } catch (e: Exception) { Log.w(tag, "wybór emulatorów na serwer: $e") }
+    }
+
+    /** Wybory z innych telefonów tego konta (nowszy wygrywa) — nowy telefon dostaje je od razu. */
+    private fun pullEmuChoices() {
+        val rel = emuRel() ?: return
+        try {
+            val o = server.nasRead(rel)?.let { JSONObject(String(it)) } ?: return
+            var changed = false
+            for (es in o.keys()) {
+                val v = o.optJSONObject(es) ?: continue
+                if (v.optLong("t") > prefs.emulatorTime(es) && v.optString("id").isNotEmpty()) {
+                    prefs.setEmulatorChoice(es, v.optString("id"), v.optLong("t"))
+                    changed = true
+                }
+            }
+            if (changed) { systemsCache = null; Log.i(tag, "wybór emulatorów z konta zastosowany") }
+            if (prefs.emulatorChoices().any { (es, v) -> o.optJSONObject(es)?.optLong("t") ?: 0L < v.second }) pushEmuChoices()
+        } catch (e: Exception) { Log.w(tag, "wybór emulatorów z serwera: $e") }
+    }
+
+    /** Opis platformy do karuzeli (producent, lata, nośnik, opis) — z serwera, jak na komputerze. */
+    private fun systemInfo(es: String): JSONObject {
+        synchronized(sysInfo) { sysInfo[es]?.let { return it } }
+        val f = cacheFile("opis-" + safe(es))
+        val d = try {
+            JSONObject(server.open("/v1/sysinfo?es=" + Server.enc(es), timeoutMs = 15000).let { c ->
+                try { c.inputStream.bufferedReader(Charsets.UTF_8).readText() } finally { c.disconnect() } })
+        } catch (e: Exception) {
+            if (f.isFile) JSONObject(f.readText()) else JSONObject()
+        }
+        if (!d.optBoolean("pending") && d.length() > 0) {
+            synchronized(sysInfo) { sysInfo[es] = d }
+            try { f.writeText(d.toString()) } catch (e: Exception) { }
+        }
+        return d
+    }
 
     /** Adresy serwera (sieć lokalna, Tailscale, publiczny, tunel) i odcisk certyfikatu — po
      *  udanym połączeniu, najwyżej raz na godzinę. Bez tego telefon znał tylko adres wpisany
@@ -209,6 +260,7 @@ class Bridge(private val act: MainActivity) {
         learnedAt = now
         pool.execute {
             try { server.info() } catch (e: Exception) { learnedAt = 0L; Log.w(tag, "adresy serwera: $e") }
+            pullEmuChoices()
         }
     }
 
@@ -226,8 +278,7 @@ class Bridge(private val act: MainActivity) {
         for (i in 0 until arr.length()) {
             val s = arr.getJSONObject(i)
             s.put("logo", remote(s.optString("logo")))
-            val emu = chosenEmu(s)
-            s.put("emulator", if (emu.isEmpty()) "" else Emulators.label(emu))
+            s.put("emulator", emuLabel(s, chosenEmu(s)))
         }
         systemsCache = arr
         return arr
@@ -388,11 +439,39 @@ class Bridge(private val act: MainActivity) {
         return (0 until a.length()).map { a.getString(it) }
     }
 
+    /** Emulator systemu: wybór gracza, a bez niego — ten, którego używa komputer (zalecany przez
+     *  serwer: RetroArch z tym samym rdzeniem — stany zgodne), dopiero potem pierwszy dostępny. */
     private fun chosenEmu(s: JSONObject): String {
         val es = s.optString("es")
-        val opts = Emulators.options(act, s.optString("plat"), s.optString("core"), cores(s))
-        val pick = prefs.emulator(es)
-        return if (opts.any { it.first == pick }) pick else opts.firstOrNull()?.first ?: ""
+        val plat = s.optString("plat")
+        val opts = Emulators.options(act, plat, s.optString("core"), cores(s))
+        var pick = prefs.emulator(es)
+        // wybór sprzed 0.37.2: „retroarch” bez rdzenia = pierwszy rdzeń z listy serwera — utrwalamy go
+        if (pick.isNotEmpty() && Emulators.baseId(pick) == "retroarch" && Emulators.coreOf(pick).isEmpty()) {
+            val c = Emulators.retroCore(plat, s.optString("core"))
+            if (c.isNotEmpty()) { pick = "$pick#$c"; prefs.setEmulator(es, pick) }
+        }
+        if (opts.any { it.first == pick }) return pick
+        return recommended(s, opts) ?: opts.firstOrNull()?.first ?: ""
+    }
+
+    private fun recommended(s: JSONObject, opts: List<Pair<String, String>>): String? {
+        val core = Emulators.retroCore(s.optString("plat"), s.optString("core"))
+        return when (s.optString("emu_rec")) {
+            "retroarch" -> opts.firstOrNull { Emulators.baseId(it.first) == "retroarch" && Emulators.coreOf(it.first) == core }?.first
+            "standalone" -> opts.firstOrNull { Emulators.baseId(it.first) != "retroarch" }?.first
+            else -> null
+        }
+    }
+
+    /** Opis wyboru: emulator z rdzeniem, a gdy rdzeń inny niż na komputerze — ostrzeżenie. */
+    private fun emuLabel(s: JSONObject, emu: String): String {
+        if (emu.isEmpty()) return ""
+        val label = Emulators.label(emu)
+        val rec = Emulators.retroCore(s.optString("plat"), s.optString("core"))
+        val core = Emulators.coreOf(emu)
+        return if (s.optString("emu_rec") == "retroarch" && Emulators.baseId(emu) == "retroarch" && core.isNotEmpty() && core != rec)
+            "$label — inny rdzeń niż na komputerze ($rec): stany się nie wczytają" else label
     }
 
     private fun settings(): JSONObject {
@@ -404,7 +483,12 @@ class Bridge(private val act: MainActivity) {
             for ((oid, label) in Emulators.options(act, s.optString("plat"), s.optString("core"), cores(s))) {
                 val c = if (Emulators.baseId(oid) == "retroarch")
                     Emulators.retroCore(s.optString("plat"), Emulators.coreOf(oid).ifEmpty { s.optString("core") }) else ""
-                opts.put(JSONObject().put("id", oid).put("label", label + if (c.isNotEmpty() && prefs.coreOk(c)) " ✓" else ""))
+                val rec = s.optString("emu_rec") == "retroarch" && c.isNotEmpty() &&
+                    c == Emulators.retroCore(s.optString("plat"), s.optString("core"))
+                val other = s.optString("emu_rec") == "retroarch" && c.isNotEmpty() && !rec
+                opts.put(JSONObject().put("id", oid).put("label", label + (if (c.isNotEmpty() && prefs.coreOk(c)) " ✓" else "") +
+                    (if (rec) " · jak na komputerze" else "") +
+                    (if (other) " · ⚠ inny rdzeń niż na komputerze — stany z PC się nie wczytają" else "")))
             }
             sys.put(JSONObject().put("es", s.optString("es")).put("display", s.optString("display"))
                 .put("options", opts).put("emulator", chosenEmu(s)))
@@ -440,7 +524,10 @@ class Bridge(private val act: MainActivity) {
                 k == "cache_recent" -> prefs.cacheRecent = d.getInt(k)
                 k == "streams" -> prefs.streams = d.getInt(k)
                 k == "games_logo" -> prefs.gamesLogo = d.getBoolean(k)
-                k.startsWith("emu:") -> { prefs.setEmulator(k.removePrefix("emu:"), d.getString(k)); systemsCache = null }
+                k.startsWith("emu:") -> {
+                    prefs.setEmulatorChoice(k.removePrefix("emu:"), d.getString(k)); systemsCache = null
+                    pool.execute { pushEmuChoices() }       // wybór na koncie — inne telefony tego konta też
+                }
                 k.startsWith("save_dir:") -> prefs.setSaveDir(k.removePrefix("save_dir:"), d.getString(k))
             }
         }
