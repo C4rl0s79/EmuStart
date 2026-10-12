@@ -110,3 +110,19 @@ def test_script_reopens_panel_in_user_session(tmp_path):
     s = updater.write_script(tmp_path, tmp_path / "app", 1, ["--server"]).read_text(encoding="utf-8-sig")
     assert "panel-user.txt" in s and "/IT" in s and "'EmuStart Panel'" in s
     assert s.index("panel-user.txt") < s.index("schtasks /Delete /TN 'EmuStart Update'")
+
+
+@pytest.mark.skipif(__import__("os").name != "nt", reason="PowerShell — Windows")
+def test_powershell_really_runs_in_background(tmp_path):
+    """PowerShell bez konsoli (DETACHED_PROCESS) kończył się bez wykonania skryptu — przez to
+    nie działała aktualizacja z aplikacji na komputerze i nie wracał panel serwera."""
+    import time
+    out = tmp_path / "out.txt"
+    script = tmp_path / "t.ps1"
+    script.write_text(f"Set-Content -LiteralPath '{out}' -Value 'ok'\n", encoding="utf-8-sig")
+    updater.spawn_powershell(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script)], tmp_path)
+    for _ in range(40):
+        if out.exists():
+            break
+        time.sleep(0.25)
+    assert out.read_text(encoding="utf-8-sig").strip() == "ok"

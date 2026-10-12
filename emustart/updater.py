@@ -182,14 +182,26 @@ def _launch(script: Path, server: bool) -> str:
                 return "zadanie Harmonogramu"
         log.warning("zadanie aktualizacji: %s — uruchamiam skrypt bezpośrednio",
                     (r.stdout + r.stderr).strip()[:200])
-    flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP | nowin
-    cmd = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script)]
+    return spawn_powershell(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script)], script.parent)
+
+
+def spawn_powershell(args: list, cwd=None) -> str:
+    """PowerShell w tle, niezależny od tego procesu (przeżyje jego zamknięcie).
+
+    Bez DETACHED_PROCESS: Windows PowerShell uruchomiony bez konsoli kończy się od razu
+    (kod 0), nie wykonując skryptu — przez to nie działała aktualizacja z aplikacji na
+    komputerze i nie wracał panel serwera. CREATE_NO_WINDOW daje mu własną, ukrytą konsolę.
+    Zwraca sposób uruchomienia (do logu)."""
+    flags = subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
+    io = dict(stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    cmd = ["powershell"] + list(args)
+    cwd = str(cwd) if cwd else None
     try:
         subprocess.Popen(cmd, creationflags=flags | getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", 0),
-                         close_fds=True, cwd=str(script.parent))
+                         close_fds=True, cwd=cwd, **io)
         return "proces poza zadaniem"
     except OSError:
-        subprocess.Popen(cmd, creationflags=flags, close_fds=True, cwd=str(script.parent))
+        subprocess.Popen(cmd, creationflags=flags, close_fds=True, cwd=cwd, **io)
         return "proces"
 
 

@@ -294,13 +294,8 @@ def _server_panel() -> None:
                       "Where-Object { $_.CommandLine -like '*--server-panel*' }; "
                       "if($p){ L 'panel już działa (uruchomiony przez skrypt aktualizacji)' } "
                       f"else {{ Start-Process -FilePath '{exe}' -ArgumentList '--server-panel'; L 'panel uruchomiony' }}")
-                flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
-                cmd = ["powershell", "-NoProfile", "-WindowStyle", "Hidden", "-Command", ps]
-                try:              # poza ewentualnym zadaniem/zadaniem systemu — przeżyje zamknięcie panelu
-                    subprocess.Popen(cmd, close_fds=True,
-                                     creationflags=flags | getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", 0))
-                except OSError:
-                    subprocess.Popen(cmd, close_fds=True, creationflags=flags)
+                # przeżyje zamknięcie panelu; bez DETACHED_PROCESS (PowerShell bez konsoli nic nie robi)
+                updater.spawn_powershell(["-NoProfile", "-WindowStyle", "Hidden", "-Command", ps])
             threading.Timer(0.8, lambda: os._exit(0)).start()
             return {"ok": True}
 

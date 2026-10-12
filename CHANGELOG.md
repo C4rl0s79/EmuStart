@@ -17,6 +17,18 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   RetroArchu na Androidzie; ocena „wyświetlania nad innymi aplikacjami” i usługi ułatwień
   dostępu dla pozostałych emulatorów na Androidzie.
 
+## [0.38.1] — 2026-10-12
+
+### Poprawione
+- **Aktualizacja z aplikacji na komputerze pobierała się i nic dalej** oraz **panel serwera
+  nie wracał po aktualizacji** — jedna przyczyna: PowerShell uruchamiany bez konsoli
+  (`DETACHED_PROCESS`) kończy się od razu, nie wykonując skryptu (skrypt podmiany plików,
+  proces czekający na serwer, żeby otworzyć panel). Teraz oba przez jedną funkcję z ukrytą
+  konsolą (`CREATE_NO_WINDOW`), nadal niezależnie od zamykanego procesu. Aktualizacja serwera
+  działała, bo jej skrypt startuje przez Harmonogram zadań.
+- Uwaga: aktualizację *do* tej wersji wykonuje mechanizm poprzedniej — na komputerze zainstaluj
+  ją ręcznie (zip z wydania), panel serwera po aktualizacji serwera otwórz jeszcze ręcznie.
+
 ## [0.38.0] — 2026-10-12
 
 Zakres: komputer (`emustart/libsync.py` — nowy, `api.py`, `config.py`, `bios.py`,
