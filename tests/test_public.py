@@ -141,6 +141,8 @@ def test_public_port_only_api_with_key_and_bans_guessers(monkeypatch):
     assert _req(port, fp, "POST", "/admin/status", KEY) == 404          # panel — nigdy z internetu
     assert _req(port, fp, "POST", "/v1/pair/request", KEY) == 404       # parowanie — tylko lokalnie
     assert _req(port, fp, "GET", "/index.html", KEY) == 404             # interfejs — nie
+    assert _req(port, fp, "GET", "/assets/systems/3DO.png", KEY) == 200        # logo wbudowane — przepuszczone
+    assert _req(port, fp, "GET", "/assets/systems/nie-ma.png") == 401          # ale tylko z kluczem
     # tunel Cloudflare: połączenie z 127.0.0.1, klient w nagłówku CF-Connecting-IP —
     # blokada dotyczy zgadującego, nie wszystkich przychodzących tunelem
     for _ in range(5):
