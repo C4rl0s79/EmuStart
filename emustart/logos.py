@@ -303,7 +303,9 @@ def push_to_server(cfg: dict, only: list | None = None) -> int:
                 sig = hashlib.sha1(f"{logo}|{int(glow)}|{name}|{fam}|{core}".encode() + data).hexdigest()
                 if library.meta_get(f"logo_pushed:{ep[0]}:{es}", "") == sig:
                     continue
-                q = {"es": es, "logo": logo, "glow": "1" if glow else "0", "name": name, "emu": fam, "core": core}
+                q = {"es": es, "logo": logo, "glow": "1" if glow else "0", "name": name}
+                if fam:                          # bez skonfigurowanego emulatora — zalecenie serwera zostaje
+                    q.update(emu=fam, core=core)
                 if logo == "custom":
                     q["ext"] = f.suffix.lower().lstrip(".")
                 c = netsrc.conn(ep[0], ep[1], 20)

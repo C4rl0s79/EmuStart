@@ -8,6 +8,16 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.37.3] — 2026-10-12
+
+### Zmienione
+- **Telefon: opis platformy w 3 liniach** (było: 1), karuzela z logo systemów wyżej — pod
+  nią nazwa, liczba gier i emulator, producent / lata / nośnik i opis.
+
+### Poprawione
+- Komputer bez skonfigurowanego emulatora systemu (np. świeża instalacja) nie kasuje na
+  serwerze zalecanego emulatora i rdzenia tego systemu.
+
 ## [0.37.2] — 2026-10-12
 
 Zakres: aplikacja na Androida (`Bridge.kt`, `Emulators.kt`, `Downloader.kt`, `Prefs.kt`),
