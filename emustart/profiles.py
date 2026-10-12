@@ -150,6 +150,8 @@ def pin_state(cfg: dict, pid: int, fresh: bool = False) -> str:
     prof = get(pid)
     if not prof or not nas_online(cfg):
         return "ok"
+    if account_of_device(cfg) and prof["nas_name"].lower() == account_of_device(cfg).lower():
+        return "ok"                 # urządzenie przypisane do konta: klucz urządzenia zastępuje PIN serwera
     fs = nasfs.backend(cfg)
     try:
         if isinstance(fs, nasfs.RemoteFs):
@@ -293,6 +295,20 @@ def delete(pid: int) -> None:
         c.execute("DELETE FROM profiles WHERE id=?", (pid,))
         c.execute("DELETE FROM play WHERE profile_id=?", (pid,))
         c.execute("DELETE FROM resume WHERE profile_id=?", (pid,))
+
+
+def account_of_device(cfg: dict) -> str:
+    """Konto, do którego przypisane jest to urządzenie (klucz urządzenia, 0.37); '' = brak."""
+    return cfg.get("server_account", "") if str(cfg.get("server_key", "")).startswith("dev:") else ""
+
+
+def unused_placeholder(p: dict) -> bool:
+    """Domyślny profil z pierwszego uruchomienia, w którym nic się nie wydarzyło."""
+    if p.get("name") != "Gracz":
+        return False
+    if (LOCAL / str(p["id"])).exists():
+        return False
+    return not library.db().execute("SELECT 1 FROM play WHERE profile_id=? LIMIT 1", (p["id"],)).fetchone()
 
 
 def first_id() -> int:

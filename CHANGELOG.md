@@ -8,6 +8,24 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.37.5] — 2026-10-12
+
+Zakres: komputer (`emustart/api.py`, `profiles.py`), aplikacja na Androida (`Bridge.kt`),
+interfejs (`web/app.js`, `web/options.js`). Urządzenie przypisane do konta — wszędzie tak samo.
+
+### Poprawione
+- **Po zatwierdzeniu nowego urządzenia konto staje się jego profilem** — na komputerze
+  i telefonie. Wcześniej komputer pokazywał wybór profili z pustym „Gracz” z pierwszego
+  uruchomienia (bez konta z serwera), a telefon zapisywał konto, nie ustawiając profilu.
+  Pusty „Gracz” jest usuwany. Gdy zatwierdzenie przyszło bez połączenia — dokończenie przy
+  starcie.
+- **Kłódka / prośba o PIN serwera przy profilu konta** — urządzenie z kluczem tego konta
+  nie potrzebuje PIN-u serwera (komputer i telefon); PIN jest lokalny.
+- **Pasek stanu u klienta serwera** (bez folderów z grami): „Serwer <nazwa>” / „Serwer
+  niedostępny” zamiast „NAS offline, tylko gry lokalne” — komputer i telefon.
+- **Ekran profili na urządzeniu przypisanym do konta**: tylko to konto — bez „Nowy profil”,
+  „Zmień nazwę”, „Usuń” (serwer i tak na to nie pozwala) — komputer i telefon.
+
 ## [0.37.4] — 2026-10-12
 
 ### Bezpieczeństwo

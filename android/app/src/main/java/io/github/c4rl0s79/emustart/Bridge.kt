@@ -182,6 +182,11 @@ class Bridge(private val act: MainActivity) {
 
     // ── stan i listy ──
     private fun state(): JSONObject {
+        // przypisany do konta, a bez profilu (np. zatwierdzenie bez połączenia) — konto jako profil
+        if (prefs.deviceId.isNotEmpty() && prefs.profile.isEmpty() && prefs.serverAccount.isNotEmpty()) {
+            prefs.profile = prefs.serverAccount
+            if (prefs.phoneOwner.isEmpty()) prefs.phoneOwner = prefs.serverAccount
+        }
         val sys = try { systems() } catch (e: Exception) { JSONArray() }
         if (profList.isEmpty() && online) try { loadProfiles() } catch (e: Exception) { }
         return JSONObject()
@@ -193,6 +198,8 @@ class Bridge(private val act: MainActivity) {
             .put("ask_profile", false).put("conflicts", drainConflicts())
             .put("profile", JSONObject().put("id", profileId()).put("name", prefs.profile.ifEmpty { "—" }))
             .put("profiles", profList.size.coerceAtLeast(1))
+            .put("account", if (prefs.deviceId.isNotEmpty()) prefs.serverAccount else "")
+            .put("server", if (prefs.configured) JSONObject().put("ok", online).put("name", "") else JSONObject.NULL)
             .put("py_pad", false).put("pad_backend", "android")
     }
 
@@ -616,6 +623,9 @@ class Bridge(private val act: MainActivity) {
                 prefs.deviceId = r.getString("device")
                 prefs.deviceKey = p.getString("alias")
                 prefs.serverAccount = r.optString("account", p.optString("account"))
+                // konto = profil tego telefonu (zamiast wyboru z listy po zatwierdzeniu)
+                prefs.profile = prefs.serverAccount
+                if (prefs.phoneOwner.isEmpty()) prefs.phoneOwner = prefs.serverAccount
                 prefs.serverEndpoints = ""
                 prefs.enrollPending = ""
                 server.dropToken(); server.forgetBase()
@@ -893,6 +903,8 @@ class Bridge(private val act: MainActivity) {
     /** ok | need_pin (PIN raz na tym telefonie) | set_pin (profil jeszcze bez PIN-u). */
     private fun pinState(n: String): String = when {
         n.isEmpty() || n !in profPin -> "ok"
+        // telefon przypisany do konta: klucz urządzenia zastępuje PIN serwera
+        prefs.deviceId.isNotEmpty() && n.equals(prefs.serverAccount, ignoreCase = true) -> "ok"
         profPin[n] != true -> "set_pin"
         prefs.token(n).isEmpty() -> "need_pin"
         else -> "ok"

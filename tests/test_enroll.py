@@ -241,3 +241,44 @@ def test_concurrent_logins_share_one_session(srv, monkeypatch):
     for t in th:
         t.join()
     assert len(set(toks)) == 1 and toks[0]
+
+
+def test_after_approval_pc_uses_the_account_not_placeholder(srv, monkeypatch):
+    from emustart import api as api_mod, library, profiles
+    host, port, _nas = srv
+    admin_key, _ = _admin_key(srv)
+    monkeypatch.setattr("emustart.config.save", lambda c: None)
+    assert [p["name"] for p in profiles.all_profiles()] == ["Gracz"]          # pierwsze uruchomienie
+    a = api_mod.Api.__new__(api_mod.Api)
+    a._cfg, a._profile = {}, profiles.first_id()
+    monkeypatch.setattr(a, "_user_load", lambda pid: None, raising=False)
+    a.server_enroll(f"{host}:{port}", "existing", "Jezus")
+    q = _req(srv, "POST", "/v1/enroll/pending", admin_key, body={})[1]["requests"][0]
+    _req(srv, "POST", "/v1/enroll/decide", admin_key, body={"id": q["id"], "allow": True})
+    assert a.server_enroll_poll()["status"] == "approved"
+    names = [p["name"] for p in profiles.all_profiles()]
+    assert names == ["Jezus"]                                                # pusty „Gracz” zniknął
+    assert profiles.get(a._profile)["name"] == "Jezus" and not profiles.setup_needed()
+    assert library.meta_get("last_profile", "") == str(a._profile)
+
+
+def test_account_profile_needs_no_server_pin_on_its_device(srv, monkeypatch):
+    """Profil konta z PIN-em na serwerze — na urządzeniu z kluczem tego konta bez PIN-u."""
+    from emustart import api as api_mod, pinauth, profiles
+    host, port, nas = srv
+    admin_key, _ = _admin_key(srv)
+    pinauth.write(nasfs.SmbFs(nas), "Jezus", pinauth.make("1234"))           # konto z PIN-em
+    monkeypatch.setattr("emustart.config.save", lambda c: None)
+    a = api_mod.Api.__new__(api_mod.Api)
+    a._cfg, a._profile = {}, profiles.first_id()
+    monkeypatch.setattr(a, "_user_load", lambda pid: None, raising=False)
+    a.server_enroll(f"{host}:{port}", "existing", "Jezus")
+    q = _req(srv, "POST", "/v1/enroll/pending", admin_key, body={})[1]["requests"][0]
+    _req(srv, "POST", "/v1/enroll/decide", admin_key, body={"id": q["id"], "allow": True})
+    a.server_enroll_poll()
+    assert profiles.pin_state(a._cfg, a._profile, fresh=True) == "ok"
+    assert a.get_state.__func__ and profiles.account_of_device(a._cfg) == "Jezus"
+    # zapisy konta przez serwer bez tokenu PIN-u
+    fs = nasfs.backend(a._cfg)
+    fs.write("Jezus/save/y.srm", b"bez PIN-u")
+    assert fs.read("Jezus/save/y.srm") == b"bez PIN-u"

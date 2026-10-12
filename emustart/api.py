@@ -214,6 +214,9 @@ class Api:
                 profiles.scrub_settings_copies(self._cfg)
                 library.meta_set("secrets_scrubbed", "1")
             profiles.import_from_nas(self._cfg)
+            acc = profiles.account_of_device(self._cfg)
+            if acc and (profiles.setup_needed() or (profiles.get(self._profile) or {}).get("nas_name", "").lower() != acc.lower()):
+                self._adopt_account(acc)      # zatwierdzenie bez połączenia — dokończenie przy starcie
             self._ra_adopt()
             self._user_load(self._profile)
         except Exception:
@@ -346,6 +349,13 @@ class Api:
         profiles.ra_set(self._cfg, int(pid), {**rec, "hardcore": bool(on)})
         return {"ok": True}
 
+    def _server_state(self) -> dict | None:
+        """Serwer EmuStart (pasek u góry): nazwa i czy odpowiada; None = nie ustawiony."""
+        if not (self._cfg.get("server_url") and self._cfg.get("server_key")):
+            return None
+        i = netsrc.info(self._cfg)
+        return {"ok": bool(i.get("ok")), "name": i.get("name", ""), "account": self._cfg.get("server_account", "")}
+
     # ── stan ogólny ──
     def get_state(self) -> dict:
         cfg = self._cfg
@@ -354,6 +364,8 @@ class Api:
             "version": __version__,
             "configured": config.is_configured(cfg),
             "rom_roots": config.rom_roots(cfg), "rom_online": rom_ok,
+            "server": self._server_state(),
+            "account": profiles.account_of_device(cfg),
             "network_mode": cfg.get("network_mode", "auto"),
             "systems": self.list_systems(),
             "scan": dict(self._scan),
@@ -1474,9 +1486,31 @@ class Api:
             threading.Thread(target=lambda: netsrc.info(self._cfg, fresh=True), daemon=True,
                              name="adresy-serwera").start()
             log.info("dołączono do serwera %s (konto %s)", p["url"], self._cfg["server_account"])
+            self._adopt_account(self._cfg["server_account"])
         elif st in ("denied", "expired"):
             self.server_enroll_cancel()
         return {"ok": True, "status": st, "account": p["account"], "code": p["code"], "reason": r.get("reason", "")}
+
+    def _adopt_account(self, account: str) -> None:
+        """Po zatwierdzeniu: konto z serwera jako profil tego komputera — zamiast pustego
+        profilu „Gracz” z pierwszego uruchomienia (usuwany, jeśli nigdy nie był używany)."""
+        try:
+            profiles.import_from_nas(self._cfg)
+            mine = next((p for p in profiles.all_profiles()
+                         if (p.get("nas_name") or p["name"]).lower() == account.lower()), None)
+            if not mine:
+                return
+            if profiles.setup_needed():
+                for p in profiles.all_profiles():
+                    if p["id"] != mine["id"] and profiles.unused_placeholder(p):
+                        profiles.delete(p["id"])
+                profiles.finish_setup(mine["id"], ask=False)
+            self._profile = mine["id"]
+            library.meta_set("last_profile", str(mine["id"]))
+            self._user_load(self._profile)
+            log.info("profil tego komputera: konto %s", account)
+        except Exception:
+            log.exception("konto z serwera jako profil")
 
     def server_enroll_cancel(self) -> dict:
         from emustart import keystore
