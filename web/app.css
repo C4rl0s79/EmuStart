@@ -423,3 +423,14 @@ body.phone {
 .phone .golist, .phone .artgrid { max-height: 62vh; }
 .phone .pv3 .desc { display: block; -webkit-line-clamp: unset; overflow: hidden;
   -webkit-mask-image: linear-gradient(#000 78%, transparent); mask-image: linear-gradient(#000 78%, transparent); }
+
+/* ── 0.31.2: logo gry nad okładką (na jej szerokość, od górnej krawędzi ekranu), w nagłówku
+   listy tylko logo platformy (większe) i liczba gier — nazwa platformy jest na logo ── */
+#pvGameLogo { position: fixed; z-index: 4; object-fit: contain; object-position: center bottom;
+  filter: drop-shadow(0 2px 6px rgba(0,0,0,.85)); pointer-events: none; }
+body:not(.phone) #listGameLogo { display: none; }
+.phone #pvGameLogo { display: none; }
+body:not(.phone) .listhead { height: calc(var(--listlogo-h) * 1.3 + 2.5vh); }
+body:not(.phone) .listhead img#listLogo { height: calc(var(--listlogo-h) * 1.3); max-width: 26vw; }
+.listhead img#listLogo:not(.hidden) ~ .lhtext h2 { display: none; }   /* nazwa platformy — jest logo */
+body:not(.phone) .listhead .lhtext p { font-size: 1.05em; }
