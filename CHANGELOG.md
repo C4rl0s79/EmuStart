@@ -17,6 +17,28 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   RetroArchu na Androidzie; ocena „wyświetlania nad innymi aplikacjami” i usługi ułatwień
   dostępu dla pozostałych emulatorów na Androidzie.
 
+## [0.40.0] — 2026-10-12
+
+### Dodane
+- **Hasła kont na serwerze** (PC, Android, serwer, panel). Konto (profil) ma hasło: co
+  najmniej 10 znaków, wielka litera, cyfra i znak specjalny — sprawdzane w aplikacji i na
+  serwerze. Serwer trzyma tylko skrót (scrypt, losowa sól) w `accounts.json` w katalogu
+  serwera, nie w folderze profili; hasło idzie w treści żądania (nigdy w adresie), z
+  urządzeń z odciskiem certyfikatu — portem HTTPS. Złe hasła: rosnące opóźnienie na konto
+  i limit prób z jednego adresu (z internetu liczone też do blokady adresu).
+  - Dołączanie przez internet: **Nowe konto** ustawia hasło, **Mam konto** je sprawdza —
+    prośba nadal czeka na zatwierdzenie na innym urządzeniu konta albo przez administratora.
+    W prośbie zostaje tylko skrót, usuwany po decyzji.
+  - **Inny użytkownik** na urządzeniu konta: nazwa konta i jego hasło → serwer rozpoznaje
+    tego użytkownika (token konta, unieważniany zmianą hasła).
+  - Konta bez hasła przy pierwszym wyborze proszą o jego ustawienie; panel serwera →
+    **Konta**: lista kont i ustawianie nowego hasła przez administratora.
+
+### Zmienione
+- **PIN jest tylko lokalny** — blokada profilu na jednym urządzeniu (skrót na urządzeniu,
+  pytanie przy wyborze profilu raz na uruchomienie); serwer już go nie sprawdza. Dawne PIN-y
+  profili z serwera zastępuje hasło konta.
+
 ## [0.39.0] — 2026-10-12
 
 ### Zmienione
