@@ -1,4 +1,7 @@
-# EmuStart — koncepcja
+# EmuStart — koncepcja (0.x)
+
+> Wersja 2.0: [docs/koncepcja-2.0.md](docs/koncepcja-2.0.md). Ten dokument opisuje 0.x
+> (klient z dostępem SMB do NAS-a) i zostaje jako historia.
 
 Frontend do uruchamiania gier na emulatorach, sterowany padem, przystosowany do
 kolekcji leżącej na NAS-ie dostępnym raz przez LAN, raz przez Tailscale.
