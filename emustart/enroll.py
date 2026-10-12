@@ -5,7 +5,8 @@ Tożsamość = konto + konkretne urządzenie. Każda instalacja tworzy własną 
 niego klucz zaszyfrowany DPAPI). Serwer zna tylko klucz publiczny.
 
 Dołączenie (jedyna droga z internetu — przez tunel albo port publiczny):
-1. Urządzenie: POST /v1/enroll/request {mode: new|existing, account, name, class, pubkey}
+1. Urządzenie: POST /v1/enroll/request {mode: new|existing, account, password, name, class, pubkey}
+   — hasło konta (0.40): nowe konto je ustawia, „mam konto” je sprawdza (emustart/accounts.py)
    → rid (tajny, do odpytywania) i kod weryfikacyjny (z klucza publicznego — ten sam na
    ekranie nowego urządzenia i u zatwierdzającego).
 2. Zatwierdzający widzi prośbę (GET /v1/enroll/pending — przy otwarciu aplikacji, w panelu):
@@ -123,8 +124,11 @@ def _safe_account(name: str) -> str:
 
 # ── prośby ──
 def request(mode: str, account: str, name: str, cls: str, ip: str, version: str, pubkey: str,
-            accounts: list, hw: str = "") -> dict:
-    """Nowa instalacja prosi o dołączenie. `accounts` — istniejące konta (profile)."""
+            accounts: list, hw: str = "", password: str = "") -> dict:
+    """Nowa instalacja prosi o dołączenie. `accounts` — istniejące konta (profile).
+    „Nowe konto” ustawia hasło, „Mam konto” je sprawdza (konto bez hasła — ustawia je
+    przy zatwierdzeniu); w prośbie zostaje tylko skrót hasła (emustart/accounts.py)."""
+    from emustart import accounts as acc_pw
     from emustart import devices
     if mode not in ("new", "existing"):
         return {"ok": False, "reason": "zły rodzaj prośby"}
@@ -135,13 +139,24 @@ def request(mode: str, account: str, name: str, cls: str, ip: str, version: str,
     acc = _safe_account(account)
     if not acc:
         return {"ok": False, "reason": "Podaj nazwę konta."}
-    match = next((a for a in accounts if a.lower() == acc.lower()), "")
+    match = next((a for a in accounts if a.lower() == acc.lower()), "") or \
+        (acc_pw.record(acc) or {}).get("name", "")
     if mode == "new" and match:
         return {"ok": False, "reason": f"Konto „{match}” już istnieje — wybierz „Mam konto”."}
+    pw_rec = None
     if mode == "existing":
         if not match:
             return {"ok": False, "reason": f"Nie ma konta „{acc}”."}
         acc = match
+        if acc_pw.has_password(acc):
+            ok, why, _wait = acc_pw.verify(acc, password, ip)
+            if not ok:
+                return {"ok": False, "reason": why}
+    if mode == "new" or not acc_pw.has_password(acc):
+        why = acc_pw.policy(password)
+        if why:
+            return {"ok": False, "reason": why}
+        pw_rec = acc_pw.make(password)
     now = time.time()
     with _lock:
         _gc(now)
@@ -157,7 +172,8 @@ def request(mode: str, account: str, name: str, cls: str, ip: str, version: str,
                      "name": (str(name).strip() or "urządzenie")[:40],
                      "class": cls if cls in devices.CLASSES else "pc", "ip": ip, "version": version[:20],
                      "pubkey": pubkey, "code": code, "created": now, "expires": now + ENROLL_TTL,
-                     "status": "pending", "device": "", "decided_by": "", "hw": devices._valid_hw(hw)}
+                     "status": "pending", "device": "", "decided_by": "", "hw": devices._valid_hw(hw),
+                     "pw": pw_rec}
         _save()
     log.info("prośba o dołączenie: %s (%s) — %s „%s”, %s, kod %s", name, cls,
              "nowe konto" if mode == "new" else "konto", acc, ip, pretty(code))
@@ -222,11 +238,16 @@ def decide(req_id: str, allow: bool, games: bool, viewer: str, create_account=No
         by = devices.name_of(viewer) if viewer else "panel serwera"
         if not allow:
             q.update(status="denied", decided_by=by)
+            q.pop("pw", None)
             _save()
             log.info("odrzucono prośbę %s (%s, %s) — %s", q["name"], q["account"], q["ip"], by)
             return {"ok": True, "status": "denied", "name": q["name"]}
         if q["mode"] == "new" and create_account:
             create_account(q["account"])
+        from emustart import accounts as acc_pw
+        if q.get("pw") and (q["mode"] == "new" or not acc_pw.has_password(q["account"])):
+            acc_pw.set_record(q["account"], q["pw"], by)
+        q.pop("pw", None)
         did = devices.add_keyed(q["name"], q["class"], q["ip"], q["version"], q["pubkey"], q["account"],
                                 role="user", games=bool(games), by=by, hw=q.get("hw", ""))
         q.update(status="approved", device=did, decided_by=by)

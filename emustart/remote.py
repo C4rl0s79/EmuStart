@@ -199,7 +199,7 @@ def pair_flow(handler, op: str) -> None:
 
 def enroll_flow(handler, op: str) -> None:
     """Nowe instalacje i logowanie podpisem (emustart/enroll.py):
-    POST /v1/enroll/request {mode, account, name, class, version, pubkey}   — bez klucza
+    POST /v1/enroll/request {mode, account, password, name, class, version, pubkey} — bez klucza
     POST /v1/enroll/poll {rid}                                               — bez klucza
     POST /v1/auth/challenge {device}, /v1/auth/token {device, nonce, sig}    — bez klucza
     POST /v1/enroll/pending, /v1/enroll/decide {id, allow, games}            — z kluczem"""
@@ -209,7 +209,7 @@ def enroll_flow(handler, op: str) -> None:
     if op == "request":
         r = enroll.request(str(d.get("mode", "")), str(d.get("account", "")), str(d.get("name", "")),
                            str(d.get("class", "")), ip, str(d.get("version", "")), str(d.get("pubkey", "")),
-                           profile_names(), str(d.get("hw", "")))
+                           profile_names(), str(d.get("hw", "")), str(d.get("password", "")))
         return _json(handler, r, 200 if r.get("ok") else 400)
     if op == "poll":
         return _json(handler, enroll.poll(str(d.get("rid", ""))))
@@ -238,8 +238,8 @@ def enroll_flow(handler, op: str) -> None:
 
 
 def create_account(name: str) -> None:
-    """Nowe konto zatwierdzone przez administratora — folder profilu (bez PIN-u na serwerze:
-    PIN jest lokalny, dostęp daje klucz urządzenia)."""
+    """Nowe konto zatwierdzone przez administratora — folder profilu (hasło konta ustawia
+    emustart/enroll.py; PIN jest lokalny)."""
     from emustart import nasfs
     if NAS_ROOT is None:
         return
@@ -408,13 +408,8 @@ def handle_write(handler, method: str) -> None:
         if n:
             handler.rfile.read(min(n, 10 << 20))
         return _json(handler, {"error": "Tylko urządzenie administratora."}, 403)
-    if method == "PUT" and len(parts) == 2 and parts[0] == "profiles" and _scope(handler):
-        name = (_savemgr_args(handler).get("name") or "").strip()
-        if parts[1] == "create" or not _scope_ok(handler, name):
-            n = int(handler.headers.get("Content-Length") or 0)
-            if n:
-                handler.rfile.read(min(n, 1 << 16))
-            return _json(handler, {"error": "To urządzenie ma dostęp tylko do swojego konta."}, 403)
+    if method == "PUT" and len(parts) == 2 and parts[0] == "profiles":
+        return _profiles_put(handler, parts[1])
     if method == "PUT" and parts == ["system"]:
         return _system_put(handler)
     if method == "PUT" and parts == ["roots"]:
@@ -423,8 +418,6 @@ def handle_write(handler, method: str) -> None:
         return _media_put(handler)
     if method == "PUT" and parts == ["savemgr", "copy"]:
         return _savemgr_copy(handler)
-    if method == "PUT" and len(parts) == 2 and parts[0] == "profiles":
-        return _profiles_put(handler, parts[1])
     if not parts or parts[0] != "nas":
         n = int(handler.headers.get("Content-Length") or 0)
         if n:
@@ -564,17 +557,17 @@ def _nas(handler, method: str, parts: list) -> None:
         return _json(handler, {"error": str(ex)}, 400)
     target = NAS_ROOT / rel if rel else NAS_ROOT
     op = parts[0] if parts else ""
-    # PIN profilu: skrót PIN-u nigdy nie wychodzi z serwera, pliki profilu z PIN-em —
-    # tylko z tokenem tego profilu (emustart/pinauth.py)
+    # dawne skróty PIN-u (.auth.json) nigdy nie wychodzą z serwera; pliki konta z hasłem —
+    # urządzeniu tego konta albo z tokenem konta (emustart/accounts.py)
     if _is_auth(rel) or (arg("backup") and _is_auth(arg("backup"))):
         return _json(handler, {"error": "niedostępne"}, 403)
     if not rel and op == "scan":
         return _json(handler, {"error": "cały folder profili jest niedostępny"}, 403)
     for r in (rel, arg("backup")):
-        if r and not _scope_ok(handler, r.replace("\\", "/").split("/")[0]):
-            return _json(handler, {"error": "To urządzenie ma dostęp tylko do swojego konta."}, 403)
-        if r and not _profile_ok(handler, r.replace("\\", "/").split("/")[0]):
-            return _json(handler, {"error": "profil wymaga PIN-u", "pin": True}, 403)
+        # inne konto — po zalogowaniu jego hasłem („pin”: klient pyta o hasło konta)
+        if r and not (_scope_ok(handler, r.replace("\\", "/").split("/")[0])
+                      and _profile_ok(handler, r.replace("\\", "/").split("/")[0])):
+            return _json(handler, {"error": "konto wymaga hasła", "pin": True}, 403)
     if method == "GET" and op == "scan":
         files = {k: list(v) for k, v in nasfs.scan_dir(target).items() if not _is_auth(k)}
         return _json(handler, {"files": files})
@@ -644,7 +637,7 @@ def _nas(handler, method: str, parts: list) -> None:
     return _json(handler, {"error": "nieznana operacja"}, 404)
 
 
-# ── profile z PIN-em ──
+# ── konta: zakres urządzenia, hasło (emustart/accounts.py) ──
 
 def _is_auth(rel: str) -> bool:
     from emustart import pinauth
@@ -667,8 +660,13 @@ def _scope(handler) -> str:
 
 
 def _scope_ok(handler, profile: str) -> bool:
+    """Swoje konto; inne konto — gdy na tym urządzeniu zalogował się jego użytkownik (hasło
+    → token konta w nagłówku X-Profile-Token)."""
+    from emustart import accounts
     sc = _scope(handler)
-    return not sc or profile.lower() == sc.lower()
+    if not sc or profile.lower() == sc.lower():
+        return True
+    return bool(profile) and accounts.token_ok(_secret(), profile, handler.headers.get("X-Profile-Token") or "")
 
 
 def _admin(handler) -> bool:
@@ -683,19 +681,18 @@ def _games_ok(handler) -> bool:
 
 
 def _profile_ok(handler, profile: str) -> bool:
-    """Profil bez PIN-u — dostępny (stare profile, do czasu ustawienia PIN-u);
-    z PIN-em — tylko z tokenem tego profilu. Urządzenie przypisane do konta (0.37): tylko
-    swoje konto, a klucz urządzenia zastępuje PIN serwera (PIN jest lokalny)."""
-    from emustart import nasfs, pinauth
+    """Konto z hasłem (0.40) — urządzenie tego konta (klucz urządzenia) albo token konta
+    (użytkownik podał hasło na tym urządzeniu). Konto bez hasła — tylko urządzenia
+    administratora i urządzenia tego konta (do czasu ustawienia hasła). PIN jest lokalny."""
+    from emustart import accounts
     sc = _scope(handler)
-    if sc:
-        return bool(profile) and profile.lower() == sc.lower()
+    if sc and profile and profile.lower() == sc.lower():
+        return True
     if not profile or profile.startswith((".", "_")) or NAS_ROOT is None:
-        return True
-    rec = pinauth.read(nasfs.SmbFs(NAS_ROOT), profile)
-    if rec is None:
-        return True
-    return pinauth.token_ok(_secret(), profile, rec, handler.headers.get("X-Profile-Token") or "")
+        return not sc
+    if accounts.has_password(profile):
+        return accounts.token_ok(_secret(), profile, handler.headers.get("X-Profile-Token") or "")
+    return not sc
 
 
 def profile_names() -> list:
@@ -710,69 +707,90 @@ def profile_names() -> list:
 
 
 def _profiles_get(handler) -> None:
-    """GET /v1/profiles — [{name, pin}]: nazwy profili i czy mają PIN."""
-    from emustart import nasfs, pinauth
+    """GET /v1/profiles — [{name, password}]: konta i czy mają hasło („pin” — to samo, dla
+    klientów sprzed 0.40)."""
+    from emustart import accounts
     if NAS_ROOT is None:
         return _json(handler, {"error": "serwer nie ma folderu profili"}, 404)
-    fs = nasfs.SmbFs(NAS_ROOT)
-    return _json(handler, {"profiles": [{"name": n, "pin": pinauth.read(fs, n) is not None}
+    with_pw = accounts.names_with_password()
+    return _json(handler, {"profiles": [{"name": n, "password": n.lower() in with_pw, "pin": n.lower() in with_pw}
                                         for n in profile_names() if _scope_ok(handler, n)]})
 
 
 def _profiles_put(handler, op: str) -> None:
-    """PUT /v1/profiles/login|create|pin?name=&pin=[&old=]
+    """PUT /v1/profiles/login|create|password — JSON {name, password[, old]} w treści
+    (hasło nigdy w adresie — trafiłoby do logów). emustart/accounts.py.
 
-    login  — PIN istniejącego profilu → token (profil bez PIN-u: needs_pin)
-    create — nowy profil z PIN-em; nazwa zajęta (bez względu na wielkość liter) → 409
-    pin    — ustawienie PIN-u (profil bez PIN-u) albo zmiana (z dotychczasowym `old`)
+    login    — hasło konta → token konta (inny użytkownik na tym urządzeniu);
+               konto bez hasła: needs_password
+    create   — nowe konto z hasłem (urządzenie administratora); nazwa zajęta → 409
+    password — ustawienie hasła (konto bez hasła: urządzenie tego konta albo administrator)
+               albo zmiana (z dotychczasowym `old`)
     """
-    from emustart import nasfs, pinauth
-    n = int(handler.headers.get("Content-Length") or 0)
-    if n:
-        handler.rfile.read(min(n, 1 << 16))
+    from emustart import accounts, nasfs, public
+    d = _body(handler)
     if NAS_ROOT is None:
         return _json(handler, {"error": "serwer nie ma folderu profili"}, 404)
-    a = _savemgr_args(handler)
     fs = nasfs.SmbFs(NAS_ROOT)
-    wanted, pin = (a.get("name") or "").strip(), a.get("pin") or ""
-    existing = pinauth.find(profile_names(), wanted)
+    wanted, pw = str(d.get("name") or "").strip(), str(d.get("password") or "")
+    ip = public.client_ip(handler)
+    existing = _find_account(wanted)
     if op == "create":
+        if _scope(handler):
+            return _json(handler, {"error": "To urządzenie ma dostęp tylko do swojego konta."}, 403)
         if existing:
             return _json(handler, {"error": f"Profil „{existing}” już istnieje.", "exists": True,
                                    "name": existing}, 409)
         name = _safe_profile_name(wanted)
         if not name:
             return _json(handler, {"error": "Zła nazwa profilu."}, 400)
-        if not pinauth.valid_pin(pin):
-            return _json(handler, {"error": "PIN to 4–8 cyfr."}, 400)
-        rec = pinauth.make(pin)
-        pinauth.write(fs, name, rec)
+        why = accounts.set_password(name, pw, by=_who(handler))
+        if why:
+            return _json(handler, {"error": why}, 400)
         fs.write(f"{name}/emustart.json", b"{}")
-        log.info("nowy profil %s (z PIN-em)", name)
-        return _json(handler, {"ok": True, "name": name, "token": pinauth.token(_secret(), name, rec)})
+        log.info("nowe konto %s (z hasłem)", name)
+        return _json(handler, {"ok": True, "name": name, "token": accounts.token(_secret(), name)})
     if not existing:
-        return _json(handler, {"error": f"Nie ma profilu „{wanted}”."}, 404)
+        return _json(handler, {"error": f"Nie ma konta „{wanted}”."}, 404)
     if op == "login":
-        ok, why, wait = pinauth.verify(fs, existing, pin)
+        ok, why, wait = accounts.verify(existing, pw, ip)
         if why == "brak":
-            return _json(handler, {"ok": True, "name": existing, "token": "", "needs_pin": True})
+            return _json(handler, {"ok": True, "name": existing, "token": "", "needs_password": True})
         if not ok:
-            return _json(handler, {"error": why, "retry_after": wait}, 429 if wait and "Za dużo" in why else 403)
-        rec = pinauth.read(fs, existing)
-        return _json(handler, {"ok": True, "name": existing, "token": pinauth.token(_secret(), existing, rec)})
-    if op == "pin":
-        if not pinauth.valid_pin(pin):
-            return _json(handler, {"error": "PIN to 4–8 cyfr."}, 400)
-        if pinauth.read(fs, existing) is not None:
-            ok, why, wait = pinauth.verify(fs, existing, a.get("old") or "")
+            if getattr(handler.server, "public", False):
+                public._fail(ip)                 # z internetu: jak zgadywanie klucza — blokada adresu
+            return _json(handler, {"error": why, "retry_after": wait}, 429 if wait else 403)
+        return _json(handler, {"ok": True, "name": existing, "token": accounts.token(_secret(), existing)})
+    if op == "password":
+        why = accounts.policy(pw)
+        if why:
+            return _json(handler, {"error": why}, 400)
+        if accounts.has_password(existing):
+            ok, why, wait = accounts.verify(existing, str(d.get("old") or ""), ip)
             if not ok:
-                return _json(handler, {"error": "Zły dotychczasowy PIN." if why == "Zły PIN." else why,
-                                       "retry_after": wait}, 403)
-        rec = pinauth.make(pin)
-        pinauth.write(fs, existing, rec)
-        log.info("PIN profilu %s ustawiony", existing)
-        return _json(handler, {"ok": True, "name": existing, "token": pinauth.token(_secret(), existing, rec)})
+                return _json(handler, {"error": "Złe dotychczasowe hasło." if why == "Złe hasło." else why,
+                                       "retry_after": wait}, 429 if wait else 403)
+        elif not _scope_ok(handler, existing):
+            return _json(handler, {"error": "To urządzenie ma dostęp tylko do swojego konta."}, 403)
+        accounts.set_password(existing, pw, by=_who(handler))
+        return _json(handler, {"ok": True, "name": existing, "token": accounts.token(_secret(), existing)})
     return _json(handler, {"error": "nieznana operacja"}, 404)
+
+
+def _find_account(name: str) -> str:
+    """Istniejące konto (folder profilu albo hasło na serwerze) bez względu na wielkość liter."""
+    from emustart import accounts, pinauth
+    hit = pinauth.find(profile_names(), name)
+    if hit:
+        return hit
+    rec = accounts.record(name)
+    return rec.get("name", "") if rec else ""
+
+
+def _who(handler) -> str:
+    from emustart import devices
+    did = getattr(handler, "device", "")
+    return devices.name_of(did) if did else "serwer"
 
 
 def _safe_profile_name(name: str) -> str:
@@ -831,10 +849,8 @@ def _savemgr_catalog(handler) -> None:
         return _json(handler, {"error": str(ex)}, 400)
     if not prof or "/" in prof or not a.get("es") or not a.get("name"):
         return _json(handler, {"error": "brak profile/es/name"}, 400)
-    if not _scope_ok(handler, prof):
-        return _json(handler, {"error": "To urządzenie ma dostęp tylko do swojego konta."}, 403)
-    if not _profile_ok(handler, prof):
-        return _json(handler, {"error": "profil wymaga PIN-u", "pin": True}, 403)
+    if not (_scope_ok(handler, prof) and _profile_ok(handler, prof)):
+        return _json(handler, {"error": "konto wymaga hasła", "pin": True}, 403)
     stems, serial = _savemgr_game(a["es"], a["name"])
     stems += [s for s in a.get("stems", "").split("|") if s]
     out = savemgr.catalog(nasfs.SmbFs(NAS_ROOT), prof, a["es"], a["name"], stems,
@@ -859,10 +875,8 @@ def _savemgr_copy(handler) -> None:
         return _json(handler, {"error": str(ex)}, 400)
     if not prof or "/" in prof:
         return _json(handler, {"error": "brak profile"}, 400)
-    if not _scope_ok(handler, prof):
-        return _json(handler, {"error": "To urządzenie ma dostęp tylko do swojego konta."}, 403)
-    if not _profile_ok(handler, prof):
-        return _json(handler, {"error": "profil wymaga PIN-u", "pin": True}, 403)
+    if not (_scope_ok(handler, prof) and _profile_ok(handler, prof)):
+        return _json(handler, {"error": "konto wymaga hasła", "pin": True}, 403)
     out = savemgr.copy(nasfs.SmbFs(NAS_ROOT), prof, src, a.get("platform", ""), a.get("emu", ""),
                        a.get("es", ""), a.get("name", ""), a.get("device", ""))
     return _json(handler, out)

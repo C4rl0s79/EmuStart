@@ -1159,38 +1159,61 @@ class Api:
         for p in lst:
             p["nas_wanted"] = profiles.nas_wanted(p)
             p["pin"] = profiles.pin_state(self._cfg, p["id"])
-            p.pop("pin_token", None)            # token zostaje w programie, nie w UI
-        return {"profiles": lst, "current": self._profile}
+        # token konta i skrót PIN-u zostają w programie, nie w UI
+        return {"profiles": [self._public_profile(p) for p in lst], "current": self._profile}
 
     def _pin_block(self, pid: int) -> dict | None:
         st = profiles.pin_state(self._cfg, int(pid), fresh=True)
         if st == "ok":
             return None
         prof = profiles.get(int(pid)) or {}
-        return {"ok": False, "need": st, "name": prof.get("name", ""),
-                "reason": f"Profil „{prof.get('name', '')}” — " +
-                          ("podaj PIN." if st == "need_pin" else "ustaw PIN profilu.")}
+        n = prof.get("name", "")
+        why = {"need_pin": f"Profil „{n}” — podaj PIN tego urządzenia.",
+               "need_password": f"Konto „{n}” — podaj hasło konta.",
+               "set_password": f"Konto „{n}” nie ma jeszcze hasła — ustaw je."}.get(st, "")
+        return {"ok": False, "need": st, "name": n, "reason": why}
 
     def profile_pin_check(self) -> dict:
-        """Przy starcie: czy bieżący profil jest odblokowany na tym urządzeniu."""
+        """Przy starcie: czy bieżący profil jest dostępny na tym urządzeniu (hasło konta, PIN)."""
         prof = profiles.get(self._profile) or {}
         return {"state": profiles.pin_state(self._cfg, self._profile), "name": prof.get("name", "")}
 
-    def profile_unlock(self, pid: int, pin: str) -> dict:
-        ok, why = profiles.pin_unlock(self._cfg, int(pid), str(pin))
+    # konto na serwerze — hasło (emustart/accounts.py)
+    def profile_login(self, pid: int, password: str) -> dict:
+        ok, why = profiles.account_login(self._cfg, int(pid), str(password))
         return {"ok": ok, "reason": why}
 
-    def profile_set_pin(self, pid: int, pin: str, old: str = "") -> dict:
-        ok, why = profiles.pin_set(self._cfg, int(pid), str(pin), str(old or ""))
+    def profile_set_password(self, pid: int, password: str, old: str = "") -> dict:
+        ok, why = profiles.account_password(self._cfg, int(pid), str(password), str(old or ""))
         return {"ok": ok, "reason": why}
 
     def profile_logout(self, pid: int) -> dict:
-        profiles.pin_logout(int(pid))
+        profiles.account_logout(int(pid))
         return {"ok": True}
 
-    def profile_join(self, name: str, pin: str) -> dict:
-        prof, why = profiles.pin_join(self._cfg, str(name), str(pin))
-        return {"ok": bool(prof), "reason": why, "profile": prof and {k: v for k, v in prof.items() if k != "pin_token"}}
+    def profile_join(self, name: str, password: str) -> dict:
+        prof, why = profiles.account_join(self._cfg, str(name), str(password))
+        return {"ok": bool(prof), "reason": why, "profile": prof and self._public_profile(prof)}
+
+    # PIN — tylko to urządzenie
+    def profile_unlock(self, pid: int, pin: str) -> dict:
+        ok, why = profiles.local_pin_check(int(pid), str(pin))
+        return {"ok": ok, "reason": why}
+
+    def profile_set_pin(self, pid: int, pin: str, old: str = "") -> dict:
+        ok, why = profiles.local_pin_set(int(pid), str(pin), str(old or ""))
+        return {"ok": ok, "reason": why}
+
+    def profile_clear_pin(self, pid: int, pin: str) -> dict:
+        ok, why = profiles.local_pin_clear(int(pid), str(pin))
+        return {"ok": ok, "reason": why}
+
+    @staticmethod
+    def _public_profile(p: dict) -> dict:
+        """Profil dla interfejsu — bez tokenu konta i skrótu PIN-u."""
+        out = {k: v for k, v in p.items() if k not in ("pin_token", "pin_hash")}
+        out["has_pin"] = bool(p.get("pin_hash"))
+        return out
 
     def profile_nas_rename(self, pid: int) -> dict:
         reason = profiles.nas_rename(self._cfg, int(pid))
@@ -1207,17 +1230,16 @@ class Api:
         self._user_load(self._profile)
         return {"ok": True}
 
-    def profile_create(self, name: str, pin: str = "") -> dict:
-        """Nowy profil z PIN-em. Nazwa zajęta (bez względu na wielkość liter) → exists:
-        UI prosi o PIN tego profilu (profile_join) albo o inną nazwę."""
+    def profile_create(self, name: str, password: str = "") -> dict:
+        """Nowy profil — z serwerem konto z hasłem. Nazwa zajęta (bez względu na wielkość
+        liter) → exists: UI prosi o hasło tego konta (profile_join) albo o inną nazwę."""
         try:
-            p = profiles.create(name, cfg=self._cfg, pin=str(pin or ""))
+            p = profiles.create(name, cfg=self._cfg, password=str(password or ""))
         except profiles.ProfileExists as ex:
             return {"ok": False, "exists": ex.name, "reason": str(ex)}
         except (ValueError, OSError) as ex:
             return {"ok": False, "reason": str(ex)}
-        p.pop("pin_token", None)
-        return {"ok": True, "profile": p}
+        return {"ok": True, "profile": self._public_profile(p)}
 
     def profile_rename(self, pid: int, name: str) -> dict:
         try:
@@ -1511,16 +1533,22 @@ class Api:
         return {"ok": True}
 
     # ── nowa instalacja przez internet (emustart/enroll.py, emustart/keystore.py) ──
-    def server_enroll(self, url: str, mode: str, account: str) -> dict:
+    def server_enroll(self, url: str, mode: str, account: str, password: str = "") -> dict:
         """Nowa instalacja zna tylko adres serwera (np. tunel): klucz urządzenia (TPM, bez niego
-        DPAPI) i prośba o dołączenie — nowe konto albo istniejące. Zatwierdza ją administrator
-        albo inne urządzenie tego konta; stan prośby przetrwa restart (24 h)."""
+        DPAPI) i prośba o dołączenie — nowe konto (z nowym hasłem) albo istniejące (z jego
+        hasłem). Zatwierdza ją administrator albo inne urządzenie tego konta; stan prośby
+        przetrwa restart (24 h). Hasło idzie tylko w prośbie — program go nie zapisuje."""
         import secrets
         import socket
         from emustart import keystore
         url, account = (url or "").strip(), (account or "").strip()
         if not url or not account or mode not in ("new", "existing"):
             return {"ok": False, "reason": "Podaj adres serwera i nazwę konta."}
+        from emustart import accounts
+        if mode == "new" and accounts.policy(password):
+            return {"ok": False, "reason": accounts.policy(password)}
+        if not password:
+            return {"ok": False, "reason": "Podaj hasło konta."}
         old = self._cfg.get("enroll_pending")
         if old and (old.get("url") != url or old.get("account") != account or old.get("mode") != mode):
             self.server_enroll_cancel()
@@ -1534,9 +1562,9 @@ class Api:
             except Exception as ex:
                 log.exception("klucz urządzenia")
                 return {"ok": False, "reason": f"Nie udało się utworzyć klucza urządzenia: {ex}"}
-        r = netsrc._post(url, "/v1/enroll/request", {"mode": mode, "account": account, "name": socket.gethostname(),
-                                                     "class": "pc", "version": __version__, "pubkey": pem,
-                                                     "hw": netsrc.hw_id()})
+        r = netsrc._post(url, "/v1/enroll/request", {"mode": mode, "account": account, "password": password,
+                                                     "name": socket.gethostname(), "class": "pc",
+                                                     "version": __version__, "pubkey": pem, "hw": netsrc.hw_id()})
         if not r.get("ok"):
             if not old:
                 keystore.delete(name, kind)

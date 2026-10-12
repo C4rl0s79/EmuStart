@@ -61,7 +61,11 @@ def _ensure_columns() -> None:
             # PIN profilu (emustart/pinauth.py): token od serwera / odblokowanie przez SMB
             con.execute("ALTER TABLE profiles ADD COLUMN pin_token TEXT NOT NULL DEFAULT ''")
             con.execute("ALTER TABLE profiles ADD COLUMN unlocked INTEGER NOT NULL DEFAULT 0")
-    # tokeny profili dla zapytań do serwera (nagłówek X-Profile-Token)
+    if "pin_hash" not in cols:
+        with con:
+            # PIN tylko na tym komputerze (0.40) — konto na serwerze chroni hasło
+            con.execute("ALTER TABLE profiles ADD COLUMN pin_hash TEXT NOT NULL DEFAULT ''")
+    # tokeny kont dla zapytań do serwera (nagłówek X-Profile-Token)
     nasfs.TOKENS.clear()
     nasfs.TOKENS.update({r[0].lower(): r[1] for r in con.execute(
         "SELECT nas_name, pin_token FROM profiles WHERE pin_token!=''")})
@@ -83,16 +87,16 @@ def _safe_name(name: str) -> str:
 
 
 class ProfileExists(ValueError):
-    """Nazwa zajęta (bez względu na wielkość liter) — dołączenie tylko z PIN-em tego profilu."""
+    """Nazwa zajęta (bez względu na wielkość liter) — dołączenie tylko z hasłem tego konta."""
 
     def __init__(self, name: str):
         super().__init__(f"Profil „{name}” już istnieje.")
         self.name = name
 
 
-def create(name: str, color: str = "", cfg: dict | None = None, pin: str = "") -> dict:
-    """Nowy profil. Z `cfg` i `pin` (NAS dostępny) — od razu z PIN-em na NAS-ie / serwerze;
-    nazwa zajęta na NAS-ie albo tutaj → ProfileExists."""
+def create(name: str, color: str = "", cfg: dict | None = None, password: str = "") -> dict:
+    """Nowy profil. Z serwerem — konto z hasłem (emustart/accounts.py); przez SMB — folder.
+    Nazwa zajęta na serwerze / NAS-ie albo tutaj → ProfileExists."""
     from emustart import pinauth
     _ensure_columns()
     name = name.strip()[:32]
@@ -100,31 +104,28 @@ def create(name: str, color: str = "", cfg: dict | None = None, pin: str = "") -
         raise ValueError("Pusta nazwa profilu.")
     local = pinauth.find([p["name"] for p in all_profiles()] + [p["nas_name"] for p in all_profiles()], name)
     online = cfg is not None and nas_online(cfg)
-    nas_name, token, unlocked = _safe_name(name), "", 0
+    nas_name, token = _safe_name(name), ""
     if online:
-        if pin and not pinauth.valid_pin(pin):
-            raise ValueError("PIN to 4–8 cyfr.")
         fs = nasfs.backend(cfg)
         taken = pinauth.find(_nas_profiles(fs), name)
         if taken or local:
             raise ProfileExists(taken or local)
-        if pin:
-            if isinstance(fs, nasfs.RemoteFs):
-                r = fs.profile_op("create", {"name": name, "pin": pin})
-                if r.get("exists"):
-                    raise ProfileExists(r.get("name") or name)
-                if not r.get("ok"):
-                    raise ValueError(r.get("error") or "Serwer nie założył profilu.")
-                nas_name, token = r["name"], r["token"]
-            else:
-                pinauth.write(fs, nas_name, pinauth.make(pin))
-                fs.write(f"{nas_name}/emustart.json", b"{}")
-            unlocked = 1
+        if isinstance(fs, nasfs.RemoteFs):
+            r = fs.profile_op("create", {"name": name, "password": password})
+            if r.get("exists"):
+                raise ProfileExists(r.get("name") or name)
+            if not r.get("ok"):
+                raise ValueError(r.get("error") or "Serwer nie założył konta.")
+            nas_name, token = r["name"], r["token"]
+        else:
+            fs.write(f"{nas_name}/emustart.json", b"{}")
     elif local:
         raise ProfileExists(local)
     with library.db() as c:
         cur = c.execute("INSERT INTO profiles(name, nas_name, color, pin_token, unlocked) VALUES(?,?,?,?,?)",
-                        (name, nas_name, color, token, unlocked))
+                        (name, nas_name, color, token, 0))
+    _session_unlocked.add(cur.lastrowid)
+    _ensure_columns()
     return get(cur.lastrowid)
 
 
@@ -136,126 +137,130 @@ def _nas_profiles(fs) -> list:
             and not fs.exists(f"{n}/moved.json")]
 
 
-# ── PIN profilu: raz na urządzeniu ──
-_pin_cache: dict = {}                 # pid → (czas, stan) — jedno sprawdzenie na minutę
+# ── konto na serwerze (hasło) i PIN tego urządzenia ──
+_pin_cache: dict = {}                 # pid → (czas, stan konta) — jedno sprawdzenie na minutę
+_session_unlocked: set = set()        # profile odblokowane PIN-em w tym uruchomieniu
 
 
-def pin_state(cfg: dict, pid: int, fresh: bool = False) -> str:
-    """ok — profil odblokowany na tym urządzeniu (albo NAS niedostępny: gra lokalnie),
-    need_pin — trzeba podać PIN, set_pin — profil jeszcze bez PIN-u (ustawić)."""
-    from emustart import pinauth
+def account_state(cfg: dict, pid: int, fresh: bool = False) -> str:
+    """Konto na serwerze: ok — dostępne z tego urządzenia; need_password — inny użytkownik,
+    trzeba się zalogować jego hasłem; set_password — konto jeszcze bez hasła (ustawić)."""
     hit = _pin_cache.get(pid)
     if hit and not fresh and time.monotonic() - hit[0] < 60:
         return hit[1]
     prof = get(pid)
     if not prof or not nas_online(cfg):
         return "ok"
-    if account_of_device(cfg) and prof["nas_name"].lower() == account_of_device(cfg).lower():
-        return "ok"                 # urządzenie przypisane do konta: klucz urządzenia zastępuje PIN serwera
     fs = nasfs.backend(cfg)
+    if not isinstance(fs, nasfs.RemoteFs):
+        return "ok"                       # bez serwera (SMB): kont z hasłem nie ma
+    mine = account_of_device(cfg)
+    own = bool(mine) and mine.lower() == prof["nas_name"].lower()
     try:
-        if isinstance(fs, nasfs.RemoteFs):
+        if own or (not mine and not prof["pin_token"]):
+            # swoje konto (klucz urządzenia) / urządzenie administratora: czy konto ma hasło
             info = next((p for p in fs.profiles() if p["name"].lower() == prof["nas_name"].lower()), None)
             if info is None:
                 st = "ok"                 # jeszcze nie ma go na serwerze — powstanie z pierwszym zapisem
-            elif not info["pin"]:
-                st = "set_pin"
-            elif not prof["pin_token"]:
-                st = "need_pin"
+            elif not info.get("password", info.get("pin")):
+                st = "set_password"
             else:
-                fs.listdir(prof["nas_name"])          # 403 → PinRequired (token nieważny)
-                st = "ok"
+                st = "ok" if own else "need_password"
+        elif not prof["pin_token"]:
+            st = "need_password"          # konto innego użytkownika — jego hasło
         else:
-            rec = pinauth.read(fs, prof["nas_name"])
-            st = "set_pin" if rec is None else ("ok" if prof["unlocked"] else "need_pin")
+            fs.listdir(prof["nas_name"])          # 403 → PinRequired (hasło zmienione gdzie indziej)
+            st = "ok"
     except nasfs.PinRequired:
-        st = "need_pin"                   # token nieważny (PIN zmieniony na innym urządzeniu)
+        st = "need_password"
     except OSError:
         st = "ok"
     _pin_cache[pid] = (time.monotonic(), st)
     return st
 
 
-def pin_unlock(cfg: dict, pid: int, pin: str) -> tuple[bool, str]:
-    """PIN profilu na tym urządzeniu → zapamiętane odblokowanie (token serwera)."""
-    from emustart import pinauth
+def pin_state(cfg: dict, pid: int, fresh: bool = False) -> str:
+    """Stan profilu na tym urządzeniu: najpierw konto na serwerze (account_state), potem
+    PIN tego urządzenia — need_pin, gdy profil ma PIN i nie był odblokowany od startu."""
+    st = account_state(cfg, pid, fresh)
+    if st != "ok":
+        return st
+    prof = get(pid)
+    if prof and prof.get("pin_hash") and pid not in _session_unlocked:
+        return "need_pin"
+    return "ok"
+
+
+def account_login(cfg: dict, pid: int, password: str) -> tuple[bool, str]:
+    """Hasło konta na tym urządzeniu → zapamiętany token konta (do wylogowania)."""
     prof = get(pid)
     if not prof:
         return False, "Nie ma takiego profilu."
     fs = nasfs.backend(cfg)
-    if isinstance(fs, nasfs.RemoteFs):
-        r = fs.profile_op("login", {"name": prof["nas_name"], "pin": pin})
-        if not r.get("ok"):
-            return False, r.get("error") or "Zły PIN."
-        if r.get("needs_pin"):
-            return False, "Ten profil nie ma jeszcze PIN-u — ustaw go."
-        _remember(pid, r["token"])
-        return True, ""
-    ok, why, _w = pinauth.verify(fs, prof["nas_name"], pin)
-    if why == "brak":
-        return False, "Ten profil nie ma jeszcze PIN-u — ustaw go."
-    if ok:
-        _remember(pid, "")
-    return ok, why
-
-
-def pin_set(cfg: dict, pid: int, pin: str, old: str = "") -> tuple[bool, str]:
-    """Ustawia PIN (profil bez PIN-u) albo zmienia go (z dotychczasowym)."""
-    from emustart import pinauth
-    prof = get(pid)
-    if not prof:
-        return False, "Nie ma takiego profilu."
-    if not pinauth.valid_pin(pin):
-        return False, "PIN to 4–8 cyfr."
-    fs = nasfs.backend(cfg)
-    if isinstance(fs, nasfs.RemoteFs):
-        r = fs.profile_op("pin", {"name": prof["nas_name"], "pin": pin, "old": old})
-        if r.get("error") and "Nie ma profilu" in r["error"]:
-            fs.write(f"{prof['nas_name']}/emustart.json", b"{}")     # profil jeszcze bez folderu
-            r = fs.profile_op("pin", {"name": prof["nas_name"], "pin": pin, "old": old})
-        if not r.get("ok"):
-            return False, r.get("error") or "Nie udało się ustawić PIN-u."
-        _remember(pid, r["token"])
-        return True, ""
-    rec = pinauth.read(fs, prof["nas_name"])
-    if rec is not None:
-        ok, why, _w = pinauth.verify(fs, prof["nas_name"], old)
-        if not ok:
-            return False, "Zły dotychczasowy PIN." if why == "Zły PIN." else why
-    pinauth.write(fs, prof["nas_name"], pinauth.make(pin))
-    _remember(pid, "")
+    if not isinstance(fs, nasfs.RemoteFs):
+        return False, "Konta z hasłem są na serwerze EmuStart — serwer jest niedostępny."
+    r = fs.profile_op("login", {"name": prof["nas_name"], "password": password})
+    if not r.get("ok"):
+        return False, r.get("error") or "Złe hasło."
+    if r.get("needs_password"):
+        return False, "To konto nie ma jeszcze hasła — ustaw je."
+    _remember(pid, r["token"])
     return True, ""
 
 
-def pin_join(cfg: dict, name: str, pin: str) -> tuple[dict | None, str]:
-    """Istniejący profil (np. założony na innym urządzeniu) na tym komputerze — z jego PIN-em."""
+def account_password(cfg: dict, pid: int, password: str, old: str = "") -> tuple[bool, str]:
+    """Ustawia hasło konta (konto bez hasła) albo zmienia je (z dotychczasowym)."""
+    from emustart import accounts
+    prof = get(pid)
+    if not prof:
+        return False, "Nie ma takiego profilu."
+    why = accounts.policy(password)
+    if why:
+        return False, why
+    fs = nasfs.backend(cfg)
+    if not isinstance(fs, nasfs.RemoteFs):
+        return False, "Konta z hasłem są na serwerze EmuStart — serwer jest niedostępny."
+    q = {"name": prof["nas_name"], "password": password, "old": old}
+    r = fs.profile_op("password", q)
+    if r.get("error") and "Nie ma konta" in r["error"]:
+        fs.write(f"{prof['nas_name']}/emustart.json", b"{}")     # profil jeszcze bez folderu
+        r = fs.profile_op("password", q)
+    if not r.get("ok"):
+        return False, r.get("error") or "Nie udało się ustawić hasła."
+    _remember(pid, r["token"])
+    return True, ""
+
+
+def account_join(cfg: dict, name: str, password: str) -> tuple[dict | None, str]:
+    """Konto innego użytkownika (albo założone na innym urządzeniu) na tym urządzeniu — z hasłem."""
     from emustart import pinauth
     fs = nasfs.backend(cfg)
-    nas_name = pinauth.find(_nas_profiles(fs), name) or pinauth.find(
-        [p["nas_name"] for p in all_profiles()], name)
-    if not nas_name:
-        return None, f"Nie ma profilu „{name}”."
+    if not isinstance(fs, nasfs.RemoteFs):
+        return None, "Konta z hasłem są na serwerze EmuStart — serwer jest niedostępny."
+    r = fs.profile_op("login", {"name": name, "password": password})
+    if not r.get("ok"):
+        return None, r.get("error") or "Złe hasło."
+    if r.get("needs_password"):
+        return None, f"Konto „{r.get('name') or name}” nie ma jeszcze hasła — ustawia je jego urządzenie albo administrator."
+    nas_name = r["name"]
     row = library.db().execute("SELECT id FROM profiles WHERE lower(nas_name)=?", (nas_name.lower(),)).fetchone()
     if row:
         pid = row["id"]
     else:
+        existing = pinauth.find([p["name"] for p in all_profiles()], nas_name)
         with library.db() as c:
             pid = c.execute("INSERT INTO profiles(name, nas_name, color) VALUES(?,?,?)",
-                            (nas_name[:32], nas_name, "")).lastrowid
-    ok, why = pin_unlock(cfg, pid, pin)
-    if not ok:
-        if not row:
-            with library.db() as c:      # obcy profil bez dobrego PIN-u nie zostaje na liście
-                c.execute("DELETE FROM profiles WHERE id=?", (pid,))
-        return None, why
+                            ((nas_name if not existing else f"{nas_name} (serwer)")[:32], nas_name, "")).lastrowid
+    _remember(pid, r["token"])
     return get(pid), ""
 
 
-def pin_logout(pid: int) -> None:
-    """Zapomina odblokowanie profilu na tym urządzeniu (następnym razem PIN)."""
+def account_logout(pid: int) -> None:
+    """Zapomina logowanie konta na tym urządzeniu (następnym razem hasło)."""
     with library.db() as c:
         c.execute("UPDATE profiles SET pin_token='', unlocked=0 WHERE id=?", (pid,))
     _pin_cache.pop(pid, None)
+    _session_unlocked.discard(pid)
     _ensure_columns()
 
 
@@ -264,6 +269,61 @@ def _remember(pid: int, token: str) -> None:
         c.execute("UPDATE profiles SET pin_token=?, unlocked=1 WHERE id=?", (token, pid))
     _pin_cache[pid] = (time.monotonic(), "ok")
     _ensure_columns()
+
+
+# PIN — tylko ten komputer (skrót scrypt w bazie programu; serwer go nie zna)
+def local_pin_set(pid: int, pin: str, old: str = "") -> tuple[bool, str]:
+    from emustart import pinauth
+    prof = get(pid)
+    if not prof:
+        return False, "Nie ma takiego profilu."
+    if not pinauth.valid_pin(pin):
+        return False, "PIN to 4–8 cyfr."
+    if prof.get("pin_hash"):
+        ok, why = local_pin_check(pid, old)
+        if not ok:
+            return False, "Zły dotychczasowy PIN." if why == "Zły PIN." else why
+    with library.db() as c:
+        c.execute("UPDATE profiles SET pin_hash=? WHERE id=?", (json.dumps(pinauth.make(pin)), pid))
+    _session_unlocked.add(pid)
+    return True, ""
+
+
+def local_pin_clear(pid: int, pin: str) -> tuple[bool, str]:
+    ok, why = local_pin_check(pid, pin)
+    if not ok:
+        return False, why
+    with library.db() as c:
+        c.execute("UPDATE profiles SET pin_hash='' WHERE id=?", (pid,))
+    return True, ""
+
+
+def local_pin_check(pid: int, pin: str) -> tuple[bool, str]:
+    """Dobry PIN → profil odblokowany do końca tego uruchomienia."""
+    from emustart import pinauth
+    prof = get(pid) or {}
+    if not prof.get("pin_hash"):
+        _session_unlocked.add(pid)
+        return True, ""
+    key = f"lokalny:{pid}"
+    left = pinauth.wait_left(key)
+    if left > 0:
+        return False, f"Za dużo złych PIN-ów — spróbuj za {int(left) + 1} s."
+    try:
+        rec = json.loads(prof["pin_hash"])
+    except ValueError:
+        rec = {}
+    if not pinauth.check(rec, pin):
+        pinauth.failed(key)
+        return False, "Zły PIN."
+    pinauth.succeeded(key)
+    _session_unlocked.add(pid)
+    return True, ""
+
+
+def local_lock(pid: int) -> None:
+    """Zablokuj profil z PIN-em (następny wybór — PIN)."""
+    _session_unlocked.discard(pid)
 
 
 def rename(pid: int, name: str, cfg: dict | None = None) -> None:

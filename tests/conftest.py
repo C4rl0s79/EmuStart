@@ -55,6 +55,9 @@ def _isolated_app(tmp_path_factory, monkeypatch):
     devices.reset_cache()
     from emustart import enroll as _enroll
     _enroll.reset()
+    from emustart import accounts as _accounts
+    _accounts.reset()
+    monkeypatch.setattr(_accounts, "N", 2 ** 10)          # szybki scrypt w testach
     netsrc._learned.clear()
     netsrc.forget_best()
     netsrc._PINS.clear()

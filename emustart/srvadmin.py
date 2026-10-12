@@ -287,6 +287,30 @@ def enroll_decide(_api, args: dict) -> dict:
                          remote.create_account)
 
 
+def accounts_list(_api) -> dict:
+    """Konta (profile) i czy mają hasło (emustart/accounts.py) — skrótów panel nie dostaje."""
+    from emustart import accounts, devices, remote
+    names = {n.lower(): n for n in remote.profile_names()}
+    for low in accounts.names_with_password():
+        names.setdefault(low, (accounts.record(low) or {}).get("name", low))
+    out = []
+    for low, name in sorted(names.items()):
+        rec = accounts.record(name)
+        out.append({"name": name, "password": rec is not None, "set": (rec or {}).get("set", 0),
+                    "devices": len(devices.of_account(name))})
+    return {"ok": True, "accounts": out, "rules": accounts.RULES}
+
+
+def account_password(_api, args: dict) -> dict:
+    """Panel (tylko ten komputer): nowe hasło konta — np. użytkownik je zapomniał."""
+    from emustart import accounts, remote
+    name = remote._find_account(str(args.get("name", "")))
+    if not name:
+        return {"ok": False, "reason": "Nie ma takiego konta."}
+    why = accounts.set_password(name, str(args.get("password", "")), by="panel serwera")
+    return {"ok": not why, "reason": why, "name": name}
+
+
 def device_access(_api, args: dict) -> dict:
     """Panel: rola urządzenia (administrator / użytkownik) i pobieranie gier."""
     from emustart import devices
@@ -422,11 +446,12 @@ def profiles_migrate_status(_api) -> dict:
     return {**_migr, "root": str(remote.NAS_ROOT or "")}
 
 
-ACTIONS_ARGS = {"device_revoke": device_revoke, "device_rename": device_rename,
+ACTIONS_ARGS = {"device_revoke": device_revoke, "device_rename": device_rename, "account_password": account_password,
                 "profiles_migrate": profiles_migrate, "pair_approve": pair_approve,
                 "public_set": public_set, "tunnel_set": tunnel_set,
                 "enroll_decide": enroll_decide, "device_access": device_access}
-ACTIONS.update({"public_status": public_status, "devices": devices_list, "pair_code": pair_code, "profiles_migrate_status": profiles_migrate_status})
+ACTIONS.update({"public_status": public_status, "devices": devices_list, "pair_code": pair_code, "profiles_migrate_status": profiles_migrate_status,
+                "accounts": accounts_list})
 
 
 # ── po stronie panelu (osobny proces) ──

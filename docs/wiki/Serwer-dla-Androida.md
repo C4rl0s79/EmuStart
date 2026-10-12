@@ -91,6 +91,13 @@ Panel pokazuje urządzenia z rodzajem, wersją EmuStart i ostatnim kontaktem; **
 odcina tylko to jedno urządzenie, **Nazwa** zmienia nazwę. Serwer trzyma tylko skróty kluczy
 (SHA-256).
 
+## Konta i hasła (0.40)
+
+Panel serwera → **Konta**: każde konto (profil), czy ma hasło i ile urządzeń. **Ustaw
+hasło** / **Nowe hasło** — gdy użytkownik zapomniał hasła (działa tylko w panelu na tym
+komputerze). Hasło: co najmniej 10 znaków, wielka litera, cyfra, znak specjalny; skrót
+scrypt w `accounts.json` w katalogu serwera. Szczegóły: [Profile graczy](Profile-graczy).
+
 ## Tylko klucze urządzeń (0.39)
 
 Każde połączenie z serwerem to **klucz urządzenia** (para kluczy EC P-256: TPM albo DPAPI na
@@ -261,6 +268,8 @@ gdy przez SMB widzi ten sam znacznik (albo SMB jest niedostępny).
 ## Bezpieczeństwo
 
 - Urządzenia logują się podpisem kluczem urządzenia; klucz prywatny nie opuszcza urządzenia.
+- Hasła kont: tylko skrót (scrypt, sól) w `accounts.json` poza folderem profili; hasło
+  w treści żądania (nigdy w adresie), rosnące opóźnienie po złych próbach.
   Wspólny klucz serwera (`config.json` → `server_token`) działa tylko lokalnie.
 - Serwer wydaje wyłącznie pliki gier z biblioteki (ścieżka spoza gry → 404).
 - Zapis tylko w folderze profili (ścieżki z `..`, dyskiem albo bezwzględne → 400).

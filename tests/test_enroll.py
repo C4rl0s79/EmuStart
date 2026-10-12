@@ -57,6 +57,9 @@ def _req(srv, method, path, key="", body=None):
         return r.status, raw
 
 
+PW = "Haslo-testowe1"          # spełnia wymagania hasła konta (emustart/accounts.py)
+
+
 class Device:
     """Nowa instalacja: własna para kluczy (klucz prywatny nie wychodzi z „urządzenia”)."""
 
@@ -67,9 +70,10 @@ class Device:
                                                       serialization.PublicFormat.SubjectPublicKeyInfo).decode()
         self.did = ""
 
-    def ask(self, srv, mode, account):
+    def ask(self, srv, mode, account, password=None):
         st, r = _req(srv, "POST", "/v1/enroll/request", body={"mode": mode, "account": account, "name": self.name,
-                                                               "class": "phone", "version": "0.37", "pubkey": self.pem})
+                                                               "class": "phone", "version": "0.37", "pubkey": self.pem,
+                                                               "password": PW if password is None else password})
         return r
 
     def login(self, srv, key=None):
@@ -199,7 +203,7 @@ def test_new_pc_with_only_server_address(srv, monkeypatch):
     monkeypatch.setattr("emustart.config.save", lambda c: saved.update(c))
     a = api_mod.Api.__new__(api_mod.Api)
     a._cfg = {}
-    r = a.server_enroll(f"{host}:{port}", "existing", "jezus")
+    r = a.server_enroll(f"{host}:{port}", "existing", "jezus", PW)
     assert r["ok"] and r["key"] in ("dpapi", "plik") and saved["enroll_pending"]["code"] == r["code"]
     assert a.server_enroll_poll()["status"] == "pending"
     # administrator (inne urządzenie) widzi prośbę z tym samym kodem
@@ -230,7 +234,7 @@ def test_concurrent_logins_share_one_session(srv, monkeypatch):
     monkeypatch.setattr("emustart.config.save", lambda c: None)
     a = api_mod.Api.__new__(api_mod.Api)
     a._cfg = {}
-    a.server_enroll(f"{host}:{port}", "existing", "Jezus")
+    a.server_enroll(f"{host}:{port}", "existing", "Jezus", PW)
     q = _req(srv, "POST", "/v1/enroll/pending", admin_key, body={})[1]["requests"][0]
     _req(srv, "POST", "/v1/enroll/decide", admin_key, body={"id": q["id"], "allow": True})
     a.server_enroll_poll()
@@ -254,7 +258,7 @@ def test_after_approval_pc_uses_the_account_not_placeholder(srv, monkeypatch):
     a = api_mod.Api.__new__(api_mod.Api)
     a._cfg, a._profile = {}, profiles.first_id()
     monkeypatch.setattr(a, "_user_load", lambda pid: None, raising=False)
-    a.server_enroll(f"{host}:{port}", "existing", "Jezus")
+    a.server_enroll(f"{host}:{port}", "existing", "Jezus", PW)
     q = _req(srv, "POST", "/v1/enroll/pending", admin_key, body={})[1]["requests"][0]
     _req(srv, "POST", "/v1/enroll/decide", admin_key, body={"id": q["id"], "allow": True})
     assert a.server_enroll_poll()["status"] == "approved"
@@ -264,26 +268,26 @@ def test_after_approval_pc_uses_the_account_not_placeholder(srv, monkeypatch):
     assert library.meta_get("last_profile", "") == str(a._profile)
 
 
-def test_account_profile_needs_no_server_pin_on_its_device(srv, monkeypatch):
-    """Profil konta z PIN-em na serwerze — na urządzeniu z kluczem tego konta bez PIN-u."""
-    from emustart import api as api_mod, pinauth, profiles
+def test_account_profile_needs_no_password_on_its_device(srv, monkeypatch):
+    """Konto z hasłem — na urządzeniu z kluczem tego konta bez podawania hasła (klucz urządzenia)."""
+    from emustart import accounts, api as api_mod, profiles
     host, port, nas = srv
     admin_key, _ = _admin_key(srv)
-    pinauth.write(nasfs.SmbFs(nas), "Jezus", pinauth.make("1234"))           # konto z PIN-em
+    accounts.set_password("Jezus", PW)
     monkeypatch.setattr("emustart.config.save", lambda c: None)
     a = api_mod.Api.__new__(api_mod.Api)
     a._cfg, a._profile = {}, profiles.first_id()
     monkeypatch.setattr(a, "_user_load", lambda pid: None, raising=False)
-    a.server_enroll(f"{host}:{port}", "existing", "Jezus")
+    assert not a.server_enroll(f"{host}:{port}", "existing", "Jezus", "Zle-haslo-123")["ok"]
+    a.server_enroll(f"{host}:{port}", "existing", "Jezus", PW)
     q = _req(srv, "POST", "/v1/enroll/pending", admin_key, body={})[1]["requests"][0]
     _req(srv, "POST", "/v1/enroll/decide", admin_key, body={"id": q["id"], "allow": True})
     a.server_enroll_poll()
     assert profiles.pin_state(a._cfg, a._profile, fresh=True) == "ok"
-    assert a.get_state.__func__ and profiles.account_of_device(a._cfg) == "Jezus"
-    # zapisy konta przez serwer bez tokenu PIN-u
+    assert profiles.account_of_device(a._cfg) == "Jezus"
     fs = nasfs.backend(a._cfg)
-    fs.write("Jezus/save/y.srm", b"bez PIN-u")
-    assert fs.read("Jezus/save/y.srm") == b"bez PIN-u"
+    fs.write("Jezus/save/y.srm", b"bez hasla")
+    assert fs.read("Jezus/save/y.srm") == b"bez hasla"
 
 
 def test_one_registration_per_hardware(srv):
@@ -302,11 +306,11 @@ def test_one_registration_per_hardware(srv):
     assert devices._load()[old["id"]]["hw"] == hw
     # inny telefon tego samego modelu — osobna rejestracja
     other = Device("Telefon 25102PCBEG")
-    _req(srv, "POST", "/v1/enroll/request", body={"mode": "new", "account": "Ola", "name": other.name,
+    _req(srv, "POST", "/v1/enroll/request", body={"mode": "new", "account": "Ola", "password": PW, "name": other.name,
                                                    "class": "phone", "pubkey": other.pem, "hw": "b" * 32})
     # ten sam telefon dołącza przez internet — prośba mówi, co zastąpi; po zatwierdzeniu stara znika
     dev = Device("Telefon 25102PCBEG")
-    _req(srv, "POST", "/v1/enroll/request", body={"mode": "existing", "account": "Jezus", "name": dev.name,
+    _req(srv, "POST", "/v1/enroll/request", body={"mode": "existing", "account": "Jezus", "password": PW, "name": dev.name,
                                                    "class": "phone", "pubkey": dev.pem, "hw": hw})
     reqs = _req(srv, "POST", "/v1/enroll/pending", admin_key, body={})[1]["requests"]
     mine = next(q for q in reqs if q["account"] == "Jezus")

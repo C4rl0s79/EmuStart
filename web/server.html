@@ -126,6 +126,24 @@
       <tbody id="devices"></tbody></table>
   </section>
   <section>
+    <h2>Konta</h2>
+    <div class="muted">Hasło konta (co najmniej 10 znaków, wielka litera, cyfra i znak specjalny) potwierdza
+      użytkownika przy dołączaniu nowego urządzenia i gdy gra na cudzym urządzeniu. Serwer trzyma tylko
+      skrót hasła. PIN jest blokadą profilu na jednym urządzeniu — serwer go nie zna.</div>
+    <table style="margin-top:10px"><thead><tr><th>Konto</th><th>Hasło</th><th class="n">Urządzenia</th><th></th></tr></thead>
+      <tbody id="accounts"></tbody></table>
+    <dialog id="pwDlg">
+      <form method="dialog">
+        <h3 style="margin-top:0">Nowe hasło konta <span id="pwName"></span></h3>
+        <div><input id="pw1" type="password" autocomplete="new-password" placeholder="Nowe hasło" style="width:100%"></div>
+        <div style="margin-top:8px"><input id="pw2" type="password" autocomplete="new-password" placeholder="Powtórz hasło" style="width:100%"></div>
+        <div id="pwWhy" class="muted" style="margin-top:8px"></div>
+        <div class="actions" style="margin-top:10px"><button id="pwOk" class="primary" value="ok">Ustaw</button>
+          <button value="cancel" formnovalidate>Anuluj</button></div>
+      </form>
+    </dialog>
+  </section>
+  <section>
     <h2>Pobierane gry</h2>
     <table><thead><tr><th>Gra</th><th>Urządzenie</th><th class="n">Wysłano</th><th class="n">Ostatnio</th></tr></thead>
       <tbody id="transfers"></tbody></table>

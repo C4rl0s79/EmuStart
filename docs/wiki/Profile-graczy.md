@@ -48,14 +48,31 @@ Nowy profil zaczyna od bieżących ustawień.
   telefon ma własne — na telefonie **Ustawienia emulatora** otwiera emulator na tym
   urządzeniu. Wspólne są tylko zapisy (save'y).
 
-**PIN profilu.** Każdy profil ma PIN (4–8 cyfr). Nazwy profili są unikalne (bez względu
-na wielkość liter): zakładając profil o zajętej nazwie podajesz PIN istniejącego — dobry
-PIN dodaje Twój profil na to urządzenie, zły oznacza, że to inny gracz i trzeba wybrać
-inną nazwę. PIN podajesz raz na każdym urządzeniu; **Start** na karcie profilu → **Zmień
-PIN** / **Wyloguj z tego urządzenia**. Profile sprzed wersji 0.27 przy pierwszym wyborze
-proszą o ustawienie PIN-u. Serwer EmuStart wydaje pliki profilu z PIN-em tylko
-urządzeniu, które podało PIN (po złych próbach — coraz dłuższe czekanie); przy samym SMB
-PIN tylko rozróżnia konta.
+**Hasło konta (0.40).** Z serwerem EmuStart każdy profil to konto z **hasłem**: co najmniej
+10 znaków, w tym wielka litera, cyfra i znak specjalny. Serwer trzyma tylko skrót hasła
+(scrypt z losową solą, w danych serwera — nie w folderze profili) i nigdy go nie wydaje.
+Hasło jest potrzebne:
+
+- przy dołączaniu nowego urządzenia — **Nowe konto** ustawia hasło, **Mam konto** je
+  sprawdza (prośba i tak czeka na zatwierdzenie na innym urządzeniu konta albo przez
+  administratora),
+- gdy na urządzeniu gra **inny użytkownik** — karta **Inny użytkownik** (albo nazwa zajęta
+  przy zakładaniu profilu) → nazwa konta i jego hasło; urządzenie pamięta logowanie do
+  **Wyloguj konto z tego urządzenia**.
+
+Urządzenie przypisane do konta nie pyta o hasło swojego konta — loguje się kluczem
+urządzenia. Konta sprzed 0.40 przy pierwszym wyborze proszą o ustawienie hasła; zapomniane
+hasło ustawia administrator w panelu serwera (**Konta** → **Nowe hasło**). Zmiana hasła
+wylogowuje to konto na urządzeniach innych użytkowników. Złe hasła: coraz dłuższe czekanie
+(na konto) i limit prób z jednego adresu. Hasło idzie szyfrowanym połączeniem (port HTTPS
+serwera z przypiętym certyfikatem, tunel) — zwykły port przyjmuje tylko sieć lokalną i
+Tailscale.
+
+**PIN — tylko to urządzenie.** PIN (4–8 cyfr) to lokalna blokada profilu, np. na wspólnym
+komputerze: **Start** na karcie profilu → **Ustaw PIN na tym urządzeniu** / **Zmień** /
+**Usuń**. Urządzenie pyta o niego przy wyborze profilu (raz na uruchomienie). Skrót PIN-u
+zostaje na urządzeniu — serwer go nie zna. Dawne PIN-y profili z serwera (0.27–0.39) nie są
+już sprawdzane. Bez serwera (sam SMB) kont z hasłem nie ma.
 
 **Menedżer zapisów** (opcje gry → **Zapisy i stany**, na komputerze i telefonie):
 stany tej gry z komputera i z telefonu oraz wspólne zapisy w grze. Stan z jednej platformy

@@ -92,7 +92,7 @@ class Bridge(private val act: MainActivity) {
         "server_scan" -> scanQr()
         "server_pair" -> pairServer(a.optString(0, ""), a.optString(1, ""))
         "server_approve" -> approveDevice(a.optString(0, ""), a.opt(1) as? Boolean)
-        "server_enroll" -> enrollStart(a.optString(0, ""), a.optString(1, ""), a.optString(2, ""))
+        "server_enroll" -> enrollStart(a.optString(0, ""), a.optString(1, ""), a.optString(2, ""), a.optString(3, ""))
         "server_enroll_poll" -> enrollPoll()
         "server_enroll_cancel" -> { enrollCancel(); JSONObject().put("ok", true) }
         "enroll_pending" -> enrollPending()
@@ -128,9 +128,15 @@ class Bridge(private val act: MainActivity) {
         "profile_select", "profile_setup" -> selectProfile(a.getInt(0))
         "profile_create" -> createProfile(a.getString(0), a.optString(1, ""))
         "profile_join" -> joinProfile(a.getString(0), a.getString(1))
-        "profile_unlock" -> unlockProfile(a.getInt(0), a.getString(1))
-        "profile_set_pin" -> setPin(a.getInt(0), a.getString(1), a.optString(2, ""))
-        "profile_logout" -> { profList.getOrNull(a.getInt(0) - 1)?.let { prefs.setToken(it, "") }; JSONObject().put("ok", true) }
+        "profile_login" -> loginProfile(a.getInt(0), a.getString(1))
+        "profile_set_password" -> setPassword(a.getInt(0), a.getString(1), a.optString(2, ""))
+        "profile_unlock" -> unlockPin(a.getInt(0), a.getString(1))
+        "profile_set_pin" -> setLocalPin(a.getInt(0), a.getString(1), a.optString(2, ""))
+        "profile_clear_pin" -> clearLocalPin(a.getInt(0), a.getString(1))
+        "profile_logout" -> {
+            profList.getOrNull(a.getInt(0) - 1)?.let { prefs.setToken(it, ""); pinUnlocked.remove(it.lowercase()) }
+            JSONObject().put("ok", true)
+        }
         "profile_pin_check" -> JSONObject().put("state", pinState(prefs.profile)).put("name", prefs.profile)
         "profile_rename", "profile_delete", "profile_nas_rename" -> JSONObject().put("ok", false)
             .put("reason", "Nazwę i folder profilu zmienia się w EmuStart na komputerze.")
@@ -591,9 +597,11 @@ class Bridge(private val act: MainActivity) {
     /** Parowanie: kod z panelu serwera albo link z kodu QR (emustart://pair?u=…&c=…) →
      *  własny klucz tego telefonu (zamiast przepisywania wspólnego klucza serwera). */
     // ── nowa instalacja przez internet (emustart/enroll.py): klucz urządzenia, prośba, zatwierdzenie ──
-    private fun enrollStart(url0: String, mode: String, account: String): JSONObject {
+    private fun enrollStart(url0: String, mode: String, account: String, password: String): JSONObject {
         if (url0.isBlank() || account.isBlank() || mode !in setOf("new", "existing"))
             return JSONObject().put("ok", false).put("reason", "Podaj adres serwera i nazwę konta.")
+        // hasło konta (emustart/accounts.py) idzie tylko w prośbie — telefon go nie zapisuje
+        if (password.isEmpty()) return JSONObject().put("ok", false).put("reason", "Podaj hasło konta.")
         val url = normUrl(url0)
         val old = prefs.enrollPending.takeIf { it.isNotEmpty() }?.let { JSONObject(it) }
         if (old != null && (old.optString("url") != url || old.optString("account") != account || old.optString("mode") != mode)) enrollCancel()
@@ -606,7 +614,7 @@ class Bridge(private val act: MainActivity) {
         }
         val r = try {
             server.postJson(url, "/v1/enroll/request", JSONObject().put("mode", mode).put("account", account)
-                .put("name", saves.device).put("class", "phone").put("version", BuildConfig.VERSION_NAME).put("pubkey", pem)
+                .put("password", password).put("name", saves.device).put("class", "phone").put("version", BuildConfig.VERSION_NAME).put("pubkey", pem)
                 .put("hw", server.hwId),
                 ca = !url.startsWith("http://"))
         } catch (e: Exception) { JSONObject().put("ok", false).put("reason", explain(e)) }
@@ -941,31 +949,45 @@ class Bridge(private val act: MainActivity) {
     private fun profileId(): Int = profList.indexOfFirst { it == prefs.profile }.let { if (it < 0) 0 else it + 1 }
 
     private fun loadProfiles() {
-        val withPin = server.profiles()
-        if (withPin != null) {
-            profList = withPin.map { it.first }
-            profPin = withPin.toMap()
+        val withPw = server.profiles()
+        if (withPw != null) {
+            // + konta innych użytkowników zalogowane hasłem na tym telefonie
+            val extra = prefs.tokenAccounts().filter { t -> withPw.none { it.first.equals(t, ignoreCase = true) } }
+            profList = withPw.map { it.first } + extra
+            profPin = withPw.toMap() + extra.associateWith { true }
         } else {
-            profList = saves.profiles()              // starszy serwer: bez PIN-ów
+            profList = saves.profiles()              // starszy serwer: bez kont z hasłem
             profPin = emptyMap()
         }
     }
 
-    /** ok | need_pin (PIN raz na tym telefonie) | set_pin (profil jeszcze bez PIN-u). */
-    private fun pinState(n: String): String = when {
-        n.isEmpty() || n !in profPin -> "ok"
-        // telefon przypisany do konta: klucz urządzenia zastępuje PIN serwera
-        prefs.deviceId.isNotEmpty() && n.equals(prefs.serverAccount, ignoreCase = true) -> "ok"
-        profPin[n] != true -> "set_pin"
-        prefs.token(n).isEmpty() -> "need_pin"
-        else -> "ok"
+    /** Profile odblokowane PIN-em od uruchomienia aplikacji. */
+    private val pinUnlocked = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+
+    /** Konto na serwerze: ok | need_password (inny użytkownik — jego hasło) | set_password
+     *  (konto bez hasła); potem PIN tego telefonu: need_pin. */
+    private fun pinState(n: String): String {
+        if (n.isEmpty()) return "ok"
+        val own = prefs.deviceId.isNotEmpty() && n.equals(prefs.serverAccount, ignoreCase = true)
+        val pw = profPin.entries.firstOrNull { it.key.equals(n, ignoreCase = true) }?.value
+        val acc = when {
+            own -> if (pw == false) "set_password" else "ok"
+            prefs.token(n).isNotEmpty() -> "ok"
+            prefs.serverAccount.isNotEmpty() -> "need_password"     // telefon konta: inne konto — hasło
+            pw == null -> "ok"
+            pw -> "need_password"
+            else -> "set_password"
+        }
+        if (acc != "ok") return acc
+        return if (prefs.pinHash(n).isNotEmpty() && n.lowercase() !in pinUnlocked) "need_pin" else "ok"
     }
 
     private fun profilesList(): JSONObject {
         try { loadProfiles() } catch (e: Exception) { Log.w(tag, "profile: $e") }
         val arr = JSONArray()
         profList.forEachIndexed { i, n ->
-            arr.put(JSONObject().put("id", i + 1).put("name", n).put("nas_name", n).put("pin", pinState(n)))
+            arr.put(JSONObject().put("id", i + 1).put("name", n).put("nas_name", n).put("pin", pinState(n))
+                .put("has_pin", prefs.pinHash(n).isNotEmpty()))
         }
         return JSONObject().put("profiles", arr).put("current", profileId())
     }
@@ -973,8 +995,11 @@ class Bridge(private val act: MainActivity) {
     private fun pinBlock(n: String): JSONObject? {
         val st = pinState(n)
         if (st == "ok") return null
-        return JSONObject().put("ok", false).put("need", st).put("name", n)
-            .put("reason", "Profil „$n” — " + if (st == "need_pin") "podaj PIN." else "ustaw PIN profilu.")
+        return JSONObject().put("ok", false).put("need", st).put("name", n).put("reason", when (st) {
+            "need_pin" -> "Profil „$n” — podaj PIN tego telefonu."
+            "need_password" -> "Konto „$n” — podaj hasło konta."
+            else -> "Konto „$n” nie ma jeszcze hasła — ustaw je."
+        })
     }
 
     private fun selectProfile(id: Int): JSONObject {
@@ -988,39 +1013,103 @@ class Bridge(private val act: MainActivity) {
     private fun opResult(n: String, r: JSONObject): JSONObject {
         if (!r.optBoolean("ok")) return JSONObject().put("ok", false)
             .put("reason", r.optString("error", "Nie udało się.")).put("exists", if (r.optBoolean("exists")) r.optString("name", n) else "")
-        if (r.optBoolean("needs_pin")) return JSONObject().put("ok", false).put("need", "set_pin")
-            .put("reason", "Ten profil nie ma jeszcze PIN-u — ustaw go.")
+        if (r.optBoolean("needs_password")) return JSONObject().put("ok", false).put("need", "set_password")
+            .put("reason", "Konto „${r.optString("name", n)}” nie ma jeszcze hasła — ustawia je jego urządzenie albo administrator.")
         val name = r.optString("name", n)
-        prefs.setToken(name, r.optString("token"))
+        val own = prefs.deviceId.isNotEmpty() && name.equals(prefs.serverAccount, ignoreCase = true)
+        if (!own) prefs.setToken(name, r.optString("token"))      // swoje konto — wystarczy klucz urządzenia
+        pinUnlocked.add(name.lowercase())
         try { loadProfiles() } catch (e: Exception) { }
         return JSONObject().put("ok", true).put("profile", JSONObject().put("id", profList.indexOf(name) + 1).put("name", name))
     }
 
-    private fun createProfile(name: String, pin: String): JSONObject = try {
+    private fun createProfile(name: String, password: String): JSONObject = try {
         if (profPin.isEmpty() && server.profiles() == null) {
-            // starszy serwer: profil bez PIN-u, jak dotąd
+            // starszy serwer: profil bez hasła, jak dotąd
             val n = saves.createProfile(name)
             profList = saves.profiles()
             JSONObject().put("ok", true).put("profile", JSONObject().put("id", profList.indexOf(n) + 1).put("name", n))
-        } else opResult(name, server.profileOp("create", mapOf("name" to name, "pin" to pin)))
+        } else opResult(name, server.profileOp("create", JSONObject().put("name", name).put("password", password)))
     } catch (e: Exception) {
         JSONObject().put("ok", false).put("reason", if (e is IllegalArgumentException) e.message else explain(e))
     }
 
-    private fun joinProfile(name: String, pin: String): JSONObject = try {
-        opResult(name, server.profileOp("login", mapOf("name" to name, "pin" to pin)))
+    /** Konto innego użytkownika na tym telefonie — z jego hasłem. */
+    private fun joinProfile(name: String, password: String): JSONObject = try {
+        opResult(name, server.profileOp("login", JSONObject().put("name", name).put("password", password)))
     } catch (e: Exception) { JSONObject().put("ok", false).put("reason", explain(e)) }
 
-    private fun unlockProfile(id: Int, pin: String): JSONObject {
+    private fun loginProfile(id: Int, password: String): JSONObject {
         val n = profList.getOrNull(id - 1) ?: return JSONObject().put("ok", false).put("reason", "Nie ma takiego profilu.")
-        return joinProfile(n, pin)
+        return joinProfile(n, password)
     }
 
-    private fun setPin(id: Int, pin: String, old: String): JSONObject {
+    private fun setPassword(id: Int, password: String, old: String): JSONObject {
         val n = profList.getOrNull(id - 1) ?: return JSONObject().put("ok", false).put("reason", "Nie ma takiego profilu.")
         return try {
-            opResult(n, server.profileOp("pin", mapOf("name" to n, "pin" to pin, "old" to old)))
+            val body = JSONObject().put("name", n).put("password", password).put("old", old)
+            var r = server.profileOp("password", body)
+            if (r.optString("error").contains("Nie ma konta")) {
+                saves.createProfile(n)               // konto jeszcze bez folderu
+                r = server.profileOp("password", body)
+            }
+            opResult(n, r)
         } catch (e: Exception) { JSONObject().put("ok", false).put("reason", explain(e)) }
+    }
+
+    // ── PIN tylko na tym telefonie (PBKDF2, sól; serwer go nie zna) ──
+    private val pinFails = java.util.concurrent.ConcurrentHashMap<String, Pair<Int, Long>>()
+
+    private fun pinDigest(pin: String, salt: ByteArray, iter: Int): ByteArray {
+        val spec = javax.crypto.spec.PBEKeySpec(pin.toCharArray(), salt, iter, 256)
+        return javax.crypto.SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec).encoded
+    }
+
+    private fun hex(b: ByteArray) = b.joinToString("") { "%02x".format(it) }
+    private fun unhex(s: String) = ByteArray(s.length / 2) { s.substring(it * 2, it * 2 + 2).toInt(16).toByte() }
+
+    private fun pinCheck(n: String, pin: String): Pair<Boolean, String> {
+        val h = prefs.pinHash(n)
+        if (h.isEmpty()) { pinUnlocked.add(n.lowercase()); return Pair(true, "") }
+        val (fails, last) = pinFails[n.lowercase()] ?: Pair(0, 0L)
+        if (fails >= 3) {
+            val wait = minOf(300_000L, 1000L shl minOf(fails - 2, 9)) - (System.currentTimeMillis() - last)
+            if (wait > 0) return Pair(false, "Za dużo złych PIN-ów — spróbuj za ${wait / 1000 + 1} s.")
+        }
+        val parts = h.split('$')
+        val ok = parts.size == 4 && parts[0] == "pbkdf2" &&
+            java.security.MessageDigest.isEqual(pinDigest(pin, unhex(parts[2]), parts[1].toInt()), unhex(parts[3]))
+        if (!ok) { pinFails[n.lowercase()] = Pair(fails + 1, System.currentTimeMillis()); return Pair(false, "Zły PIN.") }
+        pinFails.remove(n.lowercase())
+        pinUnlocked.add(n.lowercase())
+        return Pair(true, "")
+    }
+
+    private fun unlockPin(id: Int, pin: String): JSONObject {
+        val n = profList.getOrNull(id - 1) ?: return JSONObject().put("ok", false).put("reason", "Nie ma takiego profilu.")
+        val (ok, why) = pinCheck(n, pin)
+        return JSONObject().put("ok", ok).put("reason", why)
+    }
+
+    private fun setLocalPin(id: Int, pin: String, old: String): JSONObject {
+        val n = profList.getOrNull(id - 1) ?: return JSONObject().put("ok", false).put("reason", "Nie ma takiego profilu.")
+        if (!Regex("""\d{4,8}""").matches(pin)) return JSONObject().put("ok", false).put("reason", "PIN to 4–8 cyfr.")
+        if (prefs.pinHash(n).isNotEmpty()) {
+            val (ok, why) = pinCheck(n, old)
+            if (!ok) return JSONObject().put("ok", false).put("reason", if (why == "Zły PIN.") "Zły dotychczasowy PIN." else why)
+        }
+        val salt = ByteArray(16).also { java.security.SecureRandom().nextBytes(it) }
+        val iter = 120_000
+        prefs.setPinHash(n, "pbkdf2$" + iter + "$" + hex(salt) + "$" + hex(pinDigest(pin, salt, iter)))
+        pinUnlocked.add(n.lowercase())
+        return JSONObject().put("ok", true)
+    }
+
+    private fun clearLocalPin(id: Int, pin: String): JSONObject {
+        val n = profList.getOrNull(id - 1) ?: return JSONObject().put("ok", false).put("reason", "Nie ma takiego profilu.")
+        val (ok, why) = pinCheck(n, pin)
+        if (ok) prefs.setPinHash(n, "")
+        return JSONObject().put("ok", ok).put("reason", why)
     }
 
     private fun drainConflicts(): JSONArray {
