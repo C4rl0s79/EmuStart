@@ -138,6 +138,61 @@ def refresh(cfg: dict, progress=None) -> dict:
     return {"ok": True, "version": ver, "sets": len(rows)}
 
 
+FBNEO_DAT_URL = ("https://raw.githubusercontent.com/libretro/FBNeo/master/dats/"
+                 "FinalBurn%20Neo%20(ClrMame%20Pro%20XML,%20Arcade%20only).dat")
+FBNEO_DAT_DAYS = 30
+
+
+def refresh_fbneo(force: bool = False, url: str = FBNEO_DAT_URL) -> dict:
+    """Bez MAME (np. serwer, na którym gra tylko FinalBurn Neo): pełne nazwy gier, rodzic
+    każdej wersji (cloneof), BIOS-y, rok i producent z oficjalnego pliku DAT FinalBurn Neo
+    (~14 MB, raz na 30 dni). Bez tego lista pokazywała nazwy setów („10yardj”) i nie łączyła
+    wersji gry. Gdy indeks jest z MAME — zostaje (DAT tylko dopisuje brakujące sety)."""
+    import time
+    import urllib.request
+    _ensure_columns()
+    have = library.db().execute("SELECT COUNT(*) FROM arcade_sets").fetchone()[0]
+    last = float(library.meta_get("fbneo_dat_time") or 0)
+    if not force and have and last and time.time() - last < FBNEO_DAT_DAYS * 86400:
+        return {"ok": True, "cached": True, "sets": have}
+    tmp = Path(tempfile.gettempdir()) / "emustart_fbneo.dat"
+    rows = []
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "EmuStart"})
+        with urllib.request.urlopen(req, timeout=120) as r, open(tmp, "wb") as fh:
+            while True:
+                chunk = r.read(1 << 20)
+                if not chunk:
+                    break
+                fh.write(chunk)
+        for _ev, el in ET.iterparse(str(tmp), events=("end",)):
+            if el.tag not in ("game", "machine"):
+                continue
+            nm = el.get("name") or ""
+            if nm:
+                cat = "bios" if el.get("isbios") == "yes" else ("device" if el.get("isdevice") == "yes" else "arcade")
+                rows.append((nm, el.findtext("description") or nm, el.get("cloneof") or "",
+                             el.get("romof") or "", cat, (el.findtext("year") or "").strip("?"),
+                             el.findtext("manufacturer") or "", "", ""))
+            el.clear()
+    except Exception as ex:
+        return {"ok": False, "reason": f"DAT FinalBurn Neo: {ex}"}
+    finally:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+    if not rows:
+        return {"ok": False, "reason": "DAT FinalBurn Neo bez gier"}
+    mame = bool(library.meta_get("mame_version"))
+    with library.db() as c:
+        c.executemany(("INSERT OR IGNORE" if mame else "INSERT OR REPLACE") +
+                      " INTO arcade_sets(name, title, parent, romof, category, year, maker, players, genre)"
+                      " VALUES(?,?,?,?,?,?,?,?,?)", rows)
+    library.meta_set("fbneo_dat_time", str(time.time()))
+    return {"ok": True, "sets": len(rows), "source": "FinalBurn Neo DAT"}
+
+
 def lookup(names) -> dict:
     """{set: row} dla podanych nazw setów."""
     out = {}

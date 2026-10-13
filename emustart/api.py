@@ -134,13 +134,40 @@ class Api:
         return v if v in ("python", "browser", "none") else "python"
 
     def _arcade_meta(self) -> None:
-        """Rok/producent/gracze/gatunek setów arcade (filtry) — raz, w tle."""
+        """Nazwy, rodzice wersji, rok/producent/gracze/gatunek setów arcade — raz, w tle.
+        Z MAME, gdy jest; bez niego (serwer z samym FinalBurn Neo) — z pliku DAT FinalBurn
+        Neo. Po nowym indeksie systemy arcade są skanowane od nowa (nazwy, łączenie wersji)."""
         from emustart import arcade
         try:
-            if arcade.needs_refresh() and arcade.find_mame(self._cfg):
-                log.info("arcade: %s", arcade.refresh(self._cfg))
+            arc = [s["es"] for s in library.systems_summary() if systems.info(s["es"])["kind"] == "arcade"]
+            if arcade.find_mame(self._cfg):
+                if arcade.needs_refresh():
+                    r = arcade.refresh(self._cfg)
+                    log.info("arcade: %s", r)
+                    if r.get("ok") and not r.get("cached"):
+                        self._rescan_systems(arc)
+            elif arc:
+                r = arcade.refresh_fbneo()
+                log.info("arcade (bez MAME): %s", r)
+                if r.get("ok") and not r.get("cached"):
+                    self._rescan_systems(arc)
         except Exception:
             log.exception("arcade meta")
+
+    def _rescan_systems(self, names: list) -> None:
+        """Ponowny skan wskazanych systemów (np. po nowym indeksie arcade) — w tym wątku."""
+        if not names:
+            return
+        found, _u = scanner.collect_systems(self._cfg)
+        for es in names:
+            if found.get(es):
+                try:
+                    scanner.scan_system(es, found[es])
+                    log.info("ponowny skan %s (nazwy i wersje arcade)", es)
+                except Exception:
+                    log.exception("skan %s", es)
+        from emustart import remote
+        remote._games_cache.clear()
 
     def _platforms_meta(self) -> None:
         """Dane platform LaunchBoksa (Platforms.xml, ~75 KB) — dla baz zbudowanych
@@ -536,7 +563,15 @@ class Api:
 
     # ── tłumaczenia: wersje gry (emustart/translations.py) ──
     def _variants(self, g: dict) -> list:
-        """Tłumaczenia schowane pod grą: [{id, rel, label, lang}]."""
+        """Wersje schowane pod grą: tłumaczenia albo — arcade — inne wersje setu (klony
+        rodzica, np. japońska, wcześniejsza rewizja): [{id, rel, label, lang}]."""
+        if systems.info(g["es"])["kind"] == "arcade" and not g.get("parent"):
+            name = Path(g["rel"]).stem
+            rows = library.db().execute(
+                "SELECT id, rel, name FROM games WHERE es=? AND parent=? AND hidden=0 ORDER BY name COLLATE NOCASE",
+                (g["es"], name)).fetchall()
+            return [{"id": r["id"], "rel": r["rel"].replace("\\", "/"), "lang": "",
+                     "label": f"{r['name']} · {Path(r['rel']).stem}", "name": r["name"]} for r in rows]
         if g.get("trans") or not g.get("tbase"):
             return []
         rows = library.db().execute(
