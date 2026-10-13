@@ -7,8 +7,9 @@ Teraz jeden plik na system. SQLite, a nie ZIP/zstd: grafika czytana i podmienian
 kilka wątków zapisuje naraz (pobieranie grafik), przerwany zapis niczego nie psuje.
 Grafiki są już w WebP — bez dodatkowej kompresji.
 
-Adresy się nie zmieniają: `/media/<system>/<plik>` (plik = `<nazwa>.<rodzaj>.png`).
-Logo systemów (`media/_systems`) i obrazki stanów (`media/_stany`) zostają plikami.
+Adresy się nie zmieniają: `/media/<system>/<plik>` (plik = `<nazwa>.<rodzaj>.png`). Tak samo
+logo systemów (`media/_systems.media`, adres `/media/_systems/<plik>`) i obrazki stanów gry
+(`media/_stany.media`).
 
 Przeniesienie starych plików: `migrate()` — każdy plik zapisany w bazie i odczytany z niej
 z powrotem (ta sama zawartość) jest dopiero wtedy usuwany; folder znika, gdy jest pusty.
@@ -35,8 +36,15 @@ EXT = ".media"
 IMG = (".png", ".jpg", ".jpeg", ".webp", ".gif")
 
 
+SPECIAL = ("_systems", "_stany")         # logo systemów, obrazki stanów gry
+
+
 def valid_es(es: str) -> bool:
     return bool(_ES.match(es or "")) and not es.startswith("_")
+
+
+def valid_store(name: str) -> bool:
+    return valid_es(name) or name in SPECIAL
 
 
 def path_of(es: str) -> Path:
@@ -44,7 +52,7 @@ def path_of(es: str) -> Path:
 
 
 def _con(es: str, create: bool = True) -> sqlite3.Connection | None:
-    if not valid_es(es):
+    if not valid_store(es):
         raise ValueError(f"zła nazwa systemu: {es!r}")
     p = path_of(es)
     cache = getattr(_local, "cons", None)
@@ -153,12 +161,13 @@ def migrate(progress=None) -> int:
     jego zawartość jest w bazie (odczyt kontrolny). Zwraca liczbę przeniesionych."""
     moved = 0
     try:
-        dirs = [d for d in paths.MEDIA.iterdir() if d.is_dir() and valid_es(d.name)]
+        dirs = [d for d in paths.MEDIA.iterdir() if d.is_dir() and valid_store(d.name)]
     except OSError:
         return 0
     for d in dirs:
         try:
-            todo = [f for f in d.iterdir() if f.is_file() and f.suffix.lower() in IMG]
+            todo = [f for f in d.iterdir() if f.is_file() and (f.suffix.lower() in IMG + (".svg",)
+                                                                 or (d.name == "_systems" and f.suffix == ".none"))]
         except OSError:
             continue
         if not todo:
@@ -225,10 +234,10 @@ def migrate_later() -> None:
 
 
 def file_name(path_rel: str) -> tuple[str, str] | None:
-    """'snes/Gra (USA).box.png' → ('snes', 'Gra (USA).box.png'); logo systemów i obrazki
-    stanów (foldery z „_”) — None (zostają plikami)."""
+    """'snes/Gra (USA).box.png' → ('snes', 'Gra (USA).box.png'); '_systems/snes.svg' —
+    logo systemu; inne foldery — None."""
     parts = path_rel.replace("\\", "/").split("/")
-    if len(parts) != 2 or not valid_es(parts[0]) or not parts[1] or parts[1] in (".", "..") \
+    if len(parts) != 2 or not valid_store(parts[0]) or not parts[1] or parts[1] in (".", "..") \
             or os.sep in parts[1] or "/" in parts[1]:
         return None
     return parts[0], parts[1]

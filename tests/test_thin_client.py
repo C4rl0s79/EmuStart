@@ -142,9 +142,7 @@ def test_server_changes_reach_pc_cache(srv, monkeypatch):
     assert metadata.get(gid)["description"] == "Stary opis"
     from emustart import mediastore
     mediastore.put("snes", art.media_file("Gra (USA)", "box"), b"stara okladka")   # lokalna kopia
-    logo = paths.MEDIA / "_systems" / "snes.custom.png"
-    logo.parent.mkdir(parents=True, exist_ok=True)
-    logo.write_bytes(b"stare logo")
+    mediastore.put("_systems", "snes.custom.png", b"stare logo")
     # admin zmienia okładkę i opis na serwerze — wersja systemu rośnie
     game.update(art_m={"box": 200}, meta={"data": {"description": "Stary opis"}, "edits": {"description": "Nowy opis"}})
     _server_lib(monkeypatch, {"snes": 200.0})
@@ -155,4 +153,4 @@ def test_server_changes_reach_pc_cache(srv, monkeypatch):
     assert metadata.get(gid)["description"] == "Nowy opis"
     assert not art.has("snes", "Gra (USA)", "box")           # pobierze się nowa przy wyświetleniu
     assert libsync.sync(cfg)["changed"] == 0                  # bez zmian — nic
-    assert not logo.exists()                                  # nowe logo systemu — też od nowa
+    assert not mediastore.exists("_systems", "snes.custom.png")   # nowe logo systemu — też od nowa

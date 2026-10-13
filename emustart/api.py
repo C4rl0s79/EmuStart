@@ -838,7 +838,7 @@ class Api:
         for st in states:                     # obrazek stanu (jeśli emulator go zapisał)
             th = ingame.state_thumb(Path(st["path"]))
             if th:
-                st["thumb"] = "/media/_stany/" + th.name
+                st["thumb"] = "/media/_stany/" + th
         return {"id": g["id"], "title": g["title"], "emulator": emu, "options": opts,
                 "states": states}
 
@@ -1052,8 +1052,7 @@ class Api:
     def system_logo_choose(self, es: str, cid: str) -> dict:
         r = self._admin_call("PUT", f"systems/{urllib.parse.quote(es)}/logo?" + urllib.parse.urlencode({"id": cid}))
         if r.get("ok"):
-            for f in (paths.MEDIA / "_systems").glob(f"{es}.*"):      # stara kopia logo — pobierze się nowe
-                f.unlink(missing_ok=True)
+            logos.drop(es)                                            # stara kopia logo — pobierze się nowe
         return r
 
     # ── opcje systemu (przytrzymane A na logo) ──

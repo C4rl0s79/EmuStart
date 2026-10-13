@@ -184,21 +184,22 @@ def test_state_thumbnails_from_emulators(tmp_path):
     ra = tmp_path / "Gra.state1"
     ra.write_bytes(b"STAN")
     (tmp_path / "Gra.state1.png").write_bytes(png("red"))
+    from emustart import mediastore
     t = ingame.state_thumb(ra)
-    assert t and t.read_bytes() == png("red")
+    assert t and mediastore.get("_stany", t)[0] == png("red")
     assert ingame.state_thumb(ra) == t                                  # drugi raz — z pamięci
     p2s = tmp_path / "Gra.01.p2s"
     with zipfile.ZipFile(p2s, "w") as z:
         z.writestr("Screenshot.png", png("blue"))
         z.writestr("eeMemory.bin", b"x")
-    assert ingame.state_thumb(p2s).read_bytes() == png("blue")
+    assert mediastore.get("_stany", ingame.state_thumb(p2s))[0] == png("blue")
     w, h = 2, 2
     head = bytearray(200)
     head[:4] = b"DUCS"
     struct.pack_into("<4I", head, 184, w, h, w * h * 4, 200)
     sav = tmp_path / "Gra_1.sav"
     sav.write_bytes(bytes(head) + bytes([0, 255, 0, 255]) * 4 + b"DANE")
-    img = Image.open(io.BytesIO(ingame.state_thumb(sav).read_bytes()))
+    img = Image.open(io.BytesIO(mediastore.get("_stany", ingame.state_thumb(sav))[0]))
     assert img.size == (2, 2) and img.getpixel((0, 0))[:3] == (0, 255, 0)
     bad = tmp_path / "Inna_1.sav"
     bad.write_bytes(b"DUCS" + bytes(300))                               # bez zrzutu — nic

@@ -116,15 +116,13 @@ COLS = ("rel", "name", "title", "tags", "files", "size", "is_dir", "multidisc", 
 
 def _drop_changed_logos(old: dict, new: dict) -> None:
     """Logo systemu zmienione na serwerze (inny adres / wersja) — lokalna kopia od nowa."""
-    from emustart import paths
+    from emustart import mediastore
     for es, r in new.items():
         before = (old.get(es) or {}).get("logo", "")
         if before and before != r.get("logo") and before.startswith("/media/"):
-            f = paths.MEDIA / urllib.parse.unquote(before.split("?")[0][len("/media/"):])
-            try:
-                f.unlink(missing_ok=True)
-            except OSError:
-                pass
+            where = mediastore.file_name(urllib.parse.unquote(before.split("?")[0][len("/media/"):]))
+            if where:
+                mediastore.delete(*where)
 
 
 def _drop_changed_art(es: str, rows: list) -> int:

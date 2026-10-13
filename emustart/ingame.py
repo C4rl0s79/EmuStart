@@ -832,30 +832,27 @@ def list_states(adapter: Adapter, game: dict, meta: dict, learned: list) -> list
     return out
 
 
-def state_thumb(state: Path) -> Path | None:
+def state_thumb(state: Path) -> str | None:
     """Obrazek stanu gry zapisany przez emulator → plik PNG w pamięci grafik (podgląd przy
     wyborze zapisu). RetroArch: `<stan>.png` obok (savestate_thumbnail_enable); PCSX2: zrzut
     w archiwum .p2s; DuckStation: zrzut w nagłówku .sav (nieskompresowany). None = brak."""
     import hashlib
+    from emustart import mediastore
     try:
         st = state.stat()
     except OSError:
         return None
-    out = paths.MEDIA / "_stany" / (hashlib.sha1(f"{state}|{st.st_mtime_ns}".encode("utf-8", "replace"))
-                                     .hexdigest()[:20] + ".png")
-    if out.is_file():
-        return out
+    name = hashlib.sha1(f"{state}|{st.st_mtime_ns}".encode("utf-8", "replace")).hexdigest()[:20] + ".png"
+    if mediastore.exists("_stany", name):
+        return name
     data = _state_png(state)
     if not data:
         return None
     try:
-        out.parent.mkdir(parents=True, exist_ok=True)
-        tmp = out.with_suffix(".tmp")
-        tmp.write_bytes(data)
-        tmp.replace(out)
-    except OSError:
+        mediastore.put("_stany", name, data)
+    except Exception:
         return None
-    return out
+    return name
 
 
 def _state_png(state: Path) -> bytes | None:

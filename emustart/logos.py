@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import logging
 import re
-import shutil
 import threading
 from pathlib import Path
 
@@ -28,8 +27,31 @@ _busy: set = set()
 _lock = threading.Lock()
 
 
-def _dir() -> Path:
-    return paths.MEDIA / "_systems"
+STORE = "_systems"                    # logo systemów: media/_systems.media (emustart/mediastore.py)
+
+
+def _has(f: str) -> bool:
+    from emustart import mediastore
+    return mediastore.exists(STORE, f)
+
+
+def _get(f: str) -> bytes | None:
+    from emustart import mediastore
+    got = mediastore.get(STORE, f)
+    return got[0] if got else None
+
+
+def _put(f: str, data: bytes) -> None:
+    from emustart import mediastore
+    mediastore.put(STORE, f, data)
+
+
+def drop(es: str) -> None:
+    """Wszystkie logo systemu `es` z magazynu (np. lokalna kopia po zmianie na serwerze)."""
+    from emustart import mediastore
+    for f in mediastore.files(STORE):
+        if f.split(".")[0] == es:
+            mediastore.delete(STORE, f)
 
 
 def bundled(plat: str) -> str:
@@ -41,16 +63,17 @@ def bundled(plat: str) -> str:
 
 def downloaded(es: str) -> str:
     for ext in ("svg", "png"):
-        if (_dir() / f"{es}.{ext}").is_file():
+        if _has(f"{es}.{ext}"):
             return f"/media/_systems/{es}.{ext}"
     return ""
 
 
 def custom(es: str) -> str:
+    from emustart import mediastore
     for ext in ("svg", "png", "jpg", "webp"):
-        f = _dir() / f"{es}.custom.{ext}"
-        if f.is_file():
-            return f"/media/_systems/{es}.custom.{ext}?v={int(f.stat().st_mtime)}"
+        t = mediastore.mtime(STORE, f"{es}.custom.{ext}")
+        if t:
+            return f"/media/_systems/{es}.custom.{ext}?v={int(t)}"
     return ""
 
 
@@ -175,9 +198,9 @@ def choose(cfg: dict, es: str, cid: str) -> bool:
         if cid == "downloaded":
             # pobrane wygrywa z wbudowanym tylko jako kopia ręcznie wybrana
             for ext in ("svg", "png"):
-                f = _dir() / f"{es}.{ext}"
-                if f.is_file():
-                    _store_custom(es, f.read_bytes(), ext)
+                data = _get(f"{es}.{ext}")
+                if data:
+                    _store_custom(es, data, ext)
                     sc["logo"] = "custom"
         return True
     if cid == "none":
@@ -200,11 +223,11 @@ def choose(cfg: dict, es: str, cid: str) -> bool:
 
 
 def _store_custom(es: str, data: bytes, ext: str) -> None:
-    d = _dir()
-    d.mkdir(parents=True, exist_ok=True)
-    for old in d.glob(f"{es}.custom.*"):
-        old.unlink(missing_ok=True)
-    (d / f"{es}.custom.{ext}").write_bytes(data)
+    from emustart import mediastore
+    for old in mediastore.files(STORE):
+        if old.startswith(f"{es}.custom."):
+            mediastore.delete(STORE, old)
+    _put(f"{es}.custom.{ext}", data)
 
 
 def fetch_missing(cfg: dict, es_list) -> None:
@@ -213,7 +236,7 @@ def fetch_missing(cfg: dict, es_list) -> None:
     with _lock:
         for es in es_list:
             if es in _busy or bundled(systems.info(es)["plat"]) or downloaded(es) \
-                    or (_dir() / f"{es}.none").exists():
+                    or _has(f"{es}.none"):
                 continue
             _busy.add(es)
             todo.append(es)
@@ -222,20 +245,18 @@ def fetch_missing(cfg: dict, es_list) -> None:
 
 
 def _run(cfg: dict, todo: list) -> None:
-    d = _dir()
-    d.mkdir(parents=True, exist_ok=True)
     for es in todo:
         try:
             data = art_sources.fetch(CARBON.format(es=es), timeout=15)
             if data and b"<svg" in data[:2000]:
-                (d / f"{es}.svg").write_bytes(data)
+                _put(f"{es}.svg", data)
                 continue
             ra = Path(cfg.get("emu_root") or "") / "RetroArch" / "assets" / "xmb" / "systematic" / "png"
             icon = ra / f"{systems.info(es)['libretro']}.png"
             if icon.is_file():
-                shutil.copy2(icon, d / f"{es}.png")
+                _put(f"{es}.png", icon.read_bytes())
             elif data is not None or art_sources.online():
-                (d / f"{es}.none").write_text("")       # sprawdzone — logo nie ma
+                _put(f"{es}.none", b"")                 # sprawdzone — logo nie ma
         except Exception:
             log.exception("logo %s", es)
         finally:

@@ -183,4 +183,10 @@ def test_media_store_one_file_per_system_and_migration(tmp_path):
     assert mediastore.rename("snes", "A (USA).box.png", "A2.box.png") and art.has("snes", "A2", "box")
     assert art.delete("snes", "A2", "box") and not art.has("snes", "A2", "box")
     assert mediastore.file_name("snes/A.box.png") == ("snes", "A.box.png")
-    assert mediastore.file_name("_systems/snes.png") is None and mediastore.file_name("../x/y") is None
+    assert mediastore.file_name("_systems/snes.png") == ("_systems", "snes.png")
+    assert mediastore.file_name("_inne/x.png") is None and mediastore.file_name("../x/y") is None
+    (paths.MEDIA / "_systems").mkdir()
+    (paths.MEDIA / "_systems" / "psx.custom.svg").write_bytes(b"<svg/>")
+    (paths.MEDIA / "_systems" / "gb.none").write_bytes(b"")
+    assert mediastore.migrate() == 2 and not (paths.MEDIA / "_systems").exists()
+    assert mediastore.get("_systems", "psx.custom.svg")[0] == b"<svg/>" and mediastore.exists("_systems", "gb.none")   # „brak logo” też
