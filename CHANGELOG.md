@@ -151,6 +151,9 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   własnym katalogu (albo w folderze z panelu), a konta zatwierdzone wcześniej bez folderu
   dostają go przy starcie. EmuStart na PC zawsze pokazuje konto, którym jest zalogowany —
   także gdy serwer chwilowo nie poda listy kont.
+- Ekran „Kto gra?” / „Profile” sprawdza konta na serwerze co 15 s, póki jest otwarty —
+  nowo zatwierdzone konto (albo konto po powrocie serwera) pojawia się samo, a nie dopiero
+  po ponownym wejściu na ekran.
 
 ## [0.44.8] — 2026-10-13
 

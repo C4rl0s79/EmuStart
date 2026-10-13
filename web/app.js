@@ -1217,6 +1217,7 @@ async function pollCopies() {
       else if (S.screen === "games") openSystem(true);
     }
     if (lv !== undefined) libVersion = S.state.lib_version;
+    profilesRecheck();
     const post = await api().post_status();
     $("syncInfo").textContent = post ? `⇅ wysyłam zapisy: ${post}` : "";
     $("syncInfo").classList.toggle("hidden", !post);

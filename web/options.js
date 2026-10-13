@@ -507,6 +507,22 @@ async function openProfiles(startup = false) {
   PR.idx = Math.max(0, PR.list.findIndex((p) => p.id === r.current));
   show("profiles");
 }
+/** Ekran profili otwarty: konta z serwera mogły się zmienić (nowe zatwierdzone, serwer wrócił)
+ *  — lista na nowo, gdy różni się od pokazanej (bez tego dopiero po ponownym wejściu). */
+let profilesCheckedAt = 0;
+async function profilesRecheck() {
+  if (S.screen !== "profiles" || S.modal || Date.now() - profilesCheckedAt < 15000) return;
+  profilesCheckedAt = Date.now();
+  const r = await api().profiles_list().catch(() => null);
+  if (!r || S.screen !== "profiles" || S.modal) return;
+  const key = (l) => l.map((p) => `${p.id}:${p.name}:${p.pin}`).join("|");
+  if (key(r.profiles) === key(PR.list) && r.current === PR.current) return;
+  const onAdd = PR.idx >= PR.list.length, sel = PR.list[PR.idx]?.id;    // zaznaczenie zostaje
+  PR.list = r.profiles; PR.current = r.current;
+  const i = PR.list.findIndex((p) => p.id === (sel ?? r.current));
+  PR.idx = onAdd ? PR.list.length : i >= 0 ? i : 0;
+  renderProfiles();
+}
 function renderProfiles() {
   const setup = PR.startup === "setup";
   const here = S.platform === "android" ? "tym telefonie" : "tym komputerze";
