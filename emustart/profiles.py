@@ -963,6 +963,26 @@ def unlock(cfg: dict, pid: int) -> None:
 
 # ── profile z NAS (czysta instalacja / drugi komputer) ──
 
+def align_account_name(cfg: dict) -> None:
+    """Urządzenie zalogowane kontem: profil tego konta nosi nazwę konta. Lokalna nazwa mogła
+    zostać z czasów przed kontami (np. „Gracz” z folderem przemianowanym na „Jezus”) — wtedy
+    lista pokazywała obcą nazwę zamiast konta."""
+    account = account_of_device(cfg)
+    if not account:
+        return
+    _ensure_columns()
+    with library.db() as c:
+        row = c.execute("SELECT id, name FROM profiles WHERE lower(nas_name)=?", (account.lower(),)).fetchone()
+        if not row or row["name"] == account:
+            return
+        clash = c.execute("SELECT id FROM profiles WHERE lower(name)=? AND id!=?",
+                          (account.lower(), row["id"])).fetchone()
+        if clash:                          # inny lokalny profil o tej nazwie — zostaje z dopiskiem
+            c.execute("UPDATE profiles SET name=? WHERE id=?", (f"{account} (lokalny)"[:32], clash["id"]))
+        c.execute("UPDATE profiles SET name=? WHERE id=?", (account, row["id"]))
+    log.info("profil konta %s: nazwa „%s” → „%s”", account, row["name"], account)
+
+
 def import_from_nas(cfg: dict) -> list:
     """Zakłada profile dla folderów na NAS, których nie ma w bazie. Zwraca nazwy."""
     resolve_moves(cfg)

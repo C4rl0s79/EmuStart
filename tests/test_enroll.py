@@ -332,3 +332,19 @@ def test_one_registration_per_hardware(srv):
     active = [d for d in devices.listing() if not d.get("revoked") and d["name"] == "Telefon 25102PCBEG"]
     assert len(active) == 1 and active[0]["hw"] == hw
     assert _req(srv, "GET", "/v1/info", old["key"])[0] == 401              # stara rejestracja nieważna
+
+
+def test_account_profile_takes_the_account_name(monkeypatch):
+    """Profil sprzed kont: nazwa „Gracz”, folder przemianowany na „Jezus”. Po zalogowaniu
+    kontem Jezus lista pokazuje „Jezus” (wcześniej „Gracz” — wyglądało, jakby konta nie było)."""
+    from emustart import library, profiles
+    pid = profiles.first_id()
+    with library.db() as c:
+        c.execute("UPDATE profiles SET name='Gracz', nas_name='Jezus' WHERE id=?", (pid,))
+        c.execute("INSERT INTO profiles(name, nas_name, color) VALUES('Jezus', 'Jezus-stary', '')")
+    cfg = {"server_key": "dev:abc", "server_account": "Jezus"}
+    profiles.align_account_name(cfg)
+    names = {p["id"]: p["name"] for p in profiles.all_profiles()}
+    assert names[pid] == "Jezus" and "Jezus (lokalny)" in names.values()
+    profiles.align_account_name({})                       # bez konta — nic
+    assert profiles.get(pid)["name"] == "Jezus"
