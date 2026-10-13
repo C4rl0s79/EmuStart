@@ -49,12 +49,18 @@ tytuły) są zawsze escapowane.
 emulatorów, nazwę konta RetroAchievements i nazwę komputera — nie zawiera haseł,
 tokenów, kluczy ani tytułów okien innych programów.
 
-## Serwer EmuStart (audyt 0.41)
+## Serwer EmuStart (audyt 0.41, logowanie 0.43)
 
-- **Urządzenia:** tylko klucze urządzeń i logowanie podpisem (token sesji 1 h, tylko w
-  nagłówku). Wspólny klucz serwera — wyłącznie na komputerze serwera.
-- **Role:** prośbę o dołączenie z sieci lokalnej (daje pełny dostęp) zatwierdza tylko
-  urządzenie administratora; urządzenia kont zatwierdzają tylko swoje konto.
+- **Urządzenia:** jedyna droga to logowanie kontem i hasłem z kluczem urządzenia
+  (zatwierdzone na urządzeniu konta, przez administratora albo kodem QR z panelu); potem
+  logowanie podpisem (token sesji 1 h, tylko w nagłówku). Parowanie kodem i dołączanie z
+  sieci lokalnej (dawały administratora bez konta) usunięte w 0.43, a ich rejestracje
+  unieważnione. Wspólny klucz serwera — wyłącznie na komputerze serwera.
+- **Tylko szyfrowane połączenia** (0.43): urządzenia łączą się portem HTTPS z przypiętym
+  certyfikatem, portem publicznym albo tunelem; zwykły port obsługuje API tylko z samego
+  serwera. Kod QR z panelu niesie odcisk certyfikatu — pierwsze połączenie też jest przypięte.
+- **Role:** administrator to cecha konta (panel → Konta); zwykłe konto zatwierdza tylko
+  nowe urządzenia swojego konta.
 - **Konta:** hasło (scrypt, opóźnienia, limit prób z adresu, ograniczona liczba sprawdzeń
   naraz); inne konto na urządzeniu — tylko z tokenem konta po haśle.
 - **Ścieżki:** folder profili odrzuca nazwy, które Windows utożsamia z innymi (kropka lub

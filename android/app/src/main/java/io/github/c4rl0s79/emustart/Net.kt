@@ -12,7 +12,7 @@ import javax.net.ssl.X509TrustManager
 
 /**
  * Połączenia z serwerem EmuStart. HTTPS (port szyfrowany, emustart/tls.py): serwer ma własny
- * certyfikat, więc zaufanie = zgodny odcisk SHA-256 certyfikatu zapamiętany przy parowaniu
+ * certyfikat, więc zaufanie = zgodny odcisk SHA-256 certyfikatu zapamiętany przy zalogowaniu
  * („przypięcie”), a nie urząd certyfikacji. Inne adresy (np. GitHub) — zwykłe sprawdzanie.
  */
 object Net {

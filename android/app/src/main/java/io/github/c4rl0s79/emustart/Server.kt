@@ -75,7 +75,8 @@ class Server(private val prefs: Prefs) {
         if (typed.isNotBlank()) out[typed] = known[typed]
             ?: if (typed.startsWith("https")) Ep(typed, rankOf(typed, "tunnel"), true) else Ep(typed, rankOf(typed), false)
         for ((u, e) in known) if (u !in out) out[u] = e
-        val list = out.values.filter { !it.url.startsWith("https") || it.ca || prefs.serverFp.isNotEmpty() }
+        // tylko szyfrowane (0.43): własny certyfikat serwera — z odciskiem, tunel — zwykłe sprawdzanie
+        val list = out.values.filter { it.url.startsWith("https://") && (it.ca || prefs.serverFp.isNotEmpty()) }
         caUrls = list.filter { it.ca }.map { it.url }.toSet()
         return list
     }
@@ -96,7 +97,7 @@ class Server(private val prefs: Prefs) {
     fun baseUrl(): String {
         val cands = candidates()
         if (cands.size <= 1) return cands.firstOrNull()?.url ?: prefs.serverUrl
-        val sig = cands.joinToString("|") { it.url } + prefs.serverKey + prefs.deviceId + prefs.serverFp
+        val sig = cands.joinToString("|") { it.url } + prefs.deviceId + prefs.serverFp
         if (base.isNotEmpty() && sig == baseSig && System.currentTimeMillis() - baseAt < 300_000) return base
         val res = java.util.concurrent.ConcurrentHashMap<String, Long>()
         val doneSet = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
@@ -128,8 +129,8 @@ class Server(private val prefs: Prefs) {
     /** Adres przestał odpowiadać — następne zapytanie sprawdzi wszystkie od nowa. */
     fun forgetBase() { baseAt = 0L }
 
-    /** Adresy i odcisk certyfikatu z odpowiedzi serwera (info, parowanie) → ustawienia.
-     *  `trusted` — odpowiedź z połączenia szyfrowanego albo z parowania; nieszyfrowana nie zmienia
+    /** Adresy i odcisk certyfikatu z odpowiedzi serwera (info, zalogowanie) → ustawienia.
+     *  `trusted` — odpowiedź z połączenia zaufanego (przypięty certyfikat, tunel); inna nie zmienia
      *  już zapamiętanych (podszywający się w sieci podałby własny certyfikat i adresy). */
     fun learn(d: JSONObject, trusted: Boolean = true) {
         d.optJSONArray("endpoints")?.let {
@@ -153,9 +154,9 @@ class Server(private val prefs: Prefs) {
 
     fun dropToken() { tok = ""; tokExp = 0L }
 
-    /** Nagłówek klucza: urządzenie z kluczem urządzenia — token sesji; inaczej klucz serwera. */
+    /** Nagłówek klucza: token sesji z logowania podpisem kluczem urządzenia. */
     private fun bearer(via: String? = null): String =
-        if (prefs.deviceId.isEmpty()) prefs.serverKey else token(via).ifEmpty { "brak-tokenu" }
+        token(via).ifEmpty { "brak-tokenu" }
 
     private fun token(via: String?): String {
         val margin = 300_000L
@@ -184,8 +185,9 @@ class Server(private val prefs: Prefs) {
     }
 
     /** POST JSON bez klucza (dołączanie, logowanie); `ca` — zwykłe sprawdzanie certyfikatu (tunel). */
-    fun postJson(url: String, path: String, body: JSONObject, ca: Boolean = true): JSONObject {
-        val c = Net.open(url.trimEnd('/') + path, prefs.serverFp, ca)
+    fun postJson(url: String, path: String, body: JSONObject, ca: Boolean = true, fp: String = prefs.serverFp): JSONObject {
+        if (!url.startsWith("https://")) return JSONObject().put("ok", false).put("reason", "Tylko połączenie szyfrowane (https).")
+        val c = Net.open(url.trimEnd('/') + path, fp, ca)
         try {
             c.connectTimeout = 8000
             c.readTimeout = 15000
@@ -429,26 +431,6 @@ class Server(private val prefs: Prefs) {
             } finally { c.disconnect() }
         }
         throw HttpError(401, "zły klucz serwera")
-    }
-
-    /** Zatwierdzenie nowego urządzenia (POST /v1/pair/approve); allow == null — podgląd prośby. */
-    fun approve(code: String, allow: Boolean?): JSONObject {
-        val c = conn("/v1/pair/approve")
-        try {
-            c.connectTimeout = 8000
-            c.readTimeout = 15000
-            c.requestMethod = "POST"
-            c.doOutput = true
-            c.setRequestProperty("Content-Type", "application/json")
-            c.setRequestProperty("Authorization", "Bearer " + bearer())
-            val b = JSONObject().put("code", code)
-            if (allow != null) b.put("allow", allow)
-            c.outputStream.use { it.write(b.toString().toByteArray()) }
-            val status = c.responseCode
-            if (status == 404) return JSONObject().put("ok", false).put("reason", "Serwer ma starszą wersję EmuStart — zaktualizuj go.")
-            val body = (if (status in 200..299) c.inputStream else c.errorStream)?.bufferedReader(Charsets.UTF_8)?.readText() ?: "{}"
-            return try { JSONObject(body) } catch (e: Exception) { JSONObject().put("ok", false).put("reason", "błąd serwera $status") }
-        } finally { c.disconnect() }
     }
 
     fun nasDelete(p: String) {

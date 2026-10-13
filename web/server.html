@@ -98,31 +98,28 @@
     <div id="tunInfo" class="muted" style="margin-top:6px"></div>
   </section>
   <section>
-    <h2>Sparowane urządzenia</h2>
+    <h2>Urządzenia</h2>
     <div class="actions"><button id="bPair" class="primary">Dodaj urządzenie</button></div>
     <div id="pairBox" hidden style="margin-top:10px">
       <div style="display:flex;gap:18px;align-items:center;flex-wrap:wrap">
         <div id="pairQr" style="background:#fff;border-radius:8px;line-height:0"></div>
-        <div>
-          <div class="muted">Telefon: EmuStart → Ustawienia → <b>Połącz z serwerem</b> → zeskanuj kod.<br>
-            Komputer: Ustawienia → Serwer EmuStart → <b>Połącz kodem</b> → wpisz kod<br>
-            (albo na komputerze <b>Dołącz do serwera</b> i zatwierdź telefonem):</div>
-          <div style="font-size:30px;letter-spacing:.12em;margin:8px 0"><code id="pairCode"></code></div>
-          <div class="muted">Adres serwera: <code id="pairUrl"></code> · kod ważny <span id="pairLeft"></span></div>
+        <div style="flex:1;min-width:260px">
+          <div class="muted">Telefon: EmuStart → Ustawienia → <b>Zaloguj (kod QR)</b> → zeskanuj kod.<br>
+            Komputer: Ustawienia → <b>Zaloguj</b> → wklej link (przycisk niżej). Potem konto i hasło —
+            bez czekania na zatwierdzenie. Kod jednorazowy, ważny <span id="pairLeft"></span>.</div>
+          <div style="font-size:26px;letter-spacing:.12em;margin:8px 0"><code id="pairCode"></code>
+            <span class="muted" style="font-size:13px;letter-spacing:0">· <span id="pairUrl"></span></span></div>
+          <div style="display:flex;gap:8px"><input id="pairLink" readonly style="flex:1;min-width:0">
+            <button id="bPairCopy">Kopiuj link</button></div>
         </div>
       </div>
     </div>
     <div id="enrBox" hidden style="margin-top:10px">
-      <h3 style="margin:0 0 6px">Nowe instalacje z internetu</h3>
+      <h3 style="margin:0 0 6px">Proszą o zalogowanie</h3>
       <div class="muted">Kod musi się zgadzać z kodem na ekranie nowego urządzenia. Nowe konta zatwierdza administrator.</div>
       <table><tbody id="enroll"></tbody></table>
     </div>
-    <div id="reqBox" hidden style="margin-top:10px">
-      <h3 style="margin:0 0 6px">Proszą o dołączenie</h3>
-      <div class="muted">Sprawdź, czy kod zgadza się z kodem na ekranie urządzenia.</div>
-      <table><tbody id="requests"></tbody></table>
-    </div>
-    <table style="margin-top:10px"><thead><tr><th>Urządzenie</th><th>Rodzaj</th><th>Konto / rola</th><th>Wersja</th><th class="n">Ostatnio</th><th></th></tr></thead>
+    <table style="margin-top:10px"><thead><tr><th>Urządzenie</th><th>Rodzaj</th><th>Konto</th><th>Wersja</th><th class="n">Ostatnio</th><th></th></tr></thead>
       <tbody id="devices"></tbody></table>
   </section>
   <section>

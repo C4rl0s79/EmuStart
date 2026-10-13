@@ -7,9 +7,6 @@ PIN: skrót w bazie tego komputera, serwer go nie zna."""
 from __future__ import annotations
 
 import json
-import time
-import urllib.error
-import urllib.request
 
 import pytest
 
@@ -145,18 +142,18 @@ def test_server_account_files_need_password_token(env, monkeypatch, tmp_path):
     nas = tmp / "nas"
     cfg["profiles_nas"] = str(nas)
     use_server(cfg, nas, monkeypatch)
-    base = "http://" + cfg["server_url"]
+    from emustart import netsrc
+    host, port = cfg["server_url"].removeprefix("https://").split(":")
     h = {"Authorization": f"Bearer {KEY}"}
 
     def req(path, method="GET", hdr=None, body=None):
         data = json.dumps(body).encode() if body is not None else (b"" if method == "PUT" else None)
-        r = urllib.request.Request(base + path, method=method, data=data,
-                                   headers={**h, "Content-Type": "application/json", **(hdr or {})})
-        try:
-            with urllib.request.urlopen(r) as resp:
-                return resp.status, json.loads(resp.read() or b"{}")
-        except urllib.error.HTTPError as ex:
-            return ex.code, json.loads(ex.read() or b"{}")
+        c = netsrc.PinnedHTTPS(host, int(port), cfg["server_fp"])      # szyfrowane, przypięte (0.43)
+        c.request(method, path, body=data, headers={**h, "Content-Type": "application/json", **(hdr or {})})
+        r = c.getresponse()
+        out = r.status, json.loads(r.read() or b"{}")
+        c.close()
+        return out
 
     assert req("/v1/profiles/create", "PUT", body={"name": "Jan", "password": "slabe"})[0] == 400
     st, r = req("/v1/profiles/create", "PUT", body={"name": "Jan", "password": PW})
@@ -202,18 +199,15 @@ def _keyed_server(monkeypatch):
 def test_account_device_other_user_needs_their_password(monkeypatch):
     """Urządzenie konta „Jezus”: konto „Ola” dopiero po haśle Oli (token konta)."""
     import keyhelp
-    from emustart import devices, enroll
+    from emustart import enroll
     from test_three_devices import _req
     srv = _keyed_server(monkeypatch)
     nas = srv[2]
     for n in ("Jezus", "Ola"):
         _write(nas / n / "emustart.json", b"{}")
     accounts.set_password("Ola", PW)
-    with devices._lock:
-        did = devices._add_keyed_locked("Telefon", "phone", "", "", keyhelp.new_key()[1], time.time())
-        devices._load()[did].update(account="Jezus", role="user", games=True)
-        devices._save()
-    enroll._tokens["sesja"] = (did, time.time() + 600)
+    _did, tok = keyhelp.device("Jezus", name="Telefon")
+    enroll._tokens["sesja"] = enroll._tokens.pop(tok)
     assert [p["name"] for p in _req(srv, "GET", "/v1/profiles", "sesja")[1]["profiles"]] == ["Jezus"]
     assert _req(srv, "GET", "/v1/nas/file?p=Jezus/emustart.json", "sesja")[0] == 200
     st, r = _req(srv, "GET", "/v1/nas/file?p=Ola/emustart.json", "sesja")

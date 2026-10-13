@@ -126,15 +126,16 @@ def _browser_fallback(api, ex) -> None:
         time.sleep(3600)
 
 
-def _pair_code_from_server(port: int) -> str:
-    """Kod parowania z działającego serwera (kody żyją w jego pamięci) — przez panel na tym komputerze."""
+def _login_link_from_server(port: int) -> str:
+    """Link logowania z działającego serwera (kody żyją w jego pamięci) — przez panel na tym
+    komputerze. To samo co kod QR z panelu (Dodaj urządzenie)."""
     import json
     import urllib.request
     try:
-        req = urllib.request.Request(f"http://127.0.0.1:{port}/admin/pair_code", data=b"{}", method="POST",
+        req = urllib.request.Request(f"http://127.0.0.1:{port}/admin/login_code", data=b"{}", method="POST",
                                      headers={"X-EmuStart": "1"})
         with urllib.request.urlopen(req, timeout=5) as r:
-            return json.loads(r.read()).get("pretty", "")
+            return json.loads(r.read()).get("uri", "")
     except Exception:
         return ""
 
@@ -160,7 +161,6 @@ def _use_server_layout(migrate: bool) -> None:
 
 def _server_mode() -> None:
     """EmuStart jako serwer gier dla aplikacji na Androidzie (na komputerze z grami)."""
-    import socket
     import time
     from emustart import remote
     log = logging.getLogger("emustart")
@@ -169,13 +169,19 @@ def _server_mode() -> None:
     remote.ensure_token(api._cfg)           # wspólny klucz serwera (tylko ten komputer)
     port = int(api._cfg.get("server_port") or remote.DEFAULT_PORT)
     if "--server-key" in sys.argv:
-        # od 0.39 urządzenia łączą się tylko kluczem urządzenia — zamiast klucza serwera
-        # jednorazowy kod parowania z działającego serwera (panel ma ten sam przycisk)
-        code = _pair_code_from_server(port)
-        return _message(f"Adres: http://{socket.gethostname()}:{port}\n"
-                        "(na nowym urządzeniu: adres Tailscale tego komputera albo emustart.emucloud.org)\n\n"
-                        + (f"Kod parowania (jednorazowy, ważny kilka minut):\n\n{code}" if code else
-                           "Serwer nie działa — uruchom go i spróbuj ponownie (albo kod z panelu serwera)."))
+        # logowanie urządzenia bez aparatu (komputer): link z kodem jednorazowym wklejony w
+        # „Zaloguj” — to samo co kod QR z panelu (Dodaj urządzenie), bez czekania na zatwierdzenie
+        link = _login_link_from_server(port)
+        if link:
+            try:
+                import subprocess
+                subprocess.run(["clip"], input=link.encode("utf-16-le"), check=True,
+                               creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            except Exception:
+                pass
+        return _message(("Link logowania (jednorazowy, ważny 10 minut) jest w schowku —\n"
+                         "wklej go w EmuStart: Ustawienia → Zaloguj.\n\n" + link) if link else
+                        "Serwer nie działa — uruchom go i spróbuj ponownie (albo panel serwera → Dodaj urządzenie).")
     if "--install-server" in sys.argv:
         if not getattr(sys, "frozen", False):
             return _message("Autostart serwera instaluje się z EmuStart.exe (wersja zbudowana).")

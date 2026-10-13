@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import time
 
 import keyhelp
 import pytest
@@ -32,25 +31,35 @@ def test_ui_api_and_panel_only_from_this_computer():
 
 
 def _device(account="", role="admin"):
-    with devices._lock:
-        did = devices._add_keyed_locked("Urządzenie", "phone", "", "", keyhelp.new_key()[1], time.time())
-        devices._load()[did].update(account=account, role=role, games=True)
-        devices._save()
-    tok = f"sesja-{did}"
-    enroll._tokens[tok] = (did, time.time() + 600)
+    did, tok = keyhelp.device(account or "Admin", admin=role == "admin")
     return did, tok
 
 
-def test_only_admin_approves_lan_requests(srv):
-    """Prośba z sieci lokalnej daje pełny dostęp — urządzenie konta nie może jej zatwierdzić."""
-    _did, user_tok = _device("Ola", "user")
+def test_old_pairing_routes_are_gone(srv):
+    """0.43: parowanie kodem i dołączanie z sieci lokalnej (dawały administratora bez konta)
+    — usunięte; jedyna droga to logowanie kontem."""
     _adm, admin_tok = _device()
-    st, req = _req(srv, "POST", "/v1/pair/request", body={"name": "Laptop", "class": "pc",
-                                                         "pubkey": keyhelp.new_key()[1]})
-    st, r = _req(srv, "POST", "/v1/pair/approve", user_tok, body={"code": req["code"], "allow": True})
-    assert st == 403 and not r["ok"]
-    st, r = _req(srv, "POST", "/v1/pair/approve", admin_tok, body={"code": req["code"], "allow": True})
-    assert st == 200 and r["status"] == "approved"
+    for path in ("/v1/pair", "/v1/pair/request", "/v1/pair/poll", "/v1/pair/approve", "/v1/auth/upgrade"):
+        assert _req(srv, "POST", path, admin_tok, body={"code": "X"})[0] == 404, path
+
+
+def test_device_api_only_over_tls_from_the_network():
+    """Zwykły port: API urządzeń tylko z tego komputera; z sieci lokalnej i Tailscale — odmowa."""
+    class Srv:
+        server_address = ("0.0.0.0", 8740)
+    sent = []
+    h = _H("192.168.1.20")
+    h.server = Srv()
+    h.headers = {"Content-Length": "0"}
+    h.close_connection = False
+    h.send_error = sent.append
+    assert not server._v1_ok(h) and sent == [403]
+    h2 = _H("127.0.0.1")
+    h2.server = Srv()
+    assert server._v1_ok(h2)
+    h3 = _H("127.0.0.1", headers={"CF-Connecting-IP": "81.2.69.1", "Content-Length": "0"})
+    h3.server, h3.close_connection, h3.send_error = Srv(), False, sent.append
+    assert not server._v1_ok(h3)
 
 
 @pytest.mark.parametrize("bad", ["Jezus.", "Jezus ", "Jezus./save/x.srm", "JEZUS~1/save", "CON", "con.txt",
@@ -127,3 +136,10 @@ def test_panel_needs_local_connection_even_with_forged_host(srv):
     host, port, _nas = srv
     st, _r = _req(srv, "POST", "/admin/status", headers={"X-EmuStart": "1", "Host": f"127.0.0.1:{port}"})
     assert st == 200
+
+
+def test_shared_server_token_works_only_on_server_machine(srv):
+    """Wspólny klucz serwera (panel, narzędzia) — tylko z tego komputera, nigdy z sieci ani tunelu."""
+    token = remote.API._cfg["server_token"]
+    assert _req(srv, "GET", "/v1/info", token)[0] == 200                # ten komputer (127.0.0.1)
+    assert _req(srv, "GET", "/v1/info", token, headers={"CF-Connecting-IP": "81.2.69.20"})[0] == 403

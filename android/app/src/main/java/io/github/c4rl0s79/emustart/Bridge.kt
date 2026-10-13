@@ -31,7 +31,6 @@ class Bridge(private val act: MainActivity) {
 
     init {
         pool.execute {
-            try { upgradeLegacyKey() } catch (e: Exception) { Log.w(tag, "klucz urządzenia: $e") }
             try { saves.retryPending() } catch (e: Exception) { Log.w(tag, "zaległe zapisy: $e") }
             // blokada profilu z poprzedniego uruchomienia (aplikację zamknięto w trakcie gry)
             try { if (launch == null) saves.releaseStaleLock(prefs.profile) } catch (e: Exception) { }
@@ -88,10 +87,8 @@ class Bridge(private val act: MainActivity) {
         "set_variant" -> setVariant(a.getInt(0), a.optInt(1, 0))
         "get_settings" -> settings()
         "save_settings" -> { saveSettings(a.getJSONObject(0)); JSONObject().put("ok", true) }
-        "server_test" -> serverTest()
         "server_scan" -> scanQr()
-        "server_pair" -> pairServer(a.optString(0, ""), a.optString(1, ""))
-        "server_approve" -> approveDevice(a.optString(0, ""), a.opt(1) as? Boolean)
+        "server_logout" -> logout()
         "server_enroll" -> enrollStart(a.optString(0, ""), a.optString(1, ""), a.optString(2, ""), a.optString(3, ""))
         "server_enroll_poll" -> enrollPoll()
         "server_enroll_cancel" -> { enrollCancel(); JSONObject().put("ok", true) }
@@ -277,7 +274,7 @@ class Bridge(private val act: MainActivity) {
 
     /** Adresy serwera (sieć lokalna, Tailscale, publiczny, tunel) i odcisk certyfikatu — po
      *  udanym połączeniu, najwyżej raz na godzinę. Bez tego telefon znał tylko adres wpisany
-     *  przy parowaniu i po wyłączeniu Tailscale nie miał dokąd się połączyć. */
+     *  przy zalogowaniu i po wyłączeniu Tailscale nie miał dokąd się połączyć. */
     private fun learnAddresses() {
         val now = System.currentTimeMillis()
         if (now - learnedAt < 3_600_000) return
@@ -519,7 +516,7 @@ class Bridge(private val act: MainActivity) {
                 .put("options", opts).put("emulator", chosenEmu(s)))
         }
         return JSONObject()
-            .put("server_url", prefs.serverUrl).put("server_key", prefs.serverKey.ifEmpty { if (prefs.deviceId.isNotEmpty()) "dev:" + prefs.deviceId else "" })
+            .put("server_url", prefs.serverUrl).put("server_key", if (prefs.configured) "dev:" + prefs.deviceId else "")
             .put("server_keykind", if (prefs.deviceId.isNotEmpty()) "Android Keystore" else "")
             .put("server_account", prefs.serverAccount)
             .put("enroll", prefs.enrollPending.takeIf { it.isNotEmpty() }?.let { val o = JSONObject(it)
@@ -538,13 +535,6 @@ class Bridge(private val act: MainActivity) {
         while (keys.hasNext()) {
             val k = keys.next()
             when {
-                k == "server_url" -> {
-                    var u = d.getString(k).trim()
-                    if (u.isNotEmpty()) u = normUrl(u)
-                    // inny serwer: adresy i certyfikat poprzedniego nie obowiązują (nauczy się od nowa)
-                    if (u.trimEnd('/') != prefs.serverUrl) { prefs.serverEndpoints = ""; prefs.serverFp = ""; server.forgetBase() }
-                    prefs.serverUrl = u; systemsCache = null
-                }
                 k == "cache_recent" -> prefs.cacheRecent = d.getInt(k)
                 k == "streams" -> prefs.streams = d.getInt(k)
                 k == "games_logo" -> prefs.gamesLogo = d.getBoolean(k)
@@ -557,19 +547,8 @@ class Bridge(private val act: MainActivity) {
         }
     }
 
-    private fun serverTest(): JSONObject = try {
-        val info = server.info()
-        systemsCache = null
-        online = true
-        JSONObject().put("ok", true).put("name", info.optString("name")).put("version", info.optString("version"))
-            .put("systems", systems().length())
-    } catch (e: Exception) {
-        online = false
-        JSONObject().put("ok", false).put("reason", explain(e))
-    }
-
     /** Kod QR z panelu serwera (Dodaj urządzenie) — skaner kodów Google Play: bez uprawnienia
-     *  do aparatu w EmuStart. Bez Google Play: ręczne wpisanie kodu (Połącz kodem). */
+     *  do aparatu w EmuStart. Bez Google Play: Zaloguj (adres serwera). */
     private fun scanQr(): JSONObject {
         val latch = CountDownLatch(1)
         var out = JSONObject().put("ok", false).put("reason", "Anulowano.")
@@ -582,11 +561,11 @@ class Bridge(private val act: MainActivity) {
                     .addOnCanceledListener { latch.countDown() }
                     .addOnFailureListener { e ->
                         out = JSONObject().put("ok", false)
-                            .put("reason", "Skaner kodów niedostępny (${e.message}) — wpisz kod ręcznie: Połącz kodem.")
+                            .put("reason", "Skaner kodów niedostępny (${e.message}) — użyj: Zaloguj (adres serwera).")
                         latch.countDown()
                     }
             } catch (e: Exception) {
-                out = JSONObject().put("ok", false).put("reason", "Skaner kodów niedostępny — wpisz kod ręcznie: Połącz kodem.")
+                out = JSONObject().put("ok", false).put("reason", "Skaner kodów niedostępny — użyj: Zaloguj (adres serwera).")
                 latch.countDown()
             }
         }
@@ -594,17 +573,47 @@ class Bridge(private val act: MainActivity) {
         return out
     }
 
-    /** Parowanie: kod z panelu serwera albo link z kodu QR (emustart://pair?u=…&c=…) →
-     *  własny klucz tego telefonu (zamiast przepisywania wspólnego klucza serwera). */
-    // ── nowa instalacja przez internet (emustart/enroll.py): klucz urządzenia, prośba, zatwierdzenie ──
-    private fun enrollStart(url0: String, mode: String, account: String, password: String): JSONObject {
-        if (url0.isBlank() || account.isBlank() || mode !in setOf("new", "existing"))
-            return JSONObject().put("ok", false).put("reason", "Podaj adres serwera i nazwę konta.")
+    // ── logowanie na serwerze (emustart/enroll.py): konto + hasło + klucz urządzenia ──
+    private data class Login(val eps: List<Triple<String, String, Boolean>>, val fp: String, val code: String)
+
+    /** Link z kodu QR panelu (adresy, odcisk certyfikatu, kod jednorazowy) albo adres tunelu.
+     *  Adres IP bez kodu QR nie ma czym sprawdzić certyfikatu — tylko domena z prawdziwym. */
+    private fun parseLogin(text0: String): Pair<Login?, String> {
+        val text = text0.trim()
+        if (text.lowercase().startsWith("emustart://login")) {
+            return try {
+                val raw = Uri.parse(text).getQueryParameter("d") ?: ""
+                val d = JSONObject(String(android.util.Base64.decode(raw,
+                    android.util.Base64.URL_SAFE or android.util.Base64.NO_PADDING or android.util.Base64.NO_WRAP), Charsets.UTF_8))
+                val a = d.getJSONArray("e")
+                val eps = (0 until a.length()).map { a.getJSONObject(it) }
+                    .filter { it.optString("u").startsWith("https://") }
+                    .map { Triple(it.getString("u").trimEnd('/'), it.optString("k"), it.optInt("ca", 0) == 1) }
+                val fp = d.optString("f").lowercase()
+                if (eps.isEmpty() || !Regex("[0-9a-f]{64}").matches(fp)) throw IllegalArgumentException("brak adresów")
+                Pair(Login(eps, fp, d.optString("c")), "")
+            } catch (e: Exception) { Pair(null, "To nie jest kod logowania EmuStart.") }
+        }
+        if (text.isBlank()) return Pair(null, "Podaj adres serwera albo zeskanuj kod QR z panelu.")
+        if (text.lowercase().startsWith("http://"))
+            return Pair(null, "Tylko połączenie szyfrowane — podaj adres https (tunel) albo użyj kodu QR z panelu.")
+        val u = (if (text.lowercase().startsWith("https://")) text else "https://$text").trimEnd('/')
+        val host = u.removePrefix("https://").substringBefore('/').substringBeforeLast(':')
+        if (!host.contains('.') || Regex("""^[\d.]+$""").matches(host) || host.contains(':'))
+            return Pair(null, "Adres IP albo nazwę komputera da się sprawdzić tylko kodem QR z panelu serwera " +
+                              "(Dodaj urządzenie) — wpisz adres tunelu (np. emustart.emucloud.org).")
+        return Pair(Login(listOf(Triple(u, "tunnel", true)), "", ""), "")
+    }
+
+    private fun enrollStart(text: String, mode: String, account: String, password: String): JSONObject {
+        if (account.isBlank() || mode !in setOf("new", "existing"))
+            return JSONObject().put("ok", false).put("reason", "Podaj nazwę konta.")
         // hasło konta (emustart/accounts.py) idzie tylko w prośbie — telefon go nie zapisuje
         if (password.isEmpty()) return JSONObject().put("ok", false).put("reason", "Podaj hasło konta.")
-        val url = normUrl(url0)
+        val (login, why) = parseLogin(text)
+        if (login == null) return JSONObject().put("ok", false).put("reason", why)
         val old = prefs.enrollPending.takeIf { it.isNotEmpty() }?.let { JSONObject(it) }
-        if (old != null && (old.optString("url") != url || old.optString("account") != account || old.optString("mode") != mode)) enrollCancel()
+        if (old != null && (old.optString("account") != account || old.optString("mode") != mode || login.code.isNotEmpty())) enrollCancel()
         val keep = old != null && prefs.enrollPending.isNotEmpty()
         val alias = if (keep) old!!.optString("alias") else "emustart-" + java.util.UUID.randomUUID().toString().take(12)
         val (kind, pem) = if (keep) Pair(old!!.optString("kind"), old.optString("pubkey")) else try {
@@ -612,46 +621,60 @@ class Bridge(private val act: MainActivity) {
         } catch (e: Exception) {
             return JSONObject().put("ok", false).put("reason", "Nie udało się utworzyć klucza urządzenia: ${e.message}")
         }
-        val r = try {
-            server.postJson(url, "/v1/enroll/request", JSONObject().put("mode", mode).put("account", account)
-                .put("password", password).put("name", saves.device).put("class", "phone").put("version", BuildConfig.VERSION_NAME).put("pubkey", pem)
-                .put("hw", server.hwId),
-                ca = !url.startsWith("http://"))
-        } catch (e: Exception) { JSONObject().put("ok", false).put("reason", explain(e)) }
+        val body = JSONObject().put("mode", mode).put("account", account).put("password", password)
+            .put("name", saves.device).put("class", "phone").put("version", BuildConfig.VERSION_NAME)
+            .put("pubkey", pem).put("hw", server.hwId).put("login_code", login.code)
+        var r = JSONObject().put("ok", false).put("reason", "Serwer nie odpowiada.")
+        var used = Triple("", "", true)
+        for (ep in login.eps) {                       // pierwszy osiągalny adres serwera
+            used = ep
+            r = try { server.postJson(ep.first, "/v1/enroll/request", body, ca = ep.third, fp = if (ep.third) "" else login.fp) }
+                catch (e: Exception) { JSONObject().put("ok", false).put("reason", explain(e)).put("unreachable", true) }
+            if (!r.optBoolean("unreachable")) break
+        }
         if (!r.optBoolean("ok")) {
             if (!keep) DeviceKey.delete(alias)
             return JSONObject().put("ok", false).put("reason", r.optString("reason", "Serwer odrzucił prośbę."))
         }
-        prefs.enrollPending = JSONObject().put("url", url).put("rid", r.getString("rid")).put("code", r.getString("pretty"))
+        prefs.enrollPending = JSONObject().put("url", used.first).put("ca", used.third).put("fp", login.fp)
+            .put("rid", r.getString("rid")).put("code", r.getString("pretty"))
             .put("account", account).put("mode", mode).put("alias", alias).put("kind", kind).put("pubkey", pem).toString()
-        Log.i(tag, "prośba o dołączenie do $url ($mode, konto $account, klucz: $kind)")
-        return JSONObject().put("ok", true).put("code", r.getString("pretty")).put("account", account).put("url", url).put("key", kind)
+        Log.i(tag, "prośba o zalogowanie na ${used.first} ($mode, konto $account, klucz: $kind)")
+        val out = JSONObject().put("ok", true).put("code", r.getString("pretty")).put("account", account)
+            .put("url", used.first).put("key", kind)
+        if (r.optString("status") == "approved") out.put("status", enrollPoll().optString("status"))   // kod z panelu
+        return out
     }
 
     private fun enrollPoll(): JSONObject {
         val p = prefs.enrollPending.takeIf { it.isNotEmpty() }?.let { JSONObject(it) }
             ?: return JSONObject().put("ok", false).put("status", "none")
         val url = p.getString("url")
+        val ca = p.optBoolean("ca", true)
         val r = try {
-            server.postJson(url, "/v1/enroll/poll", JSONObject().put("rid", p.getString("rid")), ca = !url.startsWith("http://"))
+            server.postJson(url, "/v1/enroll/poll", JSONObject().put("rid", p.getString("rid")), ca = ca,
+                            fp = if (ca) "" else p.optString("fp"))
         } catch (e: Exception) { JSONObject().put("ok", false).put("reason", explain(e)) }
         val st = if (r.optBoolean("ok")) r.optString("status") else "error"
         when (st) {
             "approved" -> {
+                val oldKey = prefs.deviceKey
                 prefs.serverUrl = url
-                prefs.serverKey = ""
                 prefs.deviceId = r.getString("device")
                 prefs.deviceKey = p.getString("alias")
+                if (oldKey.isNotEmpty() && oldKey != prefs.deviceKey) DeviceKey.delete(oldKey)
                 prefs.serverAccount = r.optString("account", p.optString("account"))
                 // konto = profil tego telefonu (zamiast wyboru z listy po zatwierdzeniu)
                 prefs.profile = prefs.serverAccount
                 if (prefs.phoneOwner.isEmpty()) prefs.phoneOwner = prefs.serverAccount
                 prefs.serverEndpoints = ""
+                prefs.serverFp = p.optString("fp")
+                server.learn(r, trusted = true)       // adresy i odcisk — z połączenia szyfrowanego
                 prefs.enrollPending = ""
                 server.dropToken(); server.forgetBase()
                 systemsCache = null
                 learnedAt = 0L
-                Log.i(tag, "dołączono do serwera $url (konto ${prefs.serverAccount})")
+                Log.i(tag, "zalogowano na serwerze $url (konto ${prefs.serverAccount})")
             }
             "denied", "expired" -> enrollCancel()
         }
@@ -665,6 +688,18 @@ class Bridge(private val act: MainActivity) {
         prefs.enrollPending = ""
     }
 
+    /** Wyloguj z serwera: serwer unieważnia ten telefon, klucz urządzenia i adresy znikają. */
+    private fun logout(): JSONObject {
+        if (prefs.configured) try { server.postAuthed("/v1/auth/logout", JSONObject()) } catch (e: Exception) { Log.w(tag, "wylogowanie: $e") }
+        if (prefs.deviceKey.isNotEmpty()) DeviceKey.delete(prefs.deviceKey)
+        prefs.forgetServer()
+        server.dropToken(); server.forgetBase()
+        systemsCache = null
+        online = false
+        Log.i(tag, "wylogowano z serwera")
+        return JSONObject().put("ok", true)
+    }
+
     /** Prośby, które ten telefon może zatwierdzić (pokazywane przy otwarciu aplikacji). */
     private fun enrollPending(): JSONObject {
         if (!prefs.configured) return JSONObject().put("ok", true).put("requests", JSONArray())
@@ -672,117 +707,17 @@ class Bridge(private val act: MainActivity) {
         return if (r.optBoolean("ok")) r else JSONObject().put("ok", true).put("requests", JSONArray())
     }
 
-    /** Adres serwera wpisany przez gracza: nazwa domeny (np. emustart.emucloud.org — tunel)
-     *  → https (port 443), adres IP / nazwa komputera → http z portem 8740. */
-    private fun normUrl(s: String): String {
-        var u = s.trim().trimEnd('/')
-        if (!u.startsWith("http://") && !u.startsWith("https://")) {
-            val host = u.substringBefore('/').substringBefore(':')
-            val domain = host.contains('.') && !Regex("""^\d+(\.\d+){3}$""").matches(host)
-            u = (if (domain) "https://" else "http://") + u
-        }
-        if (u.startsWith("http://") && !Regex(""":\d+$""").containsMatchIn(u.removePrefix("http://"))) u += ":8740"
-        return u
-    }
-
-    /** Zatwierdzenie nowego urządzenia kodem z jego ekranu albo linkiem z jego kodu QR
-     *  (emustart://approve?u=…&c=…). allow == null — tylko podgląd prośby (nazwa, rodzaj, adres). */
-    private fun approveDevice(text: String, allow: Boolean?): JSONObject {
-        if (!prefs.configured)
-            return JSONObject().put("ok", false).put("reason", "Ten telefon nie jest połączony z serwerem.")
-        var code = text.trim()
-        if (code.lowercase().startsWith("emustart://approve")) code = Uri.parse(code).getQueryParameter("c") ?: ""
-        else if (code.lowercase().startsWith("emustart://pair"))
-            return JSONObject().put("ok", false).put("reason", "To kod do łączenia telefonu z serwerem — użyj „Połącz z serwerem (kod QR)”.")
-        return try { server.approve(code, allow) } catch (e: Exception) {
-            JSONObject().put("ok", false).put("reason", explain(e))
-        }
-    }
-
-    private fun pairServer(text: String, url0: String): JSONObject {
-        var url = url0.ifBlank { prefs.serverUrl }
-        var code = text.trim()
-        if (code.lowercase().startsWith("emustart://pair")) {
-            val u = Uri.parse(code)
-            url = u.getQueryParameter("u") ?: url
-            code = u.getQueryParameter("c") ?: ""
-        }
-        if (url.isBlank()) return JSONObject().put("ok", false).put("reason", "Podaj adres serwera albo zeskanuj kod QR.")
-        url = normUrl(url)
-        // klucz urządzenia w Android Keystore — serwer nie wydaje już kluczy-haseł (0.39)
-        val alias = "emustart-" + java.util.UUID.randomUUID().toString().take(12)
-        val pem = try { DeviceKey.create(alias).second } catch (e: Exception) {
-            return JSONObject().put("ok", false).put("reason", "Nie udało się utworzyć klucza urządzenia: ${e.message}")
-        }
-        return try {
-            val c = java.net.URL(url.trimEnd('/') + "/v1/pair").openConnection() as java.net.HttpURLConnection
-            c.connectTimeout = 8000; c.readTimeout = 15000
-            c.requestMethod = "POST"; c.doOutput = true
-            c.setRequestProperty("Content-Type", "application/json")
-            val body = JSONObject().put("code", code).put("name", saves.device).put("class", "phone")
-                .put("version", BuildConfig.VERSION_NAME).put("hw", server.hwId).put("pubkey", pem).toString().toByteArray()
-            c.outputStream.use { it.write(body) }
-            val code2 = c.responseCode
-            val txt = (if (code2 in 200..299) c.inputStream else c.errorStream)?.bufferedReader()?.readText() ?: "{}"
-            c.disconnect()
-            val d = JSONObject(txt)
-            if (!d.optBoolean("ok")) {
-                DeviceKey.delete(alias)
-                return JSONObject().put("ok", false).put("reason", d.optString("reason", "Serwer odrzucił kod."))
-            }
-            prefs.serverUrl = url
-            useDeviceKey(d.getString("id"), alias)
-            server.learn(d)                        // adresy serwera i odcisk certyfikatu (HTTPS)
-            systemsCache = null
-            online = true
-            JSONObject().put("ok", true).put("server", d.optString("server")).put("url", url)
-        } catch (e: Exception) {
-            DeviceKey.delete(alias)
-            JSONObject().put("ok", false).put("reason", explain(e))
-        }
-    }
-
-    /** Ten telefon łączy się kluczem urządzenia `did` (stary klucz-hasło i poprzedni klucz — usunięte). */
-    private fun useDeviceKey(did: String, alias: String) {
-        val old = prefs.deviceKey
-        prefs.deviceId = did
-        prefs.deviceKey = alias
-        prefs.serverKey = ""
-        if (old.isNotEmpty() && old != alias) DeviceKey.delete(old)
-        server.dropToken(); server.forgetBase()
-        systemsCache = null
-    }
-
-    /** Stary klucz-hasło → klucz urządzenia (ten sam wpis na serwerze) — przy starcie aplikacji. */
-    private fun upgradeLegacyKey() {
-        if (prefs.serverKey.isEmpty() || prefs.deviceId.isNotEmpty() || prefs.serverUrl.isEmpty()) return
-        val alias = "emustart-" + java.util.UUID.randomUUID().toString().take(12)
-        try {
-            val pem = DeviceKey.create(alias).second
-            val r = server.postAuthed("/v1/auth/upgrade", JSONObject().put("pubkey", pem).put("hw", server.hwId))
-            if (r.optBoolean("ok")) {
-                useDeviceKey(r.getString("id"), alias)
-                Log.i(tag, "telefon przeszedł na klucz urządzenia")
-            } else {
-                DeviceKey.delete(alias)
-                Log.w(tag, "przejście na klucz urządzenia: ${r.optString("reason")}")
-            }
-        } catch (e: Exception) {
-            DeviceKey.delete(alias)
-            Log.w(tag, "przejście na klucz urządzenia: $e")
-        }
-    }
-
     /** Zrozumiały powód błędu połączenia z serwerem. */
     private fun explain(e: Exception): String {
-        val url = prefs.serverUrl.ifBlank { "(brak adresu)" }
+        val url = prefs.serverUrl.ifBlank { "(serwer)" }
         return when (e) {
             is Server.HttpError -> if (e.code == 401)
-                "Serwer $url odpowiada, ale nie przyjmuje klucza tego telefonu — połącz ponownie: Dołącz przez internet albo kod z panelu serwera."
+                "Serwer $url odpowiada, ale nie przyjmuje tego telefonu — zaloguj się ponownie (Ustawienia → Zaloguj)."
                 else "Serwer $url odpowiedział błędem ${e.code}: ${e.message}"
-            is java.net.UnknownHostException -> "Nieznany adres serwera: $url. Wpisz adres Tailscale komputera z grami, np. 100.85.254.31."
+            is java.net.UnknownHostException -> "Nieznany adres serwera: ${e.message ?: url}."
+            is javax.net.ssl.SSLException -> "Połączenie szyfrowane z $url nie powiodło się (${e.message}) — zaloguj się ponownie kodem QR z panelu."
             is java.net.SocketTimeoutException, is java.net.ConnectException, is java.net.NoRouteToHostException ->
-                "Telefon nie łączy się z $url. Sprawdź, czy Tailscale na telefonie jest włączony (to samo konto co komputer z grami) i czy na komputerze działa serwer EmuStart."
+                "Telefon nie łączy się z serwerem ($url). Sprawdź internet i czy na komputerze z grami działa serwer EmuStart."
             is java.net.MalformedURLException -> "Niepoprawny adres serwera: $url"
             else -> "${e.javaClass.simpleName}: ${e.message ?: ""} ($url)"
         }

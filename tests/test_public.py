@@ -149,12 +149,10 @@ def test_public_port_only_api_with_key_and_bans_guessers(monkeypatch):
     assert _req(port, fp, "GET", "/v1/info", KEY, {"CF-Connecting-IP": "81.2.69.10"}) == 403
     # wspólny klucz serwera przez tunel nie działa (0.39 — tylko na komputerze serwera); bez blokady
     assert _req(port, fp, "GET", "/v1/info", KEY, {"CF-Connecting-IP": "81.2.69.11"}) == 401
-    import time
     import keyhelp
-    from emustart import devices, enroll
-    with devices._lock:
-        did = devices._add_keyed_locked("Telefon", "phone", "", "", keyhelp.new_key()[1], time.time())
-    enroll._tokens["sesja-telefonu"] = (did, time.time() + 600)         # zalogowany kluczem urządzenia
+    from emustart import enroll
+    _did, tok = keyhelp.device("Telefon", name="Telefon")
+    enroll._tokens["sesja-telefonu"] = enroll._tokens.pop(tok)        # zalogowany kluczem urządzenia
     assert _req(port, fp, "GET", "/v1/info", "sesja-telefonu", {"CF-Connecting-IP": "81.2.69.11"}) == 200
     assert public.status()["banned"] == 1
     assert public.STATE["last_ip"] == "81.2.69.11"
@@ -196,10 +194,10 @@ def test_tunnel_endpoint_is_listed_with_normal_certificate(monkeypatch):
         {"url": "http://192.168.1.130:8740", "kind": "lan"}, {"url": "https://81.2.69.142:8742", "kind": "public", "tls": True},
         public.tunnel_endpoint()]})
     cands = netsrc.candidates({"server_url": "http://100.85.254.31:8740", "server_key": KEY})
+    assert all(sp[0] == "https" for sp in cands)                    # zwykłe http — pominięte (0.43)
     order = sorted(cands, key=lambda sp: (netsrc._kind(sp), sp[0] == "https"))
     assert order[-1] == ("https", "emustart.emucloud.org", 443) and netsrc._mode(order[-1]) == "ca"
-    assert order[0] == ("http", "192.168.1.130", 8740)
-    assert netsrc._mode(("https", "81.2.69.142", 8742)) == "pin"
+    assert order[0] == ("https", "81.2.69.142", 8742) and netsrc._mode(order[0]) == "pin"
 
 
 def test_reachability_probe_recognises_us_without_counting_failures(monkeypatch):

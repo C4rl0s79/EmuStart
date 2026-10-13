@@ -12,6 +12,10 @@ nigdy go nie wydaje. Złe hasła: rosnące opóźnienie na konto i limit na adre
 
 Token konta (nagłówek X-Profile-Token) = HMAC(sekret serwera, konto + skrót hasła): zmiana
 hasła unieważnia tokeny na wszystkich urządzeniach.
+
+Administrator (0.43) to cecha konta, nie urządzenia: wszystkie urządzenia konta administratora
+widzą wszystkie konta i zatwierdzają nowe. Ustawiana w panelu serwera; konto zalogowane
+pierwszy raz kodem QR z panelu, gdy żadne nie jest administratorem, zostaje nim samo.
 """
 
 from __future__ import annotations
@@ -126,21 +130,40 @@ def record(name: str) -> dict | None:
 
 
 def has_password(name: str) -> bool:
-    return record(name) is not None
+    return bool((record(name) or {}).get("hash"))
 
 
 def names_with_password() -> set:
     with _lock:
-        return set(_load())
+        return {k for k, r in _load().items() if r.get("hash")}
 
 
 def set_record(name: str, rec: dict, by: str = "") -> None:
-    """Zapisuje gotowy skrót (np. z prośby o dołączenie — hasło nie jest tam trzymane)."""
+    """Zapisuje gotowy skrót (np. z prośby o zalogowanie — hasło nie jest tam trzymane);
+    flaga administratora zostaje."""
     with _lock:
-        _load()[name.lower()] = {**rec, "name": name}
+        old = _load().get(name.lower()) or {}
+        _load()[name.lower()] = {**old, **rec, "name": name}
         _save()
         _fails.pop(name.lower(), None)
     log.info("hasło konta %s ustawione%s", name, f" — {by}" if by else "")
+
+
+def is_admin(name: str) -> bool:
+    return bool(name) and bool((record(name) or {}).get("admin"))
+
+
+def any_admin() -> bool:
+    with _lock:
+        return any(r.get("admin") for r in _load().values())
+
+
+def set_admin(name: str, admin: bool, by: str = "") -> None:
+    with _lock:
+        rec = _load().setdefault(name.lower(), {"name": name})
+        rec["admin"] = bool(admin)
+        _save()
+    log.info("konto %s %s administratorem%s", name, "jest" if admin else "nie jest", f" — {by}" if by else "")
 
 
 def set_password(name: str, pw: str, by: str = "") -> str:
@@ -187,7 +210,7 @@ def verify(name: str, pw: str, ip: str = "") -> tuple[bool, str, float]:
     if left > 0:
         return False, f"Za dużo złych haseł — spróbuj za {int(left) + 1} s.", left
     rec = record(name)
-    if rec is None:
+    if not (rec or {}).get("hash"):
         return False, "brak", 0.0
     if _check(rec, pw):
         with _lock:
@@ -201,7 +224,7 @@ def verify(name: str, pw: str, ip: str = "") -> tuple[bool, str, float]:
 # ── token konta (inny użytkownik na urządzeniu) ──
 def token(secret: str, name: str) -> str:
     rec = record(name)
-    if rec is None:
+    if not (rec or {}).get("hash"):
         return ""
     msg = ("konto\n" + name.lower() + "\n" + rec.get("hash", "")).encode()
     return hmac.new(secret.encode(), msg, hashlib.sha256).hexdigest()

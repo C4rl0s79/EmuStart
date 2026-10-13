@@ -30,19 +30,14 @@ To ten sam program (`EmuStart.exe`), uruchamiany bez okna z parametrem `--server
    EmuStart.exe --install-server
    ```
    Dodaje to zadanie w Harmonogramie zadań („EmuStart Server”, start razem z Windows)
-   i regułę zapory dla portu 8740.
+   i reguły zapory dla portów 8740 (panel) i 8741 (szyfrowany).
 4. Uruchom serwer od razu (albo zrestartuj komputer):
    ```
    schtasks /Run /TN "EmuStart Server"
    ```
-5. Kod parowania dla nowego urządzenia (to samo co **Dodaj urządzenie** w panelu):
-   ```
-   EmuStart.exe --server-key
-   ```
-   Od 0.39 polecenie pokazuje jednorazowy kod parowania z działającego serwera, nie
-   wspólny klucz.
-
-Adres serwera dla telefonu: `http://<adres Tailscale komputera>:8740`.
+5. Nowe urządzenie: panel serwera → **Dodaj urządzenie** (kod QR) — patrz
+   [Logowanie urządzeń](#logowanie-urządzeń-043). Bez okna panelu: `EmuStart.exe --server-key`
+   kopiuje do schowka link logowania (to samo co kod QR).
 
 ## Panel serwera
 
@@ -69,65 +64,70 @@ Po aktualizacji do 0.25.12 uruchom ponownie `EmuStart.exe --install-server` (jak
 administrator): zadanie dostaje brak limitu czasu pracy (schtasks domyślnie zatrzymuje
 zadanie po 72 h) i ponowne uruchomienie po awarii.
 
-## Urządzenia i parowanie (0.32)
+## Logowanie urządzeń (0.43)
 
-Każdy komputer i telefon ma **własny klucz** — zamiast przepisywać wspólny klucz serwera:
+Jedyna droga urządzenia do serwera: **konto i hasło** + **klucz urządzenia** (para kluczy
+EC P-256 tworzona na urządzeniu: Windows — TPM, bez niego DPAPI; Android — Android
+Keystore; klucz prywatny nie opuszcza urządzenia) i logowanie podpisem (token sesji na
+godzinę). W Ustawieniach aplikacji są tylko dwa wiersze:
 
-1. Panel serwera → **Sparowane urządzenia** → **Dodaj urządzenie** — kod jednorazowy (ważny
-   10 minut) jako tekst i kod QR.
-2. **Telefon**: Ustawienia → **Połącz z serwerem (kod QR)** → zeskanuj kod (skaner Google
-   Play, bez uprawnienia do aparatu w EmuStart). Bez Google Play: **Połącz kodem** i wpisz kod.
-3. **Komputer**: Ustawienia → Serwer EmuStart → **Połącz kodem** → wpisz kod (albo wklej link
-   `emustart://pair?…` z kodu QR).
+- **Zaloguj (kod QR)** (telefon) — panel serwera → **Dodaj urządzenie** → zeskanuj kod. Kod
+  niesie adresy serwera, odcisk jego certyfikatu i jednorazowy kod (10 minut): połączenie
+  od pierwszego zapytania szyfrowane i przypięte, **bez czekania na zatwierdzenie** (kto
+  zeskanował kod z ekranu serwera, ma do niego dostęp). Komputer bez aparatu: w panelu
+  **Kopiuj link** i wklej go w **Zaloguj**.
+- **Zaloguj (adres serwera)** — adres tunelu, np. `emustart.emucloud.org` (prawdziwy
+  certyfikat). Prośba czeka na zatwierdzenie; adres IP bez kodu QR nie jest przyjmowany
+  (nie ma czym sprawdzić certyfikatu).
 
-**Nowy komputer bez przepisywania kodu (0.33):** na nowym komputerze Ustawienia → Serwer
-EmuStart → **Dołącz do serwera (zatwierdź telefonem)** → adres serwera. Komputer pokazuje kod
-i QR; na sparowanym telefonie Ustawienia → **Zatwierdź nowe urządzenie (kod QR)** → zeskanuj →
-**Zatwierdź** (telefon pokazuje nazwę i adres nowego urządzenia). Można też zatwierdzić kodem
-na innym sparowanym komputerze albo w panelu serwera (**Proszą o dołączenie**). Kod ważny
-10 minut, jednorazowy; zatwierdzać może tylko sparowane urządzenie.
+Potem **Mam konto** / **Nowe konto** → nazwa → hasło (nowe konto: co najmniej 10 znaków,
+wielka litera, cyfra, znak specjalny). Urządzenie pokazuje **kod weryfikacyjny**, np.
+`K7Q2-9FMX`.
 
-Panel pokazuje urządzenia z rodzajem, wersją EmuStart i ostatnim kontaktem; **Unieważnij**
-odcina tylko to jedno urządzenie, **Nazwa** zmienia nazwę. Serwer trzyma tylko skróty kluczy
-(SHA-256).
+**Zatwierdzanie** (logowanie bez kodu QR): prośbę widzi inne urządzenie konta — okienko przy
+otwarciu aplikacji (i co minutę) — albo panel serwera (**Proszą o zalogowanie**): czas,
+adres, nazwa i rodzaj urządzenia, konto, kod. **Kod musi się zgadzać** z kodem na ekranie
+nowego urządzenia. Zatwierdzenie *z grami z serwera* albo *tylko zapisy i profil*; albo
+*Odrzuć*. Prośba czeka 24 godziny (przetrwa zamknięcie aplikacji i restart serwera).
+
+- **nowe konto** — zatwierdza administrator;
+- **Mam konto** — inne urządzenie tego konta; gdy konto nie ma jeszcze żadnego — administrator.
+
+**Administrator** to cecha **konta** (panel → **Konta** → *Administrator*): wszystkie
+urządzenia konta administratora widzą wszystkie konta i zatwierdzają nowe. Pierwsze konto
+zalogowane kodem QR z panelu, gdy żadne nie jest administratorem, zostaje nim samo.
+
+**Wyloguj z serwera** (Ustawienia): serwer unieważnia to urządzenie, klucz i zapamiętane
+adresy znikają; gry, zapisy i profile na urządzeniu zostają. Panel pokazuje urządzenia
+z kontem, wersją EmuStart i ostatnim kontaktem; **Unieważnij** odcina jedno urządzenie,
+**Nazwa** zmienia nazwę, *Z grami / Bez gier* — pobieranie gier z serwera.
+
+Rejestracje sprzed 0.43 bez konta (parowanie kodem, stary klucz-hasło) są unieważniane przy
+starcie serwera — takie urządzenie loguje się ponownie.
 
 ## Konta i hasła (0.40)
 
-Panel serwera → **Konta**: każde konto (profil), czy ma hasło i ile urządzeń. **Ustaw
-hasło** / **Nowe hasło** — gdy użytkownik zapomniał hasła (działa tylko w panelu na tym
-komputerze). Hasło: co najmniej 10 znaków, wielka litera, cyfra, znak specjalny; skrót
-scrypt w `accounts.json` w katalogu serwera. Szczegóły: [Profile graczy](Profile-graczy).
+Panel serwera → **Konta**: każde konto (profil), czy ma hasło, czy jest administratorem
+i ile urządzeń. **Ustaw hasło** / **Nowe hasło** — gdy użytkownik zapomniał hasła (działa
+tylko w panelu na tym komputerze). Skrót hasła (scrypt) w `accounts.json` w katalogu
+serwera. Szczegóły: [Profile graczy](Profile-graczy).
 
-## Tylko klucze urządzeń (0.39)
+## Adresy serwera i szyfrowanie
 
-Każde połączenie z serwerem to **klucz urządzenia** (para kluczy EC P-256: TPM albo DPAPI na
-Windows, Android Keystore na telefonie) i logowanie podpisem (token sesji na godzinę).
-Serwer nie wydaje już kluczy-haseł:
+Urządzenia łączą się z serwerem **tylko szyfrowanie** (od 0.43): port szyfrowany `8741`
+(sieć lokalna, Tailscale), port publiczny `8742` i tunel. Zwykły port `8740` obsługuje API
+tylko z samego serwera (panel). Certyfikat serwer tworzy sam przy pierwszym starcie
+(`server\tls-cert.pem`, ważny 20 lat); urządzenia porównują jego odcisk z zapamiętanym przy
+logowaniu („przypięcie”) — podszycie się pod serwer wymagałoby jego klucza prywatnego.
+Odpowiedź, która nie przyszła połączeniem zaufanym, nie zmienia zapamiętanego odcisku ani
+adresów.
 
-- parowanie kodem i prośba o dołączenie wymagają klucza publicznego urządzenia — starsza
-  wersja dostaje komunikat „Zaktualizuj EmuStart”,
-- urządzenie ze starym kluczem-hasłem po aktualizacji **samo przechodzi** na klucz
-  urządzenia (`/v1/auth/upgrade`) — ten sam wpis w panelu (nazwa, konto, rola), stary
-  klucz przestaje działać; do tego czasu stary klucz otwiera tylko `/v1/info` i przejście,
-- wspólny klucz serwera (`server_token`) działa **tylko na komputerze serwera** (127.0.0.1,
-  nie przez tunel); panel nie ma już przycisku „Pokaż klucz”, a aplikacje — pola „Klucz
-  serwera” i „Wklej klucz ze schowka”.
-
-## Adresy serwera i szyfrowanie (0.34)
-
-Serwer ma dwa porty: zwykły (`8740`) i **szyfrowany** (`8741`, HTTPS). Certyfikat serwer
-tworzy sam przy pierwszym starcie (`server\tls-cert.pem`); urządzenia nie sprawdzają go
-w urzędzie certyfikacji, tylko porównują jego odcisk z zapamiętanym przy parowaniu
-(„przypięcie”) — podszycie się pod serwer wymagałoby jego klucza prywatnego.
-
-Serwer podaje urządzeniom listę swoich adresów (sieć lokalna, Tailscale; zwykły port
-i szyfrowany). Urządzenie sprawdza je równolegle i wybiera najlepszy działający: najpierw
-sieć lokalna, potem Tailscale, na końcu adres publiczny; w obrębie rodzaju zwykły port przed
-szyfrowanym. Wybór jest odświeżany co 5 minut i po błędzie połączenia — telefon przechodzący
-z domowego Wi-Fi na sieć komórkową sam przełącza się na Tailscale.
-
-Komputer trzyma nauczone adresy w `data\serwer-adresy.json`, telefon — w ustawieniach
-aplikacji. Port publiczny (otwierany przez UPnP) i dostęp spoza Tailscale — kolejne wersje.
+Serwer podaje urządzeniom listę swoich adresów (sieć lokalna, Tailscale, port publiczny,
+tunel). Urządzenie sprawdza je równolegle i wybiera najlepszy działający: najpierw sieć
+lokalna, potem Tailscale, port publiczny, na końcu tunel. Wybór jest odświeżany co 5 minut
+i po błędzie połączenia — telefon przechodzący z domowego Wi-Fi na sieć komórkową sam
+przełącza się na kolejny adres. Komputer trzyma nauczone adresy w `data\serwer-adresy.json`,
+telefon — w ustawieniach aplikacji.
 
 ## Dostęp z internetu (0.35)
 
@@ -136,8 +136,8 @@ Panel serwera → **Dostęp z internetu** → **Włącz**. Serwer otwiera osobny
 urządzeniom jako adres „publiczny”. Urządzenie używa go tylko wtedy, gdy sieć lokalna
 i Tailscale nie odpowiadają — np. telefon na danych komórkowych bez Tailscale.
 
-- Port publiczny przyjmuje tylko API urządzeń i grafiki, **zawsze z kluczem urządzenia**;
-  bez parowania (to tylko w sieci lokalnej / Tailscale), bez panelu i interfejsu.
+- Port publiczny przyjmuje tylko API urządzeń i grafiki, **zawsze z tokenem urządzenia**
+  (logowanie i podpis — bez tokenu), bez panelu i interfejsu.
 - Seria złych kluczy z jednego adresu = blokada tego adresu na 30 minut; najwyżej 32
   połączenia naraz z jednego adresu.
 - Przekierowanie jest odnawiane co 20 minut i wygasa samo po wyłączeniu serwera.
@@ -161,46 +161,16 @@ urządzenia mogą łączyć się przez **Cloudflare Tunnel** na własnej domenie
    tunel działa.
 3. Urządzenia dostają adres tunelu razem z innymi adresami serwera i biorą go **na końcu**
    (sieć lokalna → Tailscale → port publiczny → tunel) — gry idą bezpośrednio, gdy się da.
-   Nowe urządzenie można też połączyć, wpisując sam adres tunelu jako adres serwera.
+   Nowe urządzenie loguje się, wpisując sam adres tunelu (**Zaloguj (adres serwera)**).
 
-Przez tunel obowiązują te same zasady co na porcie publicznym (tylko z kluczem urządzenia,
-bez parowania); blokada za złe klucze działa po prawdziwym adresie klienta (nagłówek
+Przez tunel obowiązują te same zasady co na porcie publicznym (tylko z tokenem urządzenia);
+blokada za złe klucze działa po prawdziwym adresie klienta (nagłówek
 `CF-Connecting-IP`). W Cloudflare nie włączaj *Bot Fight Mode* ani wyzwań dla tej
 subdomeny — aplikacje nie są przeglądarkami.
 
-## Nowe urządzenie przez internet, konta i role (0.37)
-
-Nowa instalacja (komputer albo telefon) potrzebuje **tylko adresu serwera** — np. adresu
-tunelu `emustart.twojadomena.org`:
-
-1. Ustawienia → **Dołącz przez internet (nowa instalacja)** → adres serwera → **Mam konto**
-   albo **Nowe konto** → nazwa konta.
-2. Urządzenie tworzy **własny klucz** (Windows: w TPM, a bez TPM — zaszyfrowany DPAPI;
-   Android: Android Keystore / StrongBox; klucza prywatnego nie da się skopiować na inny
-   sprzęt) i pokazuje **kod weryfikacyjny**, np. `K7Q2-9FMX`.
-3. Prośbę widzi zatwierdzający — w aplikacji EmuStart przy jej otwarciu (i co minutę) albo
-   w panelu serwera: czas, adres IP, nazwa i rodzaj urządzenia, konto, kod. **Kod musi się
-   zgadzać** z kodem na ekranie nowego urządzenia. Zatwierdzenie: *z grami z serwera* albo
-   *tylko zapisy i profil*; albo *Odrzuć*.
-4. Po zatwierdzeniu urządzenie loguje się samo (podpis kluczem urządzenia → token sesji na
-   godzinę, odnawiany) i od razu widzi swoje konto.
-
-Prośba czeka **24 godziny** (można zamknąć aplikację — przy następnym uruchomieniu sprawdzi
-stan sama). Do zatwierdzenia nowe urządzenie nie ma dostępu do niczego.
-
-**Kto zatwierdza:**
-- **nowe konto** — tylko administrator;
-- **Mam konto** — inne urządzenie tego konta; gdy konto nie ma jeszcze żadnego — administrator.
-
-**Role:** *administrator* — zatwierdza wszystko, widzi wszystkie konta (urządzenie
-sparowane kodem z panelu serwera = urządzenie zero; rolę nadaje / odbiera panel → *Sparowane
-urządzenia*). *Użytkownik* — tylko swoje konto (zapisy, stany, ustawienia), zatwierdza nowe
-urządzenia swojego konta; gry z serwera — jeśli zatwierdzający na to pozwolił. Urządzenia
-sparowane przed 0.37 działają jak dotąd (pełny dostęp) — przejście na klucze urządzeń: 0.38.
-
 ## Komputer bez folderów z grami — wszystko z serwera (0.38)
 
-Komputer połączony z serwerem (np. *Dołącz przez internet*), który nie ma ustawionych
+Komputer zalogowany na serwerze, który nie ma ustawionych
 folderów z grami, **niczego nie skanuje** — bierze wszystko od serwera:
 
 - **biblioteka** — systemy i gry z serwera, przy starcie i z menu Start → *Odśwież
@@ -236,18 +206,24 @@ chwilowo nie odpowiada — tryb offline, zapisy czekają w kolejce.
 ## Administracja
 
 Na komputerze z serwerem pełny interfejs EmuStart jest dostępny w przeglądarce:
-`http://127.0.0.1:8740/index.html?dev` (ustawienia, skanowanie, grafiki). Z innych
-komputerów interfejs nie jest dostępny — tylko API z kluczem.
+`http://127.0.0.1:8740/index.html?dev` (ustawienia, skanowanie, grafiki). Interfejs, API
+programu i panel odpowiadają tylko połączeniom z tego komputera (decyduje adres połączenia,
+nie nagłówek `Host`).
 
 Nie uruchamiaj jednocześnie serwera i zwykłego EmuStart z tego samego folderu.
 
 ## API (dla aplikacji)
 
-Każde zapytanie z kluczem: nagłówek `Authorization: Bearer <klucz>` albo `?k=<klucz>`.
+Każde zapytanie z tokenem sesji w nagłówku `Authorization: Bearer <token>` (tylko
+połączeniem szyfrowanym; token z logowania podpisem).
 
 | Adres | Zawartość |
 |---|---|
-| `POST /v1/pair` | parowanie: `{code, name, class, version}` → klucz urządzenia (jednorazowy kod z panelu) |
+| `POST /v1/enroll/request` | prośba o zalogowanie: `{mode, account, password, name, class, pubkey[, login_code]}` (bez tokenu) |
+| `POST /v1/enroll/poll` | stan prośby; po zatwierdzeniu id urządzenia, adresy serwera i odcisk certyfikatu |
+| `POST /v1/auth/challenge`, `/v1/auth/token` | logowanie podpisem kluczem urządzenia → token sesji (1 h) |
+| `POST /v1/auth/logout` | urządzenie wylogowuje się (unieważnienie) |
+| `POST /v1/enroll/pending`, `/v1/enroll/decide` | prośby do zatwierdzenia przez to urządzenie / decyzja |
 | `GET /v1/info` | nazwa komputera, wersja, obsługiwane funkcje (`features`) |
 | `GET /v1/find?es=<system>&rel=<ścieżka>` | gra po systemie i ścieżce względnej: `id` i pliki (EmuStart na Windows) |
 | `GET /v1/systems` | systemy (`es`, `display`, `games`, `logo`, `kind`) |
@@ -273,5 +249,5 @@ gdy przez SMB widzi ten sam znacznik (albo SMB jest niedostępny).
   Wspólny klucz serwera (`config.json` → `server_token`) działa tylko lokalnie.
 - Serwer wydaje wyłącznie pliki gier z biblioteki (ścieżka spoza gry → 404).
 - Zapis tylko w folderze profili (ścieżki z `..`, dyskiem albo bezwzględne → 400).
-- Połączenie przez Tailscale jest szyfrowane; nie wystawiaj portu 8740 do internetu
-  bez Tailscale.
+- Urządzenia tylko połączeniem szyfrowanym (przypięty certyfikat albo tunel); nie wystawiaj
+  portu 8740 do internetu (z sieci i tak odrzuca API urządzeń).

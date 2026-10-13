@@ -66,28 +66,26 @@ def test_garbage_on_tls_port_does_not_block_server(srv):
 
 
 def test_client_learns_endpoints_and_picks_best(srv, monkeypatch):
+    """Klient zna tylko adresy szyfrowane (0.43): z odpowiedzi serwera przez przypięte
+    połączenie uczy się listy adresów; gdy wpisany nie działa — bierze inny z listy."""
     port, tport, fp = srv
     monkeypatch.setattr(srvadmin, "_addresses", lambda: ["127.0.0.1"])
-    # adres wpisany przy parowaniu przestał działać (np. inna sieć) — klient zna inne od serwera
-    cfg = {"server_url": f"http://127.0.0.1:{port}", "server_key": KEY}
+    cfg = {"server_url": f"https://127.0.0.1:{tport}", "server_fp": fp, "server_key": KEY}
     assert netsrc.info(cfg, fresh=True)["ok"]
     st = netsrc._store()
-    assert st["fp"] == fp and any(e["url"] == f"https://127.0.0.1:{tport}" for e in st["endpoints"])
+    assert st["fp"] == fp and [e["url"] for e in st["endpoints"]] == [f"https://127.0.0.1:{tport}"]
     assert (paths.DATA / "serwer-adresy.json").is_file()
-    # zwykły port działa → wybrany przed szyfrowanym (ten sam rodzaj adresu)
-    assert netsrc.best(cfg, fresh=True) == ("http", "127.0.0.1", port)
-    # wpisany adres nie odpowiada, zwykły port też nie — zostaje szyfrowany
+    # zwykły port nie jest już adresem dla urządzeń — nawet wpisany ręcznie
+    assert netsrc.candidates({**cfg, "server_url": f"http://127.0.0.1:{port}"}) == [("https", "127.0.0.1", tport)]
+    # wpisany adres nie odpowiada — zostaje adres z listy serwera
     dead = socket.socket()
     dead.bind(("127.0.0.1", 0))
     dport = dead.getsockname()[1]
     dead.close()
-    cfg2 = {"server_url": f"http://127.0.0.1:{dport}", "server_key": KEY}
-    monkeypatch.setitem(netsrc._learned, "store", {"fp": fp, "endpoints": [
-        {"url": f"http://127.0.0.1:{dport}", "kind": "lan"}, {"url": f"https://127.0.0.1:{tport}", "kind": "lan"}]})
+    cfg2 = {"server_url": f"https://127.0.0.1:{dport}", "server_fp": fp, "server_key": KEY}
     assert netsrc.best(cfg2, fresh=True) == ("https", "127.0.0.1", tport)
     host, p, _k = netsrc.endpoint(cfg2)
     assert (host, p) == ("127.0.0.1", tport) and netsrc._PINS[(host, p)] == fp
-    # cały klient przez HTTPS: info i folder profili
     netsrc._info.clear()
     assert netsrc.info(cfg2, fresh=True)["ok"]
 
@@ -95,23 +93,25 @@ def test_client_learns_endpoints_and_picks_best(srv, monkeypatch):
 def test_https_without_known_fingerprint_is_never_used(srv):
     _port, tport, _fp = srv
     cfg = {"server_url": f"https://127.0.0.1:{tport}", "server_key": KEY}
-    # wpisany ręcznie adres https bez odcisku = zwykłe sprawdzanie certyfikatu (jak tunel):
-    # własny certyfikat serwera go nie przejdzie, więc połączenia nie ma
-    assert netsrc.candidates(cfg) == [("https", "127.0.0.1", tport)]
-    assert netsrc._mode(("https", "127.0.0.1", tport)) == "ca"
+    # adres IP serwera bez zapamiętanego odcisku: nie ma czym sprawdzić certyfikatu — nie używany
+    assert netsrc.candidates(cfg) == []
     assert netsrc._probe(("https", "127.0.0.1", tport), KEY, "") is None
 
 
-def test_pairing_response_carries_fingerprint(srv, monkeypatch):
-    port, tport, fp = srv
-    monkeypatch.setattr(srvadmin, "ENABLED", True)
+def test_login_response_carries_addresses_and_fingerprint(srv, monkeypatch):
+    """Po zatwierdzeniu logowania serwer podaje (połączeniem szyfrowanym) adresy i odcisk."""
     import keyhelp
-    code = srvadmin.pair_code(None)["code"]
-    r = netsrc.pair(f"127.0.0.1:{port}", code, "Laptop", "pc", keyhelp.new_key()[1])
-    assert r["ok"] and r["tls"]["fp"] == fp and "key" not in r
-    cfg = {"server_url": r["url"], "server_key": netsrc.DEV + r["id"]}
-    netsrc.learn(cfg, r)
+    port, tport, fp = srv
+    monkeypatch.setattr(srvadmin, "_addresses", lambda: ["127.0.0.1"])
+    d = keyhelp.enroll_device("127.0.0.1", port, "Laptop", "pc", pem=keyhelp.new_key()[1])
+    r = netsrc._post(f"https://127.0.0.1:{tport}", "/v1/enroll/poll", {"rid": d["rid"]}, fp=fp)
+    assert r["status"] == "approved" and r["tls"]["fp"] == fp
+    assert [e["url"] for e in r["endpoints"]] == [f"https://127.0.0.1:{tport}"]
+    cfg = {"server_url": r["url"], "server_key": netsrc.DEV + r["device"]}
+    netsrc.learn(cfg, r, trusted=True)
     assert netsrc.server_fp(cfg) == fp
+    # bez odcisku zwykłe sprawdzanie certyfikatu — własny certyfikat serwera nie przejdzie
+    assert not netsrc._post(f"https://127.0.0.1:{tport}", "/v1/enroll/poll", {"rid": "x"})["ok"]
 
 
 def test_typed_address_domain_means_https():

@@ -9,8 +9,8 @@ Włączany w panelu serwera („Dostęp z internetu”, config: `server_public`)
 - wykrywa adres za NAT-em operatora (CGNAT) — wtedy port publiczny nie ma sensu.
 
 Port publiczny jest węższy niż pozostałe: tylko API /v1 i grafiki (/media, /assets, /local), każde zapytanie
-z kluczem urządzenia; bez parowania (kody przechodzą przez sieć lokalną, Tailscale albo —
-od 0.36 — tunel), bez panelu i interfejsu. Seria złych kluczy z jednego adresu = przerwa
+z tokenem urządzenia (bez tokenu tylko logowanie: prośba, stan prośby, podpis), bez panelu
+i interfejsu. Seria złych kluczy z jednego adresu = przerwa
 dla tego adresu; ograniczona liczba połączeń naraz z jednego adresu.
 """
 
@@ -117,7 +117,7 @@ def gate(handler) -> bool:
     if _banned.get(ip, 0) > time.time():
         refuse(handler, 403)
         return False
-    if not path.startswith(ALLOWED) or path.startswith("/v1/pair"):
+    if not path.startswith(ALLOWED):
         refuse(handler, 404)
         return False
     if path in OPEN_PATHS:

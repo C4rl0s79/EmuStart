@@ -103,17 +103,32 @@ def _local_ui(handler) -> bool:
     lokalnej albo Tailscale mogłoby go podrobić (tryb serwera słucha na 0.0.0.0). Do tego
     nasz Host (DNS rebinding); nie port publiczny i nie tunel (cloudflared łączy się lokalnie,
     ale dokłada CF-Connecting-IP)."""
-    import ipaddress
     if getattr(handler.server, "public", False) or handler.headers.get("CF-Connecting-IP"):
         return False
+    return _loopback(handler) and _host_ok(handler)
+
+
+def _v1_ok(handler) -> bool:
+    """API urządzeń (/v1) tylko połączeniem szyfrowanym (port HTTPS z certyfikatem serwera,
+    port publiczny, tunel) — zwykły port tylko z tego komputera (panel, testy). 0.43: wcześniej
+    sieć lokalna i Tailscale łączyły się zwykłym HTTP."""
+    if isinstance(handler.server, _TLSServer):
+        return True
+    if _loopback(handler) and not handler.headers.get("CF-Connecting-IP"):
+        return True
+    refuse(handler, 403)
+    return False
+
+
+def _loopback(handler) -> bool:
+    import ipaddress
     try:
         a = ipaddress.ip_address(handler.client_address[0])
         if a.version == 6 and a.ipv4_mapped:
             a = a.ipv4_mapped
-        loopback = a.is_loopback
+        return a.is_loopback
     except ValueError:
-        loopback = False
-    return loopback and _host_ok(handler)
+        return False
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -134,16 +149,14 @@ class _Handler(BaseHTTPRequestHandler):
         elif not _near(self):
             return
         p = urllib.parse.urlsplit(self.path).path
-        if p == "/v1/pair":
-            from emustart import remote      # parowanie urządzenia jednorazowym kodem (z sieci)
-            return remote.pair(self)
+        if p.startswith("/v1/") and not _v1_ok(self):
+            return
         if p in ("/v1/enroll/request", "/v1/enroll/poll", "/v1/enroll/pending", "/v1/enroll/decide",
-                 "/v1/auth/challenge", "/v1/auth/token", "/v1/auth/upgrade"):
-            from emustart import remote      # nowe instalacje przez internet, logowanie podpisem
+                 "/v1/auth/challenge", "/v1/auth/token", "/v1/auth/logout"):
+            from emustart import remote      # zalogowanie urządzenia, logowanie podpisem
             return remote.enroll_flow(self, p.rsplit("/", 1)[1])
-        if p in ("/v1/pair/request", "/v1/pair/poll", "/v1/pair/approve"):
-            from emustart import remote      # prośba o dołączenie zatwierdzana na telefonie
-            return remote.pair_flow(self, p.rsplit("/", 1)[1])
+        if p.startswith("/v1/"):
+            return refuse(self, 404)
         # API tylko dla naszego UI: właściwy Host i własny nagłówek (zwykła strona
         # z internetu nie wyśle go do 127.0.0.1 bez zgody CORS, której nie dajemy)
         if not _local_ui(self) or self.headers.get("X-EmuStart") != "1":
@@ -172,6 +185,8 @@ class _Handler(BaseHTTPRequestHandler):
         elif not _near(self):
             return
         if urllib.parse.urlsplit(self.path).path.startswith("/v1/"):
+            if not _v1_ok(self):
+                return
             from emustart import remote      # zapis w folderze profili (z kluczem)
             return remote.handle_write(self, "PUT")
         return refuse(self, 405)
@@ -184,6 +199,8 @@ class _Handler(BaseHTTPRequestHandler):
         elif not _near(self):
             return
         if urllib.parse.urlsplit(self.path).path.startswith("/v1/"):
+            if not _v1_ok(self):
+                return
             from emustart import remote
             return remote.handle_write(self, "DELETE")
         return refuse(self, 405)
@@ -197,11 +214,17 @@ class _Handler(BaseHTTPRequestHandler):
             return
         raw = urllib.parse.urlsplit(self.path).path
         if raw.startswith("/v1/"):
-            from emustart import remote      # API dla Androida — klucz zamiast sprawdzania Host
+            if not _v1_ok(self):
+                return
+            from emustart import remote      # API urządzeń — token zamiast sprawdzania Host
             return remote.handle(self)
         if not _local_ui(self):
-            from emustart import remote      # grafiki dla aplikacji na Androida (z kluczem)
-            if not (raw.startswith(("/media/", "/assets/", "/local/")) and remote.authorized(self)):
+            from emustart import remote      # grafiki dla urządzeń (z tokenem, szyfrowanym połączeniem)
+            if not raw.startswith(("/media/", "/assets/", "/local/")):
+                return self.send_error(403)
+            if not _v1_ok(self):
+                return
+            if not remote.authorized(self):
                 return self.send_error(403)
         path = urllib.parse.unquote(urllib.parse.urlsplit(self.path).path)
         base, rel = paths.WEB, path.lstrip("/") or "index.html"

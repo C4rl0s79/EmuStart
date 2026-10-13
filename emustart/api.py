@@ -75,7 +75,6 @@ class Api:
         artsync.push_later(self._cfg)     # logo / okładki / zrzuty gier, których serwer nie ma
         threading.Thread(target=lambda: netsrc.push_roots(self._cfg), daemon=True,
                          name="foldery-serwer").start()   # foldery z grami → serwer
-        threading.Thread(target=self._upgrade_legacy_key, daemon=True, name="klucz-urzadzenia").start()
         threading.Thread(target=self._profiles_bootstrap, daemon=True, name="profiles").start()
         from emustart import libsync
         if libsync.thin(self._cfg):            # biblioteka z serwera przy starcie (tylko zmienione systemy)
@@ -1400,7 +1399,6 @@ class Api:
                 "winfsp": self._winfsp,
                 "bios_dir": cfg.get("bios_dir", ""),
                 "server_url": cfg.get("server_url", ""),
-                "server_url_guess": netsrc.guess_url(config.rom_roots(cfg)) if not cfg.get("server_url") else "",
                 "server_key": cfg.get("server_key", ""),
                 "server_keykind": {"tpm": "TPM", "dpapi": "DPAPI", "plik": "plik"}.get(cfg.get("server_keykind", ""), ""),
                 "server_account": cfg.get("server_account", ""),
@@ -1414,142 +1412,27 @@ class Api:
                 "profile_names": {str(p["id"]): p["name"] for p in profiles.all_profiles()},
                 "systems": rows}
 
-    def server_test(self) -> dict:
-        """Ustawienia → Sprawdź połączenie z serwerem EmuStart."""
-        r = netsrc.info(self._cfg, fresh=True)
-        if r.get("ok") and "find" not in r.get("features", []):
-            r = {**r, "ok": False, "reason": f"serwer {r.get('name')} ma EmuStart {r.get('version')} — "
-                                             "zaktualizuj go do wersji z pobieraniem gier przez serwer"}
-        return {k: v for k, v in r.items() if k not in ("features", "nas_id")}
-
-    def server_pair(self, code: str, url: str = "") -> dict:
-        """Ustawienia → Połącz kodem: kod z panelu serwera (albo link z kodu QR) → klucz
-        tego urządzenia. Zastępuje przepisywanie wspólnego klucza serwera."""
-        import socket
-        url, code = netsrc.parse_pair(code, url or self._cfg.get("server_url") or
-                                      netsrc.guess_url(config.rom_roots(self._cfg)))
-        try:
-            name, kind, pem = self._new_device_key()
-        except Exception as ex:
-            return {"ok": False, "reason": f"Nie udało się utworzyć klucza urządzenia: {ex}"}
-        r = netsrc.pair(url, code, socket.gethostname(), "pc", pem)
-        if not r.get("ok"):
-            self._drop_device_key(name, kind)
-            return r
-        self._use_device_key(r["url"], r["id"], name, kind)
-        netsrc.learn(self._cfg, r)                 # adresy serwera i odcisk certyfikatu
-        netsrc._info.clear()
-        nasfs.reset()
-        return {"ok": True, "server": r.get("server", ""), "url": r["url"]}
-
-    # ── klucz urządzenia: każde połączenie z serwerem (0.39 — bez kluczy-haseł) ──
-    def _new_device_key(self) -> tuple:
-        import secrets
-        from emustart import keystore
-        name = f"EmuStart-{secrets.token_hex(6)}"
-        kind, pem = keystore.create(name)
-        return name, kind, pem
-
-    def _drop_device_key(self, name: str, kind: str) -> None:
-        from emustart import keystore
-        keystore.delete(name, kind)
-
-    def _use_device_key(self, url: str, did: str, name: str, kind: str) -> None:
-        """Ten komputer łączy się kluczem urządzenia `did` (logowanie podpisem)."""
-        from emustart import keystore
-        old = (self._cfg.get("server_keyname"), self._cfg.get("server_keykind"))
-        self._cfg.update(server_url=url, server_key=netsrc.DEV + did, server_keyname=name, server_keykind=kind)
-        config.save(self._cfg)
-        if old[0] and old[0] != name:
-            keystore.delete(old[0], old[1] or "")
-        netsrc.drop_token()
-        netsrc.use_device(self._cfg)
-        netsrc._info.clear()
-        nasfs.reset()
-
-    def _upgrade_legacy_key(self) -> None:
-        """Stary klucz-hasło → klucz urządzenia (ten sam wpis na serwerze), przy starcie."""
-        key = self._cfg.get("server_key") or ""
-        if not key or key.startswith(netsrc.DEV) or not self._cfg.get("server_url"):
-            return
-        try:
-            name, kind, pem = self._new_device_key()
-        except Exception:
-            log.exception("klucz urządzenia")
-            return
-        r = netsrc.authed_post(self._cfg, "/v1/auth/upgrade", {"pubkey": pem, "hw": netsrc.hw_id()})
-        if not r.get("ok"):
-            self._drop_device_key(name, kind)
-            log.info("przejście na klucz urządzenia: %s", r.get("reason", ""))
-            return
-        self._use_device_key(self._cfg["server_url"], r["id"], name, kind)
-        log.info("ten komputer przeszedł na klucz urządzenia (%s)", kind)
-
-    def server_scan(self) -> dict:
-        """Skan kodu QR — tylko na telefonie (aparat); na komputerze kod wpisuje się ręcznie."""
-        return {"ok": False, "reason": "Na komputerze wpisz kod z panelu serwera (Połącz kodem)."}
-
-    def server_join(self, url: str = "") -> dict:
-        """Ustawienia → Dołącz do serwera: prośba o dołączenie; kod i QR na ekranie tego
-        komputera zatwierdza sparowany telefon (albo panel serwera)."""
-        import socket
-        from emustart import devices, qr
-        url = (url or self._cfg.get("server_url") or netsrc.guess_url(config.rom_roots(self._cfg))).strip()
-        try:
-            name, kind, pem = self._new_device_key()
-        except Exception as ex:
-            return {"ok": False, "reason": f"Nie udało się utworzyć klucza urządzenia: {ex}"}
-        r = netsrc.join_request(url, socket.gethostname(), "pc", pem)
-        if not r.get("ok"):
-            self._drop_device_key(name, kind)
-            return {"ok": False, "reason": r.get("reason", "")}
-        self._join = {"url": r["url"], "rid": r["rid"], "keyname": name, "keykind": kind}
-        uri = devices.approve_uri(r["url"], r["code"])
-        return {"ok": True, "pretty": r["pretty"], "url": r["url"], "server": r.get("server", ""),
-                "svg": qr.svg(uri), "expires_in": max(0, r.get("expires", 0) - time.time())}
-
-    def server_join_poll(self) -> dict:
-        """Stan prośby o dołączenie; po zatwierdzeniu klucz tego komputera trafia do ustawień."""
-        j = getattr(self, "_join", None)
-        if not j:
-            return {"ok": False, "status": "none"}
-        r = netsrc.join_poll(j["url"], j["rid"])
-        st = r.get("status") if r.get("ok") else "error"
-        if st == "approved":
-            self._use_device_key(j["url"], r["id"], j["keyname"], j["keykind"])
-            netsrc.learn(self._cfg, r)
-        elif st in ("denied", "expired"):
-            self._drop_device_key(j["keyname"], j["keykind"])
-        if st in ("approved", "denied", "expired"):
-            self._join = None
-        return {"ok": True, "status": st, "url": j["url"], "reason": r.get("reason", "")}
-
-    def server_join_cancel(self) -> dict:
-        j = getattr(self, "_join", None)
-        if j:
-            self._drop_device_key(j["keyname"], j["keykind"])
-        self._join = None
-        return {"ok": True}
-
-    # ── nowa instalacja przez internet (emustart/enroll.py, emustart/keystore.py) ──
-    def server_enroll(self, url: str, mode: str, account: str, password: str = "") -> dict:
-        """Nowa instalacja zna tylko adres serwera (np. tunel): klucz urządzenia (TPM, bez niego
-        DPAPI) i prośba o dołączenie — nowe konto (z nowym hasłem) albo istniejące (z jego
-        hasłem). Zatwierdza ją administrator albo inne urządzenie tego konta; stan prośby
-        przetrwa restart (24 h). Hasło idzie tylko w prośbie — program go nie zapisuje."""
+    # ── logowanie na serwerze: konto + hasło + klucz urządzenia (emustart/enroll.py) ──
+    def server_enroll(self, text: str, mode: str, account: str, password: str = "") -> dict:
+        """Ustawienia → Zaloguj: link z kodu QR panelu (adresy, odcisk certyfikatu, kod
+        jednorazowy — bez czekania na zatwierdzenie) albo adres tunelu (zatwierdza inne
+        urządzenie konta albo administrator). Klucz urządzenia: TPM, bez niego DPAPI. Hasło idzie
+        tylko w prośbie — program go nie zapisuje. Prośba czeka do 24 h (przetrwa restart)."""
         import secrets
         import socket
-        from emustart import keystore
-        url, account = (url or "").strip(), (account or "").strip()
-        if not url or not account or mode not in ("new", "existing"):
-            return {"ok": False, "reason": "Podaj adres serwera i nazwę konta."}
-        from emustart import accounts
+        from emustart import accounts, keystore
+        account = (account or "").strip()
+        if not account or mode not in ("new", "existing"):
+            return {"ok": False, "reason": "Podaj nazwę konta."}
         if mode == "new" and accounts.policy(password):
             return {"ok": False, "reason": accounts.policy(password)}
         if not password:
             return {"ok": False, "reason": "Podaj hasło konta."}
+        login = netsrc.parse_login(text)
+        if not login.get("ok"):
+            return login
         old = self._cfg.get("enroll_pending")
-        if old and (old.get("url") != url or old.get("account") != account or old.get("mode") != mode):
+        if old and (old.get("account") != account or old.get("mode") != mode or login.get("code")):
             self.server_enroll_cancel()
             old = None
         if old:
@@ -1561,39 +1444,63 @@ class Api:
             except Exception as ex:
                 log.exception("klucz urządzenia")
                 return {"ok": False, "reason": f"Nie udało się utworzyć klucza urządzenia: {ex}"}
-        r = netsrc._post(url, "/v1/enroll/request", {"mode": mode, "account": account, "password": password,
-                                                     "name": socket.gethostname(), "class": "pc",
-                                                     "version": __version__, "pubkey": pem, "hw": netsrc.hw_id()})
+        body = {"mode": mode, "account": account, "password": password, "name": socket.gethostname(),
+                "class": "pc", "version": __version__, "pubkey": pem, "hw": netsrc.hw_id(),
+                "login_code": login.get("code", "")}
+        r: dict = {"ok": False, "reason": "Serwer nie odpowiada."}
+        fp = ""
+        for url, _kind, ca in login["endpoints"]:          # pierwszy osiągalny adres serwera
+            fp = "" if ca else login["fp"]
+            r = netsrc._post(url, "/v1/enroll/request", body, fp=fp, timeout=8)
+            if not r.get("unreachable"):
+                break
         if not r.get("ok"):
             if not old:
                 keystore.delete(name, kind)
             return {"ok": False, "reason": r.get("reason", "")}
-        self._cfg["enroll_pending"] = {"url": r["url"], "rid": r["rid"], "code": r["pretty"], "account": account,
-                                       "mode": mode, "keyname": name, "keykind": kind, "pubkey": pem,
-                                       "expires": r["expires"]}
+        self._cfg["enroll_pending"] = {"url": r["url"], "fp": fp, "rid": r["rid"], "code": r["pretty"],
+                                       "account": account, "mode": mode, "keyname": name, "keykind": kind,
+                                       "pubkey": pem, "expires": r["expires"]}
+        if login["fp"]:                                    # kod QR: odcisk z kanału zaufanego (aparat / panel)
+            netsrc.learn(self._cfg, {"tls": {"fp": login["fp"]},
+                                     "endpoints": [{"url": u, "kind": k, **({"ca": True} if c else {})}
+                                                   for u, k, c in login["endpoints"]]}, trusted=True)
         config.save(self._cfg)
-        log.info("prośba o dołączenie do %s (%s, konto %s, klucz: %s)", r["url"], mode, account, kind)
-        return {"ok": True, "code": r["pretty"], "account": account, "url": r["url"], "key": kind,
-                "expires_in": max(0, r["expires"] - time.time())}
+        log.info("prośba o zalogowanie na %s (%s, konto %s, klucz: %s)%s", r["url"], mode, account, kind,
+                 " — kod z panelu" if login.get("code") else "")
+        out = {"ok": True, "code": r["pretty"], "account": account, "url": r["url"], "key": kind,
+               "expires_in": max(0, r["expires"] - time.time())}
+        if r.get("status") == "approved":                  # kod z panelu — od razu
+            out["status"] = self.server_enroll_poll().get("status")
+        return out
+
+    def server_scan(self) -> dict:
+        """Kod QR — tylko na telefonie (aparat); na komputerze: Zaloguj → link z panelu serwera."""
+        return {"ok": False, "reason": "Na komputerze: Zaloguj → wklej link z panelu serwera (Dodaj urządzenie)."}
 
     def server_enroll_poll(self) -> dict:
         p = self._cfg.get("enroll_pending")
         if not p:
             return {"ok": False, "status": "none"}
-        r = netsrc._post(p["url"], "/v1/enroll/poll", {"rid": p["rid"]})
+        r = netsrc._post(p["url"], "/v1/enroll/poll", {"rid": p["rid"]}, fp=p.get("fp", ""))
         st = r.get("status") if r.get("ok") else "error"
         if st == "approved":
+            from emustart import keystore
+            old = (self._cfg.get("server_keyname"), self._cfg.get("server_keykind"))
             self._cfg.update(server_url=p["url"], server_key=netsrc.DEV + r["device"], server_keyname=p["keyname"],
                              server_keykind=p["keykind"], server_account=r.get("account") or p["account"])
             self._cfg.pop("enroll_pending", None)
             config.save(self._cfg)
+            if old[0] and old[0] != p["keyname"]:
+                keystore.delete(old[0], old[1] or "")      # klucz poprzedniego logowania
+            netsrc.learn(self._cfg, r, trusted=True)        # adresy i odcisk — z połączenia szyfrowanego
             netsrc._info.clear()
             netsrc.drop_token()
             netsrc.use_device(self._cfg)
             nasfs.reset()
             threading.Thread(target=lambda: netsrc.info(self._cfg, fresh=True), daemon=True,
                              name="adresy-serwera").start()
-            log.info("dołączono do serwera %s (konto %s)", p["url"], self._cfg["server_account"])
+            log.info("zalogowano na serwerze %s (konto %s)", p["url"], self._cfg["server_account"])
             self._adopt_account(self._cfg["server_account"])
             from emustart import libsync
             if libsync.thin(self._cfg):
@@ -1601,6 +1508,23 @@ class Api:
         elif st in ("denied", "expired"):
             self.server_enroll_cancel()
         return {"ok": True, "status": st, "account": p["account"], "code": p["code"], "reason": r.get("reason", "")}
+
+    def server_logout(self) -> dict:
+        """Ustawienia → Wyloguj z serwera: serwer unieważnia to urządzenie, klucz urządzenia
+        i zapamiętane adresy znikają z tego komputera. Gry, zapisy i profile zostają."""
+        from emustart import keystore
+        if self._cfg.get("server_key"):
+            r = netsrc.authed_post(self._cfg, "/v1/auth/logout", {})
+            if not r.get("ok"):
+                log.info("wylogowanie na serwerze: %s", r.get("reason", ""))
+        keystore.delete(self._cfg.get("server_keyname", ""), self._cfg.get("server_keykind", ""))
+        for k in ("server_url", "server_key", "server_keyname", "server_keykind", "server_account", "server_fp"):
+            self._cfg.pop(k, None)
+        config.save(self._cfg)
+        netsrc.forget_server()
+        nasfs.reset()
+        log.info("wylogowano z serwera")
+        return {"ok": True}
 
     def _adopt_account(self, account: str) -> None:
         """Po zatwierdzeniu: konto z serwera jako profil tego komputera — zamiast pustego
@@ -1642,15 +1566,6 @@ class Api:
         return netsrc.authed_post(self._cfg, "/v1/enroll/decide", {"id": req_id, "allow": bool(allow),
                                                                   "games": bool(games)})
 
-    def server_approve(self, text: str, allow=None) -> dict:
-        """Zatwierdzenie nowego urządzenia kodem z jego ekranu (allow=None — podgląd prośby)."""
-        code = netsrc.parse_approve(text)
-        if not self._cfg.get("server_url") or not self._cfg.get("server_key"):
-            return {"ok": False, "reason": "Ten komputer nie jest połączony z serwerem."}
-        r = netsrc.approve(self._cfg, code, allow)
-        r.pop("url", None)
-        return r
-
     def emulator_options(self, es: str) -> list:
         return emulators.options_for(systems.info(es), self._cfg.get("emu_root", ""))
 
@@ -1675,12 +1590,10 @@ class Api:
                     pass
         if "bios_dir" in data:
             cfg["bios_dir"] = str(data["bios_dir"]).strip()
-        if "server_url" in data:
-            cfg["server_url"] = str(data["server_url"]).strip()
         for k in ("server_games", "server_profiles"):
             if k in data:
                 cfg[k] = bool(data[k])
-        if any(k in data for k in ("server_url", "server_profiles")):
+        if "server_profiles" in data:
             nasfs.reset()
             netsrc._info.clear()
         if data.get("pad_backend") in ("python", "browser", "none"):

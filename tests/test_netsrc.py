@@ -7,7 +7,7 @@ import os
 
 import pytest
 
-from emustart import cache, library, netsrc, partial, remote, scanner, server
+from emustart import cache, library, netsrc, partial, remote, scanner
 
 from test_core import _write, env  # noqa: F401  (fixture)
 
@@ -21,10 +21,10 @@ class _FakeApi:
 @pytest.fixture()
 def srv(env, monkeypatch):
     cfg, roms, tmp = env
+    from _srv import tls_server
     monkeypatch.setattr(remote, "API", _FakeApi())
-    url = server.start(0, bind="127.0.0.1")
-    port = int(url.rsplit(":", 1)[1])
-    cfg.update(server_url=f"127.0.0.1:{port}", server_key=KEY)
+    url, fp = tls_server(monkeypatch)               # klient łączy się szyfrowanym portem (0.43)
+    cfg.update(server_url=url, server_fp=fp, server_key=KEY)
     netsrc._info.clear()
     yield cfg, roms, tmp
     netsrc._info.clear()
@@ -109,11 +109,6 @@ def test_reader_reconnects_after_close(srv):
         assert r.read(10) == b""
 
 
-def test_guess_url_from_unc():
-    assert netsrc.guess_url([r"\\100.85.254.31\EMU_ROMS\ROMS"]) == "http://100.85.254.31:8740"
-    assert netsrc.guess_url([r"C:\gry"]) in ("", )
-
-
 # ── folder profili przez serwer ──
 
 def _nas_server(env, monkeypatch, nas_name="nas"):
@@ -156,16 +151,15 @@ def test_remote_write_is_compressed_and_backed_up_on_server(env, monkeypatch):
 
 
 def test_remote_rejects_paths_outside_profiles(env, monkeypatch):
-    import http.client
     from _srv import KEY
     cfg, tmp = _nas_server(env, monkeypatch)
-    host, port = cfg["server_url"].split(":")
+    host, port = cfg["server_url"].removeprefix("https://").split(":")
     for p in ("../x", "..\\x", "C:/Windows/x", ".emustart-root"):
-        c = http.client.HTTPConnection(host, int(port))
+        c = netsrc.PinnedHTTPS(host, int(port), cfg["server_fp"])
         c.request("PUT", "/v1/nas/file?p=" + p.replace("\\", "%5C"), body=b"zle",
                   headers={"Authorization": f"Bearer {KEY}"})
         assert c.getresponse().status == 400, p
-    c = http.client.HTTPConnection(host, int(port))
+    c = netsrc.PinnedHTTPS(host, int(port), cfg["server_fp"])
     c.request("GET", "/v1/nas/list?p=", headers={"Authorization": "Bearer zly"})
     assert c.getresponse().status == 401
     assert not (tmp / "x").exists()
@@ -179,7 +173,7 @@ def test_with_server_profiles_never_go_through_smb(env, monkeypatch):
     (tmp / "inny").mkdir()
     nasfs.reset()
     assert isinstance(nasfs.backend(cfg), nasfs.RemoteFs)
-    off = {**cfg, "server_url": "127.0.0.1:1"}                     # serwer nie odpowiada
+    off = {**cfg, "server_url": "https://127.0.0.1:1"}             # serwer nie odpowiada
     netsrc._info.clear(); nasfs.reset()
     fs = nasfs.backend(off)
     assert isinstance(fs, nasfs.RemoteFs) and not fs.online()
