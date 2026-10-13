@@ -1,19 +1,20 @@
 **[EmuStart](Home)**
 
 **Start**
+- [EmuStart Server](EmuStart-Server)
 - [Instalacja](Instalacja-i-pierwsze-uruchomienie)
 - [Foldery z grami](Foldery-z-grami-i-systemy)
 - [Emulatory](Emulatory)
 - [Sterowanie](Sterowanie)
 
 **Granie**
-- [NAS i pamięć podręczna](Uruchamianie-gier-NAS-i-pamięć-podręczna)
+- [Gry i pamięć podręczna](Uruchamianie-gier-NAS-i-pamięć-podręczna)
 - [Menu w grze](Menu-w-grze)
 - [Pady](Pady)
 
 **Profile**
 - [Profile graczy](Profile-graczy)
-- [Kilka komputerów](Kilka-komputerów-jeden-NAS)
+- [Kilka urządzeń](Kilka-komputerów-jeden-NAS)
 - [RetroAchievements](RetroAchievements)
 
 **Biblioteka**
@@ -26,7 +27,6 @@
 - [Bezpieczeństwo](Bezpieczeństwo-i-prywatność)
 - [Problemy](Rozwiązywanie-problemów)
 - [Aplikacja na Androida](Aplikacja-na-Androida)
-- [Serwer dla Androida](Serwer-dla-Androida)
 - [Budowa ze źródeł](Budowa-ze-źródeł)
 
 [📦 Pobierz](https://github.com/C4rl0s79/EmuStart/releases)

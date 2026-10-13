@@ -106,6 +106,11 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   14 najnowszych (do zmiany). **Przywrócenie** zaczyna się od kopii obecnego stanu, a pliki,
   których w kopii nie ma, zostają.
 
+### Dokumentacja
+- Wiki: nowa strona **EmuStart Server** (instalacja, panel, foldery, grafiki i opisy, konta
+  i kopie, logowanie, adresy, API); instalacja dwóch programów; grafiki i opisy z serwera,
+  uruchamianie gier tylko z serwera, kilka urządzeń z jednym serwerem — bez SMB.
+
 ## [0.44.8] — 2026-10-13
 
 ### Zmienione
