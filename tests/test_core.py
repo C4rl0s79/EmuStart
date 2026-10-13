@@ -174,3 +174,29 @@ def test_multiple_roots_dedupe_and_names(env):
     assert rows["B (USA)"]["src"] == str(nointro / "Sony - PlayStation")
     assert rows["C (USA)"]["es"] == "atari7800"
     assert library.game_dir(library.game(rows["B (USA)"]["id"])) == nointro / "Sony - PlayStation"
+
+
+def test_fresh_database_opened_by_many_threads_at_once():
+    """Pierwsze otwarcie bazy naraz w kilku wątkach (serwer, pobieranie, interfejs): migracja
+    kolumn raz, jeden domyślny profil — wcześniej „duplicate column name” (CI wydania 0.43.0)."""
+    import threading
+    from emustart import arcade, profiles
+    errs, start = [], threading.Barrier(8)
+
+    def open_db():
+        try:
+            start.wait()
+            library.db()
+            profiles.all_profiles()
+            arcade.needs_refresh()
+        except Exception as ex:                      # noqa: BLE001 — każdy błąd to porażka testu
+            errs.append(repr(ex))
+        finally:
+            library._local.con = None
+    th = [threading.Thread(target=open_db) for _ in range(8)]
+    for t in th:
+        t.start()
+    for t in th:
+        t.join()
+    assert not errs, errs
+    assert library.db().execute("SELECT COUNT(*) FROM profiles").fetchone()[0] == 1

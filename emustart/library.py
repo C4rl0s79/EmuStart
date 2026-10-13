@@ -103,29 +103,55 @@ CREATE TABLE IF NOT EXISTS arcade_sets (
 _local = threading.local()
 
 
+_migrate_lock = threading.Lock()
+
+
+def add_columns(con: sqlite3.Connection, table: str, cols: list, after=None) -> bool:
+    """Brakujące kolumny tabeli (migracja bazy) — raz, także gdy bazę otwiera naraz kilka
+    wątków albo procesów (serwer i panel): blokada w procesie + transakcja IMMEDIATE, w której
+    kolumny sprawdzane są jeszcze raz. Wcześniej dwa wątki widziały brak kolumny i oba ją
+    dodawały („duplicate column name”). `cols` — [(nazwa, definicja)]; `after(con)` — dodatkowa
+    zmiana w tej samej transakcji, gdy coś dodano. True = coś dodano."""
+    with _migrate_lock:
+        if all(c in {r[1] for r in con.execute(f"PRAGMA table_info({table})")} for c, _d in cols):
+            return False
+        if con.in_transaction:
+            con.commit()
+        con.execute("BEGIN IMMEDIATE")
+        try:
+            have = {r[1] for r in con.execute(f"PRAGMA table_info({table})")}
+            missing = [(c, d) for c, d in cols if c not in have]
+            for c, d in missing:
+                con.execute(f"ALTER TABLE {table} ADD COLUMN {c} {d}")
+            if missing and after:
+                after(con)
+            con.execute("COMMIT")
+        except Exception:
+            con.execute("ROLLBACK")
+            raise
+        return bool(missing)
+
+
 def db() -> sqlite3.Connection:
     con = getattr(_local, "con", None)
     if con is None:
         paths.DATA.mkdir(parents=True, exist_ok=True)
         con = sqlite3.connect(str(paths.DB_PATH), timeout=30)
         con.row_factory = sqlite3.Row
-        con.execute("PRAGMA journal_mode=WAL")
-        con.execute("PRAGMA synchronous=NORMAL")
-        con.executescript(_SCHEMA)
-        cols = {r[1] for r in con.execute("PRAGMA table_info(games)")}
-        if "src" not in cols:      # baza sprzed obsługi kilku folderów z grami
-            con.execute("ALTER TABLE games ADD COLUMN src TEXT NOT NULL DEFAULT ''")
-            con.commit()
-        if "art_logo" not in cols:  # logo gry (Clear Logo) — od 0.9.0
-            con.execute("ALTER TABLE games ADD COLUMN art_logo INTEGER NOT NULL DEFAULT 0")
-            con.commit()
-        if "trans" not in cols:     # tłumaczenia jako wersje gier — od 0.30.0
-            con.execute("ALTER TABLE games ADD COLUMN trans TEXT NOT NULL DEFAULT ''")
-            con.execute("ALTER TABLE games ADD COLUMN tbase TEXT NOT NULL DEFAULT ''")
-            con.commit()
-        if not con.execute("SELECT 1 FROM profiles").fetchone():
-            con.execute("INSERT INTO profiles(name) VALUES('Gracz')")
-            con.commit()
+        with _migrate_lock:              # tryb WAL i schemat przy pierwszym otwarciu — po jednym wątku
+            con.execute("PRAGMA journal_mode=WAL")
+            con.execute("PRAGMA synchronous=NORMAL")
+            con.executescript(_SCHEMA)
+        add_columns(con, "games", [
+            ("src", "TEXT NOT NULL DEFAULT ''"),          # kilka folderów z grami
+            ("art_logo", "INTEGER NOT NULL DEFAULT 0"),   # logo gry (Clear Logo) — od 0.9.0
+            ("trans", "TEXT NOT NULL DEFAULT ''"),        # tłumaczenia jako wersje gier — od 0.30.0
+            ("tbase", "TEXT NOT NULL DEFAULT ''")])
+        with _migrate_lock:
+            con.execute("BEGIN IMMEDIATE")
+            if not con.execute("SELECT 1 FROM profiles").fetchone():
+                con.execute("INSERT INTO profiles(name) VALUES('Gracz')")
+            con.execute("COMMIT")
         _local.con = con
     return con
 

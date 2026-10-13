@@ -50,21 +50,13 @@ LOCAL = paths.APP / "profiles"
 
 def _ensure_columns() -> None:
     con = library.db()
-    cols = {r[1] for r in con.execute("PRAGMA table_info(profiles)")}
-    if "nas_name" not in cols:
-        with con:
-            con.execute("ALTER TABLE profiles ADD COLUMN nas_name TEXT NOT NULL DEFAULT ''")
-            con.execute("ALTER TABLE profiles ADD COLUMN color TEXT NOT NULL DEFAULT ''")
-            con.execute("UPDATE profiles SET nas_name=name WHERE nas_name=''")
-    if "pin_token" not in cols:
-        with con:
-            # PIN profilu (emustart/pinauth.py): token od serwera / odblokowanie przez SMB
-            con.execute("ALTER TABLE profiles ADD COLUMN pin_token TEXT NOT NULL DEFAULT ''")
-            con.execute("ALTER TABLE profiles ADD COLUMN unlocked INTEGER NOT NULL DEFAULT 0")
-    if "pin_hash" not in cols:
-        with con:
-            # PIN tylko na tym komputerze (0.40) — konto na serwerze chroni hasło
-            con.execute("ALTER TABLE profiles ADD COLUMN pin_hash TEXT NOT NULL DEFAULT ''")
+    library.add_columns(con, "profiles", [("nas_name", "TEXT NOT NULL DEFAULT ''"),
+                                          ("color", "TEXT NOT NULL DEFAULT ''")],
+                        after=lambda c: c.execute("UPDATE profiles SET nas_name=name WHERE nas_name=''"))
+    library.add_columns(con, "profiles", [
+        ("pin_token", "TEXT NOT NULL DEFAULT ''"),       # token konta na serwerze (X-Profile-Token)
+        ("unlocked", "INTEGER NOT NULL DEFAULT 0"),
+        ("pin_hash", "TEXT NOT NULL DEFAULT ''")])       # PIN tylko na tym komputerze (0.40)
     # tokeny kont dla zapytań do serwera (nagłówek X-Profile-Token)
     nasfs.TOKENS.clear()
     nasfs.TOKENS.update({r[0].lower(): r[1] for r in con.execute(

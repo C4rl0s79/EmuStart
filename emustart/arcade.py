@@ -54,11 +54,8 @@ SUPPORT_DEFAULT = r"D:\emu\dat\Support Files"
 def _ensure_columns() -> None:
     """Rok, producent, gracze, gatunek (do filtrowania) — dodane w 0.8.0."""
     con = library.db()
-    cols = {r[1] for r in con.execute("PRAGMA table_info(arcade_sets)")}
-    if "genre" not in cols:
-        with con:
-            for col in ("year", "maker", "players", "genre"):
-                con.execute(f"ALTER TABLE arcade_sets ADD COLUMN {col} TEXT NOT NULL DEFAULT ''")
+    if library.add_columns(con, "arcade_sets", [(c, "TEXT NOT NULL DEFAULT ''")
+                                                for c in ("year", "maker", "players", "genre")]):
         library.meta_set("mame_version", "")       # wymusza ponowne wczytanie z MAME
 
 
