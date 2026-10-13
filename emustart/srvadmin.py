@@ -1,6 +1,6 @@
-"""srvadmin — panel serwera EmuStart (`EmuStart.exe --server-panel`).
+"""srvadmin — panel serwera EmuStart (`EmuStartServer.exe`, osobny proces z oknem).
 
-Serwer (`--server`) zwykle działa jako zadanie Harmonogramu na koncie SYSTEM,
+Serwer (`EmuStartServer.exe --service`) zwykle działa jako zadanie Harmonogramu na koncie SYSTEM,
 bez okna. Panel to osobny proces z małym oknem (pywebview), które otwiera
 stronę `server.html` z działającego serwera i woła jego API administracyjne:
 
@@ -482,10 +482,10 @@ def start_server(port: int) -> bool:
                            creationflags=subprocess.CREATE_NO_WINDOW)
         if r.returncode == 0 and _wait(port, 15):
             return True
-        subprocess.Popen(_self_cmd() + ["--server"], close_fds=True, cwd=str(paths.APP),
+        subprocess.Popen(_self_cmd() + ["--service"], close_fds=True, cwd=str(paths.APP),
                          creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW)
     else:
-        subprocess.Popen(_self_cmd() + ["--server"], close_fds=True, cwd=str(paths.APP),
+        subprocess.Popen(_self_cmd() + ["--service"], close_fds=True, cwd=str(paths.APP),
                          start_new_session=True)
     return _wait(port, 30)
 

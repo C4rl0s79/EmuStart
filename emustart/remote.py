@@ -1,4 +1,5 @@
-"""remote — API dla EmuStart na Androidzie (tryb serwera: `EmuStart.exe --server`).
+"""remote — API dla urządzeń (EmuStart na PC i Androidzie) w EmuStart Server
+(`EmuStartServer.exe --service`).
 
 Serwer działa na komputerze z grami (NAS) i udostępnia przez HTTP (Tailscale):
 
@@ -1071,7 +1072,7 @@ def install_autostart(exe: str, port: int) -> list:
     import subprocess
     cmds = [
         ["schtasks", "/Create", "/F", "/TN", "EmuStart Server", "/SC", "ONSTART", "/RU", "SYSTEM",
-         "/RL", "HIGHEST", "/TR", f'"{exe}" --server'],
+         "/RL", "HIGHEST", "/TR", f'"{exe}" --service'],
         # schtasks zakłada limit 72 h pracy zadania — serwer działa bez końca;
         # po awarii Harmonogram uruchamia go ponownie (3 razy co minutę)
         ["powershell", "-NoProfile", "-Command",
@@ -1082,7 +1083,7 @@ def install_autostart(exe: str, port: int) -> list:
         ["powershell", "-NoProfile", "-Command",
          "$s=(New-Object -ComObject WScript.Shell).CreateShortcut("
          "\"$env:ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\EmuStart Server.lnk\");"
-         f"$s.TargetPath='{exe}';$s.Arguments='--server-panel';$s.IconLocation='{exe},0';$s.Save()"],
+         f"$s.TargetPath='{exe}';$s.Arguments='--panel';$s.IconLocation='{exe},0';$s.Save()"],
         ["netsh", "advfirewall", "firewall", "add", "rule", "name=EmuStart Server", "dir=in",
          "action=allow", "protocol=TCP", f"localport={port}"],
         ["netsh", "advfirewall", "firewall", "add", "rule", f"name={FW_TLS}", "dir=in",

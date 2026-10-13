@@ -1,5 +1,5 @@
 "use strict";
-/* Panel serwera EmuStart (server.html) — okno `EmuStart.exe --server-panel`.
+/* Panel serwera EmuStart (server.html) — okno `EmuStartServer.exe`.
    Woła POST /admin/<akcja> serwera na tym komputerze (emustart/srvadmin.py). */
 
 const $ = (id) => document.getElementById(id);

@@ -17,6 +17,22 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   RetroArchu na Androidzie; ocena „wyświetlania nad innymi aplikacjami” i usługi ułatwień
   dostępu dla pozostałych emulatorów na Androidzie.
 
+## [0.45.0] — w przygotowaniu (gałąź split/serwer-klient)
+
+### Zmienione
+- **EmuStart i EmuStart Server to dwa osobne programy** — każdy z własnym exe, plikiem
+  wydania, podpisem i aktualizacją:
+  - `EmuStart-<wersja>-win64.zip` — **EmuStart** na PC (`EmuStart.exe`: granie z padem);
+  - `EmuStart-Server-<wersja>-win64.zip` — **EmuStart Server** (`EmuStartServer.exe`):
+    bez parametrów otwiera panel serwera (i uruchamia serwer, gdy nie działa);
+    `--service` — serwer bez okna (zadanie Harmonogramu), `--install` — autostart, zapora
+    i skrót (jako administrator), `--login-link` — link logowania do schowka.
+  - Aktualizacja serwera przechodzi na nowy program sama: pobiera plik serwera, usuwa
+    z folderu serwera dawny `EmuStart.exe` i przestawia zadanie Harmonogramu na
+    `EmuStartServer.exe --service`. Dane serwera (folder `server`) zostają.
+  - `EmuStart.exe` nie ma już trybu serwera (`--server`, `--server-panel`,
+    `--install-server`, `--server-key`).
+
 ## [0.44.7] — 2026-10-13
 
 ### Poprawione
