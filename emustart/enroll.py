@@ -1,10 +1,10 @@
-"""enroll — nowe instalacje przez internet: konta, role, klucze urządzeń, logowanie podpisem (0.37).
+"""enroll — logowanie urządzeń: konto + hasło + klucz urządzenia, logowanie podpisem.
 
 Tożsamość = konto + konkretne urządzenie. Każda instalacja tworzy własną parę kluczy
 (EC P-256); klucz prywatny nie opuszcza urządzenia (Android Keystore, na Windows TPM, bez
 niego klucz zaszyfrowany DPAPI). Serwer zna tylko klucz publiczny.
 
-Dołączenie (jedyna droga z internetu — przez tunel albo port publiczny):
+Zalogowanie urządzenia (jedyna droga do serwera — 0.43; tylko połączenia szyfrowane):
 1. Urządzenie: POST /v1/enroll/request {mode: new|existing, account, password, name, class, pubkey}
    — hasło konta (0.40): nowe konto je ustawia, „mam konto” je sprawdza (emustart/accounts.py)
    → rid (tajny, do odpytywania) i kod weryfikacyjny (z klucza publicznego — ten sam na
@@ -13,6 +13,9 @@ Dołączenie (jedyna droga z internetu — przez tunel albo port publiczny):
    czas, adres, nazwę, rodzaj, konto, kod. POST /v1/enroll/decide {id, allow, games}.
    - nowe konto — tylko administrator;
    - „mam konto” — urządzenie tego konta, a gdy konto nie ma żadnego — administrator.
+   Kod QR z panelu serwera (`login_code` w prośbie, jednorazowy, 10 min) zastępuje
+   zatwierdzenie — kto go zeskanował, ma dostęp do serwera. Gdy żadne konto nie jest
+   administratorem, konto zalogowane takim kodem zostaje nim (pierwsze urządzenie).
 3. Urządzenie: POST /v1/enroll/poll {rid} → id urządzenia po zatwierdzeniu.
 4. Logowanie: POST /v1/auth/challenge {device} → wyzwanie; POST /v1/auth/token {device,
    nonce, sig} → token sesji (1 h, odnawiany przez urządzenie). Skopiowany plik nic nie da
@@ -21,9 +24,8 @@ Dołączenie (jedyna droga z internetu — przez tunel albo port publiczny):
 Do zatwierdzenia urządzenie nie ma dostępu do niczego poza stanem swojej prośby. Prośba czeka
 24 h (zapisana na dysku — przetrwa restart i aktualizację serwera).
 
-Role: `admin` (zatwierdza wszystko, urządzenie zero — zatwierdzone w panelu serwera albo
-sparowane kodem z panelu), `user` (tylko swoje konto; zatwierdza nowe urządzenia swojego konta).
-Urządzenia sprzed 0.37 (bez konta) mają dostęp jak administrator do czasu przejścia na klucze.
+Uprawnienia — z konta (emustart/accounts.py): administrator zatwierdza wszystko i widzi
+wszystkie konta; zwykłe konto zatwierdza tylko nowe urządzenia swojego konta.
 """
 
 from __future__ import annotations
@@ -54,6 +56,10 @@ _lock = threading.Lock()
 _reqs: dict | None = None        # rid → prośba (zapis: enroll.json)
 _nonces: dict = {}               # wyzwanie → (id urządzenia, ważne do) — kilka naraz na urządzenie
 _tokens: dict = {}               # token → (id urządzenia, ważny do)
+_login_codes: dict = {}          # kod z panelu (QR) → ważny do — jednorazowy
+_code_fails: dict = {}           # adres → [czasy złych kodów]
+LOGIN_CODE_TTL = 600
+CODE_FAILS_MAX = 10
 
 
 def _path():
@@ -85,6 +91,8 @@ def reset() -> None:
         _reqs = None
         _nonces.clear()
         _tokens.clear()
+        _login_codes.clear()
+        _code_fails.clear()
 
 
 def _gc(now: float) -> None:
@@ -128,9 +136,43 @@ def _safe_account(name: str) -> str:
     return name if ok else ""
 
 
+# ── kod logowania z panelu serwera (QR) ──
+def new_login_code() -> dict:
+    """Jednorazowy kod z panelu: zalogowanie nim nie czeka na zatwierdzenie."""
+    code = "".join(secrets.choice(CODE_ALPHABET) for _ in range(8))
+    now = time.time()
+    with _lock:
+        for c, exp in list(_login_codes.items()):
+            if exp < now:
+                _login_codes.pop(c, None)
+        _login_codes[code] = now + LOGIN_CODE_TTL
+    return {"code": code, "pretty": pretty(code), "expires": now + LOGIN_CODE_TTL}
+
+
+def _norm_code(code: str) -> str:
+    return "".join(ch for ch in str(code).upper() if ch in CODE_ALPHABET)
+
+
+def _take_login_code(code: str, ip: str) -> str:
+    """'' = kod przyjęty (i zużyty); inaczej powód. Złe kody z adresu — przerwa."""
+    now = time.time()
+    with _lock:
+        fails = [t for t in _code_fails.get(ip, []) if now - t < LOGIN_CODE_TTL]
+        _code_fails[ip] = fails
+        if len(fails) >= CODE_FAILS_MAX:
+            return "Za dużo błędnych kodów — spróbuj za kilka minut."
+        c = _norm_code(code)
+        exp = _login_codes.pop(c, None)
+        if not exp or exp < now:
+            fails.append(now)
+            return "Kod z panelu serwera jest nieprawidłowy albo wygasł — pokaż nowy (panel → Dodaj urządzenie)."
+    return ""
+
+
 # ── prośby ──
 def request(mode: str, account: str, name: str, cls: str, ip: str, version: str, pubkey: str,
-            accounts: list, hw: str = "", password: str = "") -> dict:
+            accounts: list, hw: str = "", password: str = "", login_code: str = "",
+            create_account=None) -> dict:
     """Nowa instalacja prosi o dołączenie. `accounts` — istniejące konta (profile).
     „Nowe konto” ustawia hasło, „Mam konto” je sprawdza (konto bez hasła — ustawia je
     przy zatwierdzeniu); w prośbie zostaje tylko skrót hasła (emustart/accounts.py)."""
@@ -163,6 +205,10 @@ def request(mode: str, account: str, name: str, cls: str, ip: str, version: str,
         if why:
             return {"ok": False, "reason": why}
         pw_rec = acc_pw.make(password)
+    if login_code:
+        why = _take_login_code(login_code, ip)
+        if why:
+            return {"ok": False, "reason": why}
     now = time.time()
     with _lock:
         _gc(now)
@@ -175,7 +221,11 @@ def request(mode: str, account: str, name: str, cls: str, ip: str, version: str,
         # ponowna prośba tego samego klucza — ta sama prośba (np. po restarcie aplikacji)
         for rid, q in reqs.items():
             if q["pubkey"] == pubkey and q["status"] == "pending":
-                return {"ok": True, "rid": rid, "code": q["code"], "pretty": pretty(q["code"]), "expires": q["expires"]}
+                if login_code:
+                    _approve_locked(q, True, "kod QR z panelu serwera", create_account, first_admin=True)
+                    _save()
+                return {"ok": True, "rid": rid, "code": q["code"], "pretty": pretty(q["code"]), "expires": q["expires"],
+                        "status": q["status"]}
         rid = secrets.token_urlsafe(24)
         reqs[rid] = {"id": secrets.token_hex(4), "mode": mode, "account": acc,
                      "name": (str(name).strip() or "urządzenie")[:40],
@@ -183,10 +233,15 @@ def request(mode: str, account: str, name: str, cls: str, ip: str, version: str,
                      "pubkey": pubkey, "code": code, "created": now, "expires": now + ENROLL_TTL,
                      "status": "pending", "device": "", "decided_by": "", "hw": devices._valid_hw(hw),
                      "pw": pw_rec}
+        if login_code:                    # kod z panelu = zatwierdzenie
+            _approve_locked(reqs[rid], True, "kod QR z panelu serwera", create_account, first_admin=True)
         _save()
-    log.info("prośba o dołączenie: %s (%s) — %s „%s”, %s, kod %s", name, cls,
-             "nowe konto" if mode == "new" else "konto", acc, ip, pretty(code))
-    return {"ok": True, "rid": rid, "code": code, "pretty": pretty(code), "expires": now + ENROLL_TTL}
+        status = reqs[rid]["status"]
+    log.info("prośba o zalogowanie: %s (%s) — %s „%s”, %s, kod %s%s", name, cls,
+             "nowe konto" if mode == "new" else "konto", acc, ip, pretty(code),
+             " — zatwierdzona kodem z panelu" if status == "approved" else "")
+    return {"ok": True, "rid": rid, "code": code, "pretty": pretty(code), "expires": now + ENROLL_TTL,
+            "status": status}
 
 
 def poll(rid: str) -> dict:
@@ -233,6 +288,23 @@ def pending(viewer: str) -> list:
     return sorted(out, key=lambda q: q["created"])
 
 
+def _approve_locked(q: dict, games: bool, by: str, create_account=None, first_admin: bool = False) -> None:
+    """Zatwierdzona prośba → konto (nowe: folder i hasło) i urządzenie. Wołający trzyma _lock.
+    `first_admin` — kod z panelu: gdy żadne konto nie jest administratorem, to zostaje."""
+    from emustart import accounts as acc_pw
+    from emustart import devices
+    if q["mode"] == "new" and create_account:
+        create_account(q["account"])
+    if q.get("pw") and (q["mode"] == "new" or not acc_pw.has_password(q["account"])):
+        acc_pw.set_record(q["account"], q["pw"], by)
+    q.pop("pw", None)
+    if first_admin and not acc_pw.any_admin():
+        acc_pw.set_admin(q["account"], True, by)
+    did = devices.add_keyed(q["name"], q["class"], q["ip"], q["version"], q["pubkey"], q["account"],
+                            games=bool(games), by=by, hw=q.get("hw", ""))
+    q.update(status="approved", device=did, decided_by=by)
+
+
 def decide(req_id: str, allow: bool, games: bool, viewer: str, create_account=None) -> dict:
     """Zatwierdzenie / odrzucenie. `create_account(name)` — zakłada konto (folder profilu)."""
     from emustart import devices
@@ -251,19 +323,11 @@ def decide(req_id: str, allow: bool, games: bool, viewer: str, create_account=No
             _save()
             log.info("odrzucono prośbę %s (%s, %s) — %s", q["name"], q["account"], q["ip"], by)
             return {"ok": True, "status": "denied", "name": q["name"]}
-        if q["mode"] == "new" and create_account:
-            create_account(q["account"])
-        from emustart import accounts as acc_pw
-        if q.get("pw") and (q["mode"] == "new" or not acc_pw.has_password(q["account"])):
-            acc_pw.set_record(q["account"], q["pw"], by)
-        q.pop("pw", None)
-        did = devices.add_keyed(q["name"], q["class"], q["ip"], q["version"], q["pubkey"], q["account"],
-                                role="user", games=bool(games), by=by, hw=q.get("hw", ""))
-        q.update(status="approved", device=did, decided_by=by)
+        _approve_locked(q, games, by, create_account)
         _save()
     log.info("zatwierdzono %s dla konta %s (%s, gry: %s) — %s", q["name"], q["account"], q["ip"],
              "tak" if games else "nie", by)
-    return {"ok": True, "status": "approved", "name": q["name"], "device": did}
+    return {"ok": True, "status": "approved", "name": q["name"], "device": q["device"]}
 
 
 # ── logowanie podpisem ──

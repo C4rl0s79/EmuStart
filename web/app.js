@@ -790,50 +790,86 @@ function menuInput(a) {
   renderMenu();
 }
 
-/* ───────────── nowa instalacja przez internet (konta, klucz urządzenia — emustart/enroll.py) ───────────── */
-function enrollStart() {
-  oskOpen("Adres serwera", S.settings.server_url || "", (url) => {
-    url = url.trim();
-    if (!url) return;
-    S.menu = [["Mam konto", () => enrollAccount(url, "existing")], ["Nowe konto", () => enrollAccount(url, "new")],
-              ["Anuluj", () => {}]];
-    S.menuIdx = 0; S.modal = "menu";
-    $("menu").querySelector("h2").textContent = "Dołączenie do serwera";
-    $("menu").classList.remove("hidden");
-    renderMenu();
-  });
+/* ───────────── logowanie na serwerze: konto + hasło + klucz urządzenia (emustart/enroll.py) ───────────── */
+const DEFAULT_SERVER = "emustart.emucloud.org";
+/** Zaloguj: `text` — link z kodu QR panelu (adresy, odcisk certyfikatu, kod jednorazowy)
+ *  albo adres tunelu. Dalej: Mam konto / Nowe konto → nazwa → hasło. */
+function loginStart(text) {
+  text = (text || "").trim();
+  if (!text) return;
+  S.menu = [["Mam konto", () => loginAccount(text, "existing")], ["Nowe konto", () => loginAccount(text, "new")],
+            ["Anuluj", () => {}]];
+  S.menuIdx = 0; S.modal = "menu";
+  $("menu").querySelector("h2").textContent = text.startsWith("emustart://") ? "Logowanie kodem z panelu serwera" : `Logowanie: ${text}`;
+  $("menu").classList.remove("hidden");
+  renderMenu();
 }
-function enrollAccount(url, mode) {
+function loginAddress() {
+  oskOpen("Adres serwera (albo link logowania z panelu)", DEFAULT_SERVER, (v) => loginStart(v));
+}
+async function loginQr() {
+  const s = await api().server_scan();
+  if (!s.ok) return toast(s.reason, 5000);
+  loginStart(s.text);
+}
+function loginAccount(text, mode) {
   oskOpen(mode === "new" ? "Nazwa nowego konta" : "Nazwa twojego konta", "", (acc) => {
     if (!acc.trim()) return;
-    // hasło konta: nowe konto je ustawia, „Mam konto” je sprawdza — i tak czeka na zatwierdzenie
+    // hasło konta: nowe konto je ustawia, „Mam konto” je sprawdza
     setTimeout(() => askPassword(mode === "new" ? `Hasło nowego konta „${acc.trim()}”` : `Hasło konta „${acc.trim()}”`, async (pw) => {
       toast("Łączę z serwerem…", 10000);
-      const r = await api().server_enroll(url, mode, acc.trim(), pw);
+      const r = await api().server_enroll(text, mode, acc.trim(), pw);
       if (!r.ok) return toast(r.reason, 7000);
+      if (r.status === "approved") return loginDone(r.account);          // kod z panelu — bez czekania
       enrollWait(r.code, r.account, mode);
     }, mode === "new"), 50);
   });
 }
+async function loginDone(account) {
+  S.settings = await api().get_settings(); await refreshState();
+  toast(`Zalogowano — konto „${account}” na tym urządzeniu.`, 6000);
+  openProfiles(true);
+}
+function logoutAsk() {
+  S.menu = [["Wyloguj — to urządzenie straci dostęp do serwera", async () => {
+    await api().server_logout();
+    S.settings = await api().get_settings(); await refreshState();
+    renderSettings(); toast("Wylogowano z serwera. Gry i zapisy na tym urządzeniu zostały.", 6000);
+  }], ["Anuluj", () => {}]];
+  S.menuIdx = 1; S.modal = "menu";
+  $("menu").querySelector("h2").textContent = "Wylogować z serwera?";
+  $("menu").classList.remove("hidden");
+  renderMenu();
+}
+/** Wiersze „Serwer EmuStart” — te same na komputerze i telefonie. */
+function serverRows(rows, c) {
+  if (c.server_key) {
+    rows.push({ k: "Serwer", type: "info", fmt: () => `${c.server_url.replace(/^https:\/\//, "")} · konto ${c.server_account || "—"}` +
+                (S.state?.server?.ok === false ? " · nie odpowiada" : "") });
+    rows.push({ k: "Wyloguj z serwera", type: "action", fmt: () => "to urządzenie straci dostęp — zalogujesz się ponownie kontem", run: () => logoutAsk() });
+    return;
+  }
+  const wait = c.enroll ? `czeka na zatwierdzenie — kod ${c.enroll.code}` : "";
+  if (S.platform === "android")
+    rows.push({ k: "Zaloguj (kod QR)", type: "action", fmt: () => wait || "panel serwera → Dodaj urządzenie → zeskanuj", run: () => loginQr() });
+  rows.push({ k: S.platform === "android" ? "Zaloguj (adres serwera)" : "Zaloguj", type: "action",
+              fmt: () => wait || (S.platform === "android" ? DEFAULT_SERVER : `${DEFAULT_SERVER} albo link z panelu serwera`),
+              run: () => loginAddress() });
+}
 let enrollTimer = null;
 function enrollWait(code, account, mode) {
-  $("joinQr").innerHTML = ""; $("joinQr").style.display = "none";
   $("join").querySelector("h2").textContent = mode === "new" ? `Nowe konto „${account}”` : `Konto „${account}” — nowe urządzenie`;
   $("join").querySelector("p").innerHTML = mode === "new"
-    ? "Czeka na zatwierdzenie przez administratora serwera (aplikacja EmuStart albo panel serwera)."
+    ? "Czeka na zatwierdzenie przez administratora serwera (aplikacja EmuStart albo panel serwera). Sprawdź, czy kod się zgadza."
     : "Zatwierdź na innym urządzeniu tego konta (albo administrator). Sprawdź, czy kod się zgadza.";
   $("joinCode").textContent = code;
   $("joinText").textContent = "Możesz zamknąć to okno albo aplikację — prośba czeka do 24 godzin.";
-  S.modal = "join"; S.joinEnroll = true;
+  S.modal = "join";
   $("join").classList.remove("hidden");
   setHints([["b", "Zamknij (prośba czeka)"], ["x", "Wycofaj prośbę"]]);
   const tick = async () => {
     const p = await api().server_enroll_poll();
-    if (p.status === "approved") {
-      enrollStop(); S.settings = await api().get_settings(); await refreshState();
-      toast(`Zatwierdzono — konto „${p.account}” na tym urządzeniu.`, 6000);
-      return openProfiles(true);
-    }
+    if (p.status === "approved") { enrollStop(); return loginDone(p.account); }
     if (p.status === "denied") { enrollStop(); return toast("Prośba odrzucona.", 6000); }
     if (p.status === "expired" || p.status === "none") { enrollStop(); return toast("Prośba wygasła — wyślij ją ponownie.", 6000); }
   };
@@ -843,7 +879,6 @@ function enrollWait(code, account, mode) {
 }
 function enrollStop(keepTimer) {
   if (!keepTimer) { clearInterval(enrollTimer); enrollTimer = null; }
-  S.joinEnroll = false;
   if (S.modal === "join") { S.modal = null; $("join").classList.add("hidden"); show(S.screen); }
 }
 async function enrollResume() {
@@ -852,7 +887,7 @@ async function enrollResume() {
   if (!p || p.status === "none") return;
   if (p.status === "pending") return enrollWait(p.code, p.account, "existing");
   if (p.status === "approved") { await refreshState(); toast(`Zatwierdzono — konto „${p.account}”.`, 6000); }
-  else if (p.status === "denied") toast("Prośba o dołączenie została odrzucona.", 6000);
+  else if (p.status === "denied") toast("Prośba o zalogowanie została odrzucona.", 6000);
 }
 const enrollSeen = new Set();
 async function enrollCheck() {
@@ -879,66 +914,9 @@ async function enrollCheck() {
   renderMenu();
 }
 
-/* ───────────── dołączenie do serwera z zatwierdzeniem na telefonie ───────────── */
-let joinTimer = null;
-async function joinOpen(url) {
-  if (!url) return toast("Podaj adres serwera (np. 100.85.254.31).", 5000);
-  toast("Łączę z serwerem…", 10000);
-  const r = await api().server_join(url);
-  if (!r.ok) return toast(r.reason, 7000);
-  $("joinQr").innerHTML = r.svg || "";
-  $("joinQr").style.display = r.svg ? "" : "none";
-  $("join").querySelector("h2").textContent = "Dołącz do serwera";
-  $("join").querySelector("p").innerHTML = "Na telefonie z EmuStart: <b>Ustawienia → Zatwierdź nowe urządzenie</b> → zeskanuj kod.<br>" +
-    "Albo w panelu serwera: <b>Proszą o dołączenie</b> → Zatwierdź.";
-  $("joinCode").textContent = r.pretty;
-  const until = Date.now() + 1000 * (r.expires_in || 600);
-  S.modal = "join";
-  $("join").classList.remove("hidden");
-  setHints([["b", "Anuluj"]]);
-  const tick = async () => {
-    const left = Math.max(0, Math.ceil((until - Date.now()) / 60000));
-    $("joinText").textContent = `Serwer ${r.server || r.url} · czekam na zatwierdzenie · kod ważny jeszcze ${left} min`;
-    const p = await api().server_join_poll();
-    if (S.modal !== "join") return;
-    if (p.status === "approved") {
-      joinClose(); S.settings = await api().get_settings(); renderSettings(); await refreshState();
-      return toast(`Dołączono do serwera ${r.server || p.url} — ten komputer ma własny klucz.`, 6000);
-    }
-    if (p.status === "denied") { joinClose(); return toast("Prośba odrzucona na serwerze.", 6000); }
-    if (p.status === "expired" || p.status === "none") { joinClose(); return toast("Kod wygasł — spróbuj ponownie.", 6000); }
-  };
-  clearInterval(joinTimer);
-  joinTimer = setInterval(tick, 2000);
-  tick();
-}
-function joinClose() {
-  clearInterval(joinTimer); joinTimer = null;
-  S.modal = null; $("join").classList.add("hidden"); show(S.screen);
-}
 function joinInput(a) {
-  if (S.joinEnroll) {
-    if (a === "x") { api().server_enroll_cancel(); enrollStop(); return toast("Prośba wycofana.", 4000); }
-    if (a === "b" || a === "start") enrollStop();
-    return;
-  }
-  if (a === "b" || a === "start") { api().server_join_cancel(); joinClose(); }
-}
-/** Sparowane urządzenie zatwierdza nowe: podgląd prośby (nazwa, rodzaj, adres) → wybór. */
-async function approveFlow(text) {
-  const r = await api().server_approve(text, null);
-  if (!r.ok) return toast(r.reason, 6000);
-  const q = r.request || {};
-  const kind = { pc: "komputer", phone: "telefon" }[q.class] || q.class || "";
-  const act = async (allow) => {
-    const x = await api().server_approve(text, allow);
-    toast(x.ok ? (allow ? `Dołączono: ${x.name}` : `Odrzucono: ${x.name}`) : x.reason, 6000);
-  };
-  S.menu = [[`Zatwierdź: ${q.name} (${kind}${q.ip ? ", " + q.ip : ""})`, () => act(true)],
-            ["Odrzuć", () => act(false)], ["Nie teraz", () => {}]];
-  S.menuIdx = 0; S.modal = "menu";
-  $("menu").classList.remove("hidden");
-  renderMenu();
+  if (a === "x") { api().server_enroll_cancel(); enrollStop(); return toast("Prośba wycofana.", 4000); }
+  if (a === "b" || a === "start") enrollStop();
 }
 
 /* ───────────── aktualizacja EmuStart (menu Start) ───────────── */
@@ -1003,7 +981,7 @@ async function openSettings(first) {
   S.setIdx = 0;
   $("setIntro").classList.toggle("hidden", !first);
   if (S.platform === "android") $("setIntro").textContent =
-    "Pierwsze uruchomienie. Wpisz adres i klucz serwera EmuStart (komputer z grami), potem „Sprawdź połączenie”.";
+    "Pierwsze uruchomienie. Zaloguj się na serwerze EmuStart (komputer z grami): kod QR z panelu serwera albo adres serwera.";
   $("setTitle").textContent = first ? "Witaj w EmuStart" : "Ustawienia";
   buildSetRows();
   show("settings");
@@ -1013,33 +991,7 @@ function buildSetRowsAndroid() {
   const c = S.settings;
   const rows = [];
   rows.push({ head: "Serwer EmuStart (komputer z grami)" });
-  rows.push({ k: "Adres serwera", key: "server_url", type: "text", fmt: (v) => v || "np. http://100.85.254.31:8740" });
-  rows.push({ k: "Klucz", key: "server_key", type: "info",
-              fmt: (v) => (String(v || "").startsWith("dev:") ? `klucz urządzenia${c.server_keykind ? " (" + c.server_keykind + ")" : ""}`
-                : v ? "stary klucz — przejdzie na klucz urządzenia przy połączeniu z serwerem" : "brak — połącz się z serwerem (kod albo przez internet)") });
-  const pairDone = async (r) => {
-    if (!r.ok) return toast(r.reason, 6000);
-    S.settings = await api().get_settings(); renderSettings(); await refreshState();
-    toast(`Połączono z serwerem ${r.server || r.url} — ten telefon ma własny klucz.`, 5000);
-  };
-  rows.push({ k: "Połącz z serwerem (kod QR)", type: "action", fmt: () => "panel serwera → Dodaj urządzenie → zeskanuj kod",
-              run: async () => { const s = await api().server_scan(); if (!s.ok) return toast(s.reason, 5000);
-                                 toast("Łączę z serwerem…", 10000); pairDone(await api().server_pair(s.text, "")); } });
-  rows.push({ k: "Połącz kodem", type: "action", fmt: () => "kod z panelu serwera wpisany ręcznie",
-              run: () => oskOpen("Kod z panelu serwera", "", async (v) => {
-                if (!v.trim()) return; toast("Łączę z serwerem…", 10000);
-                pairDone(await api().server_pair(v.trim(), S.settings.server_url || "")); }) });
-  rows.push({ k: "Dołącz przez internet (nowa instalacja)", type: "action",
-              fmt: () => (S.settings.enroll ? `czeka na zatwierdzenie — kod ${S.settings.enroll.code}` : "tylko adres serwera, np. emustart.twojadomena.org"),
-              run: () => enrollStart() });
-  rows.push({ k: "Zatwierdź nowe urządzenie (kod QR)", type: "action", fmt: () => "nowy komputer: Ustawienia → Dołącz do serwera → zeskanuj jego kod",
-              run: async () => { const s = await api().server_scan(); if (!s.ok) return toast(s.reason, 5000); approveFlow(s.text); } });
-  rows.push({ k: "Zatwierdź nowe urządzenie (kod)", type: "action", fmt: () => "kod z ekranu nowego urządzenia wpisany ręcznie",
-              run: () => oskOpen("Kod z ekranu nowego urządzenia", "", (v) => { if (v.trim()) approveFlow(v.trim()); }) });
-  rows.push({ k: "Sprawdź połączenie", type: "action", run: async () => {
-    toast("Łączę z serwerem…", 10000); const r = await api().server_test();
-    toast(r.ok ? `Połączono: ${r.name} (EmuStart ${r.version}), ${r.systems} systemów` : `Błąd: ${r.reason}`, 6000);
-    if (r.ok) { await refreshState(); } } });
+  serverRows(rows, c);
   rows.push({ head: "Zapisy gier  ·  wspólne z EmuStart na komputerze (folder profilu na serwerze)" });
   rows.push({ k: "Profil", type: "action", fmt: () => c.profile || "nie wybrano — A: wybierz", run: () => openProfiles() });
   if (c.pending_saves) rows.push({ k: "Czekają na wysłanie", type: "info", key: "pending_saves", fmt: (v) => `${v} gier (wyślą się, gdy serwer będzie dostępny)` });
@@ -1078,37 +1030,12 @@ function buildSetRows() {
   rows.push({ k: "Emulatory", key: "emu_root", type: "path" });
   rows.push({ k: "Pamięć podręczna", key: "cache_dir", type: "path" });
   rows.push({ k: "BIOS-y", key: "bios_dir", type: "path", fmt: (v) => v || "nie ustawiono — A wybierz folder (np. bios z RetroBat)" });
-  rows.push({ head: "Serwer EmuStart  ·  gry pobierane z serwera zamiast przez SMB (szybciej przez Tailscale)" });
-  rows.push({ k: "Adres serwera", key: "server_url", type: "text",
-              prefill: () => c.server_url || c.server_url_guess || "http://",
-              fmt: (v) => v || (c.server_url_guess ? `nie ustawiono — A: podpowiedź ${c.server_url_guess}` : "nie ustawiono — gry przez SMB jak dotąd") });
-  rows.push({ k: "Klucz", key: "server_key", type: "info",
-              fmt: (v) => (String(v || "").startsWith("dev:") ? `klucz urządzenia${c.server_keykind ? " (" + c.server_keykind + ")" : ""}`
-                : v ? "stary klucz — przejdzie na klucz urządzenia przy połączeniu z serwerem" : "brak — połącz się z serwerem (kod albo przez internet)") });
-  rows.push({ k: "Połącz kodem", type: "action", fmt: () => "kod z panelu serwera (Dodaj urządzenie) — własny klucz tego komputera",
-              run: () => oskOpen("Kod z panelu serwera", "", async (v) => {
-                if (!v.trim()) return;
-                toast("Łączę z serwerem…", 10000);
-                const r = await api().server_pair(v.trim(), S.settings.server_url || S.settings.server_url_guess || "");
-                if (!r.ok) return toast(r.reason, 6000);
-                S.settings = await api().get_settings(); renderSettings();
-                toast(`Połączono z serwerem ${r.server || r.url} — ten komputer ma własny klucz.`, 5000);
-              }) });
-  rows.push({ k: "Dołącz przez internet (nowa instalacja)", type: "action",
-              fmt: () => (S.settings.enroll ? `czeka na zatwierdzenie — kod ${S.settings.enroll.code}` : "tylko adres serwera, np. emustart.twojadomena.org"),
-              run: () => enrollStart() });
-  rows.push({ k: "Dołącz do serwera (zatwierdź telefonem)", type: "action",
-              fmt: () => "kod na tym ekranie zatwierdzasz sparowanym telefonem albo w panelu serwera",
-              run: () => oskOpen("Adres serwera", S.settings.server_url || S.settings.server_url_guess || "", (v) => joinOpen(v.trim())) });
-  if (c.server_key) rows.push({ k: "Zatwierdź nowe urządzenie (kod)", type: "action", fmt: () => "kod z ekranu nowego urządzenia",
-              run: () => oskOpen("Kod z ekranu nowego urządzenia", "", (v) => { if (v.trim()) approveFlow(v.trim()); }) });
+  rows.push({ head: "Serwer EmuStart  ·  gry, zapisy i profile przez serwer (połączenie szyfrowane)" });
+  serverRows(rows, c);
   rows.push({ k: "Gry z serwera", key: "server_games", type: "bool",
               fmt: (v) => (v ? "tak — 8 strumieni; gdy serwer nie ma gry albo nie odpowiada: SMB" : "nie — zawsze SMB") });
   rows.push({ k: "Zapisy i profile przez serwer", key: "server_profiles", type: "bool",
               fmt: (v) => (v ? "tak — kopie zapasowe robi serwer, pliki skompresowane; gdy serwer nie odpowiada: SMB" : "nie — zawsze SMB") });
-  rows.push({ k: "Sprawdź połączenie", type: "action", run: async () => {
-    toast("Łączę z serwerem…", 10000); const r = await api().server_test();
-    toast(r.ok ? `Połączono: ${r.name} (EmuStart ${r.version}), ${Math.round(r.rtt * 1000)} ms` : `Błąd: ${r.reason}`, 6000); } });
   rows.push({ head: "Pamięć podręczna i sieć" });
   rows.push({ k: "Trzymaj ostatnie gry", key: "cache_recent", type: "num", step: 1, min: 1, max: 100, fmt: (v) => `${v} + przypięte` });
   rows.push({ k: "Tryb sieci", key: "network_mode", type: "enum", opts: Object.keys(NET), fmt: (v) => NET[v] });
@@ -1534,6 +1461,16 @@ window.addEventListener("pywebviewready", async () => {
 });
 
 // tryb deweloperski: UI w zwykłej przeglądarce (main.py --browser)
+/** Start interfejsu (pywebviewready) dopiero po wykonaniu wszystkich skryptów strony
+ *  (app.js, options.js, look.js). setTimeout(0) potrafił wyprzedzić look.js — na Androidzie
+ *  pliki przychodzą asynchronicznie i start padał na „applyLook is not defined”: zostawało
+ *  samo tło z paskiem. */
+function uiReady() {
+  const go = () => window.dispatchEvent(new Event("pywebviewready"));
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", go, { once: true });
+  else setTimeout(go, 0);
+}
+
 if (new URLSearchParams(location.search).has("dev")) {
   window.pywebview = {
     api: new Proxy({}, {
@@ -1541,7 +1478,7 @@ if (new URLSearchParams(location.search).has("dev")) {
                                                                  body: JSON.stringify(args) }).then((r) => r.json()),
     }),
   };
-  setTimeout(() => window.dispatchEvent(new Event("pywebviewready")), 0);
+  uiReady();
 }
 
 
@@ -1569,5 +1506,5 @@ if (new URLSearchParams(location.search).has("android") && window.EmuAndroid) {
   window.__emuPad = (a, up) => (up ? release(a) : press(a, true));
   // powrót z emulatora do EmuStart
   window.__emuResumed = () => { if (S.modal === "launch") updateLaunch(); };
-  setTimeout(() => window.dispatchEvent(new Event("pywebviewready")), 0);
+  uiReady();
 }

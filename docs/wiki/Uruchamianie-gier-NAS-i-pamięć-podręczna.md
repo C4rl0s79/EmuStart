@@ -47,11 +47,10 @@ SMB ok. 25 MB/s, serwer ok. 78 MB/s.
 
 Ustawienia → **Serwer EmuStart**:
 
-1. **Adres serwera** — podpowiadany z udziału sieciowego z grami (np. dysk `Z:` →
-   `http://100.85.254.31:8740`).
-2. **Połącz kodem** (kod z panelu serwera) albo **Dołącz przez internet** — komputer
-   tworzy klucz urządzenia (TPM/DPAPI); wiersz **Klucz** pokazuje jego rodzaj.
-3. **Sprawdź połączenie**.
+1. **Zaloguj** — link z panelu serwera (Dodaj urządzenie → *Kopiuj link*) albo adres tunelu
+   (np. `emustart.emucloud.org`), potem konto i hasło. Komputer tworzy klucz urządzenia
+   (TPM/DPAPI) i łączy się z serwerem tylko szyfrowanie.
+2. **Wyloguj z serwera** — gdy komputer ma przestać korzystać z serwera.
 
 Gra jest szukana na serwerze po systemie i ścieżce; plik idzie z serwera tylko przy
 zgodnym rozmiarze. W każdym innym przypadku (serwer wyłączony, starsza wersja serwera,

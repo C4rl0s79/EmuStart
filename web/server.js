@@ -159,7 +159,7 @@ async function updTick() {
   if (close) setTimeout(() => close(st.version), 300);
 }
 
-/* ── sparowane urządzenia i parowanie kodem QR (emustart/devices.py) ── */
+/* ── urządzenia zalogowane kontem i prośby o zalogowanie (emustart/devices.py, enroll.py) ── */
 const KIND = { pc: "komputer", phone: "telefon" };
 let lastDevices = [];
 async function refreshDevices() {
@@ -181,41 +181,25 @@ async function refreshDevices() {
     msg(res?.ok ? (b.dataset.en ? `Odrzucono: ${res.name}` : `Zatwierdzono: ${res.name}`) : (res?.reason || "Serwer nie odpowiada."), res?.ok);
     refreshDevices();
   }));
-  const reqs = r.requests || [];
-  $("reqBox").hidden = !reqs.length;
-  $("requests").innerHTML = reqs.map((q) =>
-    `<tr><td>${esc(q.name)}<div class="muted">${esc(KIND[q.class] || q.class)} · ${esc(q.ip || "")}</div></td>` +
-    `<td><code style="font-size:20px;letter-spacing:.1em">${esc(q.pretty)}</code></td>` +
-    `<td class="n"><button class="primary" data-ok="${esc(q.code)}">Zatwierdź</button> ` +
-    `<button class="danger" data-no="${esc(q.code)}">Odrzuć</button></td></tr>`).join("");
-  $("requests").querySelectorAll("[data-ok],[data-no]").forEach((b) => b.addEventListener("click", async () => {
-    const allow = !!b.dataset.ok;
-    const res = await admin("pair_approve", { code: b.dataset.ok || b.dataset.no, allow }).catch(() => null);
-    msg(res?.ok ? (allow ? `Dołączono: ${res.name}` : `Odrzucono: ${res.name}`) : (res?.reason || "Serwer nie odpowiada."));
-    refreshDevices();
-  }));
   $("devices").innerHTML = r.devices.length ? r.devices.map((d) =>
     `<tr class="${d.revoked ? "off" : ""}"><td>${esc(d.name)}<div class="muted">${esc(d.ip || "")}</div></td>` +
     `<td>${esc(KIND[d.class] || d.class)}</td>` +
-    `<td>${d.admin ? "administrator" : `${esc(d.account || "—")} · ${d.games ? "z grami" : "bez gier"}`}` +
-    `${d.keyed ? ' <span class="muted">(klucz urządzenia)</span>' : ""}` +
-    `${d.revoked ? "" : ` <button data-acc="${esc(d.id)}" data-adm="${d.admin ? 1 : 0}">${d.admin ? "Odbierz admina" : "Nadaj admina"}</button>`}</td>` +
+    `<td>${esc(d.account || "—")}${d.admin ? " · administrator" : ""} · ${d.games || d.admin ? "z grami" : "bez gier"}` +
+    `${d.revoked || d.admin ? "" : ` <button data-games="${esc(d.id)}" data-on="${d.games ? 1 : 0}">${d.games ? "Bez gier" : "Z grami"}</button>`}` +
+    `${d.revoked_reason ? `<div class="muted">${esc(d.revoked_reason)}</div>` : ""}</td>` +
     `<td>${esc(d.version || "—")}</td>` +
     `<td class="n">${d.revoked ? "unieważnione" : ago(d.last_seen)}</td>` +
     `<td class="n">${d.revoked ? "" : `<button data-ren="${esc(d.id)}">Nazwa</button> <button class="danger" data-rev="${esc(d.id)}">Unieważnij</button>`}</td></tr>`).join("")
-    : `<tr><td colspan="6" class="muted">Brak sparowanych urządzeń — „Dodaj urządzenie”.</td></tr>`;
-  $("devices").querySelectorAll("[data-acc]").forEach((b) => b.addEventListener("click", async () => {
-    const make = b.dataset.adm !== "1";
-    if (!confirm(make ? "Nadać temu urządzeniu rolę administratora (zatwierdza wszystkie prośby, widzi wszystkie konta)?"
-                      : "Odebrać rolę administratora?")) return;
-    await admin("device_access", { id: b.dataset.acc, role: make ? "admin" : "user" }).catch(() => null);
+    : `<tr><td colspan="6" class="muted">Brak urządzeń — „Dodaj urządzenie” i zaloguj się w aplikacji.</td></tr>`;
+  $("devices").querySelectorAll("[data-games]").forEach((b) => b.addEventListener("click", async () => {
+    await admin("device_games", { id: b.dataset.games, games: b.dataset.on !== "1" }).catch(() => null);
     refreshDevices();
   }));
   $("devices").querySelectorAll("[data-rev]").forEach((b) => b.addEventListener("click", async () => {
     const d = (lastDevices || []).find((x) => x.id === b.dataset.rev) || {};
     const recent = d.last_seen && Date.now() / 1000 - d.last_seen < 6 * 3600;
     if (!confirm((recent ? `UWAGA: „${d.name}” łączyło się z serwerem ${ago(d.last_seen)} — to urządzenie jest w użyciu.\n\n` : "") +
-                 "Unieważnić to urządzenie? Straci dostęp do serwera, dopóki nie dołączy ponownie.")) return;
+                 "Unieważnić to urządzenie? Straci dostęp do serwera, dopóki nie zaloguje się ponownie.")) return;
     await admin("device_revoke", { id: b.dataset.rev }).catch(() => null);
     refreshDevices();
   }));
@@ -239,10 +223,20 @@ async function refreshAccounts() {
   const r = await admin("accounts").catch(() => null);
   if (!r) return;
   $("accounts").innerHTML = r.accounts.length ? r.accounts.map((a) =>
-    `<tr><td>${esc(a.name)}</td><td>${a.password ? `ustawione <span class="muted">${a.set ? ago(a.set) : ""}</span>` : "<b>brak</b>"}</td>` +
-    `<td class="n">${a.devices}</td><td class="n"><button data-pw="${esc(a.name)}">${a.password ? "Nowe hasło" : "Ustaw hasło"}</button></td></tr>`).join("")
+    `<tr><td>${esc(a.name)}${a.admin ? ' <span class="muted">· administrator</span>' : ""}</td>` +
+    `<td>${a.password ? `ustawione <span class="muted">${a.set ? ago(a.set) : ""}</span>` : "<b>brak</b>"}</td>` +
+    `<td class="n">${a.devices}</td><td class="n"><button data-pw="${esc(a.name)}">${a.password ? "Nowe hasło" : "Ustaw hasło"}</button> ` +
+    `<button data-adm="${esc(a.name)}" data-on="${a.admin ? 1 : 0}">${a.admin ? "Odbierz admina" : "Administrator"}</button></td></tr>`).join("")
     : `<tr><td colspan="4" class="muted">Brak kont.</td></tr>`;
   $("accounts").querySelectorAll("[data-pw]").forEach((b) => b.addEventListener("click", () => askAccountPassword(b.dataset.pw)));
+  $("accounts").querySelectorAll("[data-adm]").forEach((b) => b.addEventListener("click", async () => {
+    const make = b.dataset.on !== "1";
+    if (!confirm(make ? `Konto „${b.dataset.adm}” administratorem? Wszystkie jego urządzenia zatwierdzą nowe konta i zobaczą wszystkie konta.`
+                      : `Odebrać kontu „${b.dataset.adm}” administratora?`)) return;
+    const r = await admin("account_admin", { name: b.dataset.adm, admin: make }).catch(() => null);
+    msg(r?.ok ? "Zapisano." : (r?.reason || "Serwer nie odpowiada."), r?.ok);
+    refreshAccounts(); refreshDevices();
+  }));
 }
 function askAccountPassword(name) {
   $("pwName").textContent = `„${name}”`;
@@ -264,22 +258,27 @@ setInterval(refreshAccounts, 30000);
 
 let pairTimer = null;
 $("bPair").addEventListener("click", async () => {
-  const r = await admin("pair_code").catch(() => null);
-  if (!r?.ok) return msg("Serwer nie odpowiada.");
+  const r = await admin("login_code").catch(() => null);
+  if (!r?.ok) return msg(r?.reason || "Serwer nie odpowiada.");
   $("pairQr").innerHTML = r.svg || "";
   $("pairQr").hidden = !r.svg;
   $("pairCode").textContent = r.pretty;
-  $("pairUrl").textContent = r.url;
+  $("pairUrl").textContent = r.tunnel || "kod QR / link";
+  $("pairLink").value = r.uri;
   $("pairBox").hidden = false;
   clearInterval(pairTimer);
   const tick = () => {
     const left = Math.max(0, r.expires - Date.now() / 1000);
     $("pairLeft").textContent = left ? `jeszcze ${Math.ceil(left / 60)} min` : "— wygasł, wygeneruj nowy";
-    if (!left) { clearInterval(pairTimer); $("pairQr").innerHTML = ""; }
+    if (!left) { clearInterval(pairTimer); $("pairQr").innerHTML = ""; $("pairLink").value = ""; }
     refreshDevices();
   };
   tick();
   pairTimer = setInterval(tick, 3000);
+});
+$("bPairCopy").addEventListener("click", async () => {
+  try { await navigator.clipboard.writeText($("pairLink").value); msg("Link skopiowany — wklej go w EmuStart na komputerze: Ustawienia → Zaloguj.", true); }
+  catch (e) { $("pairLink").select(); }
 });
 
 /* ── dostęp z internetu: port publiczny przez UPnP (emustart/public.py) ── */
@@ -319,7 +318,7 @@ $("bTunnel").addEventListener("click", async () => {
 });
 $("bPublic").addEventListener("click", async () => {
   if (!pubOn && !confirm("Włączyć dostęp z internetu? Serwer otworzy port na routerze (UPnP). " +
-                         "Wejdą tylko sparowane urządzenia z kluczem.")) return;
+                         "Wejdą tylko urządzenia zalogowane kontem (klucz urządzenia).")) return;
   $("bPublic").disabled = true;
   const r = await admin("public_set", { enabled: !pubOn }).catch(() => null);
   $("bPublic").disabled = false;

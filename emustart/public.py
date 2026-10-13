@@ -9,14 +9,15 @@ Włączany w panelu serwera („Dostęp z internetu”, config: `server_public`)
 - wykrywa adres za NAT-em operatora (CGNAT) — wtedy port publiczny nie ma sensu.
 
 Port publiczny jest węższy niż pozostałe: tylko API /v1 i grafiki (/media, /assets, /local), każde zapytanie
-z kluczem urządzenia; bez parowania (kody przechodzą przez sieć lokalną, Tailscale albo —
-od 0.36 — tunel), bez panelu i interfejsu. Seria złych kluczy z jednego adresu = przerwa
+z tokenem urządzenia (bez tokenu tylko logowanie: prośba, stan prośby, podpis), bez panelu
+i interfejsu. Seria złych kluczy z jednego adresu = przerwa
 dla tego adresu; ograniczona liczba połączeń naraz z jednego adresu.
 """
 
 from __future__ import annotations
 
 import ipaddress
+import json
 import logging
 import threading
 import time
@@ -116,7 +117,7 @@ def gate(handler) -> bool:
     if _banned.get(ip, 0) > time.time():
         refuse(handler, 403)
         return False
-    if not path.startswith(ALLOWED) or path.startswith("/v1/pair"):
+    if not path.startswith(ALLOWED):
         refuse(handler, 404)
         return False
     if path in OPEN_PATHS:
@@ -190,6 +191,22 @@ def _remember_router(location: str) -> None:
         pass
 
 
+# Sprawdzenie, że odpowiada nasz serwer, bez klucza: wyzwanie logowania dla pustego id.
+# /v1/info bez klucza na porcie publicznym to nieudane logowanie — liczone do blokady adresu
+# (własny adres zewnętrzny = adres domu) i odrzucane ogólnym 401, nie do odróżnienia od obcego.
+PROBE_PATH = "/v1/auth/challenge"
+PROBE_BODY = b'{"device": ""}'
+
+
+def ours(status: int, body: bytes) -> bool:
+    """Odpowiedź serwera EmuStart na PROBE (nieznane urządzenie)."""
+    try:
+        d = json.loads(body or b"{}")
+    except ValueError:
+        return False
+    return status in (200, 403) and isinstance(d, dict) and "reason" in d and d.get("ok") is False
+
+
 def _self_check(ext: str, port: int) -> None:
     """Próba połączenia z własnym adresem zewnętrznym (działa, gdy router umie „zawrócić”
     ruch — NAT loopback). Niepowodzenie nie przesądza: decyduje połączenie z zewnątrz."""
@@ -199,8 +216,9 @@ def _self_check(ext: str, port: int) -> None:
         return
     try:
         c = netsrc.PinnedHTTPS(ext, port, fp, 5)
-        c.request("GET", "/v1/info")
-        ok = c.getresponse().status in (200, 401)      # odpowiedział nasz serwer (bez klucza: 401)
+        c.request("POST", PROBE_PATH, body=PROBE_BODY, headers={"Content-Type": "application/json"})
+        r = c.getresponse()
+        ok = ours(r.status, r.read())
         c.close()
     except Exception:
         ok = False
@@ -284,21 +302,21 @@ def set_tunnel(url: str) -> str:
 
 
 def check_tunnel() -> None:
-    """Czy serwer odpowiada przez tunel (zapytanie przez internet; bez klucza — 401 od naszego
-    serwera też potwierdza drogę)."""
+    """Czy serwer odpowiada przez tunel (zapytanie przez internet, bez klucza — PROBE)."""
     import ssl
     import urllib.request
     url = TUNNEL["url"]
     if not url:
         return
-    req = urllib.request.Request(url + "/v1/info", headers={"User-Agent": "EmuStart-serwer"})
+    req = urllib.request.Request(url + PROBE_PATH, data=PROBE_BODY, method="POST",
+                                 headers={"User-Agent": "EmuStart-serwer", "Content-Type": "application/json"})
     try:
         with urllib.request.urlopen(req, timeout=10, context=ssl.create_default_context()) as r:
-            ok = r.status == 200
+            ok = ours(r.status, r.read())
         TUNNEL.update(state="ok" if ok else "error", error="" if ok else "nieoczekiwana odpowiedź")
     except Exception as ex:
         code = getattr(ex, "code", None)
-        if code == 401 and b"klucz" in (ex.read() if hasattr(ex, "read") else b""):
+        if code and ours(code, ex.read() if hasattr(ex, "read") else b""):
             TUNNEL.update(state="ok", error="", checked=time.time())      # odpowiedział nasz serwer
             log.info("tunel %s działa", url)
             return

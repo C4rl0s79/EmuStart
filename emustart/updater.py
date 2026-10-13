@@ -1,8 +1,10 @@
 """updater — aktualizacja EmuStart z wydań na GitHubie (panel serwera).
 
 1. `latest()` — najnowsze wydanie C4rl0s79/EmuStart i plik `EmuStart-<wersja>-win64.zip`.
-2. `Job` — pobranie ZIP-a do `update\\` obok exe (z postępem), sprawdzenie archiwum
-   (`EmuStart\\EmuStart.exe` i `_internal`), rozpakowanie do `update\\new`.
+2. `Job` — pobranie ZIP-a do `update\\` obok exe (z postępem), sprawdzenie skrótu SHA-256
+   i **podpisu wydania** (`<zip>.sig`, Ed25519 — emustart/signing.py; bez poprawnego podpisu
+   nic nie jest rozpakowywane), sprawdzenie archiwum (`EmuStart\\EmuStart.exe` i
+   `_internal`), rozpakowanie do `update\\new`.
 3. `Job.apply()` — skrypt PowerShell `update\\apply.ps1` uruchomiony poza procesem
    serwera: czeka na jego zakończenie (i na zwolnienie plików przez okno panelu),
    robi kopię `EmuStart.exe` + `_internal` do `update\\backup`, podmienia je, przy błędzie
@@ -51,10 +53,13 @@ def latest(timeout: float = 15) -> dict:
     ver = tag.lstrip("v")
     asset = next((a for a in rel.get("assets") or []
                   if re.fullmatch(r"EmuStart-[\d.]+-win64\.zip", a.get("name") or "")), None)
+    sig = next((a for a in rel.get("assets") or []
+                if asset and a.get("name") == asset["name"] + ".sig"), None)
     return {"version": ver, "tag": tag, "current": __version__,
             "newer": vtuple(ver) > vtuple(__version__),
             "url": asset["browser_download_url"] if asset else "", "size": asset["size"] if asset else 0,
             "sha256": ((asset or {}).get("digest") or "").removeprefix("sha256:").lower(),
+            "sig_url": sig["browser_download_url"] if sig else "",
             "notes": (rel.get("body") or "")[:4000], "published": rel.get("published_at") or "",
             "page": rel.get("html_url") or ""}
 
@@ -127,6 +132,12 @@ class Job:
         if want and h.hexdigest() != want:
             part.unlink(missing_ok=True)
             raise RuntimeError("Pobrany plik ma inny skrót SHA-256 niż plik wydania — aktualizacja przerwana.")
+        # podpis wydania (klucz prywatny tylko w CI) — chroni także przed przejęciem konta GitHub
+        name = url.rsplit("/", 1)[-1]
+        if not _signature_ok(self.info.get("sig_url") or "", name, h.hexdigest()):
+            part.unlink(missing_ok=True)
+            raise RuntimeError("Wydanie nie ma poprawnego podpisu EmuStart — aktualizacja wstrzymana "
+                               "(plik mógł zostać podmieniony).")
         part.replace(dest)
 
     def apply(self, argv: list, server: bool = True) -> dict:
@@ -215,6 +226,21 @@ def spawn_powershell(args: list, cwd=None) -> str:
     except OSError:
         subprocess.Popen(cmd, creationflags=flags, close_fds=True, cwd=cwd, **io)
         return "proces"
+
+
+def _signature_ok(sig_url: str, name: str, sha256_hex: str) -> bool:
+    """Podpis `<zip>.sig` z tego samego wydania, zgodny z kluczem wbudowanym w program."""
+    from emustart import signing
+    if not sig_url.startswith(DOWNLOAD_PREFIX) or sig_url.rsplit("/", 1)[-1] != name + ".sig":
+        return False
+    try:
+        req = urllib.request.Request(sig_url, headers={"User-Agent": UA})
+        with urllib.request.urlopen(req, timeout=30) as r:
+            sig = r.read(4096).decode("ascii", "replace")
+    except OSError as ex:
+        log.warning("podpis wydania: %s", ex)
+        return False
+    return signing.verify(name, sha256_hex, sig)
 
 
 def _extract(zp: Path, new: Path) -> None:

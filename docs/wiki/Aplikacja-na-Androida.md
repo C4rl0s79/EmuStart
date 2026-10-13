@@ -8,19 +8,19 @@ w emulatorze zainstalowanym w telefonie.
 
 ## Instalacja
 
-1. Na komputerze z grami uruchom [serwer EmuStart](Serwer-dla-Androida). Telefon łączy się
-   **kluczem urządzenia** (Android Keystore): kod z panelu serwera albo **Dołącz przez
-   internet** z zatwierdzeniem na innym urządzeniu (0.39 — wspólnego klucza się nie wpisuje).
+1. Na komputerze z grami uruchom [serwer EmuStart](Serwer-dla-Androida).
 2. Pobierz `EmuStart-<wersja>-android.apk` z
    [Releases](https://github.com/C4rl0s79/EmuStart/releases) i zainstaluj (zgoda na
    instalację z nieznanych źródeł).
 3. Przy pierwszym uruchomieniu zezwól na **dostęp do wszystkich plików** — gry trafiają
    do `/storage/emulated/0/EmuStart/games`, skąd czytają je emulatory.
-4. W Ustawieniach wpisz **adres serwera** (np. `100.85.254.31` albo nazwę z Tailscale —
-   port 8740 dopisze się sam) i **klucz**, potem **Sprawdź połączenie**.
+4. Ustawienia → **Zaloguj (kod QR)** (panel serwera → Dodaj urządzenie) albo **Zaloguj (adres
+   serwera)** (np. `emustart.emucloud.org`) → konto i hasło — patrz
+   [Logowanie urządzeń](Serwer-dla-Androida#logowanie-urządzeń-043).
 5. Wybierz emulator dla systemów (←/→ w Ustawieniach → Emulatory).
 
-Telefon musi być w tej samej sieci Tailscale co serwer.
+Telefon łączy się z serwerem tylko szyfrowanie — w domu po sieci lokalnej, poza domem przez
+Tailscale, port publiczny albo tunel (wybiera sam).
 
 ## Emulatory
 

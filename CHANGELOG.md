@@ -17,6 +17,56 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   RetroArchu na Androidzie; ocena „wyświetlania nad innymi aplikacjami” i usługi ułatwień
   dostępu dla pozostałych emulatorów na Androidzie.
 
+## [0.43.0] — 2026-10-13
+
+Zawiera też niewydane 0.41.1 (poprawka startu na Androidzie) i 0.42.0 (podpis wydań).
+
+### Zmienione
+- **Jedna droga do serwera: logowanie kontem** (PC, Android, serwer, panel). W Ustawieniach
+  zostały dwa wiersze: **Zaloguj (kod QR)** (telefon) i **Zaloguj (adres serwera)**, a po
+  zalogowaniu **Wyloguj z serwera**. Zawsze konto i hasło + klucz urządzenia.
+  - **Kod QR z panelu** (Dodaj urządzenie) niesie adresy serwera, odcisk certyfikatu
+    i jednorazowy kod (10 min): połączenie od pierwszego zapytania szyfrowane i przypięte,
+    bez czekania na zatwierdzenie. Komputer: *Kopiuj link* w panelu i wklejenie w
+    **Zaloguj** (albo `EmuStart.exe --server-key` — link do schowka).
+  - **Adres** — tylko domena z prawdziwym certyfikatem (tunel); prośba czeka na
+    zatwierdzenie urządzenia konta albo administratora. Adres IP bez kodu QR nie jest
+    przyjmowany.
+- **Administrator to cecha konta**, nie urządzenia (panel → Konta → *Administrator*).
+  Pierwsze konto zalogowane kodem QR z panelu, gdy żadne nie jest administratorem, zostaje nim.
+- **Tylko szyfrowane połączenia urządzeń**: serwer podaje wyłącznie adresy HTTPS (port 8741,
+  publiczny, tunel); zwykły port 8740 obsługuje API tylko z samego serwera (panel).
+- Panel: **Urządzenia** (konto, gry z serwera, *Unieważnij*), **Proszą o zalogowanie**,
+  **Konta** (hasło, administrator).
+
+### Usunięte
+- **Parowanie kodem** (`/v1/pair`, „Połącz z serwerem (kod QR)”, „Połącz kodem”) i
+  **dołączanie z zatwierdzeniem kodem z ekranu** (`/v1/pair/request|poll|approve`,
+  „Dołącz do serwera”, „Zatwierdź nowe urządzenie”) — dawały rolę administratora bez konta
+  i hasła. Rejestracje bez konta są unieważniane przy starcie serwera (urządzenie loguje się
+  ponownie). Przejście starych kluczy-haseł (`/v1/auth/upgrade`), role per urządzenie,
+  pola „Adres serwera” i „Klucz”, „Sprawdź połączenie”.
+
+### Bezpieczeństwo
+- **Podpis wydań** (Ed25519). CI podpisuje zip wydania kluczem z sekretu repozytorium
+  (`EMUSTART_SIGNING_KEY`, `tools/release_sign.py`) i dołącza `EmuStart-<wersja>-win64.zip.sig`;
+  aktualizacja w programie (aplikacja i panel serwera) sprawdza podpis kluczem publicznym
+  wbudowanym w EmuStart.exe i bez poprawnego podpisu niczego nie rozpakowuje. Skrót SHA-256
+  z GitHuba chronił tylko przed uszkodzonym pobraniem — podpis chroni też przed podmianą
+  wydania po przejęciu konta GitHub. Podpis obejmuje nazwę pliku: podpis starszej wersji nie
+  pasuje do nowszej. Budowa z tagu bez sekretu się przerywa.
+
+### Poprawione
+- **Android: po starcie samo tło z paskiem** („błąd interfejsu: applyLook is not defined”).
+  Start interfejsu wyprzedzał wczytanie `look.js` (pliki w WebView przychodzą
+  asynchronicznie); teraz rusza po wykonaniu wszystkich skryptów strony — także na PC.
+- **Kontrola tunelu i portu publicznego** (od 0.39): `/v1/info` bez klucza dawało 401 —
+  panel pokazywał „tunel: odpowiedź 401”, a każda kontrola liczyła się jako nieudane
+  logowanie z adresu domu (blokada adresu). Teraz sonda bez klucza (wyzwanie logowania),
+  rozpoznająca odpowiedź serwera EmuStart i niczego nieliczącą.
+- Ekran pierwszego uruchomienia nie każe już wpisywać klucza serwera.
+
+
 ## [0.41.0] — 2026-10-13
 
 Audyt bezpieczeństwa całości (serwer, PC, Android, interfejs) i sprzątanie kodu. Zawiera też

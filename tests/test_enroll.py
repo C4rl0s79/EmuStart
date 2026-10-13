@@ -84,6 +84,18 @@ class Device:
         return t.get("token", ""), t
 
 
+def _link(monkeypatch) -> str:
+    """Link logowania jak z kodu QR panelu, ale bez kodu jednorazowego — prośba czeka na
+    zatwierdzenie. Komputer łączy się portem szyfrowanym z przypiętym certyfikatem."""
+    import base64
+    from _srv import tls_server
+    if not getattr(monkeypatch, "_emustart_link", ""):
+        url, fp = tls_server(monkeypatch)
+        d = {"v": 1, "f": fp, "c": "", "e": [{"u": url, "k": "lan"}]}
+        monkeypatch._emustart_link = "emustart://login?d=" + base64.urlsafe_b64encode(json.dumps(d).encode()).decode()
+    return monkeypatch._emustart_link
+
+
 def _admin_key(srv):
     """Urządzenie zero — kod z panelu serwera i klucz urządzenia → (token sesji, id)."""
     import keyhelp
@@ -203,7 +215,7 @@ def test_new_pc_with_only_server_address(srv, monkeypatch):
     monkeypatch.setattr("emustart.config.save", lambda c: saved.update(c))
     a = api_mod.Api.__new__(api_mod.Api)
     a._cfg = {}
-    r = a.server_enroll(f"{host}:{port}", "existing", "jezus", PW)
+    r = a.server_enroll(_link(monkeypatch), "existing", "jezus", PW)
     assert r["ok"] and r["key"] in ("dpapi", "plik") and saved["enroll_pending"]["code"] == r["code"]
     assert a.server_enroll_poll()["status"] == "pending"
     # administrator (inne urządzenie) widzi prośbę z tym samym kodem
@@ -234,7 +246,7 @@ def test_concurrent_logins_share_one_session(srv, monkeypatch):
     monkeypatch.setattr("emustart.config.save", lambda c: None)
     a = api_mod.Api.__new__(api_mod.Api)
     a._cfg = {}
-    a.server_enroll(f"{host}:{port}", "existing", "Jezus", PW)
+    a.server_enroll(_link(monkeypatch), "existing", "Jezus", PW)
     q = _req(srv, "POST", "/v1/enroll/pending", admin_key, body={})[1]["requests"][0]
     _req(srv, "POST", "/v1/enroll/decide", admin_key, body={"id": q["id"], "allow": True})
     a.server_enroll_poll()
@@ -258,7 +270,7 @@ def test_after_approval_pc_uses_the_account_not_placeholder(srv, monkeypatch):
     a = api_mod.Api.__new__(api_mod.Api)
     a._cfg, a._profile = {}, profiles.first_id()
     monkeypatch.setattr(a, "_user_load", lambda pid: None, raising=False)
-    a.server_enroll(f"{host}:{port}", "existing", "Jezus", PW)
+    a.server_enroll(_link(monkeypatch), "existing", "Jezus", PW)
     q = _req(srv, "POST", "/v1/enroll/pending", admin_key, body={})[1]["requests"][0]
     _req(srv, "POST", "/v1/enroll/decide", admin_key, body={"id": q["id"], "allow": True})
     assert a.server_enroll_poll()["status"] == "approved"
@@ -278,8 +290,8 @@ def test_account_profile_needs_no_password_on_its_device(srv, monkeypatch):
     a = api_mod.Api.__new__(api_mod.Api)
     a._cfg, a._profile = {}, profiles.first_id()
     monkeypatch.setattr(a, "_user_load", lambda pid: None, raising=False)
-    assert not a.server_enroll(f"{host}:{port}", "existing", "Jezus", "Zle-haslo-123")["ok"]
-    a.server_enroll(f"{host}:{port}", "existing", "Jezus", PW)
+    assert not a.server_enroll(_link(monkeypatch), "existing", "Jezus", "Zle-haslo-123")["ok"]
+    a.server_enroll(_link(monkeypatch), "existing", "Jezus", PW)
     q = _req(srv, "POST", "/v1/enroll/pending", admin_key, body={})[1]["requests"][0]
     _req(srv, "POST", "/v1/enroll/decide", admin_key, body={"id": q["id"], "allow": True})
     a.server_enroll_poll()

@@ -221,10 +221,12 @@ def candidates(cfg: dict) -> list:
             eps[sp] = {"mode": mode, "kind": e.get("kind") or ""}
     out, seen = [], set()
     for sp in [_split(cfg.get("server_url") or "")] + list(eps):
-        if not sp or sp in seen:
+        if not sp or sp in seen or sp[0] != "https":   # tylko szyfrowane (0.43)
             continue
-        info = eps.get(sp) or {"mode": "ca" if sp[0] == "https" else "plain",
-                               "kind": "tunnel" if sp[0] == "https" else ""}
+        # adres spoza listy serwera: IP / nazwa komputera — certyfikat serwera (przypięty),
+        # domena — tunel ze zwykłym certyfikatem
+        ip_like = re.fullmatch(r"[\d.]+|[0-9a-fA-F:]+", sp[1]) or "." not in sp[1]
+        info = eps.get(sp) or ({"mode": "pin", "kind": ""} if ip_like else {"mode": "ca", "kind": "tunnel"})
         if info["mode"] == "pin" and not fp:
             continue
         seen.add(sp)
@@ -359,9 +361,9 @@ def server_fp(cfg: dict) -> str:
 def learn(cfg: dict, d: dict, trusted: bool = True) -> bool:
     """Adresy i odcisk certyfikatu z odpowiedzi serwera → serwer-adresy.json. True = zmienione.
     `trusted` — odpowiedź z połączenia szyfrowanego (przypięty certyfikat albo tunel) albo
-    z parowania. Nieszyfrowana nie zmienia już zapamiętanych: podszywający się w sieci podałby
+    z zalogowania. Inna nie zmienia już zapamiętanych: podszywający się w sieci podałby
     własny certyfikat i adresy, a urządzenie wysyłałoby tam token i hasła (certyfikat serwera
-    jest ważny 20 lat — zmienia się tylko z nową instalacją, wtedy parowanie od nowa)."""
+    jest ważny 20 lat — zmienia się tylko z nową instalacją, wtedy logowanie od nowa)."""
     eps = [e for e in (d.get("endpoints") or []) if isinstance(e, dict) and e.get("url")]
     tls = d.get("tls") if isinstance(d.get("tls"), dict) else {}
     fp = tls.get("fp") or ""
@@ -389,8 +391,9 @@ def learn(cfg: dict, d: dict, trusted: bool = True) -> bool:
 
 
 def auth_headers(key: str) -> dict:
-    """Klucz i wersja EmuStart (panel serwera pokazuje wersje sparowanych urządzeń).
-    Urządzenie z kluczem urządzenia („dev:<id>”, 0.37) — token sesji z logowania podpisem."""
+    """Token i wersja EmuStart (panel serwera pokazuje wersje urządzeń). Urządzenie z kluczem
+    urządzenia („dev:<id>”) — token sesji z logowania podpisem; inny klucz — tak jak podany
+    (wspólny klucz serwera działa tylko na komputerze serwera)."""
     from emustart import __version__
     if key.startswith(DEV):
         key = session_token(key[len(DEV):]) or "brak-tokenu"
@@ -444,6 +447,24 @@ def use_device(cfg: dict) -> None:
 def drop_token() -> None:
     with _session_lock:
         _session.clear()
+
+
+def forget_server() -> None:
+    """Wylogowanie: zapomniane adresy, odcisk certyfikatu, tokeny i klucz podpisu."""
+    drop_token()
+    forget_best()
+    _info.clear()
+    _signer.clear()
+    _cfg_ref.clear()
+    _PINS.clear()
+    _CA.clear()
+    _EPINFO.clear()
+    with _best_lock:
+        _learned["store"] = {}
+    try:
+        _store_path().unlink(missing_ok=True)
+    except OSError as ex:
+        log.info("adresy serwera: %s", ex)
 
 
 def _conn_sp(sp, timeout: float):
@@ -640,58 +661,56 @@ def push_roots(cfg: dict) -> list:
     return d.get("added") or []
 
 
-def parse_pair(text: str, url: str = "") -> tuple[str, str]:
-    """(adres serwera, kod) z wpisanego kodu albo z linku z kodu QR
-    (emustart://pair?u=http://100.x.x.x:8740&c=ABCD1234)."""
+def parse_login(text: str) -> dict:
+    """Wpis „Zaloguj”: link z kodu QR panelu (emustart://login?d=…) albo adres tunelu.
+    → {"ok", "endpoints": [(url, kind, ca)], "fp", "code", "name"} albo {"ok": False, "reason"}.
+    Kod QR niesie adresy i odcisk certyfikatu serwera — połączenie od pierwszego zapytania
+    szyfrowane i przypięte. Sam adres: tylko domena z prawdziwym certyfikatem (tunel); adres
+    IP nie ma czym zweryfikować — wtedy kod QR / link z panelu."""
+    import base64
     text = (text or "").strip()
-    if text.lower().startswith("emustart://pair"):
+    if text.lower().startswith("emustart://login"):
         q = urllib.parse.parse_qs(urllib.parse.urlsplit(text).query)
-        return (q.get("u") or [url])[0], (q.get("c") or [""])[0]
-    return url, text
+        raw = (q.get("d") or [""])[0]
+        try:
+            d = json.loads(base64.urlsafe_b64decode(raw + "=" * (-len(raw) % 4)))
+            eps = [(e["u"], e.get("k", ""), bool(e.get("ca"))) for e in d.get("e") or []
+                   if str(e.get("u", "")).startswith("https://")]
+            fp = str(d.get("f") or "")
+            if not eps or not re.fullmatch(r"[0-9a-f]{64}", fp):
+                raise ValueError("brak adresów albo odcisku")
+            return {"ok": True, "endpoints": eps, "fp": fp, "code": str(d.get("c") or ""), "name": str(d.get("n") or "")}
+        except (ValueError, KeyError, TypeError, AttributeError) as ex:
+            return {"ok": False, "reason": f"To nie jest kod logowania EmuStart ({ex})."}
+    if not text:
+        return {"ok": False, "reason": "Podaj adres serwera (np. emustart.emucloud.org) albo zeskanuj kod QR z panelu."}
+    if text.lower().startswith("http://"):
+        return {"ok": False, "reason": "Tylko połączenie szyfrowane — podaj adres https (tunel) albo użyj kodu QR z panelu."}
+    sp = _split(text if "://" in text else "https://" + text)
+    if not sp or re.fullmatch(r"[\d.]+|[0-9a-f:]+", sp[1]) or "." not in sp[1]:
+        return {"ok": False, "reason": "Adres IP albo nazwę komputera da się sprawdzić tylko kodem QR z panelu serwera "
+                                       "(Dodaj urządzenie) — wpisz adres tunelu (np. emustart.emucloud.org)."}
+    url = f"https://{sp[1]}" + ("" if sp[2] == 443 else f":{sp[2]}")
+    return {"ok": True, "endpoints": [(url, "tunnel", True)], "fp": "", "code": "", "name": ""}
 
 
-def pair(url: str, code: str, name: str, cls: str = "pc", pubkey: str = "") -> dict:
-    """Parowanie z serwerem jednorazowym kodem i kluczem publicznym urządzenia →
-    {"ok", "id", "url", "server"} albo {"ok": False, "reason"}."""
-    from emustart import __version__
-    if "://" not in url:
-        url = "http://" + url
-    u = urllib.parse.urlsplit(url)
-    if not u.hostname:
-        return {"ok": False, "reason": "Podaj adres serwera (np. http://100.85.254.31:8740)."}
-    body = json.dumps({"code": code, "name": name, "class": cls, "version": __version__, "hw": hw_id(),
-                       "pubkey": pubkey}).encode("utf-8")
-    c = http.client.HTTPConnection(u.hostname, u.port or 8740, timeout=15)
-    try:
-        c.request("POST", "/v1/pair", body=body, headers={"Content-Type": "application/json"})
-        r = c.getresponse()
-        d = json.loads(r.read() or b"{}")
-    except (OSError, http.client.HTTPException, ValueError) as ex:
-        return {"ok": False, "reason": f"Brak połączenia z {u.hostname}:{u.port or 8740} ({ex})"}
-    finally:
-        c.close()
-    if not d.get("ok"):
-        return {"ok": False, "reason": d.get("reason") or d.get("error") or "Serwer odrzucił kod."}
-    return {"ok": True, "id": d["id"], "url": f"http://{u.hostname}:{u.port or 8740}", "server": d.get("server", ""),
-            "endpoints": d.get("endpoints") or [], "tls": d.get("tls")}
-
-
-def _post(url: str, path: str, data: dict, key: str = "") -> dict:
-    """POST JSON na serwer → odpowiedź (z "url" — adres w postaci kanonicznej) albo {"ok": False, "reason"}."""
+def _post(url: str, path: str, data: dict, key: str = "", fp: str = "", timeout: float = 15) -> dict:
+    """POST JSON na serwer tylko szyfrowanym połączeniem: z odciskiem `fp` — przypięty
+    certyfikat serwera, bez — zwykłe sprawdzanie certyfikatu (tunel). → odpowiedź z "url"
+    albo {"ok": False, "reason"}."""
     sp = _split(url)
-    if not sp:
-        return {"ok": False, "reason": "Podaj adres serwera (np. emustart.twojadomena.org albo 100.85.254.31)."}
-    scheme, host, port = sp
+    if not sp or sp[0] != "https":
+        return {"ok": False, "reason": "Tylko połączenie szyfrowane (https)."}
+    _scheme, host, port = sp
     h = {"Content-Type": "application/json", **(auth_headers(key) if key else {})}
-    c = (http.client.HTTPSConnection(host, port, timeout=15, context=ssl.create_default_context())
-         if scheme == "https" else http.client.HTTPConnection(host, port, timeout=15))
-    u = urllib.parse.urlsplit(f"{scheme}://{host}:{port}")
+    c = (PinnedHTTPS(host, port, fp, timeout) if fp
+         else http.client.HTTPSConnection(host, port, timeout=timeout, context=ssl.create_default_context()))
     try:
         c.request("POST", path, body=json.dumps(data).encode("utf-8"), headers=h)
         r = c.getresponse()
         d = json.loads(r.read() or b"{}")
     except (OSError, http.client.HTTPException, ValueError) as ex:
-        return {"ok": False, "reason": f"Brak połączenia z {u.hostname}:{port} ({ex})"}
+        return {"ok": False, "reason": f"Brak połączenia z {host}:{port} ({ex})", "unreachable": True}
     finally:
         c.close()
     if not isinstance(d, dict):
@@ -701,7 +720,7 @@ def _post(url: str, path: str, data: dict, key: str = "") -> dict:
     d.setdefault("ok", False)
     if not d["ok"] and not d.get("reason"):
         d["reason"] = d.get("error") or f"Serwer odpowiedział {r.status}."
-    d["url"] = f"{scheme}://{host}" + ("" if (scheme, port) in (("https", 443), ("http", 80)) else f":{port}")
+    d["url"] = f"https://{host}" + ("" if port == 443 else f":{port}")
     return d
 
 
@@ -735,52 +754,9 @@ def authed_post(cfg: dict, path: str, data: dict) -> dict:
     return {"ok": False, "reason": "serwer nie przyjął klucza"}
 
 
-def join_request(url: str, name: str, cls: str = "pc", pubkey: str = "") -> dict:
-    """Prośba o dołączenie (nowe urządzenie, z kluczem publicznym) → {"ok", "rid", "code", "pretty", "url"}."""
-    from emustart import __version__
-    return _post(url, "/v1/pair/request", {"name": name, "class": cls, "version": __version__,
-                                           "pubkey": pubkey, "hw": hw_id()})
-
-
-def join_poll(url: str, rid: str) -> dict:
-    """Stan prośby: pending / approved (+ "key") / denied / expired."""
-    return _post(url, "/v1/pair/poll", {"rid": rid})
-
-
-def approve(cfg: dict, code: str, allow: bool | None) -> dict:
-    """Zatwierdzenie nowego urządzenia kodem z jego ekranu (to urządzenie jest sparowane).
-    allow=None — tylko podgląd prośby (nazwa, rodzaj, adres)."""
-    data: dict = {"code": code}
-    if allow is not None:
-        data["allow"] = bool(allow)
-    return _post(cfg.get("server_url") or "", "/v1/pair/approve", data, cfg.get("server_key") or "")
-
-
-def parse_approve(text: str) -> str:
-    """Kod z wpisanego tekstu albo z linku z kodu QR nowego urządzenia (emustart://approve?u=…&c=…)."""
-    text = (text or "").strip()
-    if text.lower().startswith("emustart://approve"):
-        q = urllib.parse.parse_qs(urllib.parse.urlsplit(text).query)
-        return (q.get("c") or [""])[0]
-    return text
-
-
 def on_lan(cfg: dict) -> bool:
     i = info(cfg)
     return bool(i.get("ok")) and i.get("rtt", 1) < LAN_RTT
-
-
-def guess_url(rom_roots: list) -> str:
-    """Adres serwera z udziału sieciowego z grami (\\\\host\\udział albo dysk sieciowy)."""
-    for r in rom_roots:
-        p = str(r)
-        if len(p) >= 2 and p[1] == ":":
-            p = _unc_of_drive(p[:2]) or p
-        if p.startswith("\\\\"):
-            host = p[2:].split("\\", 1)[0]
-            if host:
-                return f"http://{host}:8740"
-    return ""
 
 
 def _unc_of_drive(drive: str) -> str:

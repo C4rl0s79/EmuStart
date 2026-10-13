@@ -6,7 +6,7 @@ import android.os.Environment
 import org.json.JSONObject
 import java.io.File
 
-/** Ustawienia aplikacji (adres i klucz serwera, emulator dla systemu, wygląd). */
+/** Ustawienia aplikacji (serwer i klucz urządzenia, emulator dla systemu, wygląd). */
 class Prefs(ctx: Context) {
     private val sp: SharedPreferences = ctx.getSharedPreferences("emustart", Context.MODE_PRIVATE)
 
@@ -14,16 +14,12 @@ class Prefs(ctx: Context) {
         get() = sp.getString("server_url", "") ?: ""
         set(v) = sp.edit().putString("server_url", v.trim().trimEnd('/')).apply()
 
-    var serverKey: String
-        get() = sp.getString("server_key", "") ?: ""
-        set(v) = sp.edit().putString("server_key", v.trim()).apply()
-
     /** Adresy serwera podane przez serwer (JSON: [{url, kind, tls}]) — klient wybiera najlepszy. */
     var serverEndpoints: String
         get() = sp.getString("server_endpoints", "") ?: ""
         set(v) = sp.edit().putString("server_endpoints", v).apply()
 
-    /** Odcisk SHA-256 certyfikatu serwera (port szyfrowany) — przypięty przy parowaniu. */
+    /** Odcisk SHA-256 certyfikatu serwera (port szyfrowany) — przypięty przy zalogowaniu (kod QR). */
     var serverFp: String
         get() = sp.getString("server_fp", "") ?: ""
         set(v) = sp.edit().putString("server_fp", v.trim().lowercase()).apply()
@@ -125,7 +121,15 @@ class Prefs(ctx: Context) {
     fun emulatorChoices(): Map<String, Pair<String, Long>> = sp.all.keys.filter { it.startsWith("emu_t:") }
         .associate { k -> val es = k.removePrefix("emu_t:"); es to Pair(emulator(es), emulatorTime(es)) }
 
-    val configured: Boolean get() = serverUrl.isNotBlank() && (serverKey.isNotBlank() || deviceId.isNotBlank())
+    /** Zalogowany na serwerze: adres i klucz urządzenia (od 0.43 jedyna droga). */
+    val configured: Boolean get() = serverUrl.startsWith("https://") && deviceId.isNotBlank()
+
+    /** Wylogowanie z serwera: adres, klucz urządzenia, odcisk certyfikatu, tokeny kont. */
+    fun forgetServer() {
+        sp.edit().remove("server_url").remove("server_key").remove("server_endpoints").remove("server_fp")
+            .remove("device_id").remove("device_key").remove("server_account")
+            .remove("profile_tokens").remove("profile_token_names").apply()
+    }
 
     /** Gry w publicznym folderze — emulatory z dostępem do pamięci mogą je czytać. */
     fun gamesDir(ctx: Context): File {

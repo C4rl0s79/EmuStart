@@ -49,12 +49,18 @@ tytuły) są zawsze escapowane.
 emulatorów, nazwę konta RetroAchievements i nazwę komputera — nie zawiera haseł,
 tokenów, kluczy ani tytułów okien innych programów.
 
-## Serwer EmuStart (audyt 0.41)
+## Serwer EmuStart (audyt 0.41, logowanie 0.43)
 
-- **Urządzenia:** tylko klucze urządzeń i logowanie podpisem (token sesji 1 h, tylko w
-  nagłówku). Wspólny klucz serwera — wyłącznie na komputerze serwera.
-- **Role:** prośbę o dołączenie z sieci lokalnej (daje pełny dostęp) zatwierdza tylko
-  urządzenie administratora; urządzenia kont zatwierdzają tylko swoje konto.
+- **Urządzenia:** jedyna droga to logowanie kontem i hasłem z kluczem urządzenia
+  (zatwierdzone na urządzeniu konta, przez administratora albo kodem QR z panelu); potem
+  logowanie podpisem (token sesji 1 h, tylko w nagłówku). Parowanie kodem i dołączanie z
+  sieci lokalnej (dawały administratora bez konta) usunięte w 0.43, a ich rejestracje
+  unieważnione. Wspólny klucz serwera — wyłącznie na komputerze serwera.
+- **Tylko szyfrowane połączenia** (0.43): urządzenia łączą się portem HTTPS z przypiętym
+  certyfikatem, portem publicznym albo tunelem; zwykły port obsługuje API tylko z samego
+  serwera. Kod QR z panelu niesie odcisk certyfikatu — pierwsze połączenie też jest przypięte.
+- **Role:** administrator to cecha konta (panel → Konta); zwykłe konto zatwierdza tylko
+  nowe urządzenia swojego konta.
 - **Konta:** hasło (scrypt, opóźnienia, limit prób z adresu, ograniczona liczba sprawdzeń
   naraz); inne konto na urządzeniu — tylko z tokenem konta po haśle.
 - **Ścieżki:** folder profili odrzuca nazwy, które Windows utożsamia z innymi (kropka lub
@@ -63,8 +69,11 @@ tokenów, kluczy ani tytułów okien innych programów.
 - **Certyfikat:** urządzenia przypinają odcisk certyfikatu serwera; odpowiedź po zwykłym
   porcie nie zmienia już zapamiętanego odcisku ani adresów.
 - **Identyfikator sprzętu** z nagłówka tylko się zapisuje — nie unieważnia innych rejestracji.
-- **Aktualizacje:** tylko z wydań repozytorium (adres) i ze zgodnym skrótem SHA-256 podanym
-  przez GitHub.
+- **Aktualizacje:** tylko z wydań repozytorium (adres), ze zgodnym skrótem SHA-256 podanym
+  przez GitHub i (od 0.42) z **podpisem wydania** Ed25519 (`<zip>.sig`). Klucz prywatny jest
+  tylko w sekrecie repozytorium i u właściciela, publiczny — wbudowany w program. Podmienione
+  wydanie (np. po przejęciu konta GitHub) bez klucza prywatnego nie przejdzie; wydanie bez
+  podpisu też nie. APK chroni podpis Androida (aktualizacja tylko tym samym kluczem).
 - **Android:** adres interfejsu `emustart.local` nigdy nie idzie do sieci.
 
 ## Zalecenia

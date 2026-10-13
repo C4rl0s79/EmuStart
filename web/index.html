@@ -222,15 +222,13 @@
 </div>
 
 <!-- okno skanowania -->
-<!-- dołączenie do serwera: kod i QR zatwierdzane na sparowanym telefonie -->
+<!-- logowanie na serwerze: prośba czeka na zatwierdzenie (kod do porównania) -->
 <div id="join" class="modal hidden">
   <div class="panel">
-    <h2>Dołącz do serwera</h2>
+    <h2>Logowanie na serwerze</h2>
     <div style="display:flex;gap:24px;align-items:center;flex-wrap:wrap">
-      <div id="joinQr" style="background:#fff;border-radius:10px;line-height:0;width:220px"></div>
       <div style="flex:1;min-width:260px">
-        <p>Na telefonie z EmuStart: <b>Ustawienia → Zatwierdź nowe urządzenie</b> → zeskanuj kod.<br>
-          Albo w panelu serwera: <b>Proszą o dołączenie</b> → Zatwierdź.</p>
+        <p>Zatwierdź na innym urządzeniu tego konta albo w panelu serwera — sprawdź, czy kod się zgadza.</p>
         <div id="joinCode" style="font-size:44px;letter-spacing:.12em;margin:10px 0"></div>
         <p id="joinText" class="muted"></p>
       </div>

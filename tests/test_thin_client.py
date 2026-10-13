@@ -31,7 +31,7 @@ def srv(tmp_path, monkeypatch):
     nasfs.reset()
     host, port = url.removeprefix("http://").split(":")
     import keyhelp
-    return keyhelp.pc_cfg(host, port, "Nowy PC"), media
+    return keyhelp.pc_cfg(host, port, "Nowy PC", monkeypatch), media
 
 
 SERVER_GAMES = {
@@ -101,7 +101,7 @@ def test_recommended_emulator_is_picked(monkeypatch):
 def test_account_without_games_gets_no_library(srv, monkeypatch):
     cfg, _media = srv
     did = next(d["id"] for d in devices.listing() if d["name"] == "Nowy PC")
-    devices.set_access(did, role="user", games=False)
+    devices.set_games(did, False)
     with library.db():
         pass
     from emustart import devices as dv

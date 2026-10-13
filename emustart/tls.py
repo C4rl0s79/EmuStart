@@ -2,7 +2,7 @@
 
 Serwer tworzy przy pierwszym starcie własny certyfikat (EC P-256, 20 lat) w katalogu
 serwera. Klienci nie sprawdzają go w urzędzie certyfikacji, tylko porównują jego odcisk
-(SHA-256 całego certyfikatu) z odciskiem zapamiętanym przy parowaniu („przypięcie”):
+(SHA-256 całego certyfikatu) z odciskiem z kodu QR / zalogowania („przypięcie”):
 podszycie się pod serwer wymagałoby jego klucza prywatnego. Dzięki temu HTTPS działa
 także pod gołym adresem IP (port publiczny przez UPnP — etap 0.35).
 

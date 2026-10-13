@@ -1,7 +1,7 @@
-"""qr — kod QR do parowania urządzeń (panel serwera).
+"""qr — kod QR logowania urządzeń (panel serwera → Dodaj urządzenie).
 
 Rysowany przez bibliotekę `segno` (czysty Python, licencja BSD) jako SVG. Bez niej panel
-pokazuje sam kod do przepisania — parowanie działa tak samo.
+pokazuje link logowania do skopiowania — logowanie działa tak samo.
 """
 
 from __future__ import annotations

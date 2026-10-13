@@ -60,9 +60,9 @@ def ensure_token(cfg: dict) -> str:
 
 
 def authorized(handler) -> bool:
-    """Token sesji urządzenia (logowanie podpisem kluczem urządzenia, emustart/enroll.py);
+    """Token sesji urządzenia konta (logowanie podpisem kluczem urządzenia, emustart/enroll.py);
     wspólny klucz serwera — tylko z tego komputera. handler.device = id urządzenia ('' = ten
-    komputer). Stary klucz-hasło (sprzed 0.39) — tylko /v1/info i przejście na klucz urządzenia."""
+    komputer)."""
     if API is None:
         return False
     auth = handler.headers.get("Authorization") or ""
@@ -78,11 +78,6 @@ def authorized(handler) -> bool:
         return True
     from emustart import devices
     did = devices.verify(got)
-    if did and devices.is_legacy(did):
-        # stary klucz-hasło: wyłącznie przejście na klucz urządzenia (i sprawdzenie serwera)
-        path = urllib.parse.urlsplit(handler.path).path
-        if path not in ("/v1/auth/upgrade", "/v1/info"):
-            return False
     if did:
         handler.device = did
         devices.touch(did, handler.client_address[0], handler.headers.get("X-EmuStart-Version") or "",
@@ -100,24 +95,9 @@ def _local_peer(handler) -> bool:
     return local and not handler.headers.get("CF-Connecting-IP")
 
 
-def pair(handler) -> None:
-    """POST /v1/pair {code, name, class, version} → klucz urządzenia (bez klucza — jednorazowy kod)."""
-    from emustart import devices
-    n = int(handler.headers.get("Content-Length") or 0)
-    try:
-        d = json.loads(handler.rfile.read(min(n, 4096)) or b"{}") if n else {}
-    except ValueError:
-        d = {}
-    r = devices.pair(str(d.get("code", "")), str(d.get("name", "")), str(d.get("class", "")),
-                     handler.client_address[0], str(d.get("version", "")), str(d.get("hw", "")),
-                     str(d.get("pubkey", "")))
-    if r.get("ok"):
-        r.update(server=socket.gethostname(), **_trust())
-    return _json(handler, r, 200 if r.get("ok") else 403)
-
-
 def _trust() -> dict:
-    """Do odpowiedzi parowania: adresy serwera i odcisk certyfikatu (przypinany w kliencie)."""
+    """Do odpowiedzi zalogowania i /v1/info: adresy serwera i odcisk certyfikatu (przypinany
+    w kliencie)."""
     return {"endpoints": endpoints(), "tls": {"port": TLS["port"], "fp": TLS["fp"]} if TLS else None}
 
 
@@ -136,15 +116,14 @@ def kind_of(host: str) -> str:
 
 
 def endpoints() -> list:
-    """Adresy, pod którymi klienci mogą dosięgnąć serwer (klient wybiera najlepszy):
-    sieć lokalna, Tailscale — zwykły port i szyfrowany. Port publiczny: etap 0.35."""
+    """Adresy, pod którymi klienci mogą dosięgnąć serwer (klient wybiera najlepszy) — tylko
+    szyfrowane (0.43): sieć lokalna i Tailscale na porcie HTTPS z certyfikatem serwera
+    (przypinanym), port publiczny i tunel. Zwykły port obsługuje API tylko z tego komputera."""
     from emustart import srvadmin
     out = []
-    for a in srvadmin._addresses():
-        k = kind_of(a)
-        out.append({"url": f"http://{a}:{PORT}", "kind": k, "tls": False})
-        if TLS:
-            out.append({"url": f"https://{a}:{TLS['port']}", "kind": k, "tls": True})
+    if TLS:
+        for a in srvadmin._addresses():
+            out.append({"url": f"https://{a}:{TLS['port']}", "kind": kind_of(a), "tls": True})
     from emustart import public
     for extra in (public.endpoint(), public.tunnel_endpoint()):
         if extra:
@@ -161,47 +140,9 @@ def _body(handler) -> dict:
     return d if isinstance(d, dict) else {}
 
 
-def pair_flow(handler, op: str) -> None:
-    """Prośba o dołączenie zatwierdzana na sparowanym urządzeniu (emustart/devices.py):
-    POST /v1/pair/request {name, class, version}  — nowe urządzenie, bez klucza
-    POST /v1/pair/poll {rid}                       — nowe urządzenie odbiera klucz po zatwierdzeniu
-    POST /v1/pair/approve {code, allow}            — sparowane urządzenie (z kluczem);
-                                                     allow pominięte = tylko podgląd prośby"""
-    from emustart import devices
-    d = _body(handler)
-    if op == "request":
-        r = devices.request(str(d.get("name", "")), str(d.get("class", "")),
-                            handler.client_address[0], str(d.get("version", "")),
-                            str(d.get("pubkey", "")), str(d.get("hw", "")))
-        if r.get("ok"):
-            r["server"] = socket.gethostname()
-        return _json(handler, r, 200 if r.get("ok") else 429)
-    if op == "poll":
-        r = devices.poll(str(d.get("rid", "")))
-        if r.get("status") == "approved":
-            r.update(server=socket.gethostname(), **_trust())
-        return _json(handler, r)
-    if op == "approve":
-        if not authorized(handler):
-            return _json(handler, {"ok": False, "reason": "Zatwierdzać może tylko sparowane urządzenie."}, 401)
-        if not _admin(handler):
-            # nowe urządzenie z tej drogi ma pełny dostęp — zatwierdza tylko administrator
-            # (urządzenia kont: Dołącz przez internet → zatwierdzenie w ramach konta)
-            return _json(handler, {"ok": False, "reason": "Zatwierdzać prośby z sieci lokalnej może tylko "
-                                                           "urządzenie administratora."}, 403)
-        code = str(d.get("code", ""))
-        if d.get("allow") is None:
-            p = devices.pending(code)
-            return _json(handler, {"ok": True, "request": p} if p else
-                         {"ok": False, "reason": "Nie ma takiej prośby (kod wygasł albo już użyty)."})
-        by = devices.name_of(handler.device) if getattr(handler, "device", "") else "urządzenie ze wspólnym kluczem"
-        return _json(handler, devices.approve(code, bool(d.get("allow")), by))
-    return _json(handler, {"ok": False, "reason": "nieznana operacja"}, 404)
-
-
 def enroll_flow(handler, op: str) -> None:
-    """Nowe instalacje i logowanie podpisem (emustart/enroll.py):
-    POST /v1/enroll/request {mode, account, password, name, class, version, pubkey} — bez klucza
+    """Zalogowanie urządzenia i logowanie podpisem (emustart/enroll.py):
+    POST /v1/enroll/request {mode, account, password, name, class, version, pubkey[, login_code]}
     POST /v1/enroll/poll {rid}                                               — bez klucza
     POST /v1/auth/challenge {device}, /v1/auth/token {device, nonce, sig}    — bez klucza
     POST /v1/enroll/pending, /v1/enroll/decide {id, allow, games}            — z kluczem"""
@@ -211,10 +152,14 @@ def enroll_flow(handler, op: str) -> None:
     if op == "request":
         r = enroll.request(str(d.get("mode", "")), str(d.get("account", "")), str(d.get("name", "")),
                            str(d.get("class", "")), ip, str(d.get("version", "")), str(d.get("pubkey", "")),
-                           profile_names(), str(d.get("hw", "")), str(d.get("password", "")))
+                           profile_names(), str(d.get("hw", "")), str(d.get("password", "")),
+                           str(d.get("login_code", "")), create_account)
         return _json(handler, r, 200 if r.get("ok") else 400)
     if op == "poll":
-        return _json(handler, enroll.poll(str(d.get("rid", ""))))
+        r = enroll.poll(str(d.get("rid", "")))
+        if r.get("status") == "approved":
+            r.update(server=socket.gethostname(), **_trust())
+        return _json(handler, r)
     if op == "challenge":
         r = enroll.challenge(str(d.get("device", "")))
         return _json(handler, r, 200 if r.get("ok") else 403)
@@ -226,11 +171,9 @@ def enroll_flow(handler, op: str) -> None:
     if not authorized(handler):
         return _json(handler, {"ok": False, "reason": "brak lub zły klucz"}, 401)
     viewer = getattr(handler, "device", "")
-    if op == "upgrade":                     # stary klucz-hasło → klucz urządzenia (ten sam wpis)
+    if op == "logout":                      # urządzenie wylogowuje się samo (unieważnienie)
         from emustart import devices
-        if not viewer or not devices.is_legacy(viewer):
-            return _json(handler, {"ok": False, "reason": "to urządzenie nie ma starego klucza"}, 400)
-        return _json(handler, devices.upgrade(viewer, str(d.get("pubkey", "")), str(d.get("hw", ""))))
+        return _json(handler, {"ok": bool(viewer) and devices.revoke(viewer)})
     if op == "pending":
         return _json(handler, {"ok": True, "requests": enroll.pending(viewer)})
     if op == "decide":

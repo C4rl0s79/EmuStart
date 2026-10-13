@@ -55,5 +55,19 @@ jednoplikowa była błędnie oznaczana przez Windows Defender.
 | `emustart/server.py` | lokalny serwer interfejsu |
 | `web/` | interfejs (HTML/CSS/JS) |
 
+## Podpis wydań (0.42)
+
+Zip wydania podpisuje CI (`tools/release_sign.py`, klucz Ed25519 z sekretu repozytorium
+`EMUSTART_SIGNING_KEY`); aktualizacja w programie sprawdza podpis kluczem publicznym z
+`emustart/signing.py`. Bez sekretu budowa z tagu się przerywa — wydanie bez podpisu nie
+wychodzi.
+
+- Nowy klucz: `python tools/release_sign.py keygen <plik>` — wypisuje klucz publiczny do
+  `RELEASE_PUBKEY`; plik z kluczem prywatnym: do sekretu i kopii zapasowej (poza repozytorium).
+- Sprawdzenie pliku: `python tools/release_sign.py verify EmuStart-<wersja>-win64.zip`
+  (plik `.sig` obok).
+- Zmiana klucza: nowy `RELEASE_PUBKEY` w programie działa dopiero w wersji, która go zawiera —
+  wydanie z nowym kluczem podpisuj jeszcze starym, następne już nowym.
+
 Zmiany opisuje [CHANGELOG.md](https://github.com/C4rl0s79/EmuStart/blob/main/CHANGELOG.md)
 (format Keep a Changelog, wersje SemVer).

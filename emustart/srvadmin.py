@@ -272,12 +272,11 @@ def handle(handler, api) -> None:
     handler.wfile.write(body)
 
 
-# ── urządzenia (EmuStart 2.0: klucz na urządzenie, parowanie kodem QR) ──
+# ── urządzenia i konta (logowanie kontem — emustart/enroll.py) ──
 def devices_list(_api) -> dict:
     from emustart import devices
     from emustart import enroll
-    return {"ok": True, "devices": devices.listing(), "requests": devices.pending_list(),
-            "enroll": enroll.pending(""), "now": time.time()}
+    return {"ok": True, "devices": devices.listing(), "enroll": enroll.pending(""), "now": time.time()}
 
 
 def enroll_decide(_api, args: dict) -> dict:
@@ -295,9 +294,9 @@ def accounts_list(_api) -> dict:
         names.setdefault(low, (accounts.record(low) or {}).get("name", low))
     out = []
     for low, name in sorted(names.items()):
-        rec = accounts.record(name)
-        out.append({"name": name, "password": rec is not None, "set": (rec or {}).get("set", 0),
-                    "devices": len(devices.of_account(name))})
+        rec = accounts.record(name) or {}
+        out.append({"name": name, "password": bool(rec.get("hash")), "set": rec.get("set", 0),
+                    "admin": bool(rec.get("admin")), "devices": len(devices.of_account(name))})
     return {"ok": True, "accounts": out, "rules": accounts.RULES}
 
 
@@ -311,12 +310,20 @@ def account_password(_api, args: dict) -> dict:
     return {"ok": not why, "reason": why, "name": name}
 
 
-def device_access(_api, args: dict) -> dict:
-    """Panel: rola urządzenia (administrator / użytkownik) i pobieranie gier."""
+def account_admin(_api, args: dict) -> dict:
+    """Panel: konto administratora (wszystkie jego urządzenia zatwierdzają nowe konta)."""
+    from emustart import accounts, remote
+    name = remote._find_account(str(args.get("name", "")))
+    if not name:
+        return {"ok": False, "reason": "Nie ma takiego konta."}
+    accounts.set_admin(name, bool(args.get("admin")), by="panel serwera")
+    return {"ok": True, "name": name}
+
+
+def device_games(_api, args: dict) -> dict:
+    """Panel: czy urządzenie pobiera gry z serwera."""
     from emustart import devices
-    role = args.get("role") if args.get("role") in ("admin", "user") else None
-    games = args.get("games") if isinstance(args.get("games"), bool) else None
-    return {"ok": devices.set_access(str(args.get("id", "")), role, games)}
+    return {"ok": devices.set_games(str(args.get("id", "")), bool(args.get("games")))}
 
 
 def public_status(_api) -> dict:
@@ -353,21 +360,23 @@ def tunnel_set(api, args: dict) -> dict:
     return {"ok": True, "url": url}
 
 
-def pair_approve(_api, args: dict) -> dict:
-    """Panel: zatwierdzenie / odrzucenie prośby o dołączenie nowego urządzenia."""
-    from emustart import devices
-    return devices.approve(str(args.get("code", "")), bool(args.get("allow")), "panel serwera")
-
-
-def pair_code(api) -> dict:
-    """Nowy jednorazowy kod parowania + zawartość kodu QR (adres Tailscale serwera)."""
-    from emustart import devices, qr, remote
-    port = int((api._cfg if api else {}).get("server_port") or remote.DEFAULT_PORT)
-    addrs = _addresses()
-    base = f"http://{addrs[0]}:{port}" if addrs else f"http://{socket.gethostname()}:{port}"
-    c = devices.new_code()
-    uri = devices.pair_uri(base, c["code"])
-    return {"ok": True, **c, "url": base, "uri": uri, "svg": qr.svg(uri)}
+def login_code(_api) -> dict:
+    """Kod QR „Zaloguj” (aplikacja: Ustawienia → Zaloguj (kod QR)): adresy serwera, odcisk
+    certyfikatu (urządzenie od razu łączy się szyfrowanym, przypiętym połączeniem) i
+    jednorazowy kod — zalogowanie nim nie czeka na zatwierdzenie (emustart/enroll.py)."""
+    import base64
+    import json as _json
+    from emustart import enroll, qr, remote
+    eps = remote.endpoints()
+    if not eps or not remote.TLS:
+        return {"ok": False, "reason": "Port szyfrowany serwera nie działa — sprawdź logi serwera."}
+    c = enroll.new_login_code()
+    data = {"v": 1, "n": socket.gethostname(), "f": remote.TLS["fp"], "c": c["code"],
+            "e": [{"u": e["url"], "k": e.get("kind", ""), **({"ca": 1} if e.get("ca") else {})} for e in eps]}
+    raw = base64.urlsafe_b64encode(_json.dumps(data, separators=(",", ":")).encode()).decode().rstrip("=")
+    uri = "emustart://login?d=" + raw
+    return {"ok": True, **c, "uri": uri, "svg": qr.svg(uri, scale=4),
+            "tunnel": next((e["url"] for e in eps if e.get("kind") == "tunnel"), "")}
 
 
 def device_revoke(_api, args: dict) -> dict:
@@ -447,10 +456,10 @@ def profiles_migrate_status(_api) -> dict:
 
 
 ACTIONS_ARGS = {"device_revoke": device_revoke, "device_rename": device_rename, "account_password": account_password,
-                "profiles_migrate": profiles_migrate, "pair_approve": pair_approve,
+                "profiles_migrate": profiles_migrate, 
                 "public_set": public_set, "tunnel_set": tunnel_set,
-                "enroll_decide": enroll_decide, "device_access": device_access}
-ACTIONS.update({"public_status": public_status, "devices": devices_list, "pair_code": pair_code, "profiles_migrate_status": profiles_migrate_status,
+                "enroll_decide": enroll_decide, "device_games": device_games, "account_admin": account_admin}
+ACTIONS.update({"public_status": public_status, "devices": devices_list, "login_code": login_code, "profiles_migrate_status": profiles_migrate_status,
                 "accounts": accounts_list})
 
 

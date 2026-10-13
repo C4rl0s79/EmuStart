@@ -63,6 +63,35 @@ def test_script(tmp_path):
     assert "_internal" in s and "przywracam" in s            # kopia i przywrócenie przy błędzie
 
 
+def _test_key(monkeypatch):
+    """Para kluczy testowych: publiczny zamiast wbudowanego → funkcja podpisu (base64)."""
+    import base64
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from emustart import signing
+    k = Ed25519PrivateKey.generate()
+    priv = base64.b64encode(k.private_bytes(serialization.Encoding.Raw, serialization.PrivateFormat.Raw,
+                                            serialization.NoEncryption())).decode()
+    pub = base64.b64encode(k.public_key().public_bytes(serialization.Encoding.Raw,
+                                                       serialization.PublicFormat.Raw)).decode()
+    monkeypatch.setattr(signing, "RELEASE_PUBKEY", pub)
+    return lambda name, data: signing.sign(priv, name, __import__("hashlib").sha256(data).hexdigest())
+
+
+def _serve(blob: bytes, sig: str):
+    """urlopen: plik wydania albo jego podpis (.sig)."""
+    class R(io.BytesIO):
+        headers = {"Content-Length": str(len(blob))}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    return lambda req, timeout=0: R(sig.encode() if req.full_url.endswith(".sig") else blob)
+
+
 def test_panel_flow(tmp_path, monkeypatch):
     monkeypatch.setattr(paths, "APP", tmp_path)
     data = io.BytesIO()
@@ -80,11 +109,14 @@ def test_panel_flow(tmp_path, monkeypatch):
         def __exit__(self, *a):
             return False
 
+    sign = _test_key(monkeypatch)
+    url = updater.DOWNLOAD_PREFIX + "v9.9.9/EmuStart-9.9.9-win64.zip"
     monkeypatch.setattr(updater, "latest", lambda: {"version": "9.9.9", "current": "0.31.0", "newer": True,
-                                                    "url": updater.DOWNLOAD_PREFIX + "v9.9.9/EmuStart-9.9.9-win64.zip", "size": len(blob), "notes": "", "published": "",
+                                                    "url": url, "size": len(blob), "notes": "", "published": "",
                                                     "sha256": __import__("hashlib").sha256(blob).hexdigest(),
+                                                    "sig_url": url + ".sig",
                                                     "page": "", "tag": "v9.9.9"})
-    monkeypatch.setattr(updater.urllib.request, "urlopen", lambda req, timeout=0: R(blob))
+    monkeypatch.setattr(updater.urllib.request, "urlopen", _serve(blob, sign("EmuStart-9.9.9-win64.zip", blob)))
     srvadmin._update.update(info=None, job=None)
     assert srvadmin.update_start(None)["ok"] is False          # najpierw sprawdzenie
     assert srvadmin.update_check(None)["newer"]
@@ -102,17 +134,8 @@ def test_download_checks_address_and_sha256(tmp_path, monkeypatch):
     import hashlib
     monkeypatch.setattr(updater.paths, "APP", tmp_path)
     blob = b"archiwum"
-
-    class R(io.BytesIO):
-        headers = {"Content-Length": str(len(blob))}
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *a):
-            return False
-
-    monkeypatch.setattr(updater.urllib.request, "urlopen", lambda req, timeout=0: R(blob))
+    sign = _test_key(monkeypatch)
+    monkeypatch.setattr(updater.urllib.request, "urlopen", _serve(blob, sign("EmuStart-9.9.9-win64.zip", blob)))
     good = updater.DOWNLOAD_PREFIX + "v9.9.9/EmuStart-9.9.9-win64.zip"
     job = updater.Job({"version": "9.9.9", "url": "https://evil.example/EmuStart-9.9.9-win64.zip", "size": len(blob)})
     with pytest.raises(RuntimeError, match="adres"):
@@ -121,9 +144,44 @@ def test_download_checks_address_and_sha256(tmp_path, monkeypatch):
     with pytest.raises(RuntimeError, match="SHA-256"):
         job._download(good, tmp_path / "b.zip")
     assert not (tmp_path / "b.zip").exists()
-    job = updater.Job({"version": "9.9.9", "url": good, "size": len(blob), "sha256": hashlib.sha256(blob).hexdigest()})
+    job = updater.Job({"version": "9.9.9", "url": good, "size": len(blob), "sha256": hashlib.sha256(blob).hexdigest(),
+                       "sig_url": good + ".sig"})
     job._download(good, tmp_path / "c.zip")
     assert (tmp_path / "c.zip").read_bytes() == blob
+
+
+def test_release_must_be_signed_with_our_key(tmp_path, monkeypatch):
+    """Przejęte konto GitHub: plik i skrót się zgadzają, ale podpisu kluczem wydań nie ma."""
+    import hashlib
+    blob = b"podmienione archiwum"
+    good = updater.DOWNLOAD_PREFIX + "v9.9.9/EmuStart-9.9.9-win64.zip"
+    sign = _test_key(monkeypatch)
+    info = {"version": "9.9.9", "url": good, "size": len(blob), "sha256": hashlib.sha256(blob).hexdigest()}
+    # bez podpisu
+    monkeypatch.setattr(updater.urllib.request, "urlopen", _serve(blob, ""))
+    with pytest.raises(RuntimeError, match="podpisu"):
+        updater.Job(info)._download(good, tmp_path / "a.zip")
+    assert not (tmp_path / "a.zip").exists()
+    # podpis innym kluczem (np. atakującego)
+    mp = pytest.MonkeyPatch()
+    other = _test_key(mp)                      # obcy klucz — tylko do podpisu
+    mp.undo()                                  # program dalej ufa wyłącznie kluczowi wydań
+    monkeypatch.setattr(updater.urllib.request, "urlopen", _serve(blob, other("EmuStart-9.9.9-win64.zip", blob)))
+    with pytest.raises(RuntimeError, match="podpisu"):
+        updater.Job({**info, "sig_url": good + ".sig"})._download(good, tmp_path / "b.zip")
+    # podpis innego pliku (starsza wersja) — nazwa w podpisie nie pasuje
+    monkeypatch.setattr(updater.urllib.request, "urlopen", _serve(blob, sign("EmuStart-9.9.8-win64.zip", blob)))
+    with pytest.raises(RuntimeError, match="podpisu"):
+        updater.Job({**info, "sig_url": good + ".sig"})._download(good, tmp_path / "c.zip")
+    # podpis spoza wydań repozytorium
+    monkeypatch.setattr(updater.urllib.request, "urlopen", _serve(blob, sign("EmuStart-9.9.9-win64.zip", blob)))
+    with pytest.raises(RuntimeError, match="podpisu"):
+        updater.Job({**info, "sig_url": "https://evil.example/EmuStart-9.9.9-win64.zip.sig"})._download(good, tmp_path / "d.zip")
+    # wbudowany klucz wydań ma właściwy rozmiar (Ed25519)
+    from emustart import signing
+    import base64
+    monkeypatch.undo()
+    assert len(base64.b64decode(signing.RELEASE_PUBKEY)) == 32
 
 
 def test_script_runs_as_own_task_and_confirms_start(tmp_path):
