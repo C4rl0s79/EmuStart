@@ -196,7 +196,16 @@ class Installer(private val act: MainActivity) {
         val apks = (0 until a.length()).map { a.getJSONObject(it) }
             .filter { s.asset.containsMatchIn(it.getString("name")) }
             .filter { !Regex("(?i)x86|debug|armeabi-v7a|arm32").containsMatchIn(it.getString("name")) }
-        val pick = apks.firstOrNull { Regex("(?i)arm64|aarch64|v8a").containsMatchIn(it.getString("name")) }
+        // wydania z wersjami pod poziom Androida (np. ArmSX2: a11-…-sdk30, a13-…-sdk33, a15-…-sdk35,
+        // legacy-…-sdk26): najwyższy zgodny z tym telefonem, bez „legacy”; wcześniej brany był
+        // pierwszy plik z listy (wersja dla Androida 11)
+        val sdk = android.os.Build.VERSION.SDK_INT
+        fun sdkOf(n: String) = Regex("""(?i)sdk(\d+)""").find(n)?.groupValues?.get(1)?.toIntOrNull()
+        val bySdk = apks.filter { a -> sdkOf(a.getString("name"))?.let { it <= sdk } == true }
+            .sortedWith(compareBy<JSONObject>({ Regex("(?i)legacy").containsMatchIn(it.getString("name")) },
+                                              { -(sdkOf(it.getString("name")) ?: 0) }))
+        val pick = bySdk.firstOrNull()
+            ?: apks.firstOrNull { Regex("(?i)arm64|aarch64|v8a").containsMatchIn(it.getString("name")) }
             ?: apks.firstOrNull { Regex("(?i)universal").containsMatchIn(it.getString("name")) } ?: apks.firstOrNull()
             ?: throw IllegalStateException("w najnowszym wydaniu ${s.repo} nie ma pliku APK")
         return pick.getString("browser_download_url")

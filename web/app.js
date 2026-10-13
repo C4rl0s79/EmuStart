@@ -845,7 +845,7 @@ function logoutAsk() {
 function serverRows(rows, c) {
   if (c.server_key) {
     rows.push({ k: "Serwer", type: "info", fmt: () => `konto ${c.server_account || "—"}` +
-                (c.server_via ? ` · przez: ${c.server_via}` : "") + (S.state?.server?.ok === false ? " · nie odpowiada" : "") });
+                (c.server_via ? ` · przez: ${c.server_via}` : "") + (S.state?.server?.ok === false && !S.state?.server?.checking ? " · nie odpowiada" : "") });
     rows.push({ k: "Wyloguj z serwera", type: "action", fmt: () => "to urządzenie straci dostęp — zalogujesz się ponownie kontem", run: () => logoutAsk() });
     return;
   }
@@ -1377,13 +1377,14 @@ async function refreshState() {
   if (st.server && !(st.rom_roots || []).length) {
     // klient serwera (bez folderów z grami): stan serwera EmuStart zamiast NAS-a
     net.textContent = st.server.ok ? `Serwer ${st.server.name || "EmuStart"}`
+      : st.server.checking ? "Serwer: łączę…"
       : st.server.key_rejected ? "Klucz urządzenia nieważny" : "Serwer niedostępny";
     if (st.server.key_rejected && !S.keyWarned) {
       S.keyWarned = true;
-      toast("Serwer nie przyjmuje klucza tego urządzenia (unieważniony?) — połącz ponownie: " +
-            "Ustawienia → Dołącz przez internet.", 9000);
+      toast("Serwer nie przyjmuje tego urządzenia (unieważnione?) — zaloguj się ponownie: " +
+            "Ustawienia → Wyloguj z serwera → Zaloguj.", 9000);
     }
-    net.className = "pill " + (st.server.ok ? "ok" : "warn");
+    net.className = "pill " + (st.server.ok || st.server.checking ? "ok" : "warn");
   } else {
     net.textContent = (st.rom_online ? "NAS dostępny" : "NAS offline, tylko gry lokalne") + mode;
     net.className = "pill " + (st.rom_online ? "ok" : "warn");

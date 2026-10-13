@@ -17,6 +17,31 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   RetroArchu na Androidzie; ocena „wyświetlania nad innymi aplikacjami” i usługi ułatwień
   dostępu dla pozostałych emulatorów na Androidzie.
 
+## [0.44.2] — 2026-10-13
+
+Zmiany, które miały wejść do 0.44.1, ale trafiły na gałąź już po jego wydaniu.
+
+### Poprawione
+- **Zapisy na urządzeniach konta administratora — błąd 403 „konto wymaga hasła”** (od
+  0.43, serwer): administrator to cecha konta, a sprawdzanie dostępu traktowało jego
+  urządzenia jak „widzące wszystkie konta” i dla własnego konta z hasłem żądało tokenu konta,
+  którego urządzenie właściciela nie ma. Menedżer zapisów i synchronizacja zapisów odmawiały
+  na każdym urządzeniu tego konta. Teraz własne konto urządzenia jest zawsze dostępne;
+  cudze konto z hasłem — nadal tylko po haśle. **Wymaga aktualizacji serwera**; zapisy
+  czekające w kolejce wyślą się same.
+- **Start bez czekania na serwer** (telefon i komputer): telefon pokazywał cokolwiek dopiero
+  po wyborze adresu serwera i zalogowaniu (z wyłączonym Tailscale ponad 10 s). Teraz lista
+  systemów od razu z pamięci (ostatnie połączenie), a serwer w tle — po odpowiedzi
+  interfejs odświeża się sam; pasek stanu na komputerze też nie czeka. W trakcie łączenia
+  pasek pokazuje **„Serwer: łączę…”** zamiast „Serwer niedostępny”.
+- **ArmSX2**: EmuStart nie wpisuje już konta RetroAchievements do `inis/PCSX2.ini` — ArmSX2
+  trzyma ustawienia i konto we własnych ustawieniach aplikacji, więc wpis nic nie dawał
+  (konto loguje się raz w ArmSX2). Ustawienia osobne dla gry (rozdzielczość, łatki 16:9,
+  usuwanie przeplotu) ArmSX2 stosuje przy starcie z EmuStart od wersji **2.8.2** — starsze
+  przy starcie z zewnątrz brały tylko ustawienia globalne.
+- **Instalator emulatorów na telefonie**: z wydań z wersjami pod poziom Androida (ArmSX2:
+  sdk30 / sdk33 / sdk35) bierze najwyższą zgodną z telefonem zamiast pierwszej z listy.
+
 ## [0.44.1] — 2026-10-13
 
 ### Poprawione

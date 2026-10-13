@@ -311,3 +311,20 @@ def test_account_device_lists_exactly_what_the_server_gives(penv):
     assert [p["name"] for p in profiles.visible(acc, profiles.all_profiles())] == ["Jezus", "Ola"]
     assert prof["name"] == "Ola"
     assert len(profiles.visible(cfg, profiles.all_profiles())) == len(profiles.all_profiles())   # bez konta — wszystkie
+
+
+def test_admin_account_device_reaches_its_own_account_without_token(monkeypatch):
+    """Konto administratora z hasłem: jego urządzenia czytają i zapisują własne konto bez tokenu
+    (0.43–0.44: 403 „konto wymaga hasła” — menedżer zapisów i synchronizacja zapisów);
+    cudze konto z hasłem nadal tylko z tokenem."""
+    import keyhelp
+    from test_three_devices import _req
+    srv = _keyed_server(monkeypatch)
+    for n in ("Jezus", "Ola"):
+        _write(srv[2] / n / "emustart.json", b"{}")
+        accounts.set_password(n, PW)
+    _d, tok = keyhelp.device("Jezus", admin=True, name="Telefon")
+    assert _req(srv, "GET", "/v1/nas/file?p=Jezus/emustart.json", tok)[0] == 200
+    assert _req(srv, "PUT", "/v1/nas/file?p=Jezus/save/x.srm&mtime=1", tok, body=b"zapis")[0] == 200
+    assert _req(srv, "GET", "/v1/savemgr/catalog?profile=Jezus&es=ps2&name=Gra", tok)[0] == 200
+    assert _req(srv, "GET", "/v1/nas/file?p=Ola/emustart.json", tok)[0] == 403

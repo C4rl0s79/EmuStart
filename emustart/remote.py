@@ -643,8 +643,14 @@ def _profile_ok(handler, profile: str) -> bool:
     """Konto z hasłem (0.40) — urządzenie tego konta (klucz urządzenia) albo token konta
     (użytkownik podał hasło na tym urządzeniu). Konto bez hasła — tylko urządzenia
     administratora i urządzenia tego konta (do czasu ustawienia hasła). PIN jest lokalny."""
-    from emustart import accounts
+    from emustart import accounts, devices
     sc = _scope(handler)
+    # własne konto urządzenia — zawsze, także gdy konto jest administratorem (wtedy zakres
+    # jest pusty: „wszystkie konta”) — 0.43–0.44: urządzenia konta administratora dostawały
+    # 403 „konto wymaga hasła” na własnych zapisach
+    own = devices.account_raw(getattr(handler, "device", ""))
+    if profile and own and profile.lower() == own.lower():
+        return True
     if sc and profile and profile.lower() == sc.lower():
         return True
     if not profile or profile.startswith((".", "_")) or NAS_ROOT is None:
