@@ -67,6 +67,7 @@ def emu_server(tmp_path, monkeypatch):
         else:
             data = RELEASES[url.split("/")[3]][2]
         Path(dest).write_bytes(data)
+    monkeypatch.setattr(emucatalog, "all_cores", lambda: ["handy", "puae"])
     monkeypatch.setattr(emucatalog, "latest", latest)
     monkeypatch.setattr(emucatalog, "download", download)
     url = server.start(0, bind="127.0.0.1")
@@ -94,8 +95,9 @@ def test_server_store_builds_versions_with_manifest(emu_server):
     ra = emustore.manifest(emu_server, "retroarch", "1.0")["files"]
     assert "retroarch.exe" in ra and "info/handy_libretro.info" in ra        # bez folderu nadrzędnego
     assert list(emustore.manifest(emu_server, "capsimg", "v5")["files"]) == ["capsimg.dll"]
-    # spoza manifestu serwer nic nie wyda
-    assert emustore.file_path(emu_server, "duckstation", "v1", "../index.json") is None
+    # na serwerze zostaje samo archiwum (i manifest) — emulatory nie są tam uruchamiane
+    vdir = emustore.version_dir(emu_server, "duckstation", "v1")
+    assert sorted(p.name for p in vdir.iterdir()) == [".archive.zip", ".manifest.json"]
     assert emustore.update(emu_server)["updated"] == []                      # ta sama wersja — nic
 
 
@@ -234,3 +236,37 @@ def test_required_settings_from_server_applied_before_game(emu_server, tmp_path)
     assert lines.index('savestate_thumbnail_enable = "true"') > lines.index('savestate_thumbnail_enable = "false"')
     srvadmin.emu_policy_set(A(), {"family": "duckstation", "reset": True})
     assert emupolicy.effective(emu_server)["duckstation"] == emupolicy.DEFAULTS["duckstation"]
+
+
+def test_all_retroarch_cores_on_server_and_alternatives_on_pc(emu_server, tmp_path, monkeypatch):
+    """Serwer trzyma wszystkie rdzenie z buildbota; komputer dostaje dla systemu biblioteki
+    zalecany rdzeń i wszystkie pasujące (wg plików .info) — np. bsnes obok snes9x."""
+    with library.db() as c:
+        c.execute("INSERT OR REPLACE INTO systems(es, display, rom_dir, games, scanned) VALUES('snes','SNES','snes',1,0)")
+    RELEASES["snes9x"] = ("1.63", "snes9x.zip", _zip({"snes9x-x64.exe": b"SA"}))     # zalecany samodzielny
+    RELEASES["core-snes9x"] = ("nightly-1", "s9x.zip", _zip({"snes9x_libretro.dll": b"S9X"}))
+    RELEASES["core-bsnes"] = ("nightly-1", "bsnes.zip", _zip({"bsnes_libretro.dll": b"BSNES"}))
+    RELEASES["core-fceumm"] = ("nightly-1", "fceumm.zip", _zip({"fceumm_libretro.dll": b"NES"}))
+    monkeypatch.setattr(emucatalog, "all_cores", lambda: ["bsnes", "fceumm", "handy", "puae", "snes9x"])
+    snes = 'database = "Nintendo - Super Nintendo Entertainment System|Nintendo - Super Nintendo Entertainment System Hacks"\n'
+    info = _zip({"handy_libretro.info": 'database = "Atari - Lynx"\n', "puae_libretro.info": 'database = "Commodore - Amiga"\n',
+                 "snes9x_libretro.info": snes, "bsnes_libretro.info": snes,
+                 "fceumm_libretro.info": 'database = "Nintendo - Nintendo Entertainment System"\n'})
+    orig = emucatalog.download
+
+    def download(url, dest, progress=None, cancel=None):
+        if url == emucatalog.INFO_URL:
+            return Path(dest).write_bytes(info)
+        return orig(url, dest, progress, cancel)
+    monkeypatch.setattr(emucatalog, "download", download)
+    r = emustore.update(emu_server)
+    assert not r["errors"], r
+    assert "core-fceumm" in r["updated"]                                       # spoza biblioteki też
+    pub = emustore.public_index(emu_server)
+    assert set(pub["systems"]["snes"]) == {"snes9x", "retroarch", "core-snes9x", "core-bsnes"}
+    cfg = {"emu_root": str(tmp_path / "emu"), "systems": {}}
+    st = _sync(cfg, ["snes"])
+    assert st["errors"] == [], st
+    cores = tmp_path / "emu" / "RetroArch" / "cores"
+    assert (cores / "bsnes_libretro.dll").read_bytes() == b"BSNES" and (cores / "snes9x_libretro.dll").is_file()
+    assert not (cores / "fceumm_libretro.dll").exists()                        # tylko dla systemów biblioteki

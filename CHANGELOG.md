@@ -95,6 +95,11 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   serwerze) jednym wznawianym strumieniem i rozpakowuje tylko brakujące i zmienione pliki; konfiguracji i
   zapisów nie rusza, działającego emulatora nie podmienia (później). Pasek „⬇ emulatory”
   pokazuje postęp. Komputer nie pobiera już emulatorów z internetu.
+- **Wszystkie rdzenie RetroArcha na serwerze** (około 245 z buildbota): komputer dostaje dla
+  każdego systemu biblioteki zalecany rdzeń i wszystkie pasujące — rozpoznane po plikach `.info`
+  RetroArcha (np. snes9x, bsnes, bsnes-jg dla SNES) — i wybiera je w Ustawieniach; panel ma je
+  na liście zalecanego rdzenia. Brakujące pozycje (nowy system w bibliotece) serwer dociąga co
+  godzinę, nie raz na dobę. W magazynie zostaje samo archiwum wersji (bez rozpakowanych plików).
 - **Wymagane ustawienia emulatorów z serwera** (panel → Emulatory): dla RetroArcha, DuckStation,
   PCSX2 i Dolphina lista wartości, które każdy komputer nakłada tuż przed grą (po ustawieniach
   profilu — wygrywają). Domyślnie: wyjście z gry bez okna z pytaniem, w RetroArchu pauza

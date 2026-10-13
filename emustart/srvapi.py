@@ -309,6 +309,8 @@ class ServerApi:
         out = []
         merge = self._cfg.get("system_merge") or {}
         dirs = {r["es"]: r["rom_dir"] for r in library.db().execute("SELECT es, rom_dir FROM systems")}
+        from emustart import emustore
+        store_idx = emustore.load_index(self._cfg)          # rdzenie z buildbota i ich systemy (.info)
         for s_ in sorted(library.systems_summary(), key=lambda x: x["display"].lower()):
             es = s_["es"]
             sc = (self._cfg.get("systems") or {}).get(es) or {}
@@ -320,7 +322,7 @@ class ServerApi:
                         "logo": lg["url"], "glow": bool(lg["glow"]), "logo_choice": sc.get("logo", ""),
                         "enabled": sc.get("enabled", True),
                         "emu_rec": sc.get("emu_rec", ""), "core_rec": sc.get("core_rec", ""),
-                        "core_default": emucatalog.CORES.get(plat, ""), "cores": emulators.cores_for(plat),
+                        "core_default": emucatalog.CORES.get(plat, ""), "cores": list(dict.fromkeys(emulators.cores_for(plat) + emustore.alt_cores(store_idx, es))),
                         "dirs": _json.loads(dirs.get(es) or "[]"),
                         "merged": sorted(k for k, v in merge.items() if v == es)})
         return out
@@ -367,7 +369,7 @@ class ServerApi:
             sc["emu_rec"] = data["emu_rec"]
         if "core_rec" in data:                    # rdzeń RetroArcha ("" = domyślny)
             core = str(data["core_rec"] or "").strip().lower()
-            if core and not re.fullmatch(r"[a-z0-9_]{1,40}", core):
+            if core and not re.fullmatch(r"[a-z0-9_][a-z0-9_-]{0,63}", core):
                 return {"ok": False, "reason": "Zła nazwa rdzenia RetroArcha."}
             if core:
                 sc["core_rec"] = core

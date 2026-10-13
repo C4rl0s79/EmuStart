@@ -110,7 +110,7 @@ CORES = {
 }
 
 CAPSIMG_REPO = "FrodeSolheim/capsimg"
-_SAFE = re.compile(r"^[a-z0-9_]+$")
+_SAFE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_-]{0,63}$")   # nazwy rdzeni: snes9x, bsnes-jg…
 
 
 # ── pozycje ──
@@ -162,6 +162,36 @@ def plan(es: str, emu_rec: str = "", core_rec: str = "") -> list:
     out = ["retroarch", f"core-{core}"]
     if plat == "AMIGA":
         out.append("capsimg")
+    return out
+
+
+# ── wszystkie rdzenie RetroArcha (buildbot) ──
+
+CORES_URL = f"{BUILDBOT}/nightly/windows/x86_64/latest/"
+INFO_URL = f"{BUILDBOT}/assets/frontend/info.zip"
+
+
+def all_cores() -> list:
+    """Nazwy wszystkich rdzeni dla Windows x64 z buildbota (np. 'bsnes', 'bsnes-jg', 'snes9x')."""
+    with _open(CORES_URL, timeout=30) as r:
+        html = r.read().decode("utf-8", "replace")
+    names = sorted(set(re.findall(r"([A-Za-z0-9_-]+)_libretro\.dll\.zip", html)))
+    return [n for n in names if _SAFE.match(n)]
+
+
+def core_databases(info_zip: Path) -> dict:
+    """{rdzeń: [bazy libretro]} z plików info/*.info (pole database, np. „Nintendo - Super
+    Nintendo Entertainment System”) — po nich rdzeń trafia do systemów."""
+    out = {}
+    with zipfile.ZipFile(info_zip) as z:
+        for n in z.namelist():
+            m = re.match(r"^(?:.*/)?([A-Za-z0-9_-]+)_libretro\.info$", n)
+            if not m:
+                continue
+            text = z.read(n).decode("utf-8", "replace")
+            d = re.search(r'^\s*database\s*=\s*"([^"]*)"', text, re.M)
+            if d and d.group(1).strip():
+                out[m.group(1)] = [x.strip() for x in d.group(1).split("|") if x.strip()]
     return out
 
 

@@ -125,8 +125,11 @@ Szczegóły: [Grafiki i metadane](Grafiki-i-metadane).
 
 ### Emulatory
 Magazyn emulatorów (domyślnie `server\emulators`, zmiana: Konfiguracja → Foldery → Magazyn
-emulatorów): emulatory i rdzenie RetroArcha potrzebne systemom biblioteki — wg zalecanego
-emulatora i rdzenia systemu (Konfiguracja → Systemy). Serwer sprawdza nowe wydania raz dziennie;
+emulatorów): emulatory potrzebne systemom biblioteki — wg zalecanego emulatora i rdzenia systemu
+(Konfiguracja → Systemy) — i **wszystkie rdzenie RetroArcha** z buildbota (około 245). Komputer
+dostaje dla każdego systemu biblioteki zalecany emulator i wszystkie pasujące rdzenie (wg plików
+`.info` RetroArcha, np. snes9x, bsnes, bsnes-jg dla SNES) — do wyboru w Ustawieniach. Serwer
+trzyma każdą wersję jako archiwum; nowe systemy i rdzenie dociąga co godzinę. Serwer sprawdza nowe wydania raz dziennie;
 **Sprawdź i pobierz teraz** — od razu, **Pobierz ponownie** — jeden emulator jeszcze raz.
 Tabela: systemy, wersja na serwerze (i poprzednia — zostaje na wszelki wypadek), rozmiar,
 ostatni błąd pobierania. Komputery doinstalowują i aktualizują emulatory same

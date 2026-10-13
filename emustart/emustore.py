@@ -72,16 +72,40 @@ def _save_index(cfg: dict, d: dict) -> None:
     os.replace(tmp, p)
 
 
-def needed(cfg: dict) -> dict:
-    """{pozycja: [systemy]} — emulatory potrzebne systemom biblioteki serwera (zalecenia
-    z panelu: emu_rec, core_rec); systemy wyłączone w panelu pomijane."""
-    out: dict = {}
+def _library_systems(cfg: dict) -> list:
+    out = []
     for r in library.db().execute("SELECT es FROM systems WHERE games > 0 ORDER BY es"):
         sc = (cfg.get("systems") or {}).get(r["es"]) or {}
-        if sc.get("enabled") is False:
-            continue
-        for item in emucatalog.plan(r["es"], sc.get("emu_rec", ""), sc.get("core_rec", "")):
-            out.setdefault(item, []).append(r["es"])
+        if sc.get("enabled") is not False:          # wyłączone w panelu pomijane
+            out.append((r["es"], sc))
+    return out
+
+
+def alt_cores(idx: dict, es: str) -> list:
+    """Wszystkie rdzenie RetroArcha pasujące do systemu (wg plików .info) — do wyboru na
+    komputerze, np. bsnes obok zalecanego snes9x."""
+    from emustart import systems
+    name = systems.info(es).get("libretro") or ""
+    return sorted(c for c, dbs in (idx.get("core_db") or {}).items() if name and name in dbs) if name else []
+
+
+def needed(cfg: dict) -> dict:
+    """{pozycja: [systemy]} — emulatory dla systemów biblioteki serwera (zalecane w panelu:
+    emu_rec, core_rec) i wszystkie rdzenie RetroArcha z buildbota (do wyboru na komputerach)."""
+    out: dict = {}
+    idx = load_index(cfg)
+    for es, sc in _library_systems(cfg):
+        for item in emucatalog.plan(es, sc.get("emu_rec", ""), sc.get("core_rec", "")):
+            out.setdefault(item, []).append(es)
+        alts = alt_cores(idx, es)
+        if alts and es not in out.setdefault("retroarch", []):
+            out["retroarch"].append(es)              # rdzenie do wyboru działają tylko w RetroArchu
+        for c in alts:
+            out.setdefault(f"core-{c}", [])
+            if es not in out[f"core-{c}"]:
+                out[f"core-{c}"].append(es)
+    for c in idx.get("cores") or []:
+        out.setdefault(f"core-{c}", [])
     return out
 
 
@@ -94,15 +118,6 @@ def manifest(cfg: dict, item: str, version: str) -> dict | None:
         return json.loads((version_dir(cfg, item, version) / MANIFEST).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
-
-
-def file_path(cfg: dict, item: str, version: str, rel: str) -> Path | None:
-    """Plik z manifestu tej wersji (inne ścieżki — None)."""
-    m = manifest(cfg, item, version)
-    rel = rel.replace("\\", "/")
-    if not m or rel not in m.get("files", {}):
-        return None
-    return version_dir(cfg, item, version) / rel
 
 
 def archive_path(cfg: dict, item: str, version: str) -> Path | None:
@@ -159,7 +174,8 @@ def public_index(cfg: dict) -> dict:
     systems_ = {}
     for item, ess in need.items():
         for es in ess:
-            systems_.setdefault(es, []).append(item)
+            if item in items:                # tylko to, co serwer już ma
+                systems_.setdefault(es, []).append(item)
     from emustart import emupolicy
     return {"items": items, "systems": systems_, "policy": emupolicy.effective(cfg)}
 
@@ -221,6 +237,13 @@ def _build(cfg: dict, item: str, rel: dict, progress=None) -> dict:
     (part / MANIFEST).write_text(json.dumps({"item": item, "version": rel["version"], "files": files}),
                                  encoding="utf-8")
     archive_size = _make_archive(part, files)
+    for f in files:                          # na serwerze nic nie działa — zostaje samo archiwum
+        (part / f).unlink()
+    for d in sorted((p for p in part.rglob("*") if p.is_dir()), key=lambda p: -len(p.parts)):
+        try:
+            d.rmdir()
+        except OSError:
+            pass
     shutil.rmtree(final, ignore_errors=True)
     os.replace(part, final)
     return {"version": rel["version"], "updated": time.time(), "files": len(files),
@@ -246,6 +269,10 @@ def update(cfg: dict, items: list | None = None, force: bool = False) -> dict:
         _job.update(running=True, step=0, steps=len(want), item="", done=0, total=0, log=[],
                     started=time.time(), finished=0.0)
         ensure_archives(cfg)
+        _refresh_core_list(cfg)
+        if items is None:
+            want = sorted(needed(cfg))
+            _job["steps"] = len(want)         # z rdzeniami dopiero co pobranymi z buildbota
         idx = load_index(cfg)
         updated, errors = [], {}
         for item in want:
@@ -278,6 +305,33 @@ def update(cfg: dict, items: list | None = None, force: bool = False) -> dict:
     finally:
         _job.update(running=False, item="", finished=time.time())
         _lock.release()
+
+
+def _refresh_core_list(cfg: dict) -> None:
+    """Lista rdzeni z buildbota i ich systemy (pliki .info) — raz na dobę."""
+    idx = load_index(cfg)
+    if idx.get("cores") and time.time() - float(idx.get("cores_at") or 0) < DAY - 600:
+        return
+    try:
+        cores = emucatalog.all_cores()
+        store_dir(cfg).mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="emustore_", dir=store_dir(cfg)) as td:
+            info = Path(td) / "info.zip"
+            emucatalog.download(emucatalog.INFO_URL, info)
+            dbs = emucatalog.core_databases(info)
+    except Exception as ex:
+        log.warning("emulatory: lista rdzeni z buildbota: %s", ex)
+        return
+    idx = load_index(cfg)
+    idx.update(cores=cores, core_db=dbs, cores_at=time.time())
+    _save_index(cfg, idx)
+    log.info("emulatory: rdzeni RetroArcha na buildbocie: %d (z opisem systemów: %d)", len(cores), len(dbs))
+
+
+def missing(cfg: dict) -> list:
+    """Pozycje potrzebne, których magazyn jeszcze nie ma (np. system doszedł do biblioteki)."""
+    idx = load_index(cfg)
+    return sorted(i for i in needed(cfg) if i not in idx["items"] and i not in idx["errors"])
 
 
 def start_update(cfg: dict, items: list | None = None, force: bool = False) -> dict:
@@ -319,6 +373,10 @@ def scheduler(get_cfg) -> None:
                 cfg = get_cfg()
                 if time.time() - float(load_index(cfg).get("checked") or 0) >= DAY - 600:
                     update(cfg)
+                else:
+                    lack = missing(cfg)       # co godzinę: nowe systemy / rdzenie — od razu
+                    if lack:
+                        update(cfg, lack)
             except Exception:
                 log.exception("emulatory: sprawdzanie codzienne")
             time.sleep(3600)
