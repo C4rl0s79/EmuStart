@@ -225,16 +225,26 @@ def account_password(cfg: dict, pid: int, password: str, old: str = "") -> tuple
 
 def account_join(cfg: dict, name: str, password: str) -> tuple[dict | None, str]:
     """Konto innego użytkownika (albo założone na innym urządzeniu) na tym urządzeniu — z hasłem."""
-    from emustart import pinauth
     fs = nasfs.backend(cfg)
     if not isinstance(fs, nasfs.RemoteFs):
         return None, "Konta z hasłem są na serwerze EmuStart — serwer jest niedostępny."
     r = fs.profile_op("login", {"name": name, "password": password})
+    if r.get("missing"):
+        return None, MISSING
     if not r.get("ok"):
         return None, r.get("error") or "Złe hasło."
     if r.get("needs_password"):
         return None, f"Konto „{r.get('name') or name}” nie ma jeszcze hasła — ustawia je jego urządzenie albo administrator."
-    nas_name = r["name"]
+    return account_profile(r["name"], r["token"]), ""
+
+
+MISSING = "missing"                   # account_join: nie ma takiego konta (klient proponuje założenie)
+
+
+def account_profile(nas_name: str, token: str) -> dict:
+    """Konto z serwera na tym urządzeniu (token konta) — istniejący wpis albo nowy."""
+    from emustart import pinauth
+    _ensure_columns()
     row = library.db().execute("SELECT id FROM profiles WHERE lower(nas_name)=?", (nas_name.lower(),)).fetchone()
     if row:
         pid = row["id"]
@@ -243,8 +253,18 @@ def account_join(cfg: dict, name: str, password: str) -> tuple[dict | None, str]
         with library.db() as c:
             pid = c.execute("INSERT INTO profiles(name, nas_name, color) VALUES(?,?,?)",
                             ((nas_name if not existing else f"{nas_name} (serwer)")[:32], nas_name, "")).lastrowid
-    _remember(pid, r["token"])
-    return get(pid), ""
+    _remember(pid, token)
+    return get(pid)
+
+
+def visible(cfg: dict, lst: list) -> list:
+    """Profile do pokazania. Urządzenie zalogowane kontem — dokładnie to, co daje serwer: swoje
+    konto i konta zalogowane tu hasłem (token). Lokalne wpisy sprzed kont zostają w bazie, ale
+    nie na liście (telefon pokazuje tak samo — tylko konta z serwera)."""
+    mine = account_of_device(cfg).lower()
+    if not mine:
+        return lst
+    return [p for p in lst if (p.get("nas_name") or "").lower() == mine or p.get("pin_token")]
 
 
 def account_logout(pid: int) -> None:

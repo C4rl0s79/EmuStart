@@ -185,6 +185,14 @@ def listing() -> list:
     return out
 
 
+def listing_one(did: str) -> dict:
+    """Wpis urządzenia (bez klucza publicznego) — {} gdy nie ma."""
+    with _lock:
+        d = dict(_load().get(did) or {})
+    d.pop("pubkey", None)
+    return d
+
+
 def revoke(did: str) -> bool:
     with _lock:
         d = _load().get(did)

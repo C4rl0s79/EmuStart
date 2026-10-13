@@ -171,6 +171,7 @@ async function refreshDevices() {
   $("enroll").innerHTML = enr.map((q) =>
     `<tr><td>${esc(q.name)}<div class="muted">${esc(KIND[q.class] || q.class)} · ${esc(q.ip)} · ${ago(q.created)}</div></td>` +
     `<td>${q.mode === "new" ? "nowe konto" : "konto"} <b>${esc(q.account)}</b>` +
+    `${q.from_account ? `<div class="muted">prosi zalogowane urządzenie konta ${esc(q.from_account)}</div>` : ""}` +
     `${(q.replaces || []).length ? `<div class="muted">zastąpi: ${esc(q.replaces.join(", "))}</div>` : ""}</td>` +
     `<td><code style="font-size:18px;letter-spacing:.08em">${esc(q.code)}</code></td>` +
     `<td class="n"><button class="primary" data-eg="${esc(q.id)}">Zatwierdź z grami</button> ` +
