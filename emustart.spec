@@ -9,7 +9,7 @@
 # Portable: config.json / data/ / cache/ / logs/ powstają OBOK exe (paths.app_dir),
 # a web/ i assets/ leżą w _internal/ (sys._MEIPASS).
 
-from PyInstaller.utils.hooks import collect_all, collect_submodules, copy_metadata
+from PyInstaller.utils.hooks import collect_all, collect_submodules
 
 import re
 from PyInstaller.utils.win32.versioninfo import (
@@ -65,12 +65,27 @@ for pkg in ("webview", "clr_loader", "pythonnet"):
     except Exception:
         pass
 
-# metadane wersji — EmuStart zapisuje w logu wersje pywebview/pythonnet (diagnostyka okna)
-for dist in ("pywebview", "pythonnet", "clr_loader"):
-    try:
-        datas += copy_metadata(dist)
-    except Exception:
-        pass
+# Zbędne w _internal (każdy plik to wolniejsze kopiowanie i aktualizacja):
+# - źródła .py pakietów — ich kod jest już skompilowany w exe (PYZ),
+# - pythonnet: ~96 bibliotek zgodności .NET Standard — .NET Framework 4.8 ma je wbudowane
+#   (okno działa z samym Python.Runtime.dll, sprawdzone),
+# - pywebview: część na Androida (WebView2Loader wszystkich procesorów zostaje — pywebview
+#   sprawdza je przy starcie); clr_loader 32-bit,
+# - metadane pakietów (*.dist-info), setuptools, przyspieszacz markupsafe.
+import re as _re
+_DROP = _re.compile(r"""(?ix)
+    ^pythonnet/runtime/(?!python\.runtime\.dll$)
+  | \.py$ | \.pyi$ | /py\.typed$
+  | ^webview/platforms/android/
+  | ^clr_loader/ffi/dlls/x86/
+  | \.dist-info/
+  | ^setuptools/
+  | ^markupsafe/
+""")
+
+
+def _trim(toc):
+    return [e for e in toc if not _DROP.search(e[0].replace("\\", "/"))]
 
 # własne moduły jawnie — PyInstaller potrafi przeoczyć importy leniwe
 hiddenimports += collect_submodules("emustart")
@@ -96,6 +111,8 @@ def app(script: str, name: str, desc: str):
         hiddenimports=hiddenimports,
         excludes=["tkinter", "test", "unittest", "pytest"],
     )
+    a.datas = _trim(a.datas)
+    a.binaries = _trim(a.binaries)
     pyz = PYZ(a.pure, a.zipped_data)
     exe = EXE(
         pyz,

@@ -107,8 +107,11 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   w `_internal`, a serwer wykonałby ją przy starcie z najwyższymi uprawnieniami; mógł też
   czytać i zmieniać dane serwera (konta, profile). Panel i link logowania (konto użytkownika)
   piszą logi w `%LOCALAPPDATA%\EmuStart Server\logs`.
-- **Wbudowane logo platform w jednym pliku programu** (`assets/systems.media` zamiast 40 PNG),
-  bez zbędnej ikony — `_internal` ma 276 plików zamiast 316.
+- **`_internal` ma 64 pliki zamiast 316** (szybsze kopiowanie i aktualizacja): wbudowane logo
+  platform w jednym pliku (`assets/systems.media` zamiast 40 PNG), bez ~96 bibliotek zgodności
+  .NET (Windows ma je wbudowane — okno działa z samym `Python.Runtime.dll`), bez źródeł `.py`
+  pakietów (ich kod jest już w exe), części pywebview na Androida, metadanych pakietów
+  (`*.dist-info`), `setuptools` i zbędnej ikony.
 - **Klucz certyfikatu serwera zaszyfrowany na dysku** — `tls-key.pem` zaszyfrowany (AES-256)
   losowym hasłem, a hasło chronione DPAPI tego komputera (`tls-key.pass`). Kopia folderu
   serwera (udział sieciowy, kopia zapasowa, dysk) na innym komputerze nic nie daje. Klucz
