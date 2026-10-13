@@ -220,7 +220,7 @@ def request(mode: str, account: str, name: str, cls: str, ip: str, version: str,
             return {"ok": False, "reason": "Serwer ma za dużo oczekujących próśb — spróbuj później."}
         # ponowna prośba tego samego klucza — ta sama prośba (np. po restarcie aplikacji)
         for rid, q in reqs.items():
-            if q["pubkey"] == pubkey and q["status"] == "pending":
+            if pubkey and q["pubkey"] == pubkey and q["status"] == "pending":
                 if login_code:
                     _approve_locked(q, True, "kod QR z panelu serwera", create_account, first_admin=True)
                     _save()
@@ -242,6 +242,65 @@ def request(mode: str, account: str, name: str, cls: str, ip: str, version: str,
              " — zatwierdzona kodem z panelu" if status == "approved" else "")
     return {"ok": True, "rid": rid, "code": code, "pretty": pretty(code), "expires": now + ENROLL_TTL,
             "status": status}
+
+
+MAX_ACCOUNT_REQ = 3              # oczekujących próśb o nowe konto z jednego urządzenia
+
+
+def request_account(viewer: str, account: str, password: str, ip: str, accounts: list,
+                    create_account=None) -> dict:
+    """Zalogowane urządzenie prosi o **nowe konto** (inny użytkownik na tym urządzeniu): serwer
+    wie, kto pyta (token urządzenia), konto powstaje dopiero po zatwierdzeniu przez
+    administratora (urządzenie administratora — od razu). Po zatwierdzeniu urządzenie dostaje
+    dostęp do nowego konta (token konta) — bez ponownego podawania hasła."""
+    from emustart import accounts as acc_pw
+    from emustart import devices
+    if not viewer:
+        return {"ok": False, "reason": "Tylko z zalogowanego urządzenia."}
+    acc = _safe_account(account)
+    if not acc:
+        return {"ok": False, "reason": "Zła nazwa konta."}
+    if any(a.lower() == acc.lower() for a in accounts) or acc_pw.record(acc):
+        return {"ok": False, "exists": True, "reason": f"Konto „{acc}” już istnieje — zaloguj się jego hasłem."}
+    why = acc_pw.policy(password)
+    if why:
+        return {"ok": False, "reason": why}
+    now = time.time()
+    with _lock:
+        _gc(now)
+        reqs = _load()
+        mine = [q for q in reqs.values() if q.get("for_device") == viewer and q["status"] == "pending"]
+        if any(q["account"].lower() == acc.lower() for q in mine):
+            return {"ok": False, "reason": f"Prośba o konto „{acc}” już czeka na zatwierdzenie."}
+        if len(mine) >= MAX_ACCOUNT_REQ:
+            return {"ok": False, "reason": "Za dużo oczekujących próśb o nowe konto z tego urządzenia."}
+        if len([q for q in reqs.values() if q["status"] == "pending"]) >= MAX_PENDING:
+            return {"ok": False, "reason": "Serwer ma za dużo oczekujących próśb — spróbuj później."}
+        rid = secrets.token_urlsafe(24)
+        code = "".join(secrets.choice(CODE_ALPHABET) for _ in range(8))
+        d = devices.listing_one(viewer)
+        reqs[rid] = {"id": secrets.token_hex(4), "mode": "new", "account": acc, "name": d.get("name", "urządzenie"),
+                     "class": d.get("class", "pc"), "ip": ip, "version": d.get("version", ""), "pubkey": "",
+                     "code": code, "created": now, "expires": now + ENROLL_TTL, "status": "pending",
+                     "device": "", "decided_by": "", "hw": "", "pw": acc_pw.make(password),
+                     "for_device": viewer, "for_account": devices.account_raw(viewer)}
+        if devices.is_admin(viewer):          # administrator zakłada konto sam
+            _approve_locked(reqs[rid], True, devices.name_of(viewer), create_account)
+        _save()
+        status = reqs[rid]["status"]
+    log.info("prośba o nowe konto „%s” z urządzenia %s (konto %s)%s", acc, d.get("name"), d.get("account"),
+             " — założone (administrator)" if status == "approved" else "")
+    return {"ok": True, "rid": rid, "account": acc, "status": status, "code": code, "pretty": pretty(code)}
+
+
+def poll_account(rid: str, viewer: str) -> dict:
+    """Stan prośby o nowe konto — tylko dla urządzenia, które o nie prosiło."""
+    with _lock:
+        _gc(time.time())
+        for r, q in _load().items():
+            if rid and hmac.compare_digest(r, str(rid)) and q.get("for_device") == viewer:
+                return {"ok": True, "status": q["status"], "account": q["account"]}
+    return {"ok": True, "status": "expired"}
 
 
 def poll(rid: str) -> dict:
@@ -284,7 +343,8 @@ def pending(viewer: str) -> list:
             if not _visible(q, viewer) or (_admin_only(q) and viewer and not devices.is_admin(viewer)):
                 continue
             out.append({k: q[k] for k in ("id", "mode", "account", "name", "class", "ip", "created", "expires")}
-                       | {"code": pretty(q["code"]), "replaces": devices.same_hw(q.get("hw", ""))})
+                       | {"code": pretty(q["code"]), "replaces": devices.same_hw(q.get("hw", "")),
+                          "from_account": q.get("for_account", "")})
     return sorted(out, key=lambda q: q["created"])
 
 
@@ -300,6 +360,9 @@ def _approve_locked(q: dict, games: bool, by: str, create_account=None, first_ad
     q.pop("pw", None)
     if first_admin and not acc_pw.any_admin():
         acc_pw.set_admin(q["account"], True, by)
+    if q.get("for_device"):                   # nowe konto dla urządzenia już zalogowanego
+        q.update(status="approved", device=q["for_device"], decided_by=by)
+        return
     did = devices.add_keyed(q["name"], q["class"], q["ip"], q["version"], q["pubkey"], q["account"],
                             games=bool(games), by=by, hw=q.get("hw", ""))
     q.update(status="approved", device=did, decided_by=by)

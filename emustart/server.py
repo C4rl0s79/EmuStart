@@ -152,7 +152,8 @@ class _Handler(BaseHTTPRequestHandler):
         if p.startswith("/v1/") and not _v1_ok(self):
             return
         if p in ("/v1/enroll/request", "/v1/enroll/poll", "/v1/enroll/pending", "/v1/enroll/decide",
-                 "/v1/auth/challenge", "/v1/auth/token", "/v1/auth/logout"):
+                 "/v1/auth/challenge", "/v1/auth/token", "/v1/auth/logout",
+                 "/v1/enroll/account", "/v1/enroll/account_poll"):
             from emustart import remote      # zalogowanie urządzenia, logowanie podpisem
             return remote.enroll_flow(self, p.rsplit("/", 1)[1])
         if p.startswith("/v1/"):

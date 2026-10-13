@@ -171,6 +171,20 @@ def enroll_flow(handler, op: str) -> None:
     if not authorized(handler):
         return _json(handler, {"ok": False, "reason": "brak lub zły klucz"}, 401)
     viewer = getattr(handler, "device", "")
+    if op == "account":                     # nowe konto z zalogowanego urządzenia (inny użytkownik)
+        from emustart import public as _pub
+        r = enroll.request_account(viewer, str(d.get("account", "")), str(d.get("password", "")),
+                                   _pub.client_ip(handler), profile_names(), create_account)
+        if r.get("status") == "approved":
+            from emustart import accounts
+            r["token"] = accounts.token(_secret(), r["account"])
+        return _json(handler, r, 200 if r.get("ok") else 400)
+    if op == "account_poll":
+        r = enroll.poll_account(str(d.get("rid", "")), viewer)
+        if r.get("status") == "approved":
+            from emustart import accounts
+            r["token"] = accounts.token(_secret(), r["account"])     # dostęp tego urządzenia do konta
+        return _json(handler, r)
     if op == "logout":                      # urządzenie wylogowuje się samo (unieważnienie)
         from emustart import devices
         return _json(handler, {"ok": bool(viewer) and devices.revoke(viewer)})
@@ -696,7 +710,7 @@ def _profiles_put(handler, op: str) -> None:
         log.info("nowe konto %s (z hasłem)", name)
         return _json(handler, {"ok": True, "name": name, "token": accounts.token(_secret(), name)})
     if not existing:
-        return _json(handler, {"error": f"Nie ma konta „{wanted}”."}, 404)
+        return _json(handler, {"error": f"Nie ma konta „{wanted}”.", "missing": True}, 404)
     if op == "login":
         ok, why, wait = accounts.verify(existing, pw, ip)
         if why == "brak":

@@ -114,7 +114,13 @@ class Bridge(private val act: MainActivity) {
         "app_update_apply" -> { act.runOnUiThread { installer.next() }; JSONObject().put("ok", true).put("android", true) }
         "save_manager" -> saveManager(a.getInt(0))
         "save_copy" -> saveCopy(a.getInt(0), a.getString(1), a.getString(2), a.getString(3))
-        "look_save" -> { prefs.look = a.getJSONObject(0); JSONObject().put("ok", true) }
+        "look_save" -> {
+            prefs.look = a.getJSONObject(0); prefs.lookTime = System.currentTimeMillis()
+            pool.execute { pushLook() }             // wygląd na koncie — inne telefony tego konta też
+            JSONObject().put("ok", true)
+        }
+        "account_request" -> accountRequest(a.getString(0), a.getString(1))
+        "account_requests_poll" -> accountRequestsPoll()
         "quit" -> { act.runOnUiThread { act.finishAndRemoveTask() }; null }
         "copy_status" -> JSONArray()
         "post_status" -> saves.busy
@@ -255,6 +261,78 @@ class Bridge(private val act: MainActivity) {
         } catch (e: Exception) { Log.w(tag, "wybór emulatorów z serwera: $e") }
     }
 
+    // ── wygląd na koncie (<profil>/settings/android/look.json) — telefony konta mają ten sam ──
+    private fun lookRel(): String? = prefs.profile.takeIf { it.isNotEmpty() }?.let { "$it/settings/android/look.json" }
+
+    private fun pushLook() {
+        val rel = lookRel() ?: return
+        try {
+            server.nasPut(rel, JSONObject().put("look", prefs.look).put("t", prefs.lookTime).toString(1).toByteArray(),
+                          System.currentTimeMillis() / 1000.0)
+        } catch (e: Exception) { Log.w(tag, "wygląd na serwer: $e") }
+    }
+
+    private fun pullLook() {
+        val rel = lookRel() ?: return
+        try {
+            val o = server.nasRead(rel)?.let { JSONObject(String(it)) }
+            val t = o?.optLong("t") ?: 0L
+            when {
+                o != null && t > prefs.lookTime -> {
+                    prefs.look = o.optJSONObject("look") ?: JSONObject(); prefs.lookTime = t
+                    Log.i(tag, "wygląd z konta zastosowany")
+                }
+                prefs.lookTime > t -> pushLook()
+            }
+        } catch (e: Exception) { Log.w(tag, "wygląd z serwera: $e") }
+    }
+
+    // ── nowe konto z tego telefonu (Inny użytkownik → nazwa, której nie ma) — zatwierdza administrator ──
+    private fun accountRequest(name: String, password: String): JSONObject {
+        val r = try { server.postAuthed("/v1/enroll/account", JSONObject().put("account", name).put("password", password)) }
+            catch (e: Exception) { return JSONObject().put("ok", false).put("reason", explain(e)) }
+        if (!r.optBoolean("ok")) return JSONObject().put("ok", false)
+            .put("reason", r.optString("reason", r.optString("error", "Serwer nie przyjął prośby."))).put("exists", r.optBoolean("exists"))
+        val acc = r.optString("account", name)
+        if (r.optString("status") == "approved") {
+            prefs.setToken(acc, r.optString("token"))
+            try { loadProfiles() } catch (e: Exception) { }
+            return JSONObject().put("ok", true).put("status", "approved")
+                .put("profile", JSONObject().put("id", profList.indexOf(acc) + 1).put("name", acc))
+        }
+        val pend = try { JSONArray(prefs.accountRequests) } catch (e: Exception) { JSONArray() }
+        val keep = JSONArray()
+        for (i in 0 until pend.length()) pend.optJSONObject(i)?.takeIf { it.optString("account") != acc }?.let { keep.put(it) }
+        keep.put(JSONObject().put("rid", r.optString("rid")).put("account", acc).put("code", r.optString("pretty")))
+        prefs.accountRequests = keep.toString()
+        return JSONObject().put("ok", true).put("status", "pending").put("account", acc).put("code", r.optString("pretty"))
+    }
+
+    private fun accountRequestsPoll(): JSONObject {
+        val done = JSONArray()
+        val pend = try { JSONArray(prefs.accountRequests) } catch (e: Exception) { JSONArray() }
+        if (pend.length() == 0 || !prefs.configured) return JSONObject().put("ok", true).put("done", done)
+        val keep = JSONArray()
+        for (i in 0 until pend.length()) {
+            val p = pend.optJSONObject(i) ?: continue
+            val r = try { server.postAuthed("/v1/enroll/account_poll", JSONObject().put("rid", p.optString("rid"))) }
+                catch (e: Exception) { JSONObject() }
+            when (if (r.optBoolean("ok")) r.optString("status") else "error") {
+                "approved" -> if (r.optString("token").isNotEmpty()) {
+                    prefs.setToken(r.optString("account", p.optString("account")), r.optString("token"))
+                    done.put(JSONObject().put("account", p.optString("account")).put("status", "approved"))
+                } else keep.put(p)
+                "denied", "expired" -> done.put(JSONObject().put("account", p.optString("account")).put("status", r.optString("status")))
+                else -> keep.put(p)
+            }
+        }
+        if (keep.length() != pend.length()) {
+            prefs.accountRequests = keep.toString()
+            try { loadProfiles() } catch (e: Exception) { }
+        }
+        return JSONObject().put("ok", true).put("done", done)
+    }
+
     /** Opis platformy do karuzeli (producent, lata, nośnik, opis) — z serwera, jak na komputerze. */
     private fun systemInfo(es: String): JSONObject {
         synchronized(sysInfo) { sysInfo[es]?.let { return it } }
@@ -282,6 +360,7 @@ class Bridge(private val act: MainActivity) {
         pool.execute {
             try { server.info() } catch (e: Exception) { learnedAt = 0L; Log.w(tag, "adresy serwera: $e") }
             pullEmuChoices()
+            pullLook()
         }
     }
 
@@ -940,12 +1019,20 @@ class Bridge(private val act: MainActivity) {
     private fun selectProfile(id: Int): JSONObject {
         val n = profList.getOrNull(id - 1) ?: return JSONObject().put("ok", false)
         pinBlock(n)?.let { return it }
+        val changed = n != prefs.profile
         prefs.profile = n
         if (prefs.phoneOwner.isEmpty()) prefs.phoneOwner = n
-        return JSONObject().put("ok", true)
+        if (changed) {
+            // wygląd innego użytkownika — z jego konta (bez nadpisywania go wyglądem poprzedniego)
+            prefs.lookTime = 0L
+            try { pullLook() } catch (e: Exception) { Log.w(tag, "wygląd profilu: $e") }
+        }
+        return JSONObject().put("ok", true).put("look", prefs.look)
     }
 
     private fun opResult(n: String, r: JSONObject): JSONObject {
+        if (r.optBoolean("missing")) return JSONObject().put("ok", false).put("missing", true).put("name", n)
+            .put("reason", "Nie ma konta „$n”.")
         if (!r.optBoolean("ok")) return JSONObject().put("ok", false)
             .put("reason", r.optString("error", "Nie udało się.")).put("exists", if (r.optBoolean("exists")) r.optString("name", n) else "")
         if (r.optBoolean("needs_password")) return JSONObject().put("ok", false).put("need", "set_password")

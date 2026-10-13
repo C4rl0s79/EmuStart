@@ -17,6 +17,25 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   RetroArchu na Androidzie; ocena „wyświetlania nad innymi aplikacjami” i usługi ułatwień
   dostępu dla pozostałych emulatorów na Androidzie.
 
+## [0.44.0] — 2026-10-13
+
+### Dodane
+- **Nowe konto z zalogowanego urządzenia** (PC, Android, serwer, panel): *Inny użytkownik* →
+  nazwa, której nie ma na serwerze → **Utwórz konto** → hasło (dwa razy, z wymaganiami).
+  Urządzenie jest zalogowane kluczem, więc serwer wie, kto prosi; konto powstaje dopiero po
+  zatwierdzeniu przez administratora (okienko na jego urządzeniu albo panel — z kontem
+  i urządzeniem, które prosi). Po zatwierdzeniu konto samo pojawia się na liście profili
+  tego urządzenia (bez ponownego hasła); urządzenie administratora zakłada konto od razu.
+  Najwyżej 3 oczekujące prośby z jednego urządzenia.
+- **Wygląd na telefonie wspólny dla telefonów konta** (jak wybór emulatorów): zapisywany na
+  koncie (`settings/android/look.json`), nowszy wygrywa; przy przełączeniu na innego
+  użytkownika — jego wygląd.
+
+### Poprawione
+- **PC na urządzeniu konta pokazywał stare lokalne profile** sprzed kont (z kłódką), których
+  serwer nie podaje. Lista profili = konto urządzenia i konta zalogowane tu hasłem — tak jak
+  na telefonie; lokalne wpisy zostają w bazie.
+
 ## [0.43.2] — 2026-10-13
 
 ### Poprawione

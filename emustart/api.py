@@ -1160,7 +1160,7 @@ class Api:
     def profiles_list(self) -> dict:
         profiles.import_from_nas(self._cfg)
         profiles.align_account_name(self._cfg)
-        lst = profiles.all_profiles()
+        lst = profiles.visible(self._cfg, profiles.all_profiles())
         for p in lst:
             p["nas_wanted"] = profiles.nas_wanted(p)
             p["pin"] = profiles.pin_state(self._cfg, p["id"])
@@ -1198,7 +1198,45 @@ class Api:
 
     def profile_join(self, name: str, password: str) -> dict:
         prof, why = profiles.account_join(self._cfg, str(name), str(password))
+        if why == profiles.MISSING:
+            return {"ok": False, "missing": True, "name": str(name).strip(),
+                    "reason": f"Nie ma konta „{str(name).strip()}”."}
         return {"ok": bool(prof), "reason": why, "profile": prof and self._public_profile(prof)}
+
+    # nowe konto z tego (zalogowanego) urządzenia — zatwierdza administrator (emustart/enroll.py)
+    def account_request(self, name: str, password: str) -> dict:
+        r = netsrc.authed_post(self._cfg, "/v1/enroll/account", {"account": str(name), "password": str(password)})
+        if not r.get("ok"):
+            return {"ok": False, "reason": r.get("reason") or r.get("error") or "Serwer nie przyjął prośby.",
+                    "exists": bool(r.get("exists"))}
+        if r.get("status") == "approved":
+            prof = profiles.account_profile(r["account"], r.get("token", ""))
+            return {"ok": True, "status": "approved", "profile": self._public_profile(prof)}
+        pend = [p for p in self._cfg.get("account_requests") or [] if p.get("account") != r["account"]]
+        self._cfg["account_requests"] = pend + [{"rid": r["rid"], "account": r["account"], "code": r.get("pretty", "")}]
+        config.save(self._cfg)
+        return {"ok": True, "status": "pending", "account": r["account"], "code": r.get("pretty", "")}
+
+    def account_requests_poll(self) -> dict:
+        """Prośby o nowe konto z tego urządzenia — zatwierdzone: konto na liście profili."""
+        pend = self._cfg.get("account_requests") or []
+        if not pend or not self._cfg.get("server_key"):
+            return {"ok": True, "done": []}
+        done, keep = [], []
+        for p in pend:
+            r = netsrc.authed_post(self._cfg, "/v1/enroll/account_poll", {"rid": p["rid"]})
+            st = r.get("status") if r.get("ok") else "error"
+            if st == "approved" and r.get("token"):
+                profiles.account_profile(r["account"], r["token"])
+                done.append({"account": p["account"], "status": "approved"})
+            elif st in ("denied", "expired"):
+                done.append({"account": p["account"], "status": st})
+            else:
+                keep.append(p)
+        if keep != pend:
+            self._cfg["account_requests"] = keep
+            config.save(self._cfg)
+        return {"ok": True, "done": done}
 
     # PIN — tylko to urządzenie
     def profile_unlock(self, pid: int, pin: str) -> dict:

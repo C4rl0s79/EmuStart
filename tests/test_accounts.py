@@ -257,3 +257,57 @@ def test_panel_lists_accounts_and_resets_password(env, monkeypatch):
     assert srvadmin.account_password(None, {"name": "jezus", "password": PW})["ok"]
     assert accounts.verify("Jezus", PW)[0]
     assert not srvadmin.account_password(None, {"name": "Nikt", "password": PW})["ok"]
+
+
+def test_logged_device_asks_for_new_account_admin_approves(monkeypatch):
+    """Inny użytkownik → nazwa, której nie ma: prośba z zalogowanego urządzenia; konto powstaje
+    po zatwierdzeniu przez administratora, a to urządzenie dostaje do niego dostęp."""
+    import keyhelp
+    from emustart import enroll, srvadmin
+    from test_three_devices import _req
+    srv = _keyed_server(monkeypatch)
+    _write(srv[2] / "Jezus" / "emustart.json", b"{}")
+    _p, phone = keyhelp.device("Jezus", name="Telefon")            # zwykłe konto
+    _a, admin = keyhelp.device("Admin", admin=True, name="PC admina")
+    st, r = _req(srv, "POST", "/v1/enroll/account", phone, body={"account": "Ola", "password": PW})
+    assert st == 200 and r["status"] == "pending" and "token" not in r
+    assert not accounts.has_password("Ola")                         # przed zatwierdzeniem — nic
+    # istniejące konto, słabe hasło, bez tokenu — odmowa
+    assert _req(srv, "POST", "/v1/enroll/account", phone, body={"account": "jezus", "password": PW})[1]["exists"]
+    assert not _req(srv, "POST", "/v1/enroll/account", phone, body={"account": "Ewa", "password": "slabe"})[1]["ok"]
+    assert _req(srv, "POST", "/v1/enroll/account", "", body={"account": "Ewa", "password": PW})[0] == 401
+    # prośbę widzi administrator (nie telefon zwykłego konta); poll — tylko urządzenie, które prosiło
+    assert _req(srv, "POST", "/v1/enroll/pending", phone, body={})[1]["requests"] == []
+    q = _req(srv, "POST", "/v1/enroll/pending", admin, body={})[1]["requests"][0]
+    assert q["account"] == "Ola" and q["from_account"] == "Jezus" and q["mode"] == "new"
+    assert _req(srv, "POST", "/v1/enroll/account_poll", admin, body={"rid": r["rid"]})[1]["status"] == "expired"
+    assert srvadmin.enroll_decide(None, {"id": q["id"], "allow": True})["ok"]
+    got = _req(srv, "POST", "/v1/enroll/account_poll", phone, body={"rid": r["rid"]})[1]
+    assert got["status"] == "approved" and got["token"]
+    assert accounts.verify("Ola", PW)[0] and (srv[2] / "Ola" / "emustart.json").is_file()
+    st, _f = _req(srv, "GET", "/v1/nas/file?p=Ola/emustart.json", phone, headers={"X-Profile-Token": got["token"]})
+    assert st == 200
+    assert len(enroll.pending("")) == 0                              # bez nowego urządzenia w rejestrze
+    # urządzenie administratora zakłada konto od razu
+    st, r2 = _req(srv, "POST", "/v1/enroll/account", admin, body={"account": "Ewa", "password": PW})
+    assert r2["status"] == "approved" and r2["token"] and accounts.has_password("Ewa")
+
+
+def test_account_device_lists_exactly_what_the_server_gives(penv):
+    """PC zalogowany kontem: lista profili = konto + konta zalogowane hasłem (jak telefon);
+    stare lokalne profile zostają w bazie, ale nie na liście."""
+    cfg, tmp, mode = penv
+    if mode == "nas":
+        pytest.skip("konta są na serwerze")
+    from emustart import library
+    profiles.all_profiles()                                          # migracja kolumn jak w programie
+    with library.db() as c:
+        c.execute("INSERT INTO profiles(name, nas_name, color) VALUES('Ania', 'Ania', '')")
+        c.execute("INSERT INTO profiles(name, nas_name, color) VALUES('Jezus', 'Jezus', '')")
+    acc = {**cfg, "server_key": "dev:abc", "server_account": "Jezus"}
+    names = [p["name"] for p in profiles.visible(acc, profiles.all_profiles())]
+    assert names == ["Jezus"]
+    prof = profiles.account_profile("Ola", "token-oli")              # inny użytkownik po haśle
+    assert [p["name"] for p in profiles.visible(acc, profiles.all_profiles())] == ["Jezus", "Ola"]
+    assert prof["name"] == "Ola"
+    assert len(profiles.visible(cfg, profiles.all_profiles())) == len(profiles.all_profiles())   # bez konta — wszystkie

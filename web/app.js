@@ -889,6 +889,15 @@ async function enrollResume() {
   if (p.status === "approved") { await refreshState(); toast(`Zatwierdzono — konto „${p.account}”.`, 6000); }
   else if (p.status === "denied") toast("Prośba o zalogowanie została odrzucona.", 6000);
 }
+/** Prośby o nowe konto z tego urządzenia (Inny użytkownik → nowa nazwa): wynik zatwierdzenia. */
+async function accountRequestsCheck() {
+  const r = await api().account_requests_poll().catch(() => null);
+  for (const d of r?.done || []) {
+    toast(d.status === "approved" ? `Zatwierdzono konto „${d.account}” — jest na liście profili.`
+      : d.status === "denied" ? `Administrator odrzucił konto „${d.account}”.` : `Prośba o konto „${d.account}” wygasła.`, 7000);
+    if (d.status === "approved" && S.screen === "profiles") openProfiles(PR.startup);
+  }
+}
 const enrollSeen = new Set();
 async function enrollCheck() {
   // prośby, które to urządzenie może zatwierdzić — przy otwarciu aplikacji i co minutę
@@ -908,7 +917,8 @@ async function enrollCheck() {
             ["Odrzuć", () => decide(false, false)], ["Później", () => {}]];
   S.menuIdx = 0; S.modal = "menu";
   $("menu").querySelector("h2").textContent =
-    `${q.mode === "new" ? "Nowe konto" : "Nowe urządzenie konta"} „${q.account}”: ${q.name} (${kind}) · ${q.ip} · ${when} · kod ${q.code}` +
+    `${q.mode === "new" ? "Nowe konto" : "Nowe urządzenie konta"} „${q.account}”: ${q.name} (${kind}` +
+    `${q.from_account ? `, konto ${q.from_account}` : ""}) · ${q.ip} · ${when} · kod ${q.code}` +
     ((q.replaces || []).length ? ` · zastąpi wcześniejszą rejestrację tego sprzętu (${q.replaces.join(", ")})` : "");
   $("menu").classList.remove("hidden");
   renderMenu();
@@ -1450,6 +1460,8 @@ window.addEventListener("pywebviewready", async () => {
   enrollResume();
   setTimeout(enrollCheck, 4000);
   setInterval(() => { if (!S.modal) enrollCheck(); }, 60000);
+  accountRequestsCheck();
+  setInterval(accountRequestsCheck, 30000);
   // profil zablokowany na tym urządzeniu (PIN zmieniony gdzie indziej / wylogowany)
   api().profile_pin_check().then((pc) => {
     if (pc && pc.state && pc.state !== "ok" && S.screen === "systems") {
