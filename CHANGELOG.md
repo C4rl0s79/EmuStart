@@ -17,6 +17,15 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   RetroArchu na Androidzie; ocena „wyświetlania nad innymi aplikacjami” i usługi ułatwień
   dostępu dla pozostałych emulatorów na Androidzie.
 
+## [0.43.2] — 2026-10-13
+
+### Poprawione
+- **PC po zalogowaniu kontem pokazywał profil pod starą nazwą** (np. „Gracz” zamiast
+  „Jezus”): lokalna nazwa profilu sprzed kont została, choć folder profilu na serwerze był
+  już przemianowany — wyglądało, jakby konta nie było na liście. Teraz profil konta nosi
+  nazwę konta (przy zalogowaniu, przy starcie i na liście „Kto gra?”); inny lokalny profil
+  o tej nazwie dostaje dopisek „(lokalny)”. Android bierze nazwy z serwera — bez zmian.
+
 ## [0.43.1] — 2026-10-13
 
 Pierwsze wydanie zmian 0.43.0 (jego budowa przerwała się na błędzie opisanym niżej). Zawiera

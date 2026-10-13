@@ -362,6 +362,12 @@ class Api:
     # ── stan ogólny ──
     def get_state(self) -> dict:
         cfg = self._cfg
+        if not getattr(self, "_account_aligned", False):     # raz na uruchomienie (pasek u góry)
+            self._account_aligned = True
+            try:
+                profiles.align_account_name(cfg)
+            except Exception:
+                log.exception("nazwa profilu konta")
         rom_ok = any(Path(r).is_dir() for r in config.rom_roots(cfg))
         return {
             "version": __version__,
@@ -1153,6 +1159,7 @@ class Api:
     # ── profile ──
     def profiles_list(self) -> dict:
         profiles.import_from_nas(self._cfg)
+        profiles.align_account_name(self._cfg)
         lst = profiles.all_profiles()
         for p in lst:
             p["nas_wanted"] = profiles.nas_wanted(p)
@@ -1531,6 +1538,7 @@ class Api:
         profilu „Gracz” z pierwszego uruchomienia (usuwany, jeśli nigdy nie był używany)."""
         try:
             profiles.import_from_nas(self._cfg)
+            profiles.align_account_name(self._cfg)
             mine = next((p for p in profiles.all_profiles()
                          if (p.get("nas_name") or p["name"]).lower() == account.lower()), None)
             if not mine:
