@@ -6,10 +6,13 @@ trzyma rozpakowane:
 
     <magazyn>\\<pozycja>\\<wersja>\\…pliki programu…
     <magazyn>\\<pozycja>\\<wersja>\\.manifest.json   {rel: [rozmiar, sha256]}
+    <magazyn>\\<pozycja>\\<wersja>\\.archive.zip     cała wersja w jednym ZIP-ie (do pobrania)
     <magazyn>\\index.json                            wersje, daty, błędy
 
-Komputery porównują swoje pliki z manifestem i pobierają tylko brakujące albo zmienione
-(emustart/installer.py, /v1/emulators). Zostaje bieżąca i poprzednia wersja pozycji.
+Komputery porównują swoje pliki z manifestem; gdy czegoś brakuje albo się różni, pobierają
+archiwum wersji jednym strumieniem (wznawianym) i rozpakowują u siebie tylko te pliki —
+przesyłanie tysięcy małych plików było wolne (emustart/installer.py, /v1/emulators).
+Zostaje bieżąca i poprzednia wersja pozycji.
 """
 
 from __future__ import annotations
@@ -32,6 +35,7 @@ from emustart import emucatalog, library, paths
 log = logging.getLogger("emustart.emustore")
 
 MANIFEST = ".manifest.json"
+ARCHIVE = ".archive.zip"
 DAY = 24 * 3600
 _lock = threading.Lock()
 _job: dict = {"running": False, "item": "", "step": 0, "steps": 0, "done": 0, "total": 0,
@@ -101,6 +105,42 @@ def file_path(cfg: dict, item: str, version: str, rel: str) -> Path | None:
     return version_dir(cfg, item, version) / rel
 
 
+def archive_path(cfg: dict, item: str, version: str) -> Path | None:
+    p = version_dir(cfg, item, version) / ARCHIVE
+    return p if p.is_file() and manifest(cfg, item, version) else None
+
+
+def _make_archive(vdir: Path, files: dict) -> int:
+    """ZIP wersji (kompresja — mniej do przesłania); budowany raz, przy pobraniu wersji."""
+    tmp = vdir / (ARCHIVE + ".tmp")
+    with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED, compresslevel=6, allowZip64=True) as z:
+        for rel in sorted(files):
+            z.write(vdir / rel, rel)
+    os.replace(tmp, vdir / ARCHIVE)
+    return (vdir / ARCHIVE).stat().st_size
+
+
+def ensure_archives(cfg: dict) -> None:
+    """Wersje pobrane, zanim serwer robił archiwa — dorobienie archiwum."""
+    idx = load_index(cfg)
+    changed = False
+    for item, meta in idx["items"].items():
+        if not emucatalog.valid_item(item) or archive_path(cfg, item, meta.get("version", "")):
+            continue
+        m = manifest(cfg, item, meta.get("version", ""))
+        if not m:
+            continue
+        try:
+            _job["item"] = emucatalog.item_info(item)["label"] + " — archiwum"
+            meta["archive_size"] = _make_archive(version_dir(cfg, item, meta["version"]), m["files"])
+            changed = True
+            log.info("emulatory: archiwum %s %s", item, meta["version"])
+        except OSError as ex:
+            log.warning("emulatory: archiwum %s: %s", item, ex)
+    if changed:
+        _save_index(cfg, idx)
+
+
 def public_index(cfg: dict) -> dict:
     """Dla urządzeń (/v1/emulators): bieżące wersje i co potrzebuje który system."""
     idx = load_index(cfg)
@@ -110,7 +150,10 @@ def public_index(cfg: dict) -> dict:
         if not emucatalog.valid_item(item):
             continue
         info = emucatalog.item_info(item)
+        if not archive_path(cfg, item, meta["version"]):
+            continue                         # archiwum jeszcze się robi — komputery poczekają
         items[item] = {"version": meta["version"], "size": meta.get("size", 0), "files": meta.get("files", 0),
+                       "archive_size": meta.get("archive_size", 0),
                        "label": info["label"], "kind": info["kind"], "dir": info["dir"],
                        "portable": info["portable"], "keep": info["keep"]}
     systems_ = {}
@@ -177,10 +220,11 @@ def _build(cfg: dict, item: str, rel: dict, progress=None) -> dict:
             files[p.relative_to(part).as_posix()] = [p.stat().st_size, _sha256(p)]
     (part / MANIFEST).write_text(json.dumps({"item": item, "version": rel["version"], "files": files}),
                                  encoding="utf-8")
+    archive_size = _make_archive(part, files)
     shutil.rmtree(final, ignore_errors=True)
     os.replace(part, final)
     return {"version": rel["version"], "updated": time.time(), "files": len(files),
-            "size": sum(v[0] for v in files.values()), "source": rel["url"]}
+            "size": sum(v[0] for v in files.values()), "archive_size": archive_size, "source": rel["url"]}
 
 
 def _prune(cfg: dict, item: str, keep: list) -> None:
@@ -201,6 +245,7 @@ def update(cfg: dict, items: list | None = None, force: bool = False) -> dict:
         want = sorted(items if items is not None else needed(cfg))
         _job.update(running=True, step=0, steps=len(want), item="", done=0, total=0, log=[],
                     started=time.time(), finished=0.0)
+        ensure_archives(cfg)
         idx = load_index(cfg)
         updated, errors = [], {}
         for item in want:
@@ -263,6 +308,11 @@ def scheduler(get_cfg) -> None:
     """Wątek serwera: raz dziennie sprawdza nowe wersje (pierwszy raz kilka minut po starcie,
     gdy magazyn jeszcze nic nie sprawdzał)."""
     def loop():
+        try:
+            with _lock:
+                ensure_archives(get_cfg())
+        except Exception:
+            log.exception("emulatory: archiwa")
         time.sleep(300)
         while True:
             try:

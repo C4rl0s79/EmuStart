@@ -160,9 +160,6 @@ class _Handler(BaseHTTPRequestHandler):
                  "/v1/enroll/account", "/v1/enroll/account_poll"):
             from emustart import remote      # zalogowanie urządzenia, logowanie podpisem
             return remote.enroll_flow(self, p.rsplit("/", 1)[1])
-        if p == "/v1/emulators/pack":
-            from emustart import remote      # pliki emulatora z magazynu serwera (emustart/emustore.py)
-            return remote.emulators_pack(self)
         if p.startswith("/v1/"):
             return refuse(self, 404)
         # API tylko dla naszego UI: właściwy Host i własny nagłówek (zwykła strona

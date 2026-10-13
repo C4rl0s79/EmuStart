@@ -104,6 +104,9 @@ postępu), **Restart serwera**, **Folder logów**.
 - **Gra — grafiki i opis**: wyszukanie gry, okładka, zrzut i logo gry (propozycje
   z libretro, LaunchBox, SteamGridDB, IGDB, TheGamesDB, szukanie pod inną nazwą, usunięcie),
   opis i dane gry z ręczną poprawką, przywróceniem danych pobranych i pobraniem z sieci.
+- **Klucze z pliku**: `art_keys.json` w folderze `server` serwera (`{"sgdb_key": "…",
+  "igdb_client_id": "…", "igdb_client_secret": "…", "tgdb_key": "…"}`) — przy starcie serwer
+  zapisuje je zaszyfrowane i usuwa plik.
 - **Źródła**: baza LaunchBox, klucze SteamGridDB / IGDB / TheGamesDB (zaszyfrowane
   na serwerze).
 
@@ -127,7 +130,9 @@ emulatora i rdzenia systemu (Konfiguracja → Systemy). Serwer sprawdza nowe wyd
 **Sprawdź i pobierz teraz** — od razu, **Pobierz ponownie** — jeden emulator jeszcze raz.
 Tabela: systemy, wersja na serwerze (i poprzednia — zostaje na wszelki wypadek), rozmiar,
 ostatni błąd pobierania. Komputery doinstalowują i aktualizują emulatory same
-(zob. [[Emulatory]]). Wersja to pliki z sumami SHA-256 — komputer pobiera tylko zmienione.
+(zob. [[Emulatory]]). Wersja to pliki z sumami SHA-256 i jedno archiwum ZIP: komputer pobiera
+archiwum jednym strumieniem (przerwane pobieranie wznawia się) i rozpakowuje u siebie tylko
+brakujące albo zmienione pliki.
 
 **Wymagane ustawienia emulatorów** (ta sama zakładka): wartości, które komputery nakładają tuż
 przed każdą grą — wygrywają z ustawieniami profilu. RetroArch: `klucz = wartość` (jak
@@ -215,7 +220,7 @@ Każde zapytanie z tokenem sesji (`Authorization: Bearer <token>`), połączenie
 | `GET /v1/bios?core=`, `/v1/bios?name=` | BIOS-y rdzenia |
 | `GET /v1/emulators` | emulatory w magazynie serwera (wersje) i które potrzebuje dany system |
 | `GET /v1/emulators/manifest?item=&version=` | pliki wersji z rozmiarem i SHA-256 |
-| `POST /v1/emulators/pack` | `{item, version, files}` — wybrane pliki wersji w jednym ZIP-ie |
+| `GET /v1/emulators/archive?item=&version=` | cała wersja w jednym ZIP-ie (`Range` — wznawianie) |
 | `GET /media/…` | grafiki |
 | `GET/PUT/DELETE /v1/nas/…` | folder profilu konta (zapisy, ustawienia) |
 | `GET/PUT/DELETE /v1/admin/…` | administrator: grafiki i opis gry, logo i nazwa systemu |

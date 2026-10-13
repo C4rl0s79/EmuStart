@@ -109,6 +109,7 @@ def _server_mode() -> None:
     emustore.scheduler(lambda: api._cfg)      # nowe wersje emulatorów raz dziennie
     from emustart import srvadmin
     srvadmin.ENABLED = True
+    srvadmin.import_keys_file(api)          # server\art_keys.json — klucze źródeł grafik (plik usuwany)
     # po restarcie z panelu poprzedni proces zwalnia port po chwili — czekamy na niego
     end = time.monotonic() + (30 if "--restarted" in sys.argv else 0)
     while True:

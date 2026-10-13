@@ -153,24 +153,42 @@ def test_client_never_downloads_emulators_from_internet():
     assert not hasattr(installer, "STANDALONE") and not hasattr(installer, "CORES")
 
 
-def test_pack_refuses_files_outside_manifest(emu_server):
+def test_archive_download_resumes_and_needs_key(emu_server, tmp_path):
+    """Wersja jako jedno archiwum (zamiast tysięcy małych plików): pobieranie wznawia się
+    od przerwanego miejsca; bez klucza serwer nic nie wyda."""
     import http.client
-    import json
     emustore.update(emu_server)
-    host, port, _k = netsrc.endpoint({})
-    c = http.client.HTTPConnection(host, port, timeout=10)
-    c.request("POST", "/v1/emulators/pack", body=json.dumps(
-        {"item": "duckstation", "version": "v1", "files": ["../../index.json", "settings.ini"]}).encode(),
-        headers={"Authorization": "Bearer tok", "Content-Type": "application/json"})
-    r = c.getresponse()
-    data = r.read()
-    assert r.status == 200
-    with zipfile.ZipFile(io.BytesIO(data)) as z:
-        assert z.namelist() == ["settings.ini"]
-    c = http.client.HTTPConnection(host, port, timeout=10)
-    c.request("POST", "/v1/emulators/pack", body=b'{"item": "duckstation", "version": "v1", "files": "*"}',
-              headers={"Content-Type": "application/json"})
-    assert c.getresponse().status == 401                                         # bez klucza — nic
+    arch = emustore.archive_path(emu_server, "duckstation", "v1")
+    with zipfile.ZipFile(arch) as z:                                 # bez plików magazynu
+        assert sorted(z.namelist()) == ["duckstation-qt-x64-ReleaseLTCG.exe", "resources/a.txt", "settings.ini"]
+    data = arch.read_bytes()
+    ep = netsrc.endpoint({})
+    dest = tmp_path / "ds.zip"
+    (tmp_path / "ds.zip.part").write_bytes(data[:10])                # przerwane wcześniej
+    installer.refresh_index({})
+    installer._fetch_archive(ep, "duckstation", "v1", dest, None, None)
+    assert dest.read_bytes() == data and not (tmp_path / "ds.zip.part").exists()
+    c = http.client.HTTPConnection(ep[0], ep[1], timeout=10)
+    c.request("GET", "/v1/emulators/archive?item=duckstation&version=v1")
+    assert c.getresponse().status == 401
+    c = http.client.HTTPConnection(ep[0], ep[1], timeout=10)
+    c.request("GET", "/v1/emulators/archive?item=duckstation&version=..%2F..", headers={"Authorization": "Bearer tok"})
+    assert c.getresponse().status == 404
+
+
+def test_two_jobs_at_once_do_not_collide(emu_server, tmp_path):
+    """Okno „Pobierz brakujące emulatory” i wyrównanie w tle naraz — jedno po drugim, bez
+    WinError 32 i fałszywego „emulator działa”."""
+    emustore.update(emu_server)
+    cfg = {"emu_root": str(tmp_path / "emu"), "systems": {}}
+    installer.refresh_index(cfg)
+    jobs = [installer.Job(cfg, installer.sync_items(cfg, ["psx", "lynx", "amiga"])) for _ in range(2)]
+    for j in jobs:
+        j.start()
+    for j in jobs:
+        j.thread.join(30)
+    assert all(j.status()["errors"] == [] for j in jobs), [j.status() for j in jobs]
+    assert (tmp_path / "emu" / "DuckStation" / "duckstation-qt-x64-ReleaseLTCG.exe").read_bytes() == b"EXE1"
 
 
 def test_required_settings_from_server_applied_before_game(emu_server, tmp_path):

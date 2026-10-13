@@ -188,7 +188,7 @@ def describe(steps: list) -> list:
     out = []
     for s in steps:
         m = _meta(s["key"])
-        d = dict(s, size=m.get("size", 0), version=m.get("version", ""))
+        d = dict(s, size=m.get("archive_size") or m.get("size", 0), version=m.get("version", ""))
         if not m:
             d["error"] = "serwer nie ma tego emulatora (jeszcze go nie pobrał?)"
         out.append(d)
@@ -227,19 +227,31 @@ def _get_json(ep, path: str) -> dict:
     return json.loads(body)
 
 
-def _fetch_pack(ep, item: str, version: str, files: list, dest: Path, progress, cancel) -> None:
+def _fetch_archive(ep, item: str, version: str, dest: Path, progress, cancel) -> None:
+    """Archiwum wersji z serwera jednym strumieniem; przerwane pobieranie wznawia się (Range)
+    od miejsca, w którym stanęło (plik .part)."""
     host, port, key = ep
-    body = json.dumps({"item": item, "version": version, "files": files}).encode("utf-8")
+    part = dest.with_name(dest.name + ".part")
+    have = part.stat().st_size if part.is_file() else 0
+    path = "/v1/emulators/archive?" + urllib.parse.urlencode({"item": item, "version": version})
     c = netsrc.conn(host, port, 120)
     try:
-        c.request("POST", "/v1/emulators/pack", body=body,
-                  headers={**netsrc.auth_headers(key), "Content-Type": "application/json"})
+        hdrs = netsrc.auth_headers(key)
+        if have:
+            hdrs["Range"] = f"bytes={have}-"
+        c.request("GET", path, headers=hdrs)
         r = c.getresponse()
-        if r.status != 200:
-            raise OSError(f"serwer: pliki emulatora {r.status}")
-        total = int(r.headers.get("X-Total-Size") or 0)
-        done = 0
-        with open(dest, "wb") as f:
+        if r.status == 416:                  # .part już pełny
+            r.read()
+            os.replace(part, dest)
+            return
+        if r.status not in (200, 206):
+            raise OSError(f"serwer: archiwum emulatora {r.status}")
+        if r.status == 200:
+            have = 0                         # serwer wysyła od początku
+        total = have + int(r.headers.get("Content-Length") or 0)
+        done = have
+        with open(part, "ab" if have else "wb") as f:
             while True:
                 if cancel and cancel.is_set():
                     raise InterruptedError("anulowano")
@@ -249,21 +261,36 @@ def _fetch_pack(ep, item: str, version: str, files: list, dest: Path, progress, 
                 f.write(buf)
                 done += len(buf)
                 if progress:
-                    progress(min(done, total), total)
+                    progress(done, total)
+        if done != total:
+            raise OSError("serwer przerwał pobieranie — wznowi się przy następnej próbie")
+        os.replace(part, dest)
     except http.client.HTTPException as ex:
         raise OSError(f"serwer: {ex}") from ex
     finally:
         c.close()
 
 
+# jedna instalacja naraz: okno „Pobierz emulatory” i wyrównanie w tle pisały do tych samych
+# plików (WinError 32, „emulator działa”, znikające pliki .emustart-new)
+_install_lock = threading.Lock()
+
+
 def install(cfg: dict, item: str, progress=None, cancel: threading.Event | None = None) -> bool:
     """Wyrównuje pozycję do wersji z serwera. True — coś się zmieniło. Busy — emulator działa."""
+    with _install_lock:
+        return _install(cfg, item, progress, cancel)
+
+
+def _install(cfg: dict, item: str, progress, cancel) -> bool:
     root = Path(cfg.get("emu_root") or "")
     if not str(root) or str(root) == ".":
         raise OSError("najpierw wybierz folder emulatorów (Ustawienia)")
     ver = _meta(item).get("version")
     if not ver:
         raise OSError("serwer nie ma tego emulatora")
+    if current(root, item):
+        return False                         # w międzyczasie zrobiło to inne zadanie
     ep = netsrc.endpoint(cfg)
     if not ep:
         raise OSError("brak połączenia z serwerem EmuStart")
@@ -286,15 +313,14 @@ def install(cfg: dict, item: str, progress=None, cancel: threading.Event | None 
         todo.append(rel)
     if any(_locked(p) for p in replace if p.suffix.lower() in (".exe", ".dll")):
         raise Busy(item)
-    changed = bool(todo)
     if todo:
         tmpdir = root / ".emustart-tmp"
         tmpdir.mkdir(parents=True, exist_ok=True)
-        pack = tmpdir / f"{item}.zip"
+        arch = tmpdir / f"{item}-{re.sub(r'[^0-9A-Za-z._@+-]', '_', ver)}.zip"
+        _fetch_archive(ep, item, ver, arch, progress, cancel)
         try:
-            _fetch_pack(ep, item, ver, todo, pack, progress, cancel)
-            with zipfile.ZipFile(pack) as z:
-                for rel in todo:
+            with zipfile.ZipFile(arch) as z:
+                for rel in todo:              # tylko brakujące i zmienione pliki
                     size, sha = man["files"][rel]
                     p = tgt / rel
                     p.parent.mkdir(parents=True, exist_ok=True)
@@ -312,16 +338,18 @@ def install(cfg: dict, item: str, progress=None, cancel: threading.Event | None 
                     except PermissionError as ex:
                         new.unlink(missing_ok=True)
                         raise Busy(item) from ex
-        finally:
-            pack.unlink(missing_ok=True)
+        except (zipfile.BadZipFile, KeyError) as ex:
+            arch.unlink(missing_ok=True)      # uszkodzone archiwum — następnym razem od nowa
+            raise OSError(f"uszkodzone archiwum emulatora: {ex}") from ex
+        arch.unlink(missing_ok=True)
     portable = emucatalog.item_info(item)["portable"]
     if portable and not (tgt / portable).exists():
         # tryb przenośny: ustawienia i save'y w folderze emulatora (profile podpinają je stamtąd)
         (tgt / portable).touch()
     _save_state(item, ver)
-    if changed:
-        log.info("emulatory: %s %s (%d plików z serwera)", item, ver, len(todo))
-    return changed
+    if todo:
+        log.info("emulatory: %s %s (%d plików z archiwum serwera)", item, ver, len(todo))
+    return bool(todo)
 
 
 def assign(cfg: dict, es: str) -> None:

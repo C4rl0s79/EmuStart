@@ -91,7 +91,8 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   libretro — jak skrypt emu_updater), zapisuje je z sumami SHA-256 i zostawia też poprzednią
   wersję. EmuStart na PC bierze emulatory **tylko z serwera**: po wybraniu folderu emulatorów,
   przy starcie i co 5 minut sam doinstalowuje brakujące i aktualizuje starsze (także zastane
-  w folderze, np. z RetroBata) — pobiera tylko zmienione pliki jednym ZIP-em, konfiguracji i
+  w folderze, np. z RetroBata) — pobiera archiwum wersji (skompresowane, robione raz na
+  serwerze) jednym wznawianym strumieniem i rozpakowuje tylko brakujące i zmienione pliki; konfiguracji i
   zapisów nie rusza, działającego emulatora nie podmienia (później). Pasek „⬇ emulatory”
   pokazuje postęp. Komputer nie pobiera już emulatorów z internetu.
 - **Wymagane ustawienia emulatorów z serwera** (panel → Emulatory): dla RetroArcha, DuckStation,
@@ -105,6 +106,8 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   pochodziła z plików na komputerze deweloperskim (paczka PyLinks, motywy RetroArcha), których
   serwer nie ma; własna paczka logo — nowe ustawienie w panelu (Konfiguracja → Foldery).
   Wybór logo przyjmuje tylko adresy z propozycji.
+- **Klucze źródeł grafik z pliku**: `art_keys.json` w folderze `server` serwera — przy starcie
+  serwer zapisuje je zaszyfrowane i usuwa plik.
 - **Klucze źródeł grafik z PyLinks na serwer**: EmuStart na komputerze administratora →
   Ustawienia → *Wyślij klucze źródeł grafik z PyLinks na serwer* (PyLinks szyfruje klucze
   kluczem tego komputera, więc serwer nie mógł ich odczytać sam).
@@ -168,6 +171,10 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   uruchamianie gier tylko z serwera, kilka urządzeń z jednym serwerem — bez SMB.
 
 ### Naprawione
+- Pobieranie emulatorów: okno „Pobierz brakujące emulatory” i wyrównanie w tle pisały naraz do
+  tych samych plików (WinError 32, „emulator działa”, znikające pliki) — teraz jedna
+  instalacja naraz. Zamiast składania ZIP-a z tysięcy plików przy każdym pobraniu serwer
+  trzyma gotowe archiwum wersji.
 - Okno wyboru logo: podgląd, który się nie wczytał, przebudowywał całą siatkę — przeglądarka
   pobierała wtedy od nowa wszystkie obrazki (powolne ładowanie, puste kafelki). Teraz znika
   tylko ten kafelek; podglądy z serwera zostają w pamięci okna na godzinę. Ciemne logo na

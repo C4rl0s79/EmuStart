@@ -561,6 +561,35 @@ def art_keys_set(api, args: dict) -> dict:
     return {"ok": True, "sources": art_sources.Sources(api._cfg).enabled()}
 
 
+KEYS_FILE = "art_keys.json"
+
+
+def import_keys_file(api) -> int:
+    """Przy starcie serwera: klucze źródeł grafik z pliku <serwer>/art_keys.json
+    ({"sgdb_key", "igdb_client_id", "igdb_client_secret", "tgdb_key"} jawnie) — zapisane
+    zaszyfrowane jak z panelu, plik usuwany. Zwraca liczbę kluczy."""
+    import json as _json
+    f = paths.SERVER / KEYS_FILE
+    if not f.is_file():
+        return 0
+    try:
+        data = _json.loads(f.read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError) as ex:
+        log.warning("klucze grafik z %s: %s", f, ex)
+        return 0
+    from emustart import art_sources
+    got = {k: str(data.get(k) or "").strip() for k in art_sources.KEY_NAMES} if isinstance(data, dict) else {}
+    got = {k: v for k, v in got.items() if v}
+    if got:
+        art_keys_set(api, got)
+    try:
+        f.unlink()                       # jawne klucze nie zostają na dysku
+    except OSError as ex:
+        log.warning("nie mogę usunąć %s: %s", f, ex)
+    log.info("klucze źródeł grafik z pliku %s: %s", KEYS_FILE, ", ".join(sorted(got)) or "brak")
+    return len(got)
+
+
 # ── konta: pliki i kopie zapasowe (emustart/acctbackup.py) ──
 def _acct(fn):
     def run(api, args: dict) -> dict:

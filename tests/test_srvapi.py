@@ -306,3 +306,22 @@ def test_admin_pc_sends_pylinks_keys_to_server(monkeypatch):
     assert r["ok"] and sent == {"m": "PUT", "p": "art_keys", "b": {"sgdb_key": "SG", "tgdb_key": "TG"}}
     monkeypatch.setattr(a, "_is_admin", lambda: False, raising=False)
     assert not a.art_keys_push()["ok"]
+
+
+def test_server_imports_art_keys_file_and_deletes_it(monkeypatch):
+    """server\art_keys.json (jawne klucze) — przy starcie zaszyfrowane w ustawieniach, plik znika."""
+    import json
+    from emustart import art_sources, paths, srvadmin
+    monkeypatch.setattr("emustart.config.save", lambda c: None)
+    paths.SERVER.mkdir(parents=True, exist_ok=True)
+    f = paths.SERVER / "art_keys.json"
+    f.write_text(json.dumps({"sgdb_key": "SG", "tgdb_key": "TG", "inne": "x"}), encoding="utf-8")
+
+    class A:
+        _cfg = {}
+    a = A()
+    assert srvadmin.import_keys_file(a) == 2
+    assert not f.exists()
+    assert "SG" not in json.dumps(a._cfg)                                      # zaszyfrowane
+    assert art_sources.keys(a._cfg)["sgdb_key"] == "SG"
+    assert srvadmin.import_keys_file(a) == 0

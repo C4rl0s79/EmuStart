@@ -937,7 +937,8 @@ def _bios_get(handler) -> None:
 
 def _emulators_get(handler, parts: list) -> None:
     """GET /v1/emulators — wersje emulatorów w magazynie serwera i co potrzebuje który system;
-    GET /v1/emulators/manifest?item=&version= — pliki wersji z rozmiarem i sumą SHA-256."""
+    GET /v1/emulators/manifest?item=&version= — pliki wersji z rozmiarem i sumą SHA-256;
+    GET /v1/emulators/archive?item=&version= — cała wersja w jednym ZIP-ie (Range: wznawianie)."""
     from emustart import emucatalog, emustore
     if not parts:
         return _json(handler, emustore.public_index(API._cfg))
@@ -947,59 +948,11 @@ def _emulators_get(handler, parts: list) -> None:
         m = emustore.manifest(API._cfg, item, version)
         if m:
             return _json(handler, m)
+    if parts == ["archive"] and emucatalog.valid_item(item):
+        p = emustore.archive_path(API._cfg, item, version)
+        if p:
+            return _send_path(handler, p)
     return _json(handler, {"error": "nie ma takiej wersji emulatora"}, 404)
-
-
-class _Sink:
-    """Zapis ZIP-a prosto do gniazda (bez długości z góry) — zipfile pisze sekwencyjnie."""
-
-    def __init__(self, w):
-        self.w, self.n = w, 0
-
-    def write(self, b) -> int:
-        self.w.write(b)
-        self.n += len(b)
-        return len(b)
-
-    def tell(self) -> int:
-        return self.n
-
-    def flush(self) -> None:
-        self.w.flush()
-
-
-def emulators_pack(handler) -> None:
-    """POST /v1/emulators/pack {item, version, files: [rel…] | "*"} — wybrane pliki wersji
-    emulatora w jednym ZIP-ie (bez kompresji: binaria i tak źle się kompresują, a postęp jest
-    dokładny). Nagłówek X-Total-Size: suma rozmiarów plików."""
-    import zipfile
-    from emustart import emucatalog, emustore
-    if not authorized(handler):
-        return _json(handler, {"error": "brak lub zły klucz serwera"}, 401)
-    _seen(handler)
-    n = int(handler.headers.get("Content-Length") or 0)
-    if n > 8 << 20:
-        return _json(handler, {"error": "za duże zapytanie"}, 413)
-    try:
-        d = json.loads(handler.rfile.read(n) or b"{}") if n else {}
-    except ValueError:
-        d = {}
-    item, version = str(d.get("item", "")), str(d.get("version", ""))
-    m = emustore.manifest(API._cfg, item, version) if emucatalog.valid_item(item) else None
-    if not m:
-        return _json(handler, {"error": "nie ma takiej wersji emulatora"}, 404)
-    files = m["files"]
-    want = sorted(files) if d.get("files") == "*" else         sorted({str(f) for f in (d.get("files") or []) if str(f) in files})
-    base = emustore.version_dir(API._cfg, item, version)
-    handler.send_response(200)
-    handler.send_header("Content-Type", "application/zip")
-    handler.send_header("X-Total-Size", str(sum(files[f][0] for f in want)))
-    handler.send_header("Connection", "close")
-    handler.end_headers()
-    handler.close_connection = True
-    with zipfile.ZipFile(_Sink(handler.wfile), "w", zipfile.ZIP_STORED, allowZip64=True) as z:
-        for rel in want:
-            z.write(base / rel, rel)
 
 
 def _send_file(handler, gid: int, rel: str) -> None:
@@ -1017,6 +970,13 @@ def _send_file(handler, gid: int, rel: str) -> None:
         path = deps[rel]
     else:
         path = base / rel                       # „/” działa i na Windows
+    from emustart import srvadmin
+    ip = handler.client_address[0]
+    _send_path(handler, path, lambda n: srvadmin.sent(ip, gid, g.get("title") or rel, n))
+
+
+def _send_path(handler, path: Path, on_chunk=None) -> None:
+    """Plik z obsługą Range (wznawianie pobierania): gry, archiwa emulatorów."""
     try:
         size = path.stat().st_size
     except OSError:
@@ -1046,8 +1006,6 @@ def _send_file(handler, gid: int, rel: str) -> None:
     if partial:
         handler.send_header("Content-Range", f"bytes {start}-{end}/{size}")
     handler.end_headers()
-    from emustart import srvadmin
-    ip = handler.client_address[0]
     with open(path, "rb") as f:
         f.seek(start)
         left = length
@@ -1058,7 +1016,8 @@ def _send_file(handler, gid: int, rel: str) -> None:
                 break
             handler.wfile.write(buf)
             left -= len(buf)
-            srvadmin.sent(ip, gid, g.get("title") or rel, len(buf))
+            if on_chunk:
+                on_chunk(len(buf))
 
 
 FW_TLS = "EmuStart Server (szyfrowany)"
