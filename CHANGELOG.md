@@ -154,6 +154,9 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 - Ekran „Kto gra?” / „Profile” sprawdza konta na serwerze co 15 s, póki jest otwarty —
   nowo zatwierdzone konto (albo konto po powrocie serwera) pojawia się samo, a nie dopiero
   po ponownym wejściu na ekran.
+- Panel serwera: pusta sekcja „Konto — pliki i kopie” (i ostrzeżenie o kluczu TLS) nie
+  pokazuje się już sama po przejściu na zakładkę — tylko po „Pliki i kopie”. Wygasły kod
+  „Dodaj urządzenie” znika razem z pustym linkiem i przyciskiem „Kopiuj link”.
 
 ## [0.44.8] — 2026-10-13
 

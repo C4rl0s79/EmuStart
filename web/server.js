@@ -42,9 +42,16 @@ function msg(text, ok) { toast(text, ok); }
 let restarting = false, lastStatus = null, curTab = "stan", sysScanWatch = false, lastScanRunning = false;
 
 /* ── zakładki ── */
+/** Sekcja zakładki pokazywana na żądanie: otwarta / zamknięta — showTab tego nie nadpisze. */
+function setShown(id, on) {
+  const s = $(id);
+  s.dataset.show = on ? "1" : "0";
+  s.hidden = !on || s.dataset.in !== curTab;
+}
 function showTab(t) {
   document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("on", b.dataset.tab === t));
-  document.querySelectorAll("main > section").forEach((s) => { s.hidden = s.dataset.in !== t; });
+  // sekcje pokazywane tylko na żądanie (data-show="0": zamknięte) zostają ukryte także po zmianie zakładki
+  document.querySelectorAll("main > section").forEach((s) => { s.hidden = s.dataset.in !== t || s.dataset.show === "0"; });
   try { localStorage.setItem("tab", t); } catch (e) { /* bez pamięci zakładki */ }
   if (t === "konfig") { refreshConfig(); refreshSysLook(); }
   curTab = t;
@@ -394,7 +401,7 @@ async function refresh() {
   $("info").innerHTML = rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("");
 
   const tl = st.tls || {};
-  $("tlsAlert").hidden = tl.state !== "locked" || curTab !== "stan";
+  setShown("tlsAlert", tl.state === "locked");
   $("tlsInfo").innerHTML = tl.state === "locked"
     ? `<span class="st bad">Klucz certyfikatu z innego komputera — podaj hasło przeniesienia${tl.move_ready ? "" : " (brak pliku przeniesienie.emustart w folderze serwera)"}.</span>`
     : tl.state === "ok" ? `<span class="st ok">Klucz certyfikatu zaszyfrowany na tym komputerze.</span>` +
@@ -603,7 +610,7 @@ let acctOpen = "";
 const fmtTime = (t) => t ? new Date(t * 1000).toLocaleString("pl-PL", { dateStyle: "short", timeStyle: "short" }) : "—";
 async function openAccount(name) {
   acctOpen = name;
-  $("acctBox").hidden = false;
+  setShown("acctBox", true);
   $("acctName").textContent = `„${name}”`;
   $("acctParts").innerHTML = `<tr><td colspan="4" class="muted">Wczytuję…</td></tr>`;
   const r = await admin("account_files", { name }).catch(() => null);
@@ -636,7 +643,7 @@ $("bAcctBackup").addEventListener("click", async () => {
   msg(r?.ok ? `Kopia konta „${acctOpen}”: ${r.file} (${fmtBytes(r.size)}).` : r?.reason || "Serwer nie odpowiada.", r?.ok);
   openAccount(acctOpen);
 });
-$("bAcctClose").addEventListener("click", () => { acctOpen = ""; $("acctBox").hidden = true; });
+$("bAcctClose").addEventListener("click", () => { acctOpen = ""; setShown("acctBox", false); });
 $("bBakSave").addEventListener("click", async () => {
   const r = await admin("backup_settings", { auto: $("bakAuto").checked, keep: $("bakKeep").value }).catch(() => null);
   msg(r?.ok ? "Ustawienia kopii zapisane." : r?.reason || "Serwer nie odpowiada.", r?.ok);
@@ -656,7 +663,11 @@ $("bPair").addEventListener("click", async () => {
   const tick = () => {
     const left = Math.max(0, r.expires - Date.now() / 1000);
     $("pairLeft").textContent = left ? `jeszcze ${Math.ceil(left / 60)} min` : "— wygasł, wygeneruj nowy";
-    if (!left) { clearInterval(pairTimer); $("pairQr").innerHTML = ""; $("pairLink").value = ""; }
+    if (!left) {                     // wygasły kod nic nie da — znika cały, z linkiem i przyciskiem
+      clearInterval(pairTimer);
+      $("pairBox").hidden = true; $("pairQr").innerHTML = ""; $("pairLink").value = ""; $("pairCode").textContent = "";
+      msg("Kod logowania wygasł — „Dodaj urządzenie” wygeneruje nowy.");
+    }
     refreshDevices();
   };
   tick();

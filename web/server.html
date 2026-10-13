@@ -149,7 +149,7 @@
       <div class="row"><input id="kIgdbId" placeholder="IGDB — Client ID"><input id="kIgdbSecret" placeholder="IGDB — Client Secret"></div>
       <div class="row"><input id="kTgdb" placeholder="TheGamesDB — klucz API"><button id="bKeys" class="primary">Zapisz klucze</button></div></div>
   </section>
-  <section data-in="stan" id="tlsAlert" hidden style="border-color:var(--warn)">
+  <section data-in="stan" id="tlsAlert" data-show="0" hidden style="border-color:var(--warn)">
     <h2 style="color:var(--warn)">Serwer przeniesiony — port szyfrowany wyłączony</h2>
     <div>Klucz certyfikatu pochodzi z innego komputera. Konfiguracja → <b>Przeniesienie serwera</b> → podaj
       hasło przeniesienia. Do tego czasu telefony i komputery nie połączą się z serwerem.</div>
@@ -270,7 +270,7 @@
       </form>
     </dialog>
   </section>
-  <section data-in="urz" id="acctBox" hidden>
+  <section data-in="urz" id="acctBox" data-show="0" hidden>
     <h2>Konto <span id="acctName"></span> — pliki i kopie</h2>
     <table><thead><tr><th>Folder</th><th class="n">Pliki</th><th class="n">Rozmiar</th><th class="n">Ostatnia zmiana</th></tr></thead>
       <tbody id="acctParts"></tbody></table>
