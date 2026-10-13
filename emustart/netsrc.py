@@ -147,10 +147,12 @@ class RemoteReader:
 
     def _get(self, off: int, n: int) -> bytes:
         c = self._connect()
-        c.request("GET", self.f.url, headers={"Authorization": f"Bearer {self.f.key}",
+        c.request("GET", self.f.url, headers={**auth_headers(self.f.key),
                                               "Range": f"bytes={off}-{off + n - 1}"})
         r = c.getresponse()
         data = r.read()
+        if r.status == 401 and self.f.key.startswith(DEV):
+            drop_token()                         # wygasły token — ponowienie zaloguje od nowa
         if r.status != 206 or len(data) != n:
             if r.will_close or r.status != 206:
                 self.close()
@@ -672,7 +674,7 @@ def push_roots(cfg: dict) -> list:
     body = json.dumps({"roots": rels}).encode("utf-8")
     c = conn(ep[0], ep[1], 20)
     try:
-        c.request("PUT", "/v1/roots", body=body, headers={"Authorization": f"Bearer {ep[2]}",
+        c.request("PUT", "/v1/roots", body=body, headers={**auth_headers(ep[2]),
                                                           "Content-Type": "application/json"})
         r = c.getresponse()
         d = json.loads(r.read() or b"{}")

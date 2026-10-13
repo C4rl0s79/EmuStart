@@ -236,3 +236,24 @@ def test_fbneo_names_and_versions_without_mame(env, tmp_path):
     a._cfg = cfg
     v = a._variants(library.game(games[0]["id"]))
     assert len(v) == 1 and v[0]["rel"].endswith("1941j.zip") and "Japan" in v[0]["label"]
+
+
+def test_window_mode_fetches_missing_media_from_server(env, tmp_path, monkeypatch):
+    """Zwykłe okno (bez --browser): brakująca grafika (np. logo systemu wybrane na serwerze)
+    pobierana z serwera EmuStart — wcześniej tylko w trybie przeglądarki."""
+    import urllib.request
+    from emustart import libsync, server
+    monkeypatch.setattr(server, "ROUTES", {"/media/": tmp_path / "media", "/assets/": paths.ASSETS})
+    monkeypatch.setattr(server, "DEV_API", None)
+    asked = []
+
+    def fake(cfg, rel, target):
+        asked.append((cfg.get("x"), rel))
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(b"svg")
+        return True
+    monkeypatch.setattr(libsync, "fetch_media", fake)
+    monkeypatch.setattr(server, "MEDIA_CFG", lambda: {"x": 1})
+    base = server.start(0)
+    body = urllib.request.urlopen(base + "/media/_systems/amiga.custom.svg?v=5", timeout=10).read()
+    assert body == b"svg" and asked == [(1, "_systems/amiga.custom.svg")]

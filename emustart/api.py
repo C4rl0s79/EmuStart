@@ -70,7 +70,8 @@ class Api:
         # lokalne save'y i ustawienia profili → NAS/serwer (zaległe po grze bez połączenia,
         # pierwsze przejście na serwer); gra uruchomiona w tym czasie poczeka (post_busy)
         launcher.start_post(lambda: profiles.push_all(self._cfg), "zapisy profili")
-        logos.push_later(self._cfg)       # wygląd systemów → serwer (Android pokazuje to samo)
+        if not __import__("emustart.libsync", fromlist=["thin"]).thin(self._cfg):
+            logos.push_later(self._cfg)   # wygląd systemów → serwer (Android pokazuje to samo)
         from emustart import artsync
         artsync.push_later(self._cfg)     # logo / okładki / zrzuty gier, których serwer nie ma
         threading.Thread(target=lambda: netsrc.push_roots(self._cfg), daemon=True,

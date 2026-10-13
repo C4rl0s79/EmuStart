@@ -765,8 +765,9 @@ function openMenu() {
   const items = [
     ["Ustawienia", () => openSettings()],
     ["Wygląd (logo, czcionki, kolory)", () => openLook()],
-    [S.artJob ? `Grafiki i metadane — trwa ${S.artJob.total ? Math.floor((100 * S.artJob.done) / S.artJob.total) : 0}%`
-              : "Grafiki i metadane", () => openArt()],
+    // biblioteka z serwera: grafiki i metadane pobiera serwer (komputer bierze je od niego)
+    ...(S.state?.thin ? [] : [[S.artJob ? `Grafiki i metadane — trwa ${S.artJob.total ? Math.floor((100 * S.artJob.done) / S.artJob.total) : 0}%`
+              : "Grafiki i metadane", () => openArt()]]),
     ["Zmień profil", () => openProfiles()],
     ["Kolejność padów", () => openPads()],
     [S.state?.thin ? "Odśwież bibliotekę z serwera" : "Skanuj kolekcję ponownie", () => startScan()],
