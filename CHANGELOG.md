@@ -33,6 +33,15 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   - `EmuStart.exe` nie ma już trybu serwera (`--server`, `--server-panel`,
     `--install-server`, `--server-key`).
 
+### Dodane
+- **Panel serwera: zakładki** (Stan, Konfiguracja, Urządzenia i konta, Aktualizacja).
+- **Panel serwera → Konfiguracja → Foldery**: foldery z grami (kilka, z kolejnością), BIOS-y,
+  emulatory, profile graczy, kopie kont i MAME. Wybór folderu w oknie panelu; serwer
+  sprawdza każdy folder tak, jak sam go widzi (konto systemowe), i pokazuje, co tam jest
+  (liczba systemów, plików BIOS-ów, czy jest RetroArch). Dysk sieciowy wybrany literą
+  (np. `Z:`) zamieniany jest na ścieżkę sieciową, której serwer używa. Nowe foldery z grami
+  — lista gier przeładowuje się sama.
+
 ## [0.44.7] — 2026-10-13
 
 ### Poprawione

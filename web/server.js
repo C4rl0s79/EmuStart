@@ -34,6 +34,81 @@ function msg(text, ok) {
 
 let restarting = false, lastStatus = null;
 
+/* ── zakładki ── */
+function showTab(t) {
+  document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("on", b.dataset.tab === t));
+  document.querySelectorAll("main > section").forEach((s) => { s.hidden = s.dataset.in !== t; });
+  try { localStorage.setItem("tab", t); } catch (e) { /* bez pamięci zakładki */ }
+  if (t === "konfig") refreshConfig();
+}
+document.querySelectorAll("#tabs button").forEach((b) => b.addEventListener("click", () => showTab(b.dataset.tab)));
+
+/* ── konfiguracja: foldery (emustart/srvconfig.py) ── */
+let cfgFields = [];
+function cfgMsg(text, ok) {
+  $("cfgMsg").textContent = text || "";
+  $("cfgMsg").style.color = ok ? "var(--ok)" : "var(--warn)";
+}
+const stHtml = (s) => `<span class="st ${s.ok ? "ok" : "bad"}">${esc(s.text)}</span>`;
+async function refreshConfig() {
+  const r = await admin("config").catch(() => null);
+  if (!r?.ok) return cfgMsg("Serwer nie odpowiada.");
+  cfgFields = r.fields;
+  renderConfig();
+}
+function renderConfig() {
+  $("cfgFields").innerHTML = cfgFields.map((f, i) => {
+    const pick = `<button data-pick="${i}">Wybierz…</button>`;
+    if (f.kind === "dirs") {
+      const rows = f.value.map((v, j) => `<div class="row"><input value="${esc(v)}" data-f="${i}" data-j="${j}">` +
+        `<button data-up="${i}:${j}" ${j ? "" : "disabled"} title="Wyżej">↑</button>` +
+        `<button class="danger" data-del="${i}:${j}" title="Usuń">✕</button></div>` +
+        `<div>${stHtml(f.status[j] || { ok: true, text: "" })}</div>`).join("");
+      return `<div class="field"><b>${esc(f.label)}</b><div class="muted">${esc(f.hint)}</div>${rows}` +
+        `<div class="row"><button data-add="${i}">Dodaj folder…</button><button class="primary" data-save="${i}">Zapisz</button></div></div>`;
+    }
+    return `<div class="field"><b>${esc(f.label)}</b><div class="muted">${esc(f.hint)}</div>` +
+      `<div class="row"><input value="${esc(f.value)}" data-f="${i}" placeholder="${f.optional ? "(puste)" : ""}">${pick}` +
+      `<button class="primary" data-save="${i}">Zapisz</button></div><div>${stHtml(f.status)}</div></div>`;
+  }).join("");
+  const box = $("cfgFields");
+  const values = (i) => [...box.querySelectorAll(`input[data-f="${i}"]`)].map((x) => x.value.trim());
+  box.querySelectorAll("[data-save]").forEach((b) => b.addEventListener("click", () => {
+    const i = +b.dataset.save, f = cfgFields[i];
+    saveField(f, f.kind === "dirs" ? values(i).filter(Boolean) : values(i)[0]);
+  }));
+  box.querySelectorAll("[data-pick],[data-add]").forEach((b) => b.addEventListener("click", async () => {
+    const i = +(b.dataset.pick ?? b.dataset.add), f = cfgFields[i];
+    const pick = window.pywebview?.api?.pick;
+    if (!pick) return cfgMsg("Wybór folderu działa w oknie panelu — wpisz ścieżkę.");
+    const r = await pick(f.kind === "file" ? "file" : "dir", f.kind === "dirs" ? "" : f.value).catch(() => null);
+    if (!r?.ok) return;
+    if (f.kind === "dirs") { f.value = [...values(i), r.path]; f.status.push({ ok: true, text: "nie zapisano" }); renderConfig(); }
+    else box.querySelector(`input[data-f="${i}"]`).value = r.path;
+  }));
+  box.querySelectorAll("[data-del]").forEach((b) => b.addEventListener("click", () => {
+    const [i, j] = b.dataset.del.split(":").map(Number);
+    cfgFields[i].value = values(i); cfgFields[i].value.splice(j, 1); cfgFields[i].status.splice(j, 1);
+    renderConfig();
+  }));
+  box.querySelectorAll("[data-up]").forEach((b) => b.addEventListener("click", () => {
+    const [i, j] = b.dataset.up.split(":").map(Number), f = cfgFields[i];
+    f.value = values(i);
+    [f.value[j - 1], f.value[j]] = [f.value[j], f.value[j - 1]];
+    [f.status[j - 1], f.status[j]] = [f.status[j], f.status[j - 1]];
+    renderConfig();
+  }));
+}
+async function saveField(f, value) {
+  if (f.key === "rom_roots" && !confirm("Zapisać foldery z grami? Serwer przeładuje listę gier.")) return;
+  cfgMsg("Sprawdzam…", true);
+  const r = await admin("config_set", { key: f.key, value }).catch(() => null);
+  if (!r?.ok) return cfgMsg(r?.reason || "Serwer nie odpowiada.");
+  cfgFields = r.fields;
+  renderConfig();
+  cfgMsg(`Zapisano: ${f.label}.` + (f.key === "rom_roots" ? " Przeładowuję listę gier (zakładka Stan)." : ""), true);
+}
+
 // zdanie o pobieraniu tylko wtedy, gdy któreś urządzenie naprawdę pobiera grę
 function busyNote() {
   const active = (lastStatus?.transfers || []).filter((t) => t.active);
@@ -366,6 +441,9 @@ Każdy plik zostanie skopiowany i sprawdzony; ` +
   migrPoll = setInterval(migrTick, 700);
 });
 
+let startTab = "stan";
+try { startTab = localStorage.getItem("tab") || "stan"; } catch (e) { /* domyślna zakładka */ }
+showTab(document.querySelector(`#tabs button[data-tab="${startTab}"]`) ? startTab : "stan");
 refresh();
 refreshDevices();
 refreshPublic();

@@ -459,7 +459,18 @@ ACTIONS_ARGS = {"device_revoke": device_revoke, "device_rename": device_rename, 
                 "profiles_migrate": profiles_migrate, 
                 "public_set": public_set, "tunnel_set": tunnel_set,
                 "enroll_decide": enroll_decide, "device_games": device_games, "account_admin": account_admin}
-ACTIONS.update({"public_status": public_status, "devices": devices_list, "login_code": login_code, "profiles_migrate_status": profiles_migrate_status,
+def config_get(api) -> dict:
+    from emustart import srvconfig
+    return srvconfig.get(api._cfg)
+
+
+def config_set(api, args: dict) -> dict:
+    from emustart import srvconfig
+    return srvconfig.set_value(api, str(args.get("key", "")), args.get("value"))
+
+
+ACTIONS_ARGS["config_set"] = config_set
+ACTIONS.update({"config": config_get, "public_status": public_status, "devices": devices_list, "login_code": login_code, "profiles_migrate_status": profiles_migrate_status,
                 "accounts": accounts_list})
 
 

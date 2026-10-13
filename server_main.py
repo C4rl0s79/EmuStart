@@ -159,6 +159,21 @@ def _server_panel() -> None:
             return _message(f"Serwer EmuStart nie odpowiada na porcie {port} i nie udało się go "
                             "uruchomić.\n\nSprawdź logs\\emustart.log obok EmuStart.exe.")
     class PanelApi:
+        def pick(self, kind: str = "dir", start: str = ""):
+            """Wybór folderu (albo pliku) w oknie panelu; dysk sieciowy → ścieżka UNC (serwer
+            na koncie systemowym nie zna liter dysków sieciowych użytkownika)."""
+            from emustart import srvconfig
+            win = webview.windows[0] if webview.windows else None
+            if not win:
+                return {"ok": False}
+            mode = webview.OPEN_DIALOG if kind == "file" else webview.FOLDER_DIALOG
+            got = win.create_file_dialog(mode, directory=start if start and os.path.isdir(start) else "",
+                                         file_types=("Program (*.exe)",) if kind == "file" else ())
+            if not got:
+                return {"ok": False}
+            path = got[0] if isinstance(got, (list, tuple)) else got
+            return {"ok": True, "path": srvconfig.unc(str(path))}
+
         def open_logs(self):
             # tu, nie w serwerze: serwer na koncie SYSTEM otworzyłby Eksplorator niewidocznie
             os.startfile(str(paths.LOGS))      # type: ignore[attr-defined]

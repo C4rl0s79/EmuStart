@@ -38,6 +38,16 @@
   .bar > div { height: 100%; width: 0; background: var(--accent); transition: width .3s; }
   #msg { min-height: 1.4em; color: var(--warn); }
   code { background: #0f131c; padding: 2px 6px; border-radius: 4px; user-select: all; }
+  nav { display: flex; gap: 4px; padding: 0 18px; border-bottom: 1px solid var(--line); }
+  nav button { background: none; border: 0; border-bottom: 2px solid transparent; border-radius: 0; padding: 10px 12px; color: var(--dim); }
+  nav button:hover { background: none; color: var(--text); }
+  nav button.on { color: var(--text); border-bottom-color: var(--accent); }
+  .field { padding: 10px 0; border-top: 1px solid var(--line); }
+  .field:first-of-type { border-top: 0; }
+  .field .row { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
+  .field input { flex: 1; min-width: 0; }
+  input { font: inherit; color: var(--text); background: #0f131c; border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; }
+  .st { font-size: 12px; } .st.ok { color: var(--ok); } .st.bad { color: var(--warn); }
 </style>
 </head>
 <body>
@@ -48,8 +58,22 @@
   <span class="grow"></span>
   <span id="ver" class="muted"></span>
 </header>
+<nav id="tabs">
+  <button data-tab="stan" class="on">Stan</button>
+  <button data-tab="konfig">Konfiguracja</button>
+  <button data-tab="urz">Urządzenia i konta</button>
+  <button data-tab="akt">Aktualizacja</button>
+</nav>
 <main>
-  <section>
+  <section data-in="konfig">
+    <h2>Foldery</h2>
+    <div class="muted">Serwer sprawdza każdy folder tak, jak sam go widzi. Dysk sieciowy wybrany literą
+      (np. Z:) zamieniany jest na ścieżkę sieciową — serwer działa na koncie systemowym, które liter
+      dysków sieciowych nie zna.</div>
+    <div id="cfgFields"></div>
+    <div id="cfgMsg" style="min-height:1.4em"></div>
+  </section>
+  <section data-in="stan">
     <h2>Akcje</h2>
     <div class="actions">
       <button id="bRescan" class="primary">Przeładuj listę gier</button>
@@ -62,7 +86,7 @@
     </div>
     <div id="msg"></div>
   </section>
-  <section>
+  <section data-in="akt">
     <h2>Aktualizacja</h2>
     <div class="actions">
       <button id="bUpdCheck">Sprawdź aktualizacje</button>
@@ -72,18 +96,18 @@
     <div id="updBarBox" class="bar" hidden><div id="updBar"></div></div>
     <pre id="updNotes" class="muted" hidden style="white-space:pre-wrap;max-height:160px;overflow:auto;margin:8px 0 0"></pre>
   </section>
-  <section>
+  <section data-in="stan">
     <h2>Serwer</h2>
     <dl id="info"></dl>
   </section>
-  <section>
+  <section data-in="konfig">
     <h2>Folder profili (zapisy, stany, ustawienia graczy)</h2>
     <div id="profRoot" class="muted"></div>
     <div class="actions" style="margin-top:8px"><button id="bMigrate">Przenieś profile do katalogu serwera</button></div>
     <div id="migrText" class="muted" style="margin-top:8px"></div>
     <div id="migrBarBox" class="bar" hidden><div id="migrBar"></div></div>
   </section>
-  <section>
+  <section data-in="konfig">
     <h2>Dostęp z internetu</h2>
     <div class="muted">Port publiczny (szyfrowany) otwierany na routerze przez UPnP — urządzenia poza domem
       i bez Tailscale pobierają gry prosto z serwera. Tylko dla sparowanych urządzeń (klucz).</div>
@@ -97,7 +121,7 @@
       <button id="bTunnel">Zapisz adres tunelu</button></div>
     <div id="tunInfo" class="muted" style="margin-top:6px"></div>
   </section>
-  <section>
+  <section data-in="urz">
     <h2>Urządzenia</h2>
     <div class="actions"><button id="bPair" class="primary">Dodaj urządzenie</button></div>
     <div id="pairBox" hidden style="margin-top:10px">
@@ -122,7 +146,7 @@
     <table style="margin-top:10px"><thead><tr><th>Urządzenie</th><th>Rodzaj</th><th>Konto</th><th>Wersja</th><th class="n">Ostatnio</th><th></th></tr></thead>
       <tbody id="devices"></tbody></table>
   </section>
-  <section>
+  <section data-in="urz">
     <h2>Konta</h2>
     <div class="muted">Hasło konta (co najmniej 10 znaków, wielka litera, cyfra i znak specjalny) potwierdza
       użytkownika przy dołączaniu nowego urządzenia i gdy gra na cudzym urządzeniu. Serwer trzyma tylko
@@ -140,12 +164,12 @@
       </form>
     </dialog>
   </section>
-  <section>
+  <section data-in="stan">
     <h2>Pobierane gry</h2>
     <table><thead><tr><th>Gra</th><th>Urządzenie</th><th class="n">Wysłano</th><th class="n">Ostatnio</th></tr></thead>
       <tbody id="transfers"></tbody></table>
   </section>
-  <section>
+  <section data-in="stan">
     <h2>Połączenia od startu serwera</h2>
     <table><thead><tr><th>Urządzenie</th><th class="n">Zapytania</th><th class="n">Wysłano</th><th class="n">Ostatnio</th></tr></thead>
       <tbody id="clients"></tbody></table>
