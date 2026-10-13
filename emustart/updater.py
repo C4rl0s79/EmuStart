@@ -1,6 +1,10 @@
-"""updater — aktualizacja EmuStart z wydań na GitHubie (panel serwera).
+"""updater — aktualizacja EmuStart i EmuStart Server z wydań na GitHubie.
 
-1. `latest()` — najnowsze wydanie C4rl0s79/EmuStart i plik `EmuStart-<wersja>-win64.zip`.
+Dwa programy, każdy z własnym plikiem wydania (i podpisem):
+EmuStart (PC) — `EmuStart-<wersja>-win64.zip` (EmuStart/EmuStart.exe),
+EmuStart Server — `EmuStart-Server-<wersja>-win64.zip` (EmuStartServer/EmuStartServer.exe).
+
+1. `latest()` — najnowsze wydanie C4rl0s79/EmuStart i plik tego programu.
 2. `Job` — pobranie ZIP-a do `update\\` obok exe (z postępem), sprawdzenie skrótu SHA-256
    i **podpisu wydania** (`<zip>.sig`, Ed25519 — emustart/signing.py; bez poprawnego podpisu
    nic nie jest rozpakowywane), sprawdzenie archiwum (`EmuStart\\EmuStart.exe` i
@@ -39,23 +43,43 @@ DOWNLOAD_PREFIX = f"https://github.com/{REPO}/releases/download/"
 UA = f"EmuStart/{__version__}"
 TASK = "EmuStart Server"
 
+# program → (nazwa exe i folderu w ZIP-ie, plik wydania)
+APPS = {"client": ("EmuStart", re.compile(r"EmuStart-[\d.]+-win64\.zip")),
+        "server": ("EmuStartServer", re.compile(r"EmuStart-Server-[\d.]+-win64\.zip"))}
+
+
+def kind() -> str:
+    """Który program się aktualizuje: serwer (EmuStartServer.exe, także dawny EmuStart.exe
+    --server — przejście na osobny program) albo EmuStart na PC."""
+    if Path(sys.executable).stem.lower() == "emustartserver" or \
+            any(a in sys.argv for a in ("--service", "--server", "--panel", "--server-panel")):
+        return "server"
+    return "client"
+
 
 def vtuple(v: str) -> tuple:
     return tuple(int(x) for x in re.findall(r"\d+", v or "")[:4])
 
 
-def latest(timeout: float = 15) -> dict:
-    """{version, tag, url, size, notes, published, newer} najnowszego wydania."""
+def latest(timeout: float = 15, app: str = "") -> dict:
+    """{version, tag, url, size, notes, published, newer} najnowszego wydania (plik programu `app`)."""
+    app = app or kind()
     req = urllib.request.Request(API_URL, headers={"User-Agent": UA, "Accept": "application/vnd.github+json"})
     with urllib.request.urlopen(req, timeout=timeout) as r:
         rel = json.loads(r.read())
     tag = rel.get("tag_name") or ""
     ver = tag.lstrip("v")
+    root = APPS[app][0]
     asset = next((a for a in rel.get("assets") or []
-                  if re.fullmatch(r"EmuStart-[\d.]+-win64\.zip", a.get("name") or "")), None)
+                  if APPS[app][1].fullmatch(a.get("name") or "")), None)
+    if asset is None and app == "server":
+        # wydanie sprzed rozdziału (jeden program z trybem serwera) — dotychczasowy plik
+        asset = next((a for a in rel.get("assets") or []
+                      if APPS["client"][1].fullmatch(a.get("name") or "")), None)
+        root = APPS["client"][0]
     sig = next((a for a in rel.get("assets") or []
                 if asset and a.get("name") == asset["name"] + ".sig"), None)
-    return {"version": ver, "tag": tag, "current": __version__,
+    return {"version": ver, "tag": tag, "current": __version__, "app": app, "root": root,
             "newer": vtuple(ver) > vtuple(__version__),
             "url": asset["browser_download_url"] if asset else "", "size": asset["size"] if asset else 0,
             "sha256": ((asset or {}).get("digest") or "").removeprefix("sha256:").lower(),
@@ -93,11 +117,11 @@ class Job:
             if d.exists():
                 shutil.rmtree(d, ignore_errors=True)
             d.mkdir(parents=True, exist_ok=True)
-            zp = d / f"EmuStart-{self.info['version']}-win64.zip"
+            zp = d / (self.info["url"].rsplit("/", 1)[-1] or "update.zip")
             self._download(self.info["url"], zp)
             self.phase = "extracting"
             new = d / "new"
-            _extract(zp, new)
+            _extract(zp, new, self.info.get("root") or APPS[self.info.get("app") or kind()][0])
             zp.unlink(missing_ok=True)
             self.phase = "ready"
             log.info("aktualizacja %s gotowa do podmiany", self.info["version"])
@@ -107,7 +131,7 @@ class Job:
 
     def _download(self, url: str, dest: Path) -> None:
         if not url:
-            raise RuntimeError("W wydaniu nie ma pliku EmuStart-…-win64.zip.")
+            raise RuntimeError("W wydaniu nie ma pliku tego programu (…-win64.zip).")
         if not url.startswith(DOWNLOAD_PREFIX):
             raise RuntimeError(f"Nieoczekiwany adres aktualizacji: {url}")
         import hashlib
@@ -148,7 +172,8 @@ class Job:
             return {"ok": False, "reason": "Aktualizacja nie jest gotowa."}
         if os.name != "nt" or not getattr(sys, "frozen", False):
             return {"ok": False, "reason": "Podmiana działa tylko w EmuStart.exe na Windows."}
-        script = write_script(update_dir(), paths.APP, os.getpid(), argv, server=server)
+        script = write_script(update_dir(), paths.APP, os.getpid(), argv, server=server,
+                              exe_name=self.info.get("root") or APPS[self.info.get("app") or kind()][0])
         ulog = paths.APP / "logs" / "update.log"
         before = ulog.stat().st_size if ulog.is_file() else 0
         how = _launch(script, server)
@@ -243,16 +268,16 @@ def _signature_ok(sig_url: str, name: str, sha256_hex: str) -> bool:
     return signing.verify(name, sha256_hex, sig)
 
 
-def _extract(zp: Path, new: Path) -> None:
+def _extract(zp: Path, new: Path, name: str = "EmuStart") -> None:
     """Rozpakowanie z kontrolą: archiwum całe, exe i _internal są, żadnych ścieżek poza folder."""
     with zipfile.ZipFile(zp) as z:
         bad = z.testzip()
         if bad:
             raise RuntimeError(f"Uszkodzony plik w archiwum: {bad}")
         names = z.namelist()
-        root = "EmuStart/"
-        if f"{root}EmuStart.exe" not in names or not any(n.startswith(f"{root}_internal/") for n in names):
-            raise RuntimeError("Archiwum nie wygląda jak EmuStart (brak EmuStart.exe / _internal).")
+        root = f"{name}/"
+        if f"{root}{name}.exe" not in names or not any(n.startswith(f"{root}_internal/") for n in names):
+            raise RuntimeError(f"Archiwum nie wygląda jak {name} (brak {name}.exe / _internal).")
         new.mkdir(parents=True, exist_ok=True)
         base = new.resolve()
         for info in z.infolist():
@@ -271,9 +296,14 @@ def _ps(s: str) -> str:
     return "'" + str(s).replace("'", "''") + "'"
 
 
-def write_script(udir: Path, app: Path, pid: int, argv: list, server: bool = True) -> Path:
+def write_script(udir: Path, app: Path, pid: int, argv: list, server: bool = True,
+                 exe_name: str = "") -> Path:
     """Skrypt PowerShell podmiany plików (patrz opis modułu)."""
-    exe = app / "EmuStart.exe"
+    exe_name = exe_name or ("EmuStartServer" if server else "EmuStart")
+    exe = app / f"{exe_name}.exe"
+    # dawny EmuStart.exe --server → EmuStartServer.exe --service (przejście na osobny program)
+    if exe_name == "EmuStartServer":
+        argv = ["--service" if a == "--server" else "--panel" if a == "--server-panel" else a for a in argv]
     args = " ".join(a if re.fullmatch(r"[\w\-=.:]+", a) else '"' + a.replace('"', '') + '"'
                     for a in argv if a != "--restarted")
     if server:
@@ -294,7 +324,7 @@ for ($i = 0; $i -lt 60; $i++) {{
 }}
 L 'kopia zapasowa'
 robocopy (Join-Path $app '_internal') (Join-Path $bak '_internal') /MIR /R:5 /W:2 /NFL /NDL /NJH /NJS /NP | Out-Null
-Copy-Item -LiteralPath $exe -Destination (Join-Path $bak 'EmuStart.exe') -Force
+if (Test-Path -LiteralPath $exe) {{ Copy-Item -LiteralPath $exe -Destination (Join-Path $bak {_ps(exe.name)}) -Force }}
 L 'podmiana plików'
 robocopy (Join-Path $new '_internal') (Join-Path $app '_internal') /MIR /R:30 /W:2 /NFL /NDL /NJH /NJS /NP | Out-Null
 $rc1 = $LASTEXITCODE
@@ -303,10 +333,27 @@ $rc2 = $LASTEXITCODE
 if ($rc1 -ge 8 -or $rc2 -ge 8) {{
   L "BŁĄD podmiany (robocopy $rc1/$rc2) — przywracam poprzednią wersję"
   robocopy (Join-Path $bak '_internal') (Join-Path $app '_internal') /MIR /R:30 /W:2 /NFL /NDL /NJH /NJS /NP | Out-Null
-  Copy-Item -LiteralPath (Join-Path $bak 'EmuStart.exe') -Destination $exe -Force
+  if (Test-Path -LiteralPath (Join-Path $bak {_ps(exe.name)})) {{ Copy-Item -LiteralPath (Join-Path $bak {_ps(exe.name)}) -Destination $exe -Force }}
 }} else {{
   L "podmiana zakończona (robocopy $rc1/$rc2)"
   Remove-Item -LiteralPath $new -Recurse -Force -ErrorAction SilentlyContinue
+  if ({use_task}) {{
+    # serwer to osobny program: dawny EmuStart.exe w folderze serwera (bez swojego _internal)
+    # nie uruchomiłby się — usuwamy go; zadanie Harmonogramu → EmuStartServer.exe --service
+    $old = Join-Path $app 'EmuStart.exe'
+    if ($old -ne $exe -and (Test-Path -LiteralPath $old)) {{ Remove-Item -LiteralPath $old -Force -ErrorAction SilentlyContinue; L 'usunięto dawny EmuStart.exe z folderu serwera' }}
+    schtasks /Query /TN {_ps(TASK)} 2>$null | Out-Null
+    if ($LASTEXITCODE -eq 0 -and $exe -like '*EmuStartServer.exe') {{
+      schtasks /Change /TN {_ps(TASK)} /TR ('"' + $exe + '" --service') 2>&1 | Out-Null
+      L "zadanie Harmonogramu → $exe --service (kod $LASTEXITCODE)"
+      $lnk = Join-Path $env:ProgramData 'Microsoft\\Windows\\Start Menu\\Programs\\EmuStart Server.lnk'
+      if (Test-Path -LiteralPath $lnk) {{
+        $s = (New-Object -ComObject WScript.Shell).CreateShortcut($lnk)
+        $s.TargetPath = $exe; $s.Arguments = '--panel'; $s.IconLocation = $exe + ',0'; $s.Save()
+        L 'skrót EmuStart Server → panel nowego programu'
+      }}
+    }}
+  }}
 }}
 $task = $false
 if ({use_task}) {{ schtasks /Query /TN {_ps(TASK)} 2>$null | Out-Null; $task = ($LASTEXITCODE -eq 0) }}
@@ -318,7 +365,7 @@ if ($task) {{
   L "zadanie Harmonogramu: /Run (kod $LASTEXITCODE)"
   for ($i = 0; $i -lt 30; $i++) {{
     Start-Sleep 1
-    if (Get-Process -Name EmuStart -ErrorAction SilentlyContinue | Where-Object {{ $_.Path -eq $exe }}) {{ $started = $true; break }}
+    if (Get-Process -Name {_ps(exe.stem)} -ErrorAction SilentlyContinue | Where-Object {{ $_.Path -eq $exe }}) {{ $started = $true; break }}
   }}
   if ($started) {{ L 'serwer uruchomiony (zadanie Harmonogramu)' }}
   else {{ L 'zadanie Harmonogramu nie uruchomiło serwera — start bezpośredni' }}
@@ -326,7 +373,7 @@ if ($task) {{
 if (-not $started -and {use_task}) {{
   $a = {_ps(args)}
   if ($a) {{ Start-Process -FilePath $exe -ArgumentList $a -WorkingDirectory $app -WindowStyle Hidden }}
-  else {{ Start-Process -FilePath $exe -ArgumentList '--server' -WorkingDirectory $app -WindowStyle Hidden }}
+  else {{ Start-Process -FilePath $exe -ArgumentList '--service' -WorkingDirectory $app -WindowStyle Hidden }}
   L 'serwer uruchomiony bezpośrednio'
 }} elseif (-not $started) {{
   $a = {_ps(args)}
@@ -341,7 +388,7 @@ if (Test-Path -LiteralPath $pu) {{
   Remove-Item -LiteralPath $pu -Force -ErrorAction SilentlyContinue
   if ($u) {{
     Start-Sleep 3
-    $tr = '"' + $exe + '" --server-panel'
+    $tr = '"' + $exe + '" ' + $(if ($exe -like '*EmuStartServer.exe') {{ '--panel' }} else {{ '--server-panel' }})
     schtasks /Create /F /TN {_ps(PANEL_TASK)} /SC ONCE /ST 00:00 /RU $u /IT /TR $tr 2>&1 | Out-Null
     $c1 = $LASTEXITCODE
     schtasks /Run /TN {_ps(PANEL_TASK)} 2>&1 | Out-Null
