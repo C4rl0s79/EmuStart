@@ -115,7 +115,7 @@ function removeItem() {
       if (!r || !r.ok) { toast(r?.reason || "Nie udało się usunąć."); return renderGopt(); }
       const gg = S.games.find((x) => x.id === GO.id);
       if (gg) { gg.pinned = 0; gg.cached = 0; }
-      toast(`Usunięto ${where}${r.freed ? ` (${fmtBytes(r.freed)})` : ""}. Gra zostaje na ${S.platform === "android" ? "serwerze" : "NAS-ie"}.`);
+      toast(`Usunięto ${where}${r.freed ? ` (${fmtBytes(r.freed)})` : ""}. Gra zostaje na serwerze.`);
       closeGopt();
       refreshState();
       schedulePreview();
@@ -500,7 +500,7 @@ function renderProfiles() {
     ? (S.platform === "android"
       ? "Wybierz swój profil (te same co w EmuStart na komputerze) albo utwórz nowy. Zapisy gier będą wspólne " +
         "z komputerem; zapisy zastane w emulatorach telefonu trafią do tego profilu."
-      : "Wybierz swój profil (profile z NAS są już na liście) albo utwórz nowy. Do niego trafią save'y i konto " +
+      : "Wybierz swój profil (konta z serwera są już na liście) albo utwórz nowy. Do niego trafią save'y i konto " +
         "RetroAchievements zastane w emulatorach na tym komputerze. Później zmienisz to w Ustawieniach → Profile.") : "";
   const cards = PR.list.map((p, i) =>
     `<div class="pcard${i === PR.idx ? " sel" : ""}${p.id === PR.current ? " cur" : ""}" data-i="${i}">` +
@@ -552,7 +552,7 @@ async function profilesInput(a) {
         toast(`Utworzono profil: ${r.profile.name}.` + (pw ? " Zapamiętaj hasło — będzie potrzebne na innych urządzeniach." : ""), 6000);
         openProfiles(PR.startup);
       };
-      // z serwerem: konto z hasłem (emustart/accounts.py); bez serwera — profil lokalny / NAS
+      // konto z hasłem na serwerze (emustart/accounts.py); serwer niedostępny — profil lokalny
       if (!S.state?.server) return create("");
       setTimeout(() => askPassword(`Hasło nowego konta „${name.trim()}”`, create, true), 50);
     });
@@ -696,13 +696,6 @@ async function profileMenu(p) {
     if (f.user !== st.user) items.push([`Użyj konta ${f.user} z ${RA_FAM[f.family] || f.family}`, async () => {
       const r = await api().ra_import(p.id, f.family);
       toast(r.ok ? `Profil „${p.name}” używa konta ${r.user}.` : r.reason);
-    }]);
-  }
-  if (p.nas_wanted && p.nas_name !== p.nas_wanted) {
-    items.push([`Folder na NAS: „${p.nas_name}” → zmień na „${p.nas_wanted}”`, async () => {
-      const r = await api().profile_nas_rename(p.id);
-      toast(r.ok ? `Folder profilu na NAS: ${r.nas_name}. Inne komputery przełączą się same.` : r.reason, 5000);
-      if (r.ok) openProfiles(PR.startup);
     }]);
   }
   items.push(["Ustaw jako profil tego komputera", async () => {

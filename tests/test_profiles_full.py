@@ -15,7 +15,7 @@ from emustart import art, dstoken, ingame, launcher, paths, profiles
 from test_core import _write, env  # noqa: F401  (fixture)
 
 
-@pytest.fixture(params=["nas", "serwer"])
+@pytest.fixture(params=["serwer"])
 def prof_env(env, monkeypatch, request):
     cfg, roms, tmp = env
     monkeypatch.setattr(profiles, "LOCAL", tmp / "profiles")
@@ -326,29 +326,6 @@ def test_hide_settings_are_per_profile(prof_env, monkeypatch):
     assert cfg["hide_beta"] is True
 
 
-def test_nas_folder_rename_and_other_pc_follows(prof_env):
-    from emustart import library
-    cfg, tmp = prof_env
-    pid = profiles.first_id()
-    profiles.rename(pid, "Jezus")                                          # stara wersja: folder został
-    assert profiles.get(pid)["nas_name"] == "Gracz"
-    root = Path(cfg["profiles_nas"])
-    _write(root / "Gracz" / "save" / "pcsx2" / "memcards" / "Mcd001.ps2", b"SAVE")
-    _write(root / "Gracz" / "lock", b'{"host": "INNY-PC", "time": %d}' % int(profiles.time.time()))
-    assert "INNY-PC" in profiles.nas_rename(cfg, pid)                     # gra na innym komputerze
-    (root / "Gracz" / "lock").unlink()
-    assert profiles.nas_rename(cfg, pid) == ""
-    assert profiles.get(pid)["nas_name"] == "Jezus"
-    assert (root / "Jezus" / "save" / "pcsx2" / "memcards" / "Mcd001.ps2").read_bytes() == b"SAVE"
-    assert (root / "Gracz" / profiles.MOVED).is_file()
-
-    # drugi komputer: ma ten profil jeszcze pod starym folderem
-    with library.db() as c:
-        c.execute("UPDATE profiles SET nas_name='Gracz' WHERE id=?", (pid,))
-    assert profiles.import_from_nas(cfg) == []                              # nie powstaje duplikat
-    assert profiles.get(pid)["nas_name"] == "Jezus"
-
-
 def test_msu1_zip_is_fully_extracted(tmp_path):
     import zipfile
     z = tmp_path / "Gra (USA) (MSU1).zip"
@@ -407,7 +384,7 @@ def test_settings_copy_has_no_secrets_but_machine_keeps_them(prof_env):
 
 def test_scrub_existing_copies(prof_env):
     cfg, tmp = prof_env
-    f = Path(cfg["profiles_nas"]) / "Gracz" / "_backup" / "x" / "settings" / "duckstation" / "-" / "settings.ini"
+    f = profiles.LOCAL / "Gracz" / "_backup" / "x" / "settings" / "duckstation" / "-" / "settings.ini"
     _write(f, b"[Cheevos]\nUsername = a\nToken = ABCDEF\n")
     machine = profiles.LOCAL / "_machine" / "duckstation" / "settings.ini"
     _write(machine, b"[Cheevos]\nToken = ZOSTAJE\n")
@@ -531,8 +508,9 @@ def test_capsimg_install_from_tar(tmp_path, monkeypatch):
     assert installer.amiga_extras(str(tmp_path / "emu")) == []
 
 
-def test_bios_copied_from_bios_dir(tmp_path):
-    from emustart import bios
+def test_bios_from_server(tmp_path, monkeypatch):
+    """BIOS-y z serwera EmuStart (folder BIOS-ów ustawia się w panelu serwera)."""
+    from emustart import bios, libsync
     ra = tmp_path / "RetroArch"
     _write(ra / "retroarch.cfg", b'system_directory = ":\\system"\n')
     _write(ra / "info" / "puae_libretro.info", b'firmware0_path = "kick34005.A500"\nfirmware1_path = "kick40068.A1200"\n'
@@ -544,11 +522,19 @@ def test_bios_copied_from_bios_dir(tmp_path):
     _write(ra / "system" / "kick40068.A1200", b"MOJ")                    # istniejący zostaje
     _write(src / "kick40068.A1200", b"INNY")
     assert bios.core_name('-L "C:\\RA\\cores\\puae_libretro.dll" -f') == "puae"
-    got = bios.sync({"bios_dir": str(src)}, ra, "puae", ("capsimg.dll",))
+
+    def from_server(cfg, rel, dst):
+        if ".." in rel or not (src / rel).is_file():
+            return False
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        dst.write_bytes((src / rel).read_bytes())
+        return True
+    monkeypatch.setattr(libsync, "bios_from_server", from_server)
+    got = bios.sync({"server_url": "https://serwer", "server_key": "dev:x"}, ra, "puae", ("capsimg.dll",))
     assert sorted(got) == ["capsimg.dll", "kick34005.A500"]
     assert (ra / "system" / "kick40068.A1200").read_bytes() == b"MOJ"
     assert not (ra / "zly.rom").exists()
-    assert bios.sync({}, ra, "puae") == []
+    assert bios.sync({}, ra, "puae") == []                               # bez serwera — nic
 
 
 def test_whdload_kickstarts_copied_to_devs(tmp_path):
@@ -556,10 +542,10 @@ def test_whdload_kickstarts_copied_to_devs(tmp_path):
     ra = tmp_path / "RetroArch"
     _write(ra / "retroarch.cfg", b'system_directory = ":\\system"\n')
     _write(ra / "system" / "kick34005.A500", b"KS13")
-    _write(tmp_path / "bios" / "kick40068.A1200", b"KS31")
+    _write(ra / "system" / "kick40068.A1200", b"KS31")              # BIOS-y pobrane z serwera
     saves = tmp_path / "saves"
     _write(saves / "PUAE" / "WHDLoad" / "Devs" / "Kickstarts" / "kick34005.A500.RTB", b"RTB")
-    got = bios.whdload_kickstarts({"bios_dir": str(tmp_path / "bios")}, ra, saves)
+    got = bios.whdload_kickstarts({}, ra, saves)
     ks = saves / "PUAE" / "WHDLoad" / "Devs" / "Kickstarts"
     assert sorted(got) == ["kick34005.A500", "kick40068.A1200"]
     assert (ks / "kick34005.A500").read_bytes() == b"KS13" and (ks / "kick40068.A1200").read_bytes() == b"KS31"
@@ -708,11 +694,12 @@ def test_stream_game_through_winfsp(tmp_path, monkeypatch):
     os.utime(cue_dst, (1.0, 1.0))
     s = launcher.Session.__new__(launcher.Session)
     s.cfg, s.cancel = cfg, threading.Event()
+    s.srcs = {rel: nas / rel for rel, _s, _m in g["files"]}        # pliki „z serwera”
     alive = threading.Event()
     s.copy_thread = threading.Thread(target=alive.wait, daemon=True)
     s.copy_thread.start()
     try:
-        base = s._stream(g, nas)
+        base = s._stream(g)
         assert base is not None
         assert (base / "Gra (USA).cue").read_bytes().startswith(b"FILE")
         with open(base / "Gra (USA).bin", "rb") as f:

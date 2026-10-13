@@ -87,7 +87,7 @@ class FakeUI:
         self.events.append(("in", a))
 
 
-def test_quicksave_and_exit_then_resume(env, monkeypatch):
+def test_quicksave_and_exit_then_resume(env, monkeypatch, server_files):
     cfg, roms, tmp = env
     _write(roms / "psx" / "Game (USA).chd", b"d" * 2000)
     scanner.scan_system("psx", roms / "psx")

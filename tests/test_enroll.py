@@ -131,7 +131,7 @@ def test_new_account_needs_admin_and_scopes_device(srv):
     # bez uprawnienia do gier
     assert _req(srv, "GET", "/v1/find?es=snes&rel=x.sfc", tok)[0] == 403
     # nie zmienia ustawień serwera
-    assert _req(srv, "PUT", "/v1/roots", tok, body={"roots": []})[0] == 403
+    assert _req(srv, "PUT", "/v1/roots", tok, body={"roots": []})[0] == 404     # foldery — tylko panel
 
 
 def test_existing_account_approved_by_own_device_not_by_other_user(srv):

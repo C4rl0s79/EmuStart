@@ -18,11 +18,9 @@ DEFAULTS: dict = {
     "rom_root": "",                 # stary klucz (jeden folder) — patrz rom_roots()
     "rom_roots": [],                # foldery z grami, kolejność = pierwszeństwo przy duplikatach
     "emu_root": "",
-    "profiles_nas": "",             # folder profili przez SMB ("" = brak; z serwerem — przez serwer)
+    "profiles_nas": "",             # serwer: folder profili graczy ("" → <serwer>\profiles)
     "cache_dir": "",                # "" → <program>\cache
     "cache_recent": 10,             # ile ostatnio uruchomionych gier trzymać
-    "network_mode": "auto",         # auto | lan | remote
-    "lan_threshold_mbps": 200,      # powyżej: LAN (gra płytowa wprost z NAS)
     "small_game_mb": 64,            # mniejsze gry zawsze najpierw do cache
     "fullscreen": True,
     "hide_arcade_clones": True,

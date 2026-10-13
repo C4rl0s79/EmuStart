@@ -1,4 +1,5 @@
-"""nasfs — folder profili na NAS-ie: przez serwer EmuStart (HTTP) albo przez SMB.
+"""nasfs — folder profili graczy: przez serwer EmuStart (HTTP, EmuStart na PC) albo na dysku
+(DirFs — EmuStart Server, jego własny folder profili).
 
 Ścieżki względem korzenia profili (`profiles_nas`, np. Z:\\emustart\\Profiles), zapisane
 z „/”: `Ania/save/pcsx2/memcards/Mcd001.ps2`.
@@ -170,10 +171,10 @@ def root_id(root: Path, create: bool) -> str:
 MOVED_MARK = ".emustart-moved"      # folder profili przeniesiony do katalogu serwera (srvadmin)
 
 
-class SmbFs:
-    """Folder profili przez SMB (albo dysk lokalny)."""
+class DirFs:
+    """Folder profili na dysku — po stronie EmuStart Server (jego folder profili)."""
 
-    name = "NAS"
+    name = "dysk"
 
     def __init__(self, root: Path):
         self.root = Path(root)
@@ -445,25 +446,41 @@ class RemoteFs:
         return json.loads(data)
 
 
-# ── wybór: serwer albo SMB ──
+# ── folder profili EmuStart na PC: przez serwer ──
+
+class OfflineFs:
+    """Bez zalogowania do serwera / serwer nieosiągalny przy starcie: tryb offline — zapisy
+    czekają w kolejce i wyślą się, gdy serwer odpowie."""
+
+    name = "serwer"
+
+    def online(self) -> bool:
+        return False
+
+    def profiles(self) -> list:
+        raise OSError("serwer EmuStart niedostępny")
+
+    def profile_op(self, op: str, q: dict) -> dict:
+        return {"ok": False, "error": "Serwer EmuStart jest niedostępny."}
+
+    def __getattr__(self, name):
+        def offline(*_a, **_k):
+            raise OSError("serwer EmuStart niedostępny")
+        return offline
+
 
 _choice: dict = {}
 _choice_lock = threading.Lock()
+OFFLINE = OfflineFs()
 
 
 def backend(cfg: dict):
-    """Folder profili. Z ustawionym serwerem EmuStart — tylko przez serwer (2.0: klienci bez
-    SMB); serwer chwilowo niedostępny = tryb offline (zapisy czekają w kolejce), nie SMB.
-    SMB tylko bez serwera albo ze starszym serwerem, który nie udostępnia folderu profili."""
+    """Folder profili graczy — przez serwer EmuStart (zapisy, stany, ustawienia, konta).
+    Bez zalogowania do serwera: tryb offline (zapisy czekają w kolejce)."""
     from emustart import netsrc
-    from emustart import profiles
-    smb = SmbFs(profiles.nas_root(cfg))
     ep = netsrc.endpoint(cfg)
-    if not ep or cfg.get("server_profiles", True) is False:
-        return smb
-    info = netsrc.info(cfg)
-    if info.get("ok") and "nas" not in info.get("features", []):
-        return smb                             # serwer sprzed 0.24 — folder profili tylko przez SMB
+    if not ep:
+        return OFFLINE
     with _choice_lock:
         hit = _choice.get(ep)
         if hit is None:

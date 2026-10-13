@@ -259,7 +259,7 @@ def test_settings_on_nas_separate_for_windows(tmp_path, monkeypatch):
     from emustart import nasfs, profiles
     nas = tmp_path / "nas"
     _write(nas / "Jezus" / "settings" / "retroarch" / "retroarch.cfg", b'video_smooth = "true"\n')
-    fs = nasfs.SmbFs(nas)
+    fs = nasfs.DirFs(nas)
     assert profiles._migrate_settings(fs, {"nas_name": "Jezus"}, "retroarch") >= 1
     assert (nas / "Jezus" / "settings" / "windows" / "retroarch" / "retroarch.cfg").read_bytes() == b'video_smooth = "true"\n'
     assert profiles._migrate_settings(fs, {"nas_name": "Jezus"}, "retroarch") == 0   # już jest

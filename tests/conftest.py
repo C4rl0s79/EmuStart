@@ -78,3 +78,15 @@ def _isolated_app(tmp_path_factory, monkeypatch):
     library._local.con = None
     yield
     library._local.con = None
+
+
+@pytest.fixture()
+def server_files(monkeypatch):
+    """EmuStart na PC pobiera gry tylko z serwera — w testach uruchamiania pliki „z serwera”
+    to pliki z folderu gry w teście (bez prawdziwego serwera)."""
+    from emustart import library, netsrc
+
+    def fake(cfg, g):
+        d = library.game_dir(g)
+        return {rel: d / rel for rel, _size, _mt in g["files"] if (d / rel).is_file()}
+    monkeypatch.setattr(netsrc, "sources", fake)

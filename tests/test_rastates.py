@@ -26,6 +26,7 @@ def _setup(tmp_path, monkeypatch, sort_core=True, by_content=False):
     monkeypatch.setattr(profiles, "LOCAL", tmp_path / "profiles")
     nasfs.reset()
     cfg = {"profiles_nas": str(tmp_path / "nas")}
+    monkeypatch.setattr(nasfs, "backend", lambda _cfg: nasfs.DirFs(tmp_path / "nas"))   # folder serwera
     phone = tmp_path / "nas" / "Jezus" / "states" / "shared" / "retroarch"
     return cfg, {"id": 1, "nas_name": "Jezus"}, _Ra(home), phone
 
@@ -81,7 +82,7 @@ def test_savemgr_flat_phone_state_not_guessed_when_ambiguous(tmp_path):
     _w(root / "Jezus/save/retroarch/states/Snes9x/Gra (USA).state", b"b")
     _w(root / "Jezus/save/retroarch/states/PUAE/Inna.state", b"c")
     _w(root / "Jezus/save/retroarch/states/PUAE/Inna2.state", b"c")
-    fs = nasfs.SmbFs(root)
+    fs = nasfs.DirFs(root)
     r = savemgr.copy(fs, "Jezus", "states/android/retroarch/Gra (USA).state", "windows", "retroarch", "snes", "Gra (USA)")
     assert not r["ok"] and "rdzeniu" in r["reason"]
     _w(root / "Jezus/states/android/retroarch/Snes9x/Gra (USA).state", b"t2")

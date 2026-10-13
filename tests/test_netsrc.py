@@ -44,7 +44,6 @@ def test_info_and_wrong_key(srv):
     assert i["ok"] and "find" in i["features"] and i["rtt"] < 1
     bad = {**cfg, "server_key": "zly"}
     assert netsrc.info(bad, fresh=True) == {"ok": False, "reason": "zły klucz serwera", "key_rejected": True}
-    assert netsrc.sources({**cfg, "server_games": False}, {"es": "psx"}) == {}
     assert netsrc.info({}, fresh=True)["ok"] is False
 
 
@@ -165,9 +164,9 @@ def test_remote_rejects_paths_outside_profiles(env, monkeypatch):
     assert not (tmp / "x").exists()
 
 
-def test_with_server_profiles_never_go_through_smb(env, monkeypatch):
-    """2.0: z ustawionym serwerem zapisy tylko przez serwer — także gdy przez SMB widać inny
-    folder albo serwer chwilowo nie odpowiada (wtedy tryb offline, nie SMB)."""
+def test_profiles_only_through_server(env, monkeypatch):
+    """Zapisy i konta tylko przez serwer; serwer nie odpowiada albo PC nie jest zalogowany —
+    tryb offline (zapisy czekają w kolejce)."""
     from emustart import nasfs
     cfg, tmp = _nas_server(env, monkeypatch, nas_name="inny")
     (tmp / "inny").mkdir()
@@ -177,7 +176,10 @@ def test_with_server_profiles_never_go_through_smb(env, monkeypatch):
     netsrc._info.clear(); nasfs.reset()
     fs = nasfs.backend(off)
     assert isinstance(fs, nasfs.RemoteFs) and not fs.online()
-    assert isinstance(nasfs.backend({"profiles_nas": str(tmp / "inny")}), nasfs.SmbFs)   # bez serwera
+    fs = nasfs.backend({"profiles_nas": str(tmp / "inny")})           # bez zalogowania
+    assert fs is nasfs.OFFLINE and not fs.online()
+    with pytest.raises(OSError):
+        fs.write("Jezus/save/x.srm", b"zapis")
 
 def test_push_all_sends_existing_local_saves(env, monkeypatch):
     from emustart import profiles

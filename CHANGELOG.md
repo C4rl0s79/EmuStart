@@ -40,6 +40,13 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   „Odśwież bibliotekę z serwera”), w opcjach systemu „Grafiki: pobierz brakujące”
   i „Skanuj ponownie”. Bez serwera grają gry już pobrane na komputer. Okładkę, zrzut,
   logo i opis jednej gry nadal można wybrać w opcjach gry — trafiają na serwer.
+- **EmuStart na PC działa tylko przez serwer — bez SMB.** Gry pobiera z serwera (także
+  przypięte — wcześniej przypinanie kopiowało wyłącznie przez SMB, więc na PC bez udziału nie
+  działało), zapisy, stany, ustawienia i konta — przez serwer, BIOS-y — z serwera. Serwer
+  niedostępny: grają gry już pobrane, a zapisy czekają w kolejce. Usunięte: start gry prosto
+  z NAS-a i „Graj teraz (z sieci)”, pomiar sieci, ustawienia „Tryb sieci”, „Próg LAN”, „Gry
+  z serwera”, „Zapisy i profile przez serwer”, przenoszenie folderu profilu na NAS-ie,
+  zgłaszanie folderów z grami z PC na serwer (foldery ustawia się w panelu serwera).
 - Serwer ma własny, mniejszy zestaw funkcji (emustart/srvapi.py) — nie uruchamia już
   obsługi padów, profili gracza i wysyłania zapisów, które są potrzebne tylko na PC.
 

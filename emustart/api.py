@@ -341,7 +341,6 @@ class Api:
             "configured": config.is_configured(cfg),
             "server": self._server_state(),
             "account": profiles.account_of_device(cfg),
-            "network_mode": cfg.get("network_mode", "auto"),
             "systems": self.list_systems(),
             "scan": dict(self._scan),
             "cache": cache.usage(cfg),
@@ -625,10 +624,6 @@ class Api:
         if self._session:
             self._session.abort()
 
-    def launch_play_now(self) -> None:
-        if self._session:
-            self._session.request_play_now()
-
     def launch_dismiss(self) -> None:
         s = self._session
         if s and s.phase in ("finished", "error", "cancelled"):
@@ -765,9 +760,10 @@ class Api:
 
         def run():
             try:
-                if not (rom_dir / g["rel"]).exists():
-                    return    # offline — dociągniemy przy następnym uruchomieniu gry
-                cache.copy_game(self._cfg, g, rom_dir, prog, cancel)
+                srcs = netsrc.sources(self._cfg, g)
+                if len(srcs) != len(g["files"]):
+                    return    # serwer niedostępny — dociągniemy przy następnym uruchomieniu gry
+                cache.copy_game(self._cfg, g, rom_dir, prog, cancel, srcs=srcs)
             except cache.Cancelled:
                 pass
             except Exception:
@@ -840,7 +836,7 @@ class Api:
     def _savemgr_ctx(self, g: dict):
         prof = profiles.get(self._profile) or {}
         if not prof.get("nas_name") or not profiles.nas_online(self._cfg):
-            return None, None, "Menedżer zapisów działa z profilem na NAS-ie / serwerze — NAS niedostępny."
+            return None, None, "Menedżer zapisów działa przez serwer EmuStart — serwer jest niedostępny."
         return nasfs.backend(self._cfg), prof["nas_name"], ""
 
     def save_manager(self, game_id: int) -> dict:
@@ -856,19 +852,17 @@ class Api:
         serial = ingame._serial(meta)
         stems = [Path(g["rel"]).stem, g["name"]]
         if g["rel"].lower().endswith(".zip"):
-            # RetroArch nazywa stan od ROM-u w środku ZIP-a — z kopii lokalnej, inaczej z NAS-a
+            # RetroArch nazywa stan od ROM-u w środku ZIP-a — z kopii lokalnej (gra pobrana)
             local = cache.local_path(self._cfg, g)
-            stems += savemgr.zip_stems(local if local.is_file() else library.game_dir(g) / g["rel"])
+            if local.is_file():
+                stems += savemgr.zip_stems(local)
         learned = [r["prefix"] for r in library.db().execute(
             "SELECT prefix FROM states WHERE game_id=?", (g["id"],))]
         stems += [p[:-len(".state")] for p in learned if p.endswith(".state")]
         try:
-            if isinstance(fs, nasfs.RemoteFs):
-                out = fs.savemgr_catalog({"profile": nas, "es": g["es"], "name": g["name"],
-                                          "stems": "|".join(stems), "serial": serial,
-                                          "learned": "|".join(learned)})
-            else:
-                out = savemgr.catalog(fs, nas, g["es"], g["name"], stems, serial, learned)
+            out = fs.savemgr_catalog({"profile": nas, "es": g["es"], "name": g["name"],
+                                      "stems": "|".join(stems), "serial": serial,
+                                      "learned": "|".join(learned)})
         except OSError as ex:
             return {"ok": False, "reason": f"Nie udało się odczytać zapisów: {ex}"}
         out["ok"] = True
@@ -877,7 +871,6 @@ class Api:
 
     def save_copy(self, game_id: int, rel: str, platform: str, emu: str) -> dict:
         """Kopia stanu na drugą platformę; na ten komputer — od razu do folderu emulatora."""
-        from emustart import savemgr
         g = library.game(int(game_id))
         if not g:
             return {"ok": False, "reason": "Nie ma takiej gry."}
@@ -885,11 +878,8 @@ class Api:
         if not fs:
             return {"ok": False, "reason": why}
         try:
-            if isinstance(fs, nasfs.RemoteFs):
-                out = fs.savemgr_copy({"profile": nas, "src": rel, "platform": platform, "emu": emu,
-                                       "es": g["es"], "name": g["name"], "device": socket.gethostname()})
-            else:
-                out = savemgr.copy(fs, nas, rel, platform, emu, g["es"], g["name"], socket.gethostname())
+            out = fs.savemgr_copy({"profile": nas, "src": rel, "platform": platform, "emu": emu,
+                                   "es": g["es"], "name": g["name"], "device": socket.gethostname()})
         except OSError as ex:
             return {"ok": False, "reason": f"Nie udało się skopiować: {ex}"}
         if out.get("ok") and platform == "windows":
@@ -1061,7 +1051,6 @@ class Api:
         profiles.align_account_name(self._cfg)
         lst = profiles.visible(self._cfg, profiles.all_profiles())
         for p in lst:
-            p["nas_wanted"] = profiles.nas_wanted(p)
             p["pin"] = profiles.pin_state(self._cfg, p["id"])
         # token konta i skrót PIN-u zostają w programie, nie w UI
         return {"profiles": [self._public_profile(p) for p in lst], "current": self._profile}
@@ -1157,10 +1146,6 @@ class Api:
         out["has_pin"] = bool(p.get("pin_hash"))
         return out
 
-    def profile_nas_rename(self, pid: int) -> dict:
-        reason = profiles.nas_rename(self._cfg, int(pid))
-        return {"ok": not reason, "reason": reason, "nas_name": (profiles.get(int(pid)) or {}).get("nas_name", "")}
-
     def profile_select(self, pid: int) -> dict:
         if not profiles.get(int(pid)):
             return {"ok": False}
@@ -1251,8 +1236,6 @@ class Api:
         return {"emu_root": cfg.get("emu_root", ""),
                 "cache_dir": str(config.cache_dir(cfg)),
                 "cache_recent": cfg.get("cache_recent", 10),
-                "network_mode": cfg.get("network_mode", "auto"),
-                "lan_threshold_mbps": cfg.get("lan_threshold_mbps", 200),
                 "fullscreen": cfg.get("fullscreen", True),
                 "hide_arcade_clones": cfg.get("hide_arcade_clones", True),
                 "games_logo": cfg.get("games_logo", False),
@@ -1268,8 +1251,6 @@ class Api:
                 "server_via": netsrc.current_kind(cfg),
                 "enroll": ({k: cfg["enroll_pending"].get(k) for k in ("url", "code", "account", "mode")}
                            if cfg.get("enroll_pending") else None),
-                "server_games": cfg.get("server_games", True),
-                "server_profiles": cfg.get("server_profiles", True),
                 **{k: bool(cfg.get(k)) for k in self.HIDE_KEYS},
                 "ask_profile": profiles.ask_at_start(),
                 "machine_profile": profiles.machine_owner(),
@@ -1433,24 +1414,16 @@ class Api:
 
     def save_settings(self, data: dict) -> dict:
         cfg = self._cfg
-        for k in ("emu_root", "network_mode"):
-            if k in data:
-                cfg[k] = str(data[k]).strip()
+        if "emu_root" in data:
+            cfg["emu_root"] = str(data["emu_root"]).strip()
         if "cache_dir" in data:
             cd = str(data["cache_dir"]).strip()
             cfg["cache_dir"] = "" if Path(cd) == paths.DEFAULT_CACHE else cd
-        for k in ("cache_recent", "lan_threshold_mbps"):
-            if k in data:
-                try:
-                    cfg[k] = max(1, int(data[k]))
-                except (TypeError, ValueError):
-                    pass
-        for k in ("server_games", "server_profiles"):
-            if k in data:
-                cfg[k] = bool(data[k])
-        if "server_profiles" in data:
-            nasfs.reset()
-            netsrc._info.clear()
+        if "cache_recent" in data:
+            try:
+                cfg["cache_recent"] = max(1, int(data["cache_recent"]))
+            except (TypeError, ValueError):
+                pass
         if data.get("pad_backend") in ("python", "browser", "none"):
             cfg["pad_backend"] = data["pad_backend"]
         for k in ("fullscreen", "hide_arcade_clones", "games_logo", *self.HIDE_KEYS):

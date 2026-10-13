@@ -482,7 +482,7 @@ async function updatePreview() {
     : d.pinned && d.cached ? '<span class="st-p">przypięta, lokalnie</span>'
     : d.pinned ? '<span class="st-p">przypięta (pobierze się)</span>'
     : d.cached ? '<span class="st-c">w pamięci podręcznej</span>'
-    : '<span class="st-n">na NAS</span>';
+    : '<span class="st-n">na serwerze</span>';
   $("pvMeta").innerHTML =
     `<dt>Status</dt><dd>${status}</dd>` +
     `<dt>Rozmiar</dt><dd>${fmtBytes(d.size)}${d.files > 1 ? ` · ${d.files} ${plural(d.files, "plik", "pliki", "plików")}` : ""}</dd>` +
@@ -633,10 +633,7 @@ async function updateLaunch() {
   const p = st.progress;
   const head = {
     preparing: "Przygotowuję…",
-    downloading: st.source && st.source !== "NAS"
-      ? `Pobieranie z ${st.source === "serwer" ? "serwera EmuStart" : "serwera EmuStart i NAS"}`
-      : st.mode === "remote" ? "Pobieranie z NAS (połączenie zdalne)"
-      : st.mode === "lan" ? "Kopiowanie z NAS" : "Kopiowanie do pamięci podręcznej",
+    downloading: S.platform === "android" || st.source ? "Pobieranie z serwera EmuStart" : "Kopiowanie do pamięci podręcznej",
     extracting: "Rozpakowuję do pamięci…",
     running: st.mode === "config" ? "Ustawienia emulatora — zamknij emulator, aby zapisać w profilu" : "Gra uruchomiona",
     finished: st.mode === "config" ? "Ustawienia zapisane w profilu" : "Koniec gry",
@@ -660,14 +657,12 @@ async function updateLaunch() {
   const msg = $("lMsg");
   msg.className = "lmsg" + (st.phase === "error" ? " err" : "");
   if (st.phase === "running") msg.textContent = !st.copying ? "Miłej gry!"
-    : st.mode === "stream" ? "Gra działa w trakcie pobierania — brakujące fragmenty dociągane na bieżąco."
-    : "Gra działa wprost z NAS, kopia do pamięci podręcznej trwa w tle.";
+    : "Gra działa w trakcie pobierania — brakujące fragmenty dociągane na bieżąco.";
   else if (st.phase === "downloading" && st.mode === "remote") msg.textContent = "Następnym razem gra uruchomi się od razu z dysku lokalnego.";
   else msg.textContent = st.message || "";
 
   const hints = [];
   if (st.phase === "downloading") {
-    if (st.can_play_now) hints.push(["x", "Graj teraz (z sieci)"]);
     hints.push(["b", "Anuluj"]);
   } else if (["error", "cancelled"].includes(st.phase)) {
     if (st.locked_by) hints.push(["y", "Przejmij profil i graj"]);
@@ -689,7 +684,6 @@ async function closeLaunch() {
 function launchInput(a) {
   const ph = lastLaunch.phase;
   if (ph === "downloading" && a === "b") api().launch_cancel();
-  else if (ph === "downloading" && a === "x" && lastLaunch.can_play_now) api().launch_play_now();
   else if (ph === "error" && a === "y" && lastLaunch.missing_core) {
     // telefon: RetroArch bez rdzenia — otwarcie RetroArcha (Online Updater → Core Downloader)
     const gid = lastLaunch.game_id;
@@ -991,7 +985,6 @@ async function startScan(after) {
 }
 
 /* ───────────── ustawienia ───────────── */
-const NET = { auto: "Automatycznie (pomiar)", lan: "Zawsze LAN (gra wprost z NAS)", remote: "Zawsze zdalnie (najpierw pobierz)" };
 
 async function openSettings(first) {
   S.settings = await api().get_settings();
@@ -1045,20 +1038,14 @@ function buildSetRows() {
   rows.push({ k: "Pamięć podręczna (pobrane gry)", key: "cache_dir", type: "path" });
   rows.push({ head: "Serwer EmuStart  ·  gry, zapisy i profile przez serwer (połączenie szyfrowane)" });
   serverRows(rows, c);
-  rows.push({ k: "Gry z serwera", key: "server_games", type: "bool",
-              fmt: (v) => (v ? "tak — 8 strumieni; gdy serwer nie ma gry albo nie odpowiada: SMB" : "nie — zawsze SMB") });
-  rows.push({ k: "Zapisy i profile przez serwer", key: "server_profiles", type: "bool",
-              fmt: (v) => (v ? "tak — kopie zapasowe robi serwer, pliki skompresowane; gdy serwer nie odpowiada: SMB" : "nie — zawsze SMB") });
   rows.push({ head: "Pamięć podręczna i sieć" });
   rows.push({ k: "Trzymaj ostatnie gry", key: "cache_recent", type: "num", step: 1, min: 1, max: 100, fmt: (v) => `${v} + przypięte` });
-  rows.push({ k: "Tryb sieci", key: "network_mode", type: "enum", opts: Object.keys(NET), fmt: (v) => NET[v] });
   rows.push({ k: "Graj w trakcie pobierania", key: "stream_play", type: "bool",
               fmt: (v) => c.winfsp !== "dostępny" ? `niedostępne — ${c.winfsp} (https://winfsp.dev)`
                 : v ? "tak — gra startuje od razu, brakujące fragmenty dociągane na bieżąco (WinFsp)" : "nie — najpierw pobranie" });
   rows.push({ k: "…gdy pobieranie potrwa dłużej niż", key: "stream_min_seconds", type: "num", step: 15, min: 0, max: 600,
               fmt: (v) => v ? `${v} s — krótsze pobranie: najpierw cała gra (przy 250 Mb/s ${Math.round(v * 250 / 8 / 1024 * 10) / 10} GB)`
                                 : "zawsze w trakcie pobierania" });
-  rows.push({ k: "Próg LAN", key: "lan_threshold_mbps", type: "num", step: 50, min: 50, max: 2000, fmt: (v) => `${v} Mb/s` });
   rows.push({ head: "Wygląd" });
   rows.push({ k: "Pełny ekran", key: "fullscreen", type: "bool", fmt: (v) => (v ? "tak" : "nie") + " (po restarcie)" });
   rows.push({ k: "Obsługa padów w menu", key: "pad_backend", type: "enum", opts: ["python", "browser", "none"],
@@ -1079,7 +1066,7 @@ function buildSetRows() {
   rows.push({ k: "Pytaj, kto gra, przy starcie", key: "ask_profile", type: "bool",
               fmt: (v) => (v ? "tak" : "nie (od razu profil tego komputera)") });
   rows.push({ k: "Ustawienia emulatorów osobno dla profilu", key: "profile_settings", type: "bool",
-              fmt: (v) => (v ? "tak (RetroArch, DuckStation, PCSX2 — kopia w profilu i na NAS)" : "nie (wspólne)") });
+              fmt: (v) => (v ? "tak (RetroArch, DuckStation, PCSX2 — kopia w profilu na serwerze)" : "nie (wspólne)") });
   rows.push({ head: "Akcje" });
   rows.push({ k: "Wykryj emulatory", type: "action", run: async () => { toast("Wykrywam emulatory…", 60000); const r = await api().autodetect(); if (!r.ok) return toast(r.reason, 4000); toast(`Przypisano emulatory: ${r.assigned}`); await openSettings(); } });
   rows.push({ k: "Pobierz brakujące emulatory", type: "action", run: () => askInstallMissing() });
@@ -1213,7 +1200,7 @@ async function refreshState() {
   if (st.conflicts?.length) {
     const c = st.conflicts[0];
     toast(`Konflikt save'ów (${c.profile}): ${c.file}${st.conflicts.length > 1 ? ` i ${st.conflicts.length - 1} innych` : ""} — ` +
-          "grano na dwóch komputerach bez NAS-a. Została nowsza wersja, druga jest w kopii zapasowej profilu.", 10000);
+          "grano na dwóch urządzeniach bez połączenia z serwerem. Została nowsza wersja, druga jest w kopii zapasowej profilu.", 10000);
   }
   return st;
 }

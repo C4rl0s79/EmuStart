@@ -16,7 +16,7 @@ from test_core import _write, env  # noqa: F401  (fixture)
 
 # ── profile ──
 
-@pytest.fixture(params=["nas", "serwer"])
+@pytest.fixture(params=["serwer"])
 def prof_env(env, monkeypatch, request):
     cfg, roms, tmp = env
     monkeypatch.setattr(profiles, "LOCAL", tmp / "profiles")

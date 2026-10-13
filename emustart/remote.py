@@ -203,7 +203,7 @@ def create_account(name: str) -> None:
     from emustart import nasfs
     if NAS_ROOT is None:
         return
-    fs = nasfs.SmbFs(NAS_ROOT)
+    fs = nasfs.DirFs(NAS_ROOT)
     if not fs.exists(f"{name}/emustart.json"):
         fs.write(f"{name}/emustart.json", b"{}")
     log.info("nowe konto %s", name)
@@ -265,7 +265,7 @@ def handle(handler) -> None:
     parts = [p for p in path.split("/") if p][1:]           # bez „v1”
     try:
         if parts == ["info"]:
-            feats = ["find", "system", "bios", "media", "library"] + (["nas", "roots", "savemgr", "profiles"] if NAS_ROOT else [])
+            feats = ["find", "system", "bios", "media", "library"] + (["nas", "savemgr", "profiles"] if NAS_ROOT else [])
             return _json(handler, {"name": socket.gethostname(), "version": __version__, "api": 1,
                                    "features": feats, "nas_id": NAS_ID, "endpoints": endpoints(),
                                    "tls": {"port": TLS["port"], "fp": TLS["fp"]} if TLS else None})
@@ -397,7 +397,7 @@ def handle_write(handler, method: str) -> None:
     _seen(handler)
     path = urllib.parse.unquote(urllib.parse.urlsplit(handler.path).path)
     parts = [p for p in path.split("/") if p][1:]
-    if method == "PUT" and parts in (["system"], ["roots"], ["media"]) and not _admin(handler):
+    if method == "PUT" and parts in (["system"], ["media"]) and not _admin(handler):
         n = int(handler.headers.get("Content-Length") or 0)
         if n:
             handler.rfile.read(min(n, 10 << 20))
@@ -406,8 +406,6 @@ def handle_write(handler, method: str) -> None:
         return _profiles_put(handler, parts[1])
     if method == "PUT" and parts == ["system"]:
         return _system_put(handler)
-    if method == "PUT" and parts == ["roots"]:
-        return _roots_put(handler)
     if method == "PUT" and parts == ["media"]:
         return _media_put(handler)
     if method == "PUT" and parts == ["savemgr", "copy"]:
@@ -437,50 +435,6 @@ def handle_write(handler, method: str) -> None:
             _json(handler, {"error": "błąd serwera (szczegóły w logu serwera)"}, 500)
         except OSError:
             pass
-
-
-def _roots_put(handler) -> None:
-    """Foldery z grami z EmuStart na Windows (względem udziału na NAS-ie, np. „WHDLoad”):
-    brakujące w ustawieniach serwera dopisujemy i skanujemy — telefon widzi to samo co PC.
-    Udział = folder nad emustart\\Profiles (ten sam, który klienci mają np. jako Z:)."""
-    from emustart import nasfs
-    n = int(handler.headers.get("Content-Length") or 0)
-    if n > 65536:
-        handler.close_connection = True
-        return _json(handler, {"error": "za dużo danych"}, 413)
-    try:
-        rels = json.loads(handler.rfile.read(n) or b"{}").get("roots") or []
-    except ValueError:
-        return _json(handler, {"error": "zły JSON"}, 400)
-    if NAS_ROOT is None:
-        return _json(handler, {"error": "serwer nie zna swojego udziału (brak folderu profili)"}, 404)
-    share = NAS_ROOT.parent.parent
-    cfg = API._cfg
-    have = {os.path.normcase(os.path.normpath(r)) for r in config.rom_roots(cfg)}
-    added, missing = [], []
-    for rel in rels[:64]:
-        try:
-            r = nasfs.clean_rel(str(rel))
-        except ValueError:
-            continue
-        d = share / r if r else share
-        if not d.is_dir():
-            missing.append(r)
-            continue
-        key = os.path.normcase(os.path.normpath(str(d)))
-        if key not in have:
-            have.add(key)
-            added.append(str(d))
-    if added:
-        cfg["rom_roots"] = config.rom_roots(cfg) + added
-        cfg["rom_root"] = cfg["rom_roots"][0]
-        config.save(cfg)
-        log.info("foldery z grami od klienta: %s — skanowanie", ", ".join(added))
-        try:
-            API.rescan()
-        except Exception:
-            log.exception("skanowanie nowych folderów")
-    return _json(handler, {"ok": True, "added": added, "missing": missing})
 
 
 def _media_put(handler) -> None:
@@ -731,7 +685,7 @@ def _profiles_put(handler, op: str) -> None:
     d = _body(handler)
     if NAS_ROOT is None:
         return _json(handler, {"error": "serwer nie ma folderu profili"}, 404)
-    fs = nasfs.SmbFs(NAS_ROOT)
+    fs = nasfs.DirFs(NAS_ROOT)
     wanted, pw = str(d.get("name") or "").strip(), str(d.get("password") or "")
     ip = public.client_ip(handler)
     existing = _find_account(wanted)
@@ -858,7 +812,7 @@ def _savemgr_catalog(handler) -> None:
         return _json(handler, {"error": "konto wymaga hasła", "pin": True}, 403)
     stems, serial = _savemgr_game(a["es"], a["name"])
     stems += [s for s in a.get("stems", "").split("|") if s]
-    out = savemgr.catalog(nasfs.SmbFs(NAS_ROOT), prof, a["es"], a["name"], stems,
+    out = savemgr.catalog(nasfs.DirFs(NAS_ROOT), prof, a["es"], a["name"], stems,
                           a.get("serial") or serial, [p for p in a.get("learned", "").split("|") if p])
     return _json(handler, out)
 
@@ -882,7 +836,7 @@ def _savemgr_copy(handler) -> None:
         return _json(handler, {"error": "brak profile"}, 400)
     if not (_scope_ok(handler, prof) and _profile_ok(handler, prof)):
         return _json(handler, {"error": "konto wymaga hasła", "pin": True}, 403)
-    out = savemgr.copy(nasfs.SmbFs(NAS_ROOT), prof, src, a.get("platform", ""), a.get("emu", ""),
+    out = savemgr.copy(nasfs.DirFs(NAS_ROOT), prof, src, a.get("platform", ""), a.get("emu", ""),
                        a.get("es", ""), a.get("name", ""), a.get("device", ""))
     return _json(handler, out)
 

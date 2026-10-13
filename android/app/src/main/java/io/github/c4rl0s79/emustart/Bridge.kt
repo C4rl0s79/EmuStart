@@ -100,7 +100,6 @@ class Bridge(private val act: MainActivity) {
         "launch_status" -> launchStatus()
         "launch_cancel" -> { launch?.downloader?.cancel?.set(true); null }
         "launch_dismiss" -> { val l = launch; if (l != null && l.phase in setOf("finished", "error", "cancelled")) launch = null; null }
-        "launch_play_now" -> null
         "toggle_pin" -> togglePin(a.getInt(0))
         "remove_local" -> removeLocal(a.getInt(0))
         "configure_emulator" -> configureEmulator(a.getInt(0))
@@ -1012,7 +1011,7 @@ class Bridge(private val act: MainActivity) {
         val o = JSONObject().put("phase", l.phase).put("message", l.message).put("mode", "remote")
             .put("title", l.game.optString("title")).put("tags", l.game.optString("tags"))
             .put("system", l.sys.optString("display")).put("game_id", l.game.optInt("id"))
-            .put("can_play_now", false).put("copying", false).put("locked_by", l.lockedBy)
+            .put("copying", false).put("locked_by", l.lockedBy)
             .put("missing_core", l.missingCore)
         l.progress?.let { o.put("progress", JSONObject(it.snapshot())) }
         return o

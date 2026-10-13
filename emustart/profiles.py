@@ -87,8 +87,8 @@ class ProfileExists(ValueError):
 
 
 def create(name: str, color: str = "", cfg: dict | None = None, password: str = "") -> dict:
-    """Nowy profil. Z serwerem — konto z hasłem (emustart/accounts.py); przez SMB — folder.
-    Nazwa zajęta na serwerze / NAS-ie albo tutaj → ProfileExists."""
+    """Nowy profil = konto na serwerze z hasłem (emustart/accounts.py); serwer niedostępny —
+    profil lokalny, konto powstanie z pierwszym zapisem. Nazwa zajęta → ProfileExists."""
     from emustart import pinauth
     _ensure_columns()
     name = name.strip()[:32]
@@ -102,15 +102,12 @@ def create(name: str, color: str = "", cfg: dict | None = None, password: str = 
         taken = pinauth.find(_nas_profiles(fs), name)
         if taken or local:
             raise ProfileExists(taken or local)
-        if isinstance(fs, nasfs.RemoteFs):
-            r = fs.profile_op("create", {"name": name, "password": password})
-            if r.get("exists"):
-                raise ProfileExists(r.get("name") or name)
-            if not r.get("ok"):
-                raise ValueError(r.get("error") or "Serwer nie założył konta.")
-            nas_name, token = r["name"], r["token"]
-        else:
-            fs.write(f"{nas_name}/emustart.json", b"{}")
+        r = fs.profile_op("create", {"name": name, "password": password})
+        if r.get("exists"):
+            raise ProfileExists(r.get("name") or name)
+        if not r.get("ok"):
+            raise ValueError(r.get("error") or "Serwer nie założył konta.")
+        nas_name, token = r["name"], r["token"]
     elif local:
         raise ProfileExists(local)
     with library.db() as c:
@@ -122,11 +119,8 @@ def create(name: str, color: str = "", cfg: dict | None = None, password: str = 
 
 
 def _nas_profiles(fs) -> list:
-    """Nazwy profili w folderze profili (serwer: /v1/profiles, SMB: foldery)."""
-    if isinstance(fs, nasfs.RemoteFs):
-        return [p["name"] for p in fs.profiles()]
-    return [n for n, d in fs.listdir("") if d and not n.startswith((".", "_"))
-            and not fs.exists(f"{n}/moved.json")]
+    """Nazwy kont (profili) na serwerze."""
+    return [p["name"] for p in fs.profiles()]
 
 
 # ── konto na serwerze (hasło) i PIN tego urządzenia ──
@@ -144,8 +138,6 @@ def account_state(cfg: dict, pid: int, fresh: bool = False) -> str:
     if not prof or not nas_online(cfg):
         return "ok"
     fs = nasfs.backend(cfg)
-    if not isinstance(fs, nasfs.RemoteFs):
-        return "ok"                       # bez serwera (SMB): kont z hasłem nie ma
     mine = account_of_device(cfg)
     own = bool(mine) and mine.lower() == prof["nas_name"].lower()
     try:
@@ -189,7 +181,7 @@ def account_login(cfg: dict, pid: int, password: str) -> tuple[bool, str]:
     if not prof:
         return False, "Nie ma takiego profilu."
     fs = nasfs.backend(cfg)
-    if not isinstance(fs, nasfs.RemoteFs):
+    if not fs.online():
         return False, "Konta z hasłem są na serwerze EmuStart — serwer jest niedostępny."
     r = fs.profile_op("login", {"name": prof["nas_name"], "password": password})
     if not r.get("ok"):
@@ -210,7 +202,7 @@ def account_password(cfg: dict, pid: int, password: str, old: str = "") -> tuple
     if why:
         return False, why
     fs = nasfs.backend(cfg)
-    if not isinstance(fs, nasfs.RemoteFs):
+    if not fs.online():
         return False, "Konta z hasłem są na serwerze EmuStart — serwer jest niedostępny."
     q = {"name": prof["nas_name"], "password": password, "old": old}
     r = fs.profile_op("password", q)
@@ -226,7 +218,7 @@ def account_password(cfg: dict, pid: int, password: str, old: str = "") -> tuple
 def account_join(cfg: dict, name: str, password: str) -> tuple[dict | None, str]:
     """Konto innego użytkownika (albo założone na innym urządzeniu) na tym urządzeniu — z hasłem."""
     fs = nasfs.backend(cfg)
-    if not isinstance(fs, nasfs.RemoteFs):
+    if not fs.online():
         return None, "Konta z hasłem są na serwerze EmuStart — serwer jest niedostępny."
     r = fs.profile_op("login", {"name": name, "password": password})
     if r.get("missing"):
@@ -531,13 +523,8 @@ def attach(pid: int, family: str, emu_dir: Path) -> None:
 
 # ── NAS ──
 
-def nas_root(cfg: dict) -> Path:
-    # bez ustawionego folderu — brak (nie „Z:\…” z pierwszej instalacji); SmbFs: niedostępny
-    return Path(cfg.get("profiles_nas") or "")
-
-
 def nas_online(cfg: dict) -> bool:
-    """Folder profili dostępny — przez serwer EmuStart albo SMB (nasfs.backend)."""
+    """Folder profili (konta na serwerze EmuStart) dostępny."""
     return nasfs.backend(cfg).online()
 
 
@@ -1004,32 +991,14 @@ def align_account_name(cfg: dict) -> None:
 
 
 def import_from_nas(cfg: dict) -> list:
-    """Zakłada profile dla folderów na NAS, których nie ma w bazie. Zwraca nazwy."""
+    """Zakłada profile dla kont na serwerze, których nie ma w bazie. Zwraca nazwy."""
     resolve_moves(cfg)
     fs = nasfs.backend(cfg)
     try:
-        if isinstance(fs, nasfs.RemoteFs):
-            # serwer zna wszystkie profile (też z PIN-em, do których bez tokenu nie zajrzymy)
-            return _import_names([p["name"] for p in fs.profiles()])
-        dirs = [name for name, is_dir in fs.listdir("") if is_dir and not name.startswith((".", "_"))]
+        # serwer zna wszystkie konta (też z hasłem, do których bez tokenu nie zajrzymy)
+        return _import_names([p["name"] for p in fs.profiles()])
     except (OSError, ValueError):
         return []
-    have = {p["nas_name"].lower() for p in all_profiles()} | {p["name"].lower() for p in all_profiles()}
-    added = []
-    for d in sorted(dirs, key=str.lower):
-        if d.lower() in have:
-            continue
-        try:
-            if not any(fs.exists(f"{d}/{sub}") for sub in ("save", "settings", "emustart.json", "retroachievements.json")):
-                continue
-            with library.db() as c:
-                c.execute("INSERT INTO profiles(name, nas_name, color) VALUES(?,?,?)", (d[:32], d, ""))
-            added.append(d)
-        except Exception:
-            log.exception("profil z NAS %s", d)
-    if added:
-        log.info("profile z NAS: %s", ", ".join(added))
-    return added
 
 
 def _import_names(names: list) -> list:
@@ -1403,45 +1372,6 @@ def resolve_moves(cfg: dict) -> int:
     return n
 
 
-def nas_rename(cfg: dict, pid: int) -> str:
-    """Przenosi folder profilu na NAS pod nazwę zgodną z nazwą profilu. '' = OK,
-    inaczej powód odmowy."""
-    prof = get(pid)
-    if not prof:
-        return "Nie ma takiego profilu."
-    new = nas_wanted(prof)
-    if new == prof["nas_name"]:
-        return ""
-    root = nas_root(cfg)
-    if not nasfs.SmbFs(root).online():
-        return "Zmiana folderu profilu wymaga dostępu do NAS-a przez sieć (SMB)."
-    old_dir, new_dir = root / prof["nas_name"], root / new
-    if new_dir.exists():
-        return f"Na NAS jest już folder „{new}”."
-    if library.db().execute("SELECT 1 FROM profiles WHERE nas_name=? AND id!=?", (new, pid)).fetchone():
-        return f"Folder „{new}” należy do innego profilu."
-    try:
-        cur = json.loads((old_dir / "lock").read_text(encoding="utf-8"))
-        if lock_active(cur):
-            return f"Profil właśnie gra na komputerze {cur.get('host', '?')}."
-    except (OSError, ValueError):
-        pass
-    try:
-        if old_dir.exists():
-            os.rename(old_dir, new_dir)
-            old_dir.mkdir()
-            (old_dir / MOVED).write_text(json.dumps({"to": new, "time": time.time(),
-                                                     "host": socket.gethostname()}), encoding="utf-8")
-        else:
-            new_dir.mkdir(parents=True)
-    except OSError as ex:
-        return f"Nie udało się przenieść folderu: {ex}"
-    with library.db() as c:
-        c.execute("UPDATE profiles SET nas_name=? WHERE id=?", (new, pid))
-    log.info("profil %s: folder na NAS %s → %s", prof["name"], old_dir.name, new)
-    return ""
-
-
 def _merge_rules(*maps) -> dict:
     out: dict = {}
     for m in maps:
@@ -1461,14 +1391,11 @@ SECRET_FILES = {
 
 
 def scrub_settings_copies(cfg: dict) -> int:
-    """Usuwa hasła/tokeny z kopii ustawień profili (lokalnie i na NAS, także
-    w _backup). Pliki emulatorów i profiles/_machine (ten komputer) zostają."""
+    """Usuwa hasła/tokeny z lokalnych kopii ustawień profili (także w _backup). Pliki
+    emulatorów i profiles/_machine (ten komputer) zostają."""
     from emustart import ingame
-    roots = [LOCAL]
-    if nasfs.SmbFs(nas_root(cfg)).online():
-        roots.append(nas_root(cfg))
     n = 0
-    for root in roots:
+    for root in [LOCAL]:
         try:
             files = [f for name in SECRET_FILES for f in root.rglob(name)]
         except OSError:

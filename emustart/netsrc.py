@@ -611,26 +611,24 @@ def info_nowait(cfg: dict) -> dict | None:
 
 def sources(cfg: dict, g: dict) -> dict:
     """{rel: RemoteFile} dla plików gry dostępnych na serwerze w tym samym rozmiarze.
-    Pusty słownik = wszystko jak dotąd przez SMB."""
-    if cfg.get("server_games", True) is False:
-        return {}
+    Pusty / niepełny = serwer niedostępny albo nie ma tej gry."""
     ep = endpoint(cfg)
     if not ep:
         return {}
     i = info(cfg)
     if not i.get("ok") or "find" not in i.get("features", []):
         if i.get("ok"):
-            log.info("serwer %s (EmuStart %s) nie umie szukać gier — zaktualizuj go; pobieranie przez SMB",
+            log.info("serwer %s (EmuStart %s) nie umie szukać gier — zaktualizuj go",
                      i.get("name"), i.get("version"))
         return {}
     q = urllib.parse.urlencode({"es": g["es"], "rel": g["rel"].replace("\\", "/")})
     try:
         st, body, _rtt = _request(ep, f"/v1/find?{q}", timeout=10)
     except (OSError, http.client.HTTPException) as ex:
-        log.info("serwer: szukanie %s: %s — SMB", g["title"], ex)
+        log.info("serwer: szukanie %s: %s", g["title"], ex)
         return {}
     if st != 200:
-        log.info("serwer nie ma gry %s (%s) — SMB", g["title"], st)
+        log.info("serwer nie ma gry %s (%s)", g["title"], st)
         return {}
     d = json.loads(body)
     remote = {f["path"].replace("\\", "/"): f["size"] for f in d.get("files", [])}
@@ -640,54 +638,6 @@ def sources(cfg: dict, g: dict) -> dict:
             out[rel] = RemoteFile(ep[0], ep[1], ep[2], int(d["id"]), rel, size)
     log.info("serwer %s: %d/%d plików gry %s", ep[0], len(out), len(g["files"]), g["title"])
     return out
-
-
-def share_rel(path: str) -> str | None:
-    """Ścieżka względem udziału sieciowego: Z:\\WHDLoad (Z: = \\\\nas\\EMU_ROMS) → „WHDLoad”."""
-    p = str(path)
-    if len(p) >= 2 and p[1] == ":":
-        if not _unc_of_drive(p[:2]):
-            return None                      # dysk lokalny — serwer go nie zobaczy
-        rest = p[2:]
-    elif p.startswith("\\\\"):
-        parts = p[2:].split("\\", 2)
-        if len(parts) < 2:
-            return None
-        rest = parts[2] if len(parts) > 2 else ""
-    else:
-        return None
-    return rest.replace("\\", "/").strip("/")
-
-
-def push_roots(cfg: dict) -> list:
-    """Foldery z grami z tego komputera → serwer (dopisuje brakujące i skanuje). Zwraca dodane."""
-    from emustart import config
-    ep = endpoint(cfg)
-    if not ep:
-        return []
-    i = info(cfg)
-    if not i.get("ok") or "roots" not in i.get("features", []):
-        return []
-    rels = [r for r in (share_rel(x) for x in config.rom_roots(cfg)) if r is not None]
-    if not rels:
-        return []
-    body = json.dumps({"roots": rels}).encode("utf-8")
-    c = conn(ep[0], ep[1], 20)
-    try:
-        c.request("PUT", "/v1/roots", body=body, headers={**auth_headers(ep[2]),
-                                                          "Content-Type": "application/json"})
-        r = c.getresponse()
-        d = json.loads(r.read() or b"{}")
-    except (OSError, http.client.HTTPException, ValueError) as ex:
-        log.info("foldery z grami na serwer: %s", ex)
-        return []
-    finally:
-        c.close()
-    if d.get("added"):
-        log.info("serwer dodał foldery z grami: %s", ", ".join(d["added"]))
-    if d.get("missing"):
-        log.info("serwer nie widzi folderów: %s", ", ".join(d["missing"]))
-    return d.get("added") or []
 
 
 def parse_login(text: str) -> dict:
@@ -781,20 +731,3 @@ def authed_post(cfg: dict, path: str, data: dict) -> dict:
             return {"ok": False, "reason": "Serwer ma starszą wersję EmuStart — zaktualizuj go (panel serwera)."}
         return d if isinstance(d, dict) else {"ok": False}
     return {"ok": False, "reason": "serwer nie przyjął klucza"}
-
-
-def on_lan(cfg: dict) -> bool:
-    i = info(cfg)
-    return bool(i.get("ok")) and i.get("rtt", 1) < LAN_RTT
-
-
-def _unc_of_drive(drive: str) -> str:
-    try:
-        import ctypes
-        buf = ctypes.create_unicode_buffer(1024)
-        n = ctypes.c_ulong(len(buf))
-        if ctypes.windll.mpr.WNetGetConnectionW(drive, buf, ctypes.byref(n)) == 0:
-            return buf.value
-    except (AttributeError, OSError):
-        pass
-    return ""

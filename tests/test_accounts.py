@@ -59,7 +59,7 @@ def test_wrong_passwords_slow_down_per_account_and_address():
     assert accounts.wait_left("Ola", "5.6.7.8") > 0 and accounts.wait_left("Ola", "9.9.9.9") == 0
 
 
-@pytest.fixture(params=["nas", "serwer"])
+@pytest.fixture(params=["serwer"])
 def penv(env, monkeypatch, request, tmp_path):
     cfg, roms, tmp = env
     monkeypatch.setattr(profiles, "LOCAL", tmp / "profiles")
