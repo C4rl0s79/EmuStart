@@ -1205,8 +1205,17 @@ async function refreshState() {
   return st;
 }
 
+let libVersion = null;
 async function pollCopies() {
   try {
+    // biblioteka z serwera zmieniła się w tle (grafiki, opisy, logo) — lista na nowo
+    const lv = S.state?.lib_version;
+    if (libVersion !== null && lv !== undefined && lv !== libVersion && !S.modal) {
+      await refreshState();
+      if (S.screen === "systems") renderSystems();
+      else if (S.screen === "games") openSystem(true);
+    }
+    if (lv !== undefined) libVersion = S.state.lib_version;
     const post = await api().post_status();
     $("syncInfo").textContent = post ? `⇅ wysyłam zapisy: ${post}` : "";
     $("syncInfo").classList.toggle("hidden", !post);

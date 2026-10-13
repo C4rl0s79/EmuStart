@@ -53,8 +53,9 @@ class Api:
         launcher.start_post(lambda: profiles.push_all(self._cfg), "zapisy profili")
         threading.Thread(target=self._profiles_bootstrap, daemon=True, name="profiles").start()
         from emustart import libsync
-        if libsync.thin(self._cfg):            # biblioteka z serwera przy starcie (tylko zmienione systemy)
-            threading.Thread(target=self._thin_sync, daemon=True, name="biblioteka-serwera").start()
+        self._lib_version = 0                  # rośnie, gdy biblioteka z serwera się zmieniła (UI przerysowuje)
+        if libsync.thin(self._cfg):            # biblioteka z serwera przy starcie i co 5 minut (zmienione systemy)
+            threading.Thread(target=self._thin_loop, daemon=True, name="biblioteka-serwera").start()
         threading.Thread(target=self._platforms_meta, daemon=True, name="platforms").start()
         # Menu w grze: stan czyta UI (ingame_poll), Python niczego nie wywołuje
         # w oknie. evaluate_js przy grze na pełnym ekranie potrafiło czekać 20 s
@@ -338,6 +339,7 @@ class Api:
             "version": __version__,
             "configured": config.is_configured(cfg),
             "server": self._server_state(),
+            "lib_version": getattr(self, "_lib_version", 0),
             "account": profiles.account_of_device(cfg),
             "systems": self.list_systems(),
             "scan": dict(self._scan),
@@ -903,17 +905,28 @@ class Api:
         return {"ok": True}
 
     def meta_fetch(self, game_id: int, full: bool = False) -> dict:
-        """Opisy z sieci w tle; UI odpytuje game_detail. `full` = także TheGamesDB
-        (limit miesięczny — tylko na wyraźne żądanie z opcji gry)."""
+        """Opis gry z serwera (serwer pobiera go z sieci, gdy go nie ma) → lokalna kopia.
+        UI odpytuje game_detail."""
         g = library.game(int(game_id))
         if not g:
             return {"ok": False}
 
         def run():
+            import json as _json
+            from emustart import libsync
             try:
-                metadata.fetch_online(self._cfg, g, tgdb=bool(full))
-            except Exception:
-                log.exception("metadane %s", g["name"])
+                files, _deps = netsrc.find(self._cfg, g)
+                sid = next(iter(files.values())).gid if files else 0
+                if not sid:
+                    return
+                d = libsync._get(self._cfg, f"/v1/games/{sid}", 15)
+                if d.get("meta_online") and d.get("meta"):
+                    with library.db() as c:
+                        c.execute("INSERT OR REPLACE INTO game_meta(game_id, data, edits, online, updated) "
+                                  "VALUES(?,?,?,?,?)", (g["id"], _json.dumps(d["meta"], ensure_ascii=False),
+                                                         "{}", 1, time.time()))
+            except Exception as ex:
+                log.info("opis %s z serwera: %s", g["name"], ex)
         threading.Thread(target=run, daemon=True, name="meta").start()
         return {"ok": True}
 
@@ -1138,7 +1151,20 @@ class Api:
         r = libsync.sync(self._cfg, force=force)
         if r.get("ok") and self._cfg.get("emu_root"):
             self.autodetect()
+        if r.get("changed"):
+            self._lib_version += 1
         return r
+
+    def _thin_loop(self) -> None:
+        """Przy starcie i co 5 minut: zmiany z serwera (grafiki, opisy, logo, nowe gry — także
+        ustawione przez administratora na innym urządzeniu). W trakcie gry — bez sieci."""
+        while True:
+            if not (self._session and self._session.phase in ("preparing", "downloading", "extracting", "running")):
+                try:
+                    self._thin_sync()
+                except Exception:
+                    log.exception("biblioteka z serwera")
+            time.sleep(300)
 
     def rescan(self) -> dict:
         """Odświeżenie biblioteki z serwera (Start → Odśwież bibliotekę z serwera)."""

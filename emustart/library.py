@@ -146,7 +146,8 @@ def db() -> sqlite3.Connection:
             ("src", "TEXT NOT NULL DEFAULT ''"),          # kilka folderów z grami
             ("art_logo", "INTEGER NOT NULL DEFAULT 0"),   # logo gry (Clear Logo) — od 0.9.0
             ("trans", "TEXT NOT NULL DEFAULT ''"),        # tłumaczenia jako wersje gier — od 0.30.0
-            ("tbase", "TEXT NOT NULL DEFAULT ''")])
+            ("tbase", "TEXT NOT NULL DEFAULT ''"),
+            ("art_m", "TEXT NOT NULL DEFAULT ''")])         # PC: czasy grafik na serwerze (JSON)
         with _migrate_lock:
             con.execute("BEGIN IMMEDIATE")
             if not con.execute("SELECT 1 FROM profiles").fetchone():
@@ -164,6 +165,25 @@ def meta_get(key: str, default: str = "") -> str:
 def meta_set(key: str, value: str) -> None:
     with db() as c:
         c.execute("INSERT OR REPLACE INTO meta(key,value) VALUES(?,?)", (key, value))
+
+
+def bump_rev(es: str) -> None:
+    """Zmiana grafiki albo opisu w systemie (serwer): urządzenia pobiorą ten system od nowa."""
+    if es:
+        meta_set(f"rev:{es}", repr(time.time()))
+
+
+def bump_rev_game(game_id: int) -> None:
+    r = db().execute("SELECT es FROM games WHERE id=?", (game_id,)).fetchone()
+    if r:
+        bump_rev(r["es"])
+
+
+def rev(es: str) -> float:
+    try:
+        return float(meta_get(f"rev:{es}", "0") or 0)
+    except ValueError:
+        return 0.0
 
 
 # ── gry ──
@@ -298,6 +318,7 @@ def set_art(game_id: int, kind: str, state: int) -> None:
     col = {"box": "art_box", "snap": "art_snap", "logo": "art_logo"}[kind]
     with db() as c:
         c.execute(f"UPDATE games SET {col}=? WHERE id=?", (state, game_id))
+    bump_rev_game(game_id)
 
 
 # ── historia gry ──

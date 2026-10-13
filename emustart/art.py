@@ -49,6 +49,8 @@ def rename(es: str, old: str, new: str) -> int:
                 n += 1
         except OSError as ex:
             log.warning("grafika %s → %s: %s", src.name, dst.name, ex)
+    if n:
+        library.bump_rev(es)
     return n
 
 

@@ -257,6 +257,16 @@ class ServerApi:
         threading.Thread(target=run, daemon=True, name="meta").start()
         return {"ok": True}
 
+    def meta_auto(self, game_id: int) -> None:
+        """Urządzenie oglądało grę bez opisu z sieci — pobranie w tle (bez TheGamesDB, który
+        ma limit miesięczny), najwyżej raz na godzinę dla gry."""
+        import time
+        asked = self.__dict__.setdefault("_meta_asked", {})
+        if time.monotonic() - asked.get(game_id, -1e9) < 3600:
+            return
+        asked[game_id] = time.monotonic()
+        self.meta_fetch(game_id, False)
+
     def meta_save(self, game_id: int, edits: dict) -> dict:
         clean = {k: str(v)[:20000] for k, v in (edits or {}).items() if k in META_FIELDS and str(v).strip()}
         metadata.set_edits(int(game_id), clean)

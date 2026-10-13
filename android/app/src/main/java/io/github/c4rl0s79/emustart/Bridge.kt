@@ -988,8 +988,11 @@ class Bridge(private val act: MainActivity) {
             // ustawienia i konto RetroAchievements profilu w RetroArchu (osobno od komputera,
             // wspólne dla telefonów); ArmSX2 trzyma swoje we własnych ustawieniach — bez zmian
             var raCfg: String? = null
-            if (prefs.profile.isNotEmpty() && Emulators.baseId(emu) == "retroarch")
-                raCfg = emuProfile.retroarchBefore(prefs.profile, Emulators.raConfig(act, emu))?.absolutePath
+            if (Emulators.baseId(emu) == "retroarch") {
+                val original = Emulators.raConfig(act, emu)
+                raCfg = (if (prefs.profile.isNotEmpty()) emuProfile.retroarchBefore(prefs.profile, original) else null)
+                    ?.absolutePath ?: emuProfile.retroarchBase(original)?.absolutePath
+            }
             val intent = Emulators.intent(act, emu, main, l.sys.optString("plat"), l.sys.optString("core"), raCfg)
             l.startedAt = System.currentTimeMillis()
             l.phase = "running"

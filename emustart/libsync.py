@@ -67,6 +67,10 @@ def sync(cfg: dict, progress=None, force: bool = False) -> dict:
         except PermissionError as ex:
             return {"ok": False, "reason": str(ex)}
         local = {r["es"]: r for r in (dict(x) for x in library.db().execute("SELECT es, scanned FROM systems"))}
+        try:
+            old_rec = json.loads(library.meta_get("server_emu_rec", "{}") or "{}")
+        except ValueError:
+            old_rec = {}
         changed = games = 0
         rec = {}
         for i, s in enumerate(remote):
@@ -94,6 +98,7 @@ def sync(cfg: dict, progress=None, force: bool = False) -> dict:
                     c.execute("DELETE FROM games WHERE es=?", (es,))
                     c.execute("DELETE FROM systems WHERE es=?", (es,))
         library.meta_set("server_emu_rec", json.dumps(rec))
+        _drop_changed_logos(old_rec, rec)
         if progress:
             progress("Gotowe", len(remote), len(remote))
         log.info("biblioteka z serwera: %d systemów (%d zmienionych), %d gier", len(remote), changed, games)
@@ -109,8 +114,50 @@ COLS = ("rel", "name", "title", "tags", "files", "size", "is_dir", "multidisc", 
         "trans", "tbase", "art_box", "art_snap", "art_logo")
 
 
+def _drop_changed_logos(old: dict, new: dict) -> None:
+    """Logo systemu zmienione na serwerze (inny adres / wersja) — lokalna kopia od nowa."""
+    from emustart import paths
+    for es, r in new.items():
+        before = (old.get(es) or {}).get("logo", "")
+        if before and before != r.get("logo") and before.startswith("/media/"):
+            f = paths.MEDIA / urllib.parse.unquote(before.split("?")[0][len("/media/"):])
+            try:
+                f.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
+def _drop_changed_art(es: str, rows: list) -> int:
+    """Grafiki gier zmienione na serwerze (inny czas pliku) — lokalna kopia usunięta, przy
+    wyświetleniu pobierze się nowa. Zwraca liczbę usuniętych."""
+    from emustart import art
+    old = {r["rel"]: (r["name"], r["art_m"]) for r in library.db().execute(
+        "SELECT rel, name, art_m FROM games WHERE es=?", (es,))}
+    n = 0
+    for r in rows:
+        prev = old.get(r["rel"])
+        if not prev:
+            continue
+        try:
+            before = json.loads(prev[1] or "{}")
+        except ValueError:
+            before = {}
+        now = r.get("art_m") or {}
+        for kind in ("box", "snap", "logo"):
+            if before.get(kind) != now.get(kind) or prev[0] != r["name"]:
+                f = art.media_path(es, prev[0], kind)
+                if f.exists():
+                    try:
+                        f.unlink()
+                        n += 1
+                    except OSError:
+                        pass
+    return n
+
+
 def _write(es: str, s: dict, rows: list) -> None:
     now = time.time()
+    _drop_changed_art(es, rows)
     data = []
     for r in rows:
         files = r.get("files")
@@ -118,18 +165,25 @@ def _write(es: str, s: dict, rows: list) -> None:
                      files if isinstance(files, str) else json.dumps(files or []), int(r.get("size") or 0),
                      int(r.get("is_dir") or 0), int(r.get("multidisc") or 0), r.get("parent", ""),
                      int(r.get("hidden") or 0), now, SERVER_SRC, r.get("trans", ""), r.get("tbase", ""),
-                     int(r.get("art_box") or 0), int(r.get("art_snap") or 0), int(r.get("art_logo") or 0)))
+                     int(r.get("art_box") or 0), int(r.get("art_snap") or 0), int(r.get("art_logo") or 0),
+                     json.dumps(r.get("art_m") or {})))
     with library.db() as c:
         c.executemany("""
             INSERT INTO games(es, rel, name, title, tags, files, size, is_dir, multidisc, parent,
-                              hidden, seen, src, trans, tbase, art_box, art_snap, art_logo)
-            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                              hidden, seen, src, trans, tbase, art_box, art_snap, art_logo, art_m)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(es, rel) DO UPDATE SET
               name=excluded.name, title=excluded.title, tags=excluded.tags, files=excluded.files,
               size=excluded.size, is_dir=excluded.is_dir, multidisc=excluded.multidisc,
               parent=excluded.parent, hidden=excluded.hidden, seen=excluded.seen, src=excluded.src,
               trans=excluded.trans, tbase=excluded.tbase, art_box=excluded.art_box,
-              art_snap=excluded.art_snap, art_logo=excluded.art_logo""", data)
+              art_snap=excluded.art_snap, art_logo=excluded.art_logo, art_m=excluded.art_m""", data)
+        # opisy i dane gier z serwera (serwer jest źródłem prawdy — PC sam ich nie szuka)
+        ids = {r["rel"]: r["id"] for r in c.execute("SELECT id, rel FROM games WHERE es=?", (es,))}
+        meta = [(ids[r["rel"]], json.dumps(r["meta"].get("data") or {}, ensure_ascii=False),
+                 json.dumps(r["meta"].get("edits") or {}, ensure_ascii=False), 1, now)
+                for r in rows if r.get("meta") and r["rel"] in ids]
+        c.executemany("INSERT OR REPLACE INTO game_meta(game_id, data, edits, online, updated) VALUES(?,?,?,?,?)", meta)
         gone = [r["id"] for r in c.execute("SELECT id FROM games WHERE es=? AND seen<?", (es, now))]
         for j in range(0, len(gone), 500):
             chunk = gone[j:j + 500]
@@ -211,13 +265,33 @@ def server_systems() -> list:
         sc = ((remote.API._cfg.get("systems") or {}).get(r["es"]) or {}) if remote.API else {}
         from emustart import logos
         lg = logos.url_for(r["es"], remote.API._cfg) if remote.API else {"url": "", "glow": False}
+        # wersja systemu: skan albo ostatnia zmiana grafiki / opisu — urządzenia pobiorą go od nowa
         out.append({"es": r["es"], "display": sc.get("name") or r["display"], "games": r["games"],
-                    "scanned": r["scanned"], "emu_rec": sc.get("emu_rec", ""), "core": sc.get("core_rec", ""),
+                    "scanned": max(float(r["scanned"] or 0), library.rev(r["es"])),
+                    "emu_rec": sc.get("emu_rec", ""), "core": sc.get("core_rec", ""),
                     "logo": lg["url"], "logo_glow": bool(lg["glow"])})
     return out
 
 
 def server_games(es: str) -> list:
-    cols = ", ".join(COLS)
-    return [dict(r) for r in library.db().execute(f"SELECT {cols} FROM games WHERE es=?", (es,))]
+    """Gry systemu dla PC: kolumny biblioteki, czasy grafik (PC podmienia zmienione) i opisy."""
+    import os
+    from emustart import art
+    cols = ", ".join(f"g.{c}" for c in COLS)
+    out = []
+    for r in library.db().execute(f"SELECT {cols}, m.data AS m_data, m.edits AS m_edits FROM games g "
+                                  "LEFT JOIN game_meta m ON m.game_id=g.id WHERE g.es=?", (es,)):
+        d = {c: r[c] for c in COLS}
+        art_m = {}
+        for kind in ("box", "snap", "logo"):
+            if r[f"art_{kind}"] == art.HAS:
+                try:
+                    art_m[kind] = int(os.stat(art.media_path(es, r["name"], kind)).st_mtime)
+                except OSError:
+                    pass
+        d["art_m"] = art_m
+        if r["m_data"] or r["m_edits"]:
+            d["meta"] = {"data": json.loads(r["m_data"] or "{}"), "edits": json.loads(r["m_edits"] or "{}")}
+        out.append(d)
+    return out
 

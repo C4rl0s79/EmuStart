@@ -322,6 +322,8 @@ def handle(handler) -> None:
             d = API.game_detail(int(parts[1]), use_variant=False)
             if not d:
                 return _json(handler, {"error": "nie ma takiej gry"}, 404)
+            if not d.get("meta_online") and hasattr(API, "meta_auto"):
+                API.meta_auto(int(parts[1]))           # opis z sieci w tle — przy następnym pytaniu jest
             from emustart import library
             g = library.game(int(parts[1]))
             # ścieżki z „/” — Android traktuje „\\” jako znak w nazwie pliku (EPERM)

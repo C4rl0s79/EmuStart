@@ -289,6 +289,7 @@ def _store(game_id: int, data: dict | None = None, edits: dict | None = None,
         c.execute("INSERT OR REPLACE INTO game_meta(game_id, data, edits, online, updated) VALUES(?,?,?,?,?)",
                   (game_id, json.dumps(d, ensure_ascii=False), json.dumps(e, ensure_ascii=False),
                    o, time.time()))
+    library.bump_rev_game(game_id)
 
 
 def set_edits(game_id: int, edits: dict) -> None:
@@ -298,8 +299,11 @@ def set_edits(game_id: int, edits: dict) -> None:
 
 
 def ensure_local(cfg: dict, game: dict) -> dict:
-    """Dane z rdb (offline, natychmiast) — przy pierwszym podglądzie gry."""
+    """Dane z rdb (offline, natychmiast) — przy pierwszym podglądzie gry. EmuStart na PC
+    zalogowany do serwera — opisy z serwera (synchronizacja biblioteki), bez szukania tutaj."""
     m = get(game["id"])
+    if _from_server(cfg):
+        return m
     if "_auto" in m and m["_auto"].get("_rdb_checked"):
         return m
     rec = rdb_lookup(cfg, game)
@@ -311,6 +315,8 @@ def prepare_system(cfg: dict, es: str) -> int:
     """Dane z rdb dla wszystkich gier systemu, które ich jeszcze nie mają —
     jedna transakcja (filtrowanie listy gier potrzebuje metadanych od razu).
     Zwraca liczbę uzupełnionych gier."""
+    if _from_server(cfg):
+        return 0                          # PC: opisy i dane do filtrów przychodzą z serwera
     con = library.db()
     rows = con.execute("""SELECT g.id, g.es, g.name, g.rel, m.data, m.edits, m.online
                           FROM games g LEFT JOIN game_meta m ON m.game_id=g.id
@@ -343,7 +349,13 @@ def prepare_system(cfg: dict, es: str) -> int:
         with con:
             con.executemany("INSERT OR REPLACE INTO game_meta(game_id, data, edits, online, updated) "
                             "VALUES(?,?,?,?,?)", todo)
+        library.bump_rev(es)
     return len(todo)
+
+
+def _from_server(cfg: dict) -> bool:
+    """EmuStart na PC zalogowany do serwera (serwer ma opisy; sam niczego nie szuka)."""
+    return bool(cfg.get("server_url") and cfg.get("server_key"))
 
 
 FIELDS_FILTER = ("genre", "year", "players", "developer", "publisher", "title")

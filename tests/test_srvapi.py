@@ -101,3 +101,29 @@ def test_recommended_emulator_set_in_panel(tmp_path):
         assert rec["emu_rec"] == "retroarch" and rec["core"] == "bsnes"
     finally:
         remote.API = None
+
+
+def test_server_version_grows_with_art_and_description_changes(tmp_path, monkeypatch):
+    """Zmiana grafiki albo opisu podbija wersję systemu — urządzenia pobierają go od nowa;
+    biblioteka dla PC niesie czasy grafik i opisy."""
+    from emustart import art_sources, libsync, remote, scanner
+    _write(tmp_path / "roms" / "snes" / "A (USA).sfc")
+    scanner.scan_system("snes", tmp_path / "roms" / "snes")
+    s = srvapi.ServerApi(start_background=False)
+    remote.API = s
+    try:
+        v1 = libsync.server_systems()[0]["scanned"]
+        gid = s.games_search("A")[0]["id"]
+        png = bytes([0x89]) + b"PNG" + bytes([13, 10, 26, 10]) + b"0" * 64
+        monkeypatch.setattr(art_sources, "fetch", lambda url, **k: png)
+        import time
+        time.sleep(0.01)
+        assert s.art_choose(gid, "box", "https://x/a.png")["ok"]
+        v2 = libsync.server_systems()[0]["scanned"]
+        assert v2 > v1
+        s.meta_save(gid, {"description": "Opis"})
+        assert libsync.server_systems()[0]["scanned"] >= v2
+        row = libsync.server_games("snes")[0]
+        assert row["art_m"].get("box") and row["meta"]["edits"] == {"description": "Opis"}
+    finally:
+        remote.API = None

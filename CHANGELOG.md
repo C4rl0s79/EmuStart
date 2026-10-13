@@ -61,6 +61,18 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   w swoich folderach z grami, więc emulator zgłaszał brak plików. Teraz serwer podaje je
   razem z grą, a PC pobiera je obok gry (także przy przypinaniu), jak telefon.
 
+- **Serwer jest źródłem prawdy dla grafik, opisów i logo — urządzenia trzymają lokalną
+  kopię** (szybki interfejs) i odświeżają ją same: każda zmiana grafiki albo opisu na
+  serwerze podbija wersję systemu; PC co 5 minut (i przy starcie) pobiera zmienione systemy,
+  zapisuje opisy z serwera, a zmienione grafiki i logo systemów pobiera od nowa przy
+  wyświetleniu. Lista na ekranie odświeża się sama. Telefon ma grafiki z wersją w adresie.
+  Wcześniej PC pobierał system tylko po ponownym skanie na serwerze, a raz pobraną grafikę
+  trzymał na zawsze.
+- **Opisy gier szuka serwer** — gdy urządzenie ogląda grę bez opisu, serwer pobiera go w tle
+  (PC wcześniej szukał sam).
+- **Android: RetroArch zamyka się po zamknięciu gry** („Quit on Close Content: CLI”) — wcześniej
+  zostawał w tle z menu. Stany gry RetroArcha mają obrazek (podgląd stanu).
+
 ### Dodane
 - **Panel serwera: zakładki** (Stan, Konfiguracja, Urządzenia i konta, Aktualizacja).
 - **Panel serwera → Konfiguracja → Foldery**: foldery z grami (kilka, z kolejnością), BIOS-y,
