@@ -260,6 +260,12 @@ class _Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(data)
             return
+        if base == ROUTES.get("/assets/") and rel.startswith("systems/") and rel.count("/") == 1:
+            from emustart import mediastore            # wbudowane logo platform (assets/systems.media)
+            data = mediastore.bundled_get(rel[len("systems/"):])
+            if data is None:
+                return self.send_error(404)
+            return self._send_bytes(data, "image/png")
         if base == ROUTES.get("/media/"):
             from emustart import mediastore
             where = mediastore.file_name(rel)

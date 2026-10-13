@@ -224,6 +224,43 @@ def _rmdir_if_empty(d: Path) -> None:
         pass
 
 
+# ── wbudowane logo platform (w programie: assets/systems.media, tylko do odczytu) ──
+_bundled: dict = {}
+_bundled_lock = threading.Lock()
+
+
+def bundled_names() -> set:
+    """Nazwy wbudowanych logo (np. 'PSX.png'). Ze źródeł (bez zbudowanego pliku) — pliki PNG."""
+    if "names" not in _bundled:
+        db = paths.ASSETS / "systems.media"
+        names: set = set()
+        if db.is_file():
+            try:
+                con = sqlite3.connect(f"file:{db.as_posix()}?mode=ro", uri=True, check_same_thread=False)
+                names = {r[0] for r in con.execute("SELECT file FROM art")}
+                _bundled["con"] = con
+            except sqlite3.Error as ex:
+                log.warning("wbudowane logo: %s", ex)
+        else:
+            names = {f.name for f in (paths.ASSETS / "systems").glob("*.png")}
+        _bundled["names"] = names
+    return _bundled["names"]
+
+
+def bundled_get(file: str) -> bytes | None:
+    if file not in bundled_names():
+        return None
+    con = _bundled.get("con")
+    if con is not None:
+        with _bundled_lock:                     # jedno połączenie, wiele wątków serwera
+            r = con.execute("SELECT data FROM art WHERE file=?", (file,)).fetchone()
+        return bytes(r[0]) if r else None
+    try:
+        return (paths.ASSETS / "systems" / file).read_bytes()
+    except OSError:
+        return None
+
+
 def migrate_later() -> None:
     def run():
         try:

@@ -190,3 +190,25 @@ def test_media_store_one_file_per_system_and_migration(tmp_path):
     (paths.MEDIA / "_systems" / "gb.none").write_bytes(b"")
     assert mediastore.migrate() == 2 and not (paths.MEDIA / "_systems").exists()
     assert mediastore.get("_systems", "psx.custom.svg")[0] == b"<svg/>" and mediastore.exists("_systems", "gb.none")   # „brak logo” też
+
+
+def test_bundled_platform_logos_in_one_file(tmp_path, monkeypatch):
+    """Wbudowane logo platform w programie — jeden plik assets/systems.media (zamiast 40 PNG
+    w _internal); adresy /assets/systems/<kod>.png bez zmian."""
+    import sys as _sys
+    import urllib.request
+    from emustart import logos, mediastore, paths, server
+    _sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from tools.pack_assets import build
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "PSX.png").write_bytes(b"\x89PNG logo psx")
+    assets = tmp_path / "assets"
+    assert build(src, assets / "systems.media") == 1
+    monkeypatch.setattr(paths, "ASSETS", assets)
+    monkeypatch.setitem(server.ROUTES, "/assets/", assets)
+    monkeypatch.setattr(mediastore, "_bundled", {})
+    assert logos.bundled("PSX") == "/assets/systems/PSX.png" and logos.bundled("NIEMA") == ""
+    assert not (assets / "systems").exists()                          # bez osobnych plików
+    base = server.start(0)
+    assert urllib.request.urlopen(base + "/assets/systems/PSX.png", timeout=10).read() == b"\x89PNG logo psx"

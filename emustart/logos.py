@@ -17,7 +17,7 @@ import re
 import threading
 from pathlib import Path
 
-from emustart import art_sources, paths, systems
+from emustart import art_sources, systems
 
 log = logging.getLogger("emustart.logos")
 
@@ -55,8 +55,9 @@ def drop(es: str) -> None:
 
 
 def bundled(plat: str) -> str:
+    from emustart import mediastore
     for key in (plat, _ALIAS.get(plat, "")):
-        if key and (paths.ASSETS / "systems" / f"{key}.png").is_file():
+        if key and f"{key}.png" in mediastore.bundled_names():
             return f"/assets/systems/{key}.png"
     return ""
 

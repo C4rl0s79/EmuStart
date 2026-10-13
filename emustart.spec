@@ -41,7 +41,14 @@ def version_info(name: str, desc: str):
     )
 
 
-datas = [("web", "web"), ("assets", "assets")]
+# wbudowane logo platform — jeden plik (tools/pack_assets.py) zamiast 40 PNG; ikona jest już w exe
+import sys as _sys
+_sys.path.insert(0, ".")
+from tools.pack_assets import build as _pack_logos
+from pathlib import Path as _P
+_logos = _P("build") / "systems.media"
+_pack_logos(_P("assets") / "systems", _logos)
+datas = [("web", "web"), (str(_logos), "assets")]
 binaries = []
 hiddenimports = [
     "webview.platforms.edgechromium",   # backend WebView2 (Win10/11)
