@@ -20,6 +20,7 @@ import socket
 import sys
 import threading
 import time
+import urllib.parse
 from pathlib import Path
 
 from emustart import (__version__, art, bios, cache, catalog, ingame, installer, logos, sysinfo, metadata, pads, profiles, translations, uipad, config, emulators, launcher, library,
@@ -340,6 +341,7 @@ class Api:
             "configured": config.is_configured(cfg),
             "server": self._server_state(),
             "lib_version": getattr(self, "_lib_version", 0),
+            "admin": self._is_admin() if self._cfg.get("server_key") else False,
             "account": profiles.account_of_device(cfg),
             "systems": self.list_systems(),
             "scan": dict(self._scan),
@@ -930,18 +932,143 @@ class Api:
         threading.Thread(target=run, daemon=True, name="meta").start()
         return {"ok": True}
 
+    # ── administrator: grafiki, opisy i wygląd systemów przez serwer (serwer = źródło prawdy) ──
+    def _is_admin(self) -> bool:
+        i = netsrc.info_nowait(self._cfg) or {}
+        return bool(i.get("admin"))
+
+    def _admin_call(self, method: str, path: str, body: dict | None = None) -> dict:
+        """Zapytanie do /v1/admin/… serwera. Po zmianie — biblioteka z serwera w tle (wersja
+        systemu na serwerze wzrosła), żeby ten komputer od razu pokazał nową grafikę / opis."""
+        import http.client
+        import json as _json
+        ep = netsrc.endpoint(self._cfg)
+        if not ep:
+            return {"ok": False, "reason": "Zaloguj się do serwera EmuStart."}
+        data = _json.dumps(body).encode("utf-8") if body is not None else None
+        for attempt in (0, 1):
+            c = netsrc.conn(ep[0], ep[1], 60)
+            try:
+                c.request(method, "/v1/admin/" + path, body=data,
+                          headers={**netsrc.auth_headers(ep[2]), "Content-Type": "application/json"})
+                r = c.getresponse()
+                raw = r.read()
+            except (OSError, http.client.HTTPException) as ex:
+                return {"ok": False, "reason": f"Serwer niedostępny: {ex}"}
+            finally:
+                c.close()
+            if r.status == 401 and attempt == 0 and ep[2].startswith(netsrc.DEV):
+                netsrc.drop_token()
+                continue
+            break
+        try:
+            out = _json.loads(raw or b"{}")
+        except ValueError:
+            out = {}
+        if r.status == 403:
+            return {"ok": False, "reason": "Zmieniać grafiki i opisy może tylko administrator."}
+        if r.status != 200:
+            return {"ok": False, "reason": out.get("error") or f"Serwer: błąd {r.status}"}
+        if method != "GET":
+            threading.Thread(target=self._thin_sync, daemon=True, name="biblioteka-po-zmianie").start()
+        return out if isinstance(out, (dict, list)) else {"ok": False}
+
+    def _sid(self, game_id: int) -> int:
+        """Identyfikator gry na serwerze (lokalna kopia biblioteki ma własne)."""
+        g = library.game(int(game_id))
+        if not g:
+            return 0
+        files, _deps = netsrc.find(self._cfg, g)
+        return next(iter(files.values())).gid if files else 0
+
+    @staticmethod
+    def _via_server(url: str) -> str:
+        """Podgląd z serwera (logo z paczki, grafika serwera) przez lokalny serwer interfejsu."""
+        return "/serwer" + url if url.startswith("/") and not url.startswith("/assets/") else url
+
+    def art_candidates(self, game_id: int, kind: str, query: str = "") -> list:
+        sid = self._sid(game_id)
+        if not sid:
+            return []
+        r = self._admin_call("GET", f"games/{sid}/art?" + urllib.parse.urlencode({"kind": kind, "q": query or ""}))
+        return [dict(c, url=c.get("url", ""), thumb=self._via_server(c.get("thumb") or c.get("url", "")))
+                for c in (r.get("list") or [])] if r.get("ok") else []
+
+    def _drop_local_art(self, game_id: int, kind: str, state: int | None = None) -> None:
+        """Lokalna kopia grafiki po zmianie na serwerze — usunięta, pobierze się nowa."""
+        g = library.game(int(game_id))
+        if g and kind in ("box", "snap", "logo"):
+            art.media_path(g["es"], g["name"], kind).unlink(missing_ok=True)
+            if state is not None:
+                with library.db() as c:
+                    c.execute(f"UPDATE games SET art_{kind}=? WHERE id=?", (state, g["id"]))
+
+    def art_choose(self, game_id: int, kind: str, url: str) -> dict:
+        sid = self._sid(game_id)
+        if not sid:
+            return {"ok": False, "reason": "Serwer nie ma tej gry albo nie odpowiada."}
+        r = self._admin_call("PUT", f"games/{sid}/art?" + urllib.parse.urlencode({"kind": kind, "url": url}))
+        if r.get("ok"):
+            self._drop_local_art(game_id, kind, art.HAS)
+            g = library.game(int(game_id))
+            r["url"] = art.media_url(g["es"], g["name"], kind) + f"&t={int(time.time())}" if g else ""
+        return r
+
+    def art_clear(self, game_id: int, kind: str) -> dict:
+        sid = self._sid(game_id)
+        if not sid:
+            return {"ok": False, "reason": "Serwer nie ma tej gry albo nie odpowiada."}
+        r = self._admin_call("DELETE", f"games/{sid}/art?" + urllib.parse.urlencode({"kind": kind}))
+        if r.get("ok"):
+            self._drop_local_art(game_id, kind, art.MISSING)
+        return r
+
+    def meta_save(self, game_id: int, edits: dict) -> dict:
+        sid = self._sid(game_id)
+        if not sid:
+            return {"ok": False, "reason": "Serwer nie ma tej gry albo nie odpowiada."}
+        r = self._admin_call("PUT", f"games/{sid}/meta", {"edits": edits or {}})
+        if r.get("ok"):
+            metadata._store(int(game_id), edits=dict(edits or {}))      # od razu na ekranie
+        return r
+
+    def meta_fetch_full(self, game_id: int) -> dict:
+        sid = self._sid(game_id)
+        if not sid:
+            return {"ok": False, "reason": "Serwer nie ma tej gry albo nie odpowiada."}
+        return self._admin_call("PUT", f"games/{sid}/meta/fetch?full=1")
+
+    def system_logo_candidates(self, es: str) -> list:
+        r = self._admin_call("GET", f"systems/{urllib.parse.quote(es)}/logos")
+        return [dict(c, url=self._via_server(c.get("url", ""))) for c in (r.get("list") or [])] if r.get("ok") else []
+
+    def system_logo_choose(self, es: str, cid: str) -> dict:
+        r = self._admin_call("PUT", f"systems/{urllib.parse.quote(es)}/logo?" + urllib.parse.urlencode({"id": cid}))
+        if r.get("ok"):
+            for f in (paths.MEDIA / "_systems").glob(f"{es}.*"):      # stara kopia logo — pobierze się nowe
+                f.unlink(missing_ok=True)
+        return r
+
     # ── opcje systemu (przytrzymane A na logo) ──
     def system_options(self, es: str) -> dict:
         info = systems.info(es)
         sc = (self._cfg.get("systems") or {}).get(es) or {}
         has_emu = bool(sc.get("exe") and Path(sc["exe"]).is_file())
-        shown = next((s_["display"] for s_ in self.list_systems() if s_["es"] == es), info["display"])
-        return {"es": es, "display": shown, "emulator": sc.get("label", "") if has_emu else "",
+        shown = next((s_ for s_ in self.list_systems() if s_["es"] == es), None) or {}
+        return {"es": es, "display": shown.get("display") or info["display"], "default_name": info["display"],
+                "logo": shown.get("logo", ""), "glow": bool(shown.get("logo_glow")), "admin": self._is_admin(),
+                "emulator": sc.get("label", "") if has_emu else "",
                 "options": emulators.options_for(info, self._cfg.get("emu_root", "")),
                 "install": installer.plan_for(es, self._cfg.get("emu_root", "")) if not has_emu else []}
 
     def system_set(self, es: str, data: dict) -> dict:
-        """Na tym komputerze: emulator systemu i ukrycie systemu (logo i nazwa — panel serwera)."""
+        """Na tym komputerze: emulator systemu i ukrycie systemu. Nazwa i poświata logo —
+        na serwerze (administrator), dla wszystkich urządzeń."""
+        shared = {k: data[k] for k in ("name", "glow") if k in data}
+        if shared:
+            r = self._admin_call("PUT", f"systems/{urllib.parse.quote(es)}", shared)
+            if not r.get("ok"):
+                return r
         sc = self._cfg.setdefault("systems", {}).setdefault(es, {})
         if "enabled" in data:
             sc["enabled"] = bool(data["enabled"])

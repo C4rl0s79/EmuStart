@@ -68,6 +68,11 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   wyświetleniu. Lista na ekranie odświeża się sama. Telefon ma grafiki z wersją w adresie.
   Wcześniej PC pobierał system tylko po ponownym skanie na serwerze, a raz pobraną grafikę
   trzymał na zawsze.
+- **Administrator zmienia grafiki, opisy i logo także z PC i telefonu** — opcje gry: okładka,
+  zrzut, logo gry, poprawki opisu, „Pobierz opis z sieci”; opcje systemu (przytrzymane A na
+  logo, teraz także na telefonie): logo, poświata, nazwa. Zapis idzie na serwer (źródło prawdy),
+  a pozostałe urządzenia dostają zmianę przy najbliższej synchronizacji. Zwykłe konto widzi
+  opis tylko do odczytu. Serwer: `/v1/admin/…` tylko dla urządzenia administratora.
 - **Opisy gier szuka serwer** — gdy urządzenie ogląda grę bez opisu, serwer pobiera go w tle
   (PC wcześniej szukał sam).
 - **Android: RetroArch zamyka się po zamknięciu gry** („Quit on Close Content: CLI”) — wcześniej

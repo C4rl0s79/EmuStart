@@ -582,7 +582,8 @@ def info(cfg: dict, fresh: bool = False) -> dict:
             d = json.loads(body)
             learn(cfg, d, trusted=(ep[0], ep[1]) in _PINS or (ep[0], ep[1]) in _CA)
             res = {"ok": True, "name": d.get("name", ""), "version": d.get("version", ""),
-                   "features": d.get("features") or [], "nas_id": d.get("nas_id", ""), "rtt": rtt}
+                   "features": d.get("features") or [], "nas_id": d.get("nas_id", ""), "rtt": rtt,
+                   "admin": bool(d.get("admin"))}
     except (OSError, http.client.HTTPException, ValueError) as ex:
         res = {"ok": False, "reason": f"brak połączenia z {ep[0]}:{ep[1]} ({ex})"}
         forget_best()

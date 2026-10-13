@@ -318,3 +318,38 @@ def test_game_list_in_pages_and_gzip(srv, monkeypatch):
     r = c.getresponse()
     raw = r.read()
     assert r.getheader("Content-Encoding") == "gzip" and len(json.loads(gzip.decompress(raw))) == 2500
+
+
+def test_admin_device_edits_art_and_look_for_everyone(srv, monkeypatch, tmp_path):
+    """Administrator zmienia grafiki, opisy i wygląd systemu z PC albo telefonu — zapis na
+    serwerze (źródło prawdy), wersja systemu rośnie, inne urządzenia pobiorą zmianę.
+    Zwykłe urządzenie — 403."""
+    from emustart import accounts, art_sources, libsync, library, metadata, scanner, srvapi
+    (tmp_path / "roms" / "snes").mkdir(parents=True)
+    (tmp_path / "roms" / "snes" / "Gra (USA).sfc").write_bytes(b"x")
+    scanner.scan_system("snes", tmp_path / "roms" / "snes")
+    api = srvapi.ServerApi(start_background=False)
+    monkeypatch.setattr(remote, "API", api)
+    monkeypatch.setattr("emustart.config.save", lambda c: None)
+    tok, _did, _ = _pair(srv, "Telefon", "phone")
+    accounts.set_admin("Test", False)
+    gid = library.db().execute("SELECT id FROM games").fetchone()["id"]
+    assert _req(srv, "GET", "/v1/info", tok)[1]["admin"] is False
+    assert _req(srv, "PUT", f"/v1/admin/games/{gid}/meta", tok, body={"edits": {"description": "x"}})[0] == 403
+    accounts.set_admin("Test", True)
+    assert _req(srv, "GET", "/v1/info", tok)[1]["admin"] is True
+    v1 = libsync.server_systems()[0]["scanned"]
+    st, r = _req(srv, "PUT", f"/v1/admin/games/{gid}/meta", tok, body={"edits": {"description": "Opis admina"}})
+    assert st == 200 and r["ok"] and metadata.get(gid)["description"] == "Opis admina"
+    assert libsync.server_systems()[0]["scanned"] > v1                     # urządzenia pobiorą od nowa
+    monkeypatch.setattr(art_sources, "candidates", lambda *a, **k: [{"url": "https://x/b.png", "thumb": "https://x/t.png"}])
+    st, r = _req(srv, "GET", f"/v1/admin/games/{gid}/art?kind=box&q=", tok)
+    assert st == 200 and r["list"][0]["url"] == "https://x/b.png"
+    png = bytes([0x89]) + b"PNG" + bytes([13, 10, 26, 10]) + b"0" * 64
+    monkeypatch.setattr(art_sources, "fetch", lambda url, **k: png)
+    st, r = _req(srv, "PUT", f"/v1/admin/games/{gid}/art?kind=box&url=https%3A%2F%2Fx%2Fb.png", tok, body=b"")
+    assert st == 200 and r["ok"] and libsync.server_games("snes")[0]["art_m"].get("box")
+    assert _req(srv, "DELETE", f"/v1/admin/games/{gid}/art?kind=box", tok)[1]["ok"]
+    st, r = _req(srv, "PUT", "/v1/admin/systems/snes", tok, body={"name": "Moje SNES"})
+    assert st == 200 and r["ok"] and libsync.server_systems()[0]["display"] == "Moje SNES"
+    assert _req(srv, "PUT", "/v1/admin/nieznane", tok, body={})[0] == 404

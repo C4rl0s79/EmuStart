@@ -257,6 +257,23 @@ def fetch_media(cfg: dict, rel: str, target: Path) -> bool:
     return True
 
 
+def fetch_preview(cfg: dict, path: str):
+    """Podgląd z serwera (logo z paczki serwera, grafika) dla okna wyboru — (dane, typ) albo None."""
+    if not path.startswith(("/media/", "/local/")) or ".." in path.split("/"):
+        return None
+    ep = netsrc.endpoint(cfg)
+    if not ep:
+        return None
+    try:
+        st, body, _rtt = netsrc._request(ep, urllib.parse.quote(path), 20)
+    except OSError:
+        return None
+    if st != 200 or not body:
+        return None
+    import mimetypes
+    return body, mimetypes.guess_type(path)[0] or "application/octet-stream"
+
+
 # ── po stronie serwera ──
 def server_systems() -> list:
     from emustart import remote

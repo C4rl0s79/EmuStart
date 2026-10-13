@@ -19,8 +19,8 @@ WINDOWS_ONLY = {
     # emulatory na komputerze, odświeżenie biblioteki z serwera
     "autodetect", "scan_status", "set_game_emulator",
     # opcje gier i systemów (openGameOptions / openSystemOptions zablokowane na Androidzie)
-    "game_options", "system_options",
-    "system_set",
+    "game_options",
+
     # menu w grze i pady Windows (XInput), RetroAchievements w emulatorach na komputerze
     "ingame_action", "pads_set", "pads_state", "ui_pad_poll",
     "ra_hardcore", "ra_import", "ra_login", "ra_logout", "ra_status",

@@ -270,9 +270,42 @@ class Server(private val prefs: Prefs) {
         try { return c.inputStream.bufferedReader(Charsets.UTF_8).readText() } finally { c.disconnect() }
     }
 
+    /** To urządzenie administratora (zmienia grafiki, opisy i logo dla wszystkich urządzeń). */
+    @Volatile var admin = false
+
     fun info(): JSONObject {
         val viaTls = baseUrl().startsWith("https")
-        return JSONObject(text("/v1/info")).also { learn(it, trusted = viaTls) }
+        return JSONObject(text("/v1/info")).also { learn(it, trusted = viaTls); admin = it.optBoolean("admin") }
+    }
+
+    /** /v1/admin/… serwera (tylko urządzenie administratora): {ok, …} albo {ok: false, reason}. */
+    fun adminCall(method: String, path: String, body: JSONObject? = null): JSONObject {
+        for (attempt in 0..1) {
+            val c = conn("/v1/admin/$path")
+            try {
+                c.connectTimeout = 8000
+                c.readTimeout = 60000
+                c.requestMethod = method
+                c.setRequestProperty("Authorization", "Bearer " + bearer())
+                c.setRequestProperty("Content-Type", "application/json")
+                if (method == "PUT") {
+                    val b = (body ?: JSONObject()).toString().toByteArray()
+                    c.doOutput = true
+                    c.setFixedLengthStreamingMode(b.size)
+                    c.outputStream.use { it.write(b) }
+                }
+                val code = c.responseCode
+                val text = (if (code in 200..299) c.inputStream else c.errorStream)?.bufferedReader(Charsets.UTF_8)?.readText() ?: "{}"
+                if (code == 401 && attempt == 0) { dropToken(); continue }
+                if (code == 403) return JSONObject().put("ok", false).put("reason", "Zmieniać grafiki i opisy może tylko administrator.")
+                if (code !in 200..299) {
+                    val why = try { JSONObject(text).optString("error") } catch (e: Exception) { "" }
+                    return JSONObject().put("ok", false).put("reason", why.ifEmpty { "błąd serwera $code" })
+                }
+                return JSONObject(text)
+            } finally { c.disconnect() }
+        }
+        return JSONObject().put("ok", false).put("reason", "serwer nie przyjął klucza")
     }
     fun systems(): JSONArray = JSONArray(text("/v1/systems"))
     fun games(es: String): JSONArray = JSONArray(text("/v1/systems/" + enc(es) + "/games"))

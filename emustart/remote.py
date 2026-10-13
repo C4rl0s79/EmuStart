@@ -267,10 +267,13 @@ def handle(handler) -> None:
         if parts == ["info"]:
             feats = ["find", "system", "bios", "media", "library"] + (["nas", "savemgr", "profiles"] if NAS_ROOT else [])
             return _json(handler, {"name": socket.gethostname(), "version": __version__, "api": 1,
-                                   "features": feats, "nas_id": NAS_ID, "endpoints": endpoints(),
+                                   "features": feats + ["admin"], "nas_id": NAS_ID, "endpoints": endpoints(),
+                                   "admin": _admin(handler),
                                    "tls": {"port": TLS["port"], "fp": TLS["fp"]} if TLS else None})
         if parts and parts[0] == "nas":
             return _nas(handler, "GET", parts[1:])
+        if parts and parts[0] == "admin":
+            return _admin_route(handler, "GET", parts[1:])
         if parts == ["library"]:                       # biblioteka dla komputera bez folderów z grami
             if not _games_ok(handler):
                 return _json(handler, {"error": "To konto nie pobiera gier z serwera."}, 403)
@@ -393,6 +396,8 @@ def handle_write(handler, method: str) -> None:
     _seen(handler)
     path = urllib.parse.unquote(urllib.parse.urlsplit(handler.path).path)
     parts = [p for p in path.split("/") if p][1:]
+    if parts and parts[0] == "admin":
+        return _admin_route(handler, method, parts[1:])
     if method == "PUT" and len(parts) == 2 and parts[0] == "profiles":
         return _profiles_put(handler, parts[1])
     if method == "PUT" and parts == ["savemgr", "copy"]:
@@ -547,6 +552,63 @@ def _scope_ok(handler, profile: str) -> bool:
     if not sc or profile.lower() == sc.lower():
         return True
     return bool(profile) and accounts.token_ok(_secret(), profile, handler.headers.get("X-Profile-Token") or "")
+
+
+def _admin_route(handler, method: str, p: list) -> None:
+    """Grafiki i opisy gier, logo i nazwy systemów — z EmuStart na PC albo telefonie
+    administratora (te same funkcje co panel serwera). Zmiana podbija wersję systemu, więc
+    pozostałe urządzenia pobiorą ją przy najbliższej synchronizacji.
+
+        GET    admin/games/<id>/art?kind=&q=    propozycje grafik
+        PUT    admin/games/<id>/art?kind=&url=  wybór grafiki
+        DELETE admin/games/<id>/art?kind=       usunięcie grafiki
+        PUT    admin/games/<id>/meta            {"edits": {...}} ręczne poprawki opisu
+        PUT    admin/games/<id>/meta/fetch?full=1  opis z sieci (w tle)
+        GET    admin/systems/<es>/logos         propozycje logo systemu
+        PUT    admin/systems/<es>/logo?id=      wybór logo
+        PUT    admin/systems/<es>               {"name", "glow", "enabled", "emu_rec", "core_rec"}"""
+    n = int(handler.headers.get("Content-Length") or 0)
+    if n > (1 << 20):
+        handler.close_connection = True
+        return _json(handler, {"error": "za dużo danych"}, 413)
+    raw = handler.rfile.read(n) if n else b""
+    if not _admin(handler):
+        return _json(handler, {"error": "Tylko urządzenie administratora."}, 403)
+    if not hasattr(API, "art_choose"):
+        return _json(handler, {"error": "nieznany adres"}, 404)
+    q = {k: (v or [""])[0] for k, v in urllib.parse.parse_qs(urllib.parse.urlsplit(handler.path).query).items()}
+    try:
+        body = json.loads(raw or b"{}")
+    except ValueError:
+        return _json(handler, {"error": "zły JSON"}, 400)
+    if not isinstance(body, dict):
+        body = {}
+    out = None
+    if len(p) >= 3 and p[0] == "games" and p[1].isdigit():
+        gid = int(p[1])
+        if p[2:] == ["art"] and method == "GET":
+            out = {"ok": True, "list": API.art_candidates(gid, q.get("kind", ""), q.get("q", ""))}
+        elif p[2:] == ["art"] and method == "PUT":
+            out = API.art_choose(gid, q.get("kind", ""), q.get("url", ""))
+        elif p[2:] == ["art"] and method == "DELETE":
+            out = API.art_clear(gid, q.get("kind", ""))
+        elif p[2:] == ["meta"] and method == "PUT":
+            out = API.meta_save(gid, body.get("edits") if isinstance(body.get("edits"), dict) else {})
+        elif p[2:] == ["meta", "fetch"] and method == "PUT":
+            out = API.meta_fetch(gid, q.get("full") == "1")
+    elif len(p) >= 2 and p[0] == "systems":
+        es = p[1]
+        if p[2:] == ["logos"] and method == "GET":
+            out = {"ok": True, "list": API.system_logo_candidates(es)}
+        elif p[2:] == ["logo"] and method == "PUT":
+            out = API.system_logo_choose(es, q.get("id", ""))
+        elif not p[2:] and method == "PUT":
+            out = API.system_set(es, {k: body[k] for k in ("name", "glow", "enabled", "emu_rec", "core_rec") if k in body})
+    if out is None:
+        return _json(handler, {"error": "nieznany adres"}, 404)
+    _games_cache.clear()
+    log.info("administrator %s: %s %s", _who(handler), method, "/".join(p))
+    return _json(handler, out)
 
 
 def _admin(handler) -> bool:

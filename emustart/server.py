@@ -247,6 +247,19 @@ class _Handler(BaseHTTPRequestHandler):
             target.relative_to(base.resolve())
         except ValueError:
             return self.send_error(403)
+        if path.startswith("/serwer/") and MEDIA_CFG:
+            from emustart import libsync           # podgląd z serwera (logo z paczki) — bez zapisu
+            got = libsync.fetch_preview(MEDIA_CFG(), path[len("/serwer"):])
+            if not got:
+                return self.send_error(404)
+            data, ctype = got
+            self.send_response(200)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(data)
+            return
         if not target.is_file() and base == ROUTES.get("/media/"):
             cfg = MEDIA_CFG() if MEDIA_CFG else getattr(DEV_API, "_cfg", None)
             if cfg:

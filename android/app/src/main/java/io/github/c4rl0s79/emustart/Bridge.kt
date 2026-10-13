@@ -101,6 +101,16 @@ class Bridge(private val act: MainActivity) {
         "launch_cancel" -> { launch?.downloader?.cancel?.set(true); null }
         "launch_dismiss" -> { val l = launch; if (l != null && l.phase in setOf("finished", "error", "cancelled")) launch = null; null }
         "toggle_pin" -> togglePin(a.getInt(0))
+        // administrator: grafiki, opisy i wygląd systemów na serwerze (wszystkie urządzenia)
+        "art_candidates" -> artCandidates(a.getInt(0), a.getString(1), a.optString(2, ""))
+        "art_choose" -> artChange(a.getInt(0), "PUT", "kind=" + Server.enc(a.getString(1)) + "&url=" + Server.enc(a.getString(2)))
+        "art_clear" -> artChange(a.getInt(0), "DELETE", "kind=" + Server.enc(a.getString(1)))
+        "meta_save" -> adminGame(a.getInt(0)) { server.adminCall("PUT", "games/${a.getInt(0)}/meta", JSONObject().put("edits", a.optJSONObject(1) ?: JSONObject())) }
+        "meta_fetch_full" -> adminGame(a.getInt(0)) { server.adminCall("PUT", "games/${a.getInt(0)}/meta/fetch?full=1") }
+        "system_options" -> systemOptions(a.getString(0))
+        "system_set" -> systemChange { server.adminCall("PUT", "systems/" + Server.enc(a.getString(0)), a.getJSONObject(1)) }
+        "system_logo_candidates" -> logoCandidates(a.getString(0))
+        "system_logo_choose" -> systemChange { server.adminCall("PUT", "systems/" + Server.enc(a.getString(0)) + "/logo?id=" + Server.enc(a.getString(1))) }
         "remove_local" -> removeLocal(a.getInt(0))
         "configure_emulator" -> configureEmulator(a.getInt(0))
         "install_missing" -> installMissing()
@@ -211,7 +221,67 @@ class Bridge(private val act: MainActivity) {
             .put("server", if (prefs.configured) JSONObject().put("ok", online).put("name", "")
                 .put("checking", checking && !online).put("key_rejected", keyRejected) else JSONObject.NULL)
             .put("py_pad", false).put("pad_backend", "android")
+            .put("admin", server.admin)
     }
+
+    // ── administrator: zmiany na serwerze, potem lista z serwera od nowa ──
+    private fun refreshGames(es: String) {
+        if (es.isEmpty()) return
+        synchronized(gamesCache) { gamesCache.remove(es) }
+        cacheFile("gry-" + safe(es)).delete()
+        loadGamesInBackground(es)            // po pobraniu interfejs odświeży listę sam
+    }
+
+    private fun adminGame(id: Int, call: () -> JSONObject): JSONObject {
+        val r = try { call() } catch (e: Exception) { JSONObject().put("ok", false).put("reason", explain(e)) }
+        if (r.optBoolean("ok")) pool.execute { try { refreshGames(server.game(id).optString("es")) } catch (e: Exception) { } }
+        return r
+    }
+
+    private fun artCandidates(id: Int, kind: String, q: String): JSONArray = try {
+        val r = server.adminCall("GET", "games/$id/art?kind=" + Server.enc(kind) + "&q=" + Server.enc(q))
+        val list = r.optJSONArray("list") ?: JSONArray()
+        for (i in 0 until list.length()) list.getJSONObject(i).let { c ->
+            c.put("thumb", web(c.optString("thumb").ifEmpty { c.optString("url") }))
+        }
+        list
+    } catch (e: Exception) { Log.w(tag, "propozycje grafik: $e"); JSONArray() }
+
+    private fun artChange(id: Int, method: String, q: String): JSONObject {
+        val r = adminGame(id) { server.adminCall(method, "games/$id/art?$q") }
+        if (r.optString("url").isNotEmpty()) r.put("url", remote(r.optString("url")))
+        return r
+    }
+
+    /** Adres z serwera do pokazania w WebView: względny — przez serwer (media), pełny — wprost. */
+    private fun web(url: String): String = if (url.startsWith("/")) remote(url) else url
+
+    private fun systemOptions(es: String): JSONObject {
+        val all = systems()
+        val s = (0 until all.length()).map { all.getJSONObject(it) }.firstOrNull { it.optString("es") == es }
+            ?: JSONObject()
+        return JSONObject().put("es", es).put("display", s.optString("display", es)).put("default_name", s.optString("display", es))
+            .put("logo", s.optString("logo")).put("glow", s.optBoolean("logo_glow")).put("admin", server.admin)
+            .put("emulator", "").put("options", JSONArray()).put("install", JSONArray())
+    }
+
+    private fun systemChange(call: () -> JSONObject): JSONObject {
+        val r = try { call() } catch (e: Exception) { JSONObject().put("ok", false).put("reason", explain(e)) }
+        if (r.optBoolean("ok")) {
+            systemsCache = null
+            pool.execute {
+                try { fetchSystems() } catch (e: Exception) { }
+                act.js("window.refreshState && refreshState().then(() => S.screen === 'systems' && renderSystems())")
+            }
+        }
+        return r
+    }
+
+    private fun logoCandidates(es: String): JSONArray = try {
+        val list = server.adminCall("GET", "systems/" + Server.enc(es) + "/logos").optJSONArray("list") ?: JSONArray()
+        for (i in 0 until list.length()) list.getJSONObject(i).let { c -> c.put("url", web(c.optString("url"))) }
+        list
+    } catch (e: Exception) { Log.w(tag, "propozycje logo: $e"); JSONArray() }
 
     private fun cacheFile(name: String) = File(act.filesDir, "lista-$name.json")
 
