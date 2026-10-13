@@ -344,6 +344,11 @@ async function openSystem(keepIdx) {
   applyGameFilter();
 }
 
+/** Lista gier dociągnięta w tle (telefon: duże systemy porcjami) — na tej samej grze. */
+window.__emuGamesUpdated = (es) => {
+  if (S.screen === "games" && S.es === es && !S.modal) openSystem(true);
+};
+
 function renderGames() {
   const box = $("rows");
   const n = S.games.length;
@@ -450,7 +455,13 @@ function schedulePreview() {
 async function updatePreview() {
   const g = S.games[S.gameIdx];
   clearInterval(artPoll);
-  if (!g) return;
+  if (!g) {
+    // pusta lista (np. jeszcze się wczytuje): bez grafik i opisu poprzedniej gry/platformy
+    $("pvTitle").textContent = ""; $("pvTags").textContent = "";
+    $("pvMeta").innerHTML = ""; $("pvDesc").innerHTML = "";
+    setArt({ title: "" });
+    return;
+  }
   $("pvTitle").textContent = g.title;
   $("pvTags").textContent = g.tags;
   setArt(g);

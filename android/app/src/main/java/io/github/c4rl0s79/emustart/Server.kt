@@ -276,6 +276,14 @@ class Server(private val prefs: Prefs) {
     }
     fun systems(): JSONArray = JSONArray(text("/v1/systems"))
     fun games(es: String): JSONArray = JSONArray(text("/v1/systems/" + enc(es) + "/games"))
+
+    /** Strona listy gier: (wszystkich, gry od `offset`). Starszy serwer (bez stron) — cała lista. */
+    fun gamesPage(es: String, offset: Int, limit: Int): Pair<Int, JSONArray> {
+        val t = text("/v1/systems/" + enc(es) + "/games?offset=$offset&limit=$limit").trim()
+        if (t.startsWith("[")) { val a = JSONArray(t); return Pair(a.length(), a) }
+        val o = JSONObject(t)
+        return Pair(o.getInt("total"), o.getJSONArray("games"))
+    }
     /** Szczegóły gry; ścieżki plików zawsze z „/” (serwer na Windows sprzed 0.30.6 wysyłał „\\”,
      *  a na Androidzie „\\” to znak w nazwie pliku — EPERM w pamięci telefonu). */
     fun game(id: Int): JSONObject {

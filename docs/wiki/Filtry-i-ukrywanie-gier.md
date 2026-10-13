@@ -19,7 +19,7 @@ Na podstawie oznaczeń w nazwach No-Intro/Redump/MAME. Każda grupa osobno,
 | Pirackie i przeróbki | Pirate, hack, bootleg |
 | Nielicencjonowane | Unl, Aftermarket, Homebrew |
 | Programy i BIOS-y | Program, BIOS |
-| Klony arcade | warianty gier arcade (zostaje wersja główna) |
+| Klony arcade | warianty gier arcade (zostaje wersja główna; inne wersje — opcje gry → **Wersja gry**) |
 
 Rewizje (Rev 1, Alt) zostają — to pełne wersje gier. Gry nie znikają z dysku ani
 z biblioteki, tylko z listy; liczby gier w karuzeli uwzględniają ukryte.

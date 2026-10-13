@@ -200,3 +200,30 @@ def test_fresh_database_opened_by_many_threads_at_once():
         t.join()
     assert not errs, errs
     assert library.db().execute("SELECT COUNT(*) FROM profiles").fetchone()[0] == 1
+
+
+def test_fbneo_names_and_versions_without_mame(env, tmp_path):
+    """Serwer bez MAME (samo FinalBurn Neo): nazwy i rodzice wersji z DAT FinalBurn Neo,
+    lista pokazuje grę raz, inne wersje — w „Wersja gry” (wcześniej „10yardj” i wszystkie
+    wersje osobno)."""
+    from emustart import api as api_mod, arcade
+    cfg, roms, tmp = env
+    dat = tmp_path / "fbneo.dat"
+    dat.write_text('<?xml version="1.0"?><datafile>'
+                   '<game name="1941"><description>1941 - Counter Attack (World)</description><year>1990</year>'
+                   '<manufacturer>Capcom</manufacturer></game>'
+                   '<game name="1941j" cloneof="1941" romof="1941"><description>1941 - Counter Attack (Japan)</description></game>'
+                   '<game name="neogeo" isbios="yes"><description>Neo-Geo BIOS</description></game>'
+                   '</datafile>', encoding="utf-8")
+    assert arcade.refresh_fbneo(force=True, url=dat.as_uri())["sets"] == 3
+    assert arcade.refresh_fbneo()["cached"]                          # raz na 30 dni
+    for n in ("1941", "1941j", "neogeo"):
+        _write(roms / "fbneo" / f"{n}.zip", b"zip")
+    scanner.scan_system("fbneo", roms / "fbneo")
+    games = library.list_games("fbneo", library.default_profile(), True)
+    assert [g["title"] for g in games] == ["1941 - Counter Attack"]  # bez wersji i BIOS-u
+    assert arcade.dependencies("1941j") == ["1941"]                  # wersja potrzebuje rodzica
+    a = api_mod.Api.__new__(api_mod.Api)
+    a._cfg = cfg
+    v = a._variants(library.game(games[0]["id"]))
+    assert len(v) == 1 and v[0]["rel"].endswith("1941j.zip") and "Japan" in v[0]["label"]

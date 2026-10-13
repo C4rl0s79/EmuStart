@@ -419,21 +419,89 @@ class Bridge(private val act: MainActivity) {
         return null
     }
 
+    private val gamesLoading = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+    private val gamesFailAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    /** Lista gier systemu bez czekania na całą: z pamięci (ostatnie połączenie) od razu
+     *  i odświeżenie w tle; bez listy w pamięci — 100 gier z góry i 100 z dołu, reszta
+     *  dociągana w tle porcjami. Nieudane pobranie nigdy nie zostaje jako „zero gier”
+     *  (wcześniej zostawało do ręcznego przeładowania — FBA z tysiącami gier). */
     private fun games(es: String): JSONArray {
         synchronized(gamesCache) { gamesCache[es]?.let { return decorate(es, it) } }
-        val arr = try {
-            server.games(es).also { online = true; cacheFile("gry-" + safe(es)).writeText(it.toString()) }
+        val f = cacheFile("gry-" + safe(es))
+        if (f.isFile) {
+            val arr = gameUrls(try { JSONArray(f.readText()) } catch (e: Exception) { JSONArray() })
+            synchronized(gamesCache) { gamesCache[es] = arr }
+            loadGamesInBackground(es)
+            return decorate(es, arr)
+        }
+        val head = try {
+            val (total, top) = server.gamesPage(es, 0, 100)
+            online = true
+            if (total > top.length()) {
+                val bottom = server.gamesPage(es, maxOf(top.length(), total - 100), 100).second
+                for (i in 0 until bottom.length()) top.put(bottom.get(i))
+                loadGamesInBackground(es)            // reszta listy w tle
+            } else {
+                f.writeText(top.toString())         // mała lista — od razu cała
+                synchronized(gamesCache) { gamesCache[es] = gameUrls(top) }
+            }
+            top
         } catch (e: Exception) {
             online = false
-            val f = cacheFile("gry-" + safe(es))
-            if (f.isFile) JSONArray(f.readText()) else JSONArray()
+            gamesFailAt[es] = System.currentTimeMillis()
+            Log.w(tag, "lista gier $es: $e")
+            loadGamesInBackground(es, delayMs = 15_000)
+            JSONArray()
         }
+        return decorate(es, gameUrls(head))
+    }
+
+    /** Cała lista gier porcjami po 1000 (każda z ponowieniem) → pamięć, plik i odświeżenie
+     *  interfejsu. Nieudane — ponowienie za 30 s, dopóki lista nie przyjdzie. */
+    private fun loadGamesInBackground(es: String, delayMs: Long = 0) {
+        if (!gamesLoading.add(es)) return
+        pool.execute {
+            try {
+                if (delayMs > 0) Thread.sleep(delayMs)
+                val all = JSONArray()
+                var off = 0
+                var total = Int.MAX_VALUE
+                while (off < total) {
+                    var page: Pair<Int, JSONArray>? = null
+                    for (attempt in 0..2) {
+                        page = try { server.gamesPage(es, off, 1000) } catch (e: Exception) {
+                            Log.w(tag, "lista gier $es od $off: $e"); Thread.sleep(2000L * (attempt + 1)); null }
+                        if (page != null) break
+                    }
+                    if (page == null) throw java.io.IOException("lista gier $es: brak odpowiedzi")
+                    total = page.first
+                    for (i in 0 until page.second.length()) all.put(page.second.get(i))
+                    if (page.second.length() == 0) break
+                    off += page.second.length()
+                }
+                online = true
+                cacheFile("gry-" + safe(es)).writeText(all.toString())
+                synchronized(gamesCache) { gamesCache[es] = gameUrls(all) }
+                gamesFailAt.remove(es)
+                act.js("window.__emuGamesUpdated && window.__emuGamesUpdated(${JSONObject.quote(es)})")
+            } catch (e: Exception) {
+                gamesFailAt[es] = System.currentTimeMillis()
+                Log.w(tag, "lista gier $es w tle: $e")
+                gamesLoading.remove(es)
+                loadGamesInBackground(es, delayMs = 30_000)
+                return@execute
+            }
+            gamesLoading.remove(es)
+        }
+    }
+
+    private fun gameUrls(arr: JSONArray): JSONArray {
         for (i in 0 until arr.length()) {
             val g = arr.getJSONObject(i)
             for (k in listOf("box", "snap", "logo")) g.put(k, remote(g.optString(k)))
         }
-        synchronized(gamesCache) { gamesCache[es] = arr }
-        return decorate(es, arr)
+        return arr
     }
 
     /** Stan lokalny: gra w telefonie, przypięta. */

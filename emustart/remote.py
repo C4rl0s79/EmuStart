@@ -214,14 +214,39 @@ def _seen(handler) -> None:
     srvadmin.seen(handler.client_address[0])
 
 
+GZIP_MIN = 32 * 1024
+
+
 def _json(handler, data, status: int = 200) -> None:
     body = json.dumps(data, ensure_ascii=False).encode("utf-8")
+    gz = len(body) >= GZIP_MIN and "gzip" in (handler.headers.get("Accept-Encoding") or "")
+    if gz:                             # listy gier: kilka MB JSON-a → kilkaset KB (telefon, tunel)
+        import gzip
+        body = gzip.compress(body, 5)
     handler.send_response(status)
     handler.send_header("Content-Type", "application/json; charset=utf-8")
+    if gz:
+        handler.send_header("Content-Encoding", "gzip")
     handler.send_header("Content-Length", str(len(body)))
     handler.send_header("Cache-Control", "no-store")
     handler.end_headers()
     handler.wfile.write(body)
+
+
+_games_cache: dict = {}             # es → (czas, wiersze) — strony listy z jednego liczenia
+GAMES_TTL = 120
+
+
+def _games_rows(es: str) -> list:
+    """Lista gier systemu dla urządzeń — liczona raz na GAMES_TTL s (metadane systemu, grafiki),
+    więc kolejne strony tej samej listy są natychmiast."""
+    import time as _t
+    hit = _games_cache.get(es)
+    if hit and _t.monotonic() - hit[0] < GAMES_TTL:
+        return hit[1]
+    rows = [_game_row(r) for r in API.list_games(es)]
+    _games_cache[es] = (_t.monotonic(), rows)
+    return rows
 
 
 def _game_row(r: dict) -> dict:
@@ -288,7 +313,16 @@ def handle(handler) -> None:
                 out.append(d)
             return _json(handler, out)
         if len(parts) == 3 and parts[0] == "systems" and parts[2] == "games":
-            return _json(handler, [_game_row(r) for r in API.list_games(parts[1])])
+            q = urllib.parse.parse_qs(urllib.parse.urlsplit(handler.path).query)
+            rows = _games_rows(parts[1])
+            if "offset" not in q and "limit" not in q:
+                return _json(handler, rows)                 # cała lista (dawni klienci)
+            try:
+                off = max(0, int((q.get("offset") or ["0"])[0]))
+                lim = max(1, min(5000, int((q.get("limit") or ["1000"])[0])))
+            except ValueError:
+                return _json(handler, {"error": "zły offset/limit"}, 400)
+            return _json(handler, {"total": len(rows), "offset": off, "games": rows[off:off + lim]})
         if len(parts) == 2 and parts[0] == "games" and parts[1].isdigit():
             d = API.game_detail(int(parts[1]), use_variant=False)
             if not d:

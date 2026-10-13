@@ -32,7 +32,7 @@ Folder, którego EmuStart nie rozpoznał, widać w Ustawieniach (sekcja Systemy)
 | Kartridże | ROM-y lub `.zip` (jeden plik w środku) |
 | Płyty | `.chd`, `.iso`, `.cue/.bin`, `.rvz`, `.m3u` (gry wielopłytowe) |
 | PS3 | katalogi gier (`PS3_GAME\USRDIR\EBOOT.BIN`) |
-| Arcade | zestawy MAME/FBNeo (`.zip`), nazwy z bazy MAME |
+| Arcade | zestawy MAME/FBNeo (`.zip`), nazwy z bazy MAME, a bez MAME — z pliku DAT FinalBurn Neo (pobierany raz na 30 dni) |
 
 Nazwy plików w konwencji No-Intro/Redump (`Gra (USA) (Rev 1).zip`) dają najlepsze
 trafienia okładek i metadanych — oznaczenia w nawiasach służą też do filtrów

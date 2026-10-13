@@ -17,6 +17,27 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   RetroArchu na Androidzie; ocena „wyświetlania nad innymi aplikacjami” i usługi ułatwień
   dostępu dla pozostałych emulatorów na Androidzie.
 
+## [0.44.4] — 2026-10-13
+
+### Poprawione
+- **Duże listy gier na telefonie (np. FBA) — zero gier po przerwanym wczytywaniu**: lista
+  przychodziła w jednym kawałku (kilka MB), a nieudane pobranie zostawało zapamiętane jako
+  pusta lista do ręcznego przeładowania. Teraz:
+  - lista z pamięci (ostatnie połączenie) od razu, odświeżana w tle;
+  - bez listy w pamięci — najpierw 100 gier z góry i 100 z dołu, reszta dociągana w tle
+    porcjami po 1000 z ponawianiem; po dociągnięciu lista odświeża się sama (ta sama gra
+    zaznaczona); nieudane pobranie — ponowienie, nigdy „zero gier”;
+  - serwer liczy listę raz (kolejne porcje natychmiast) i wysyła ją skompresowaną (gzip).
+- **Przy pustej liście zostawały grafiki i opis poprzedniej gry** (z innej platformy) —
+  podgląd jest czyszczony.
+- **FBA / FinalBurn Neo bez MAME na serwerze**: nazwy setów („10yardj”) zamiast tytułów
+  i każda wersja gry osobno. Bez MAME serwer bierze nazwy, rodziców wersji, BIOS-y, rok
+  i producenta z oficjalnego pliku DAT FinalBurn Neo (raz na 30 dni) i skanuje systemy
+  arcade od nowa: lista pokazuje grę raz (np. 6607 setów → ok. 2160 gier), BIOS-y znikają.
+  Inne wersje (japońska, rewizje, bootlegi) — w opcjach gry → **Wersja gry** (PC
+  i telefon, wybór zapamiętany w profilu; gra startuje w wybranej wersji, z ROM-ami
+  rodzica).
+
 ## [0.44.3] — 2026-10-13
 
 ### Poprawione
