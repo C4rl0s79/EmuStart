@@ -269,7 +269,9 @@ img.glow { filter: drop-shadow(0 0 1px rgba(255,255,255,.9)) drop-shadow(0 0 6px
 
 /* ── wybór logo systemu ── */
 .logogrid { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
-.logogrid img { aspect-ratio: 16 / 9; background: #0b0d12; padding: 10px; }
+/* szachownica w średnich szarościach: widać na niej i czarne, i białe logo (warianty paczek) */
+.logogrid img { aspect-ratio: 16 / 9; padding: 10px;
+  background: repeating-conic-gradient(#3b414d 0% 25%, #30353f 0% 50%) 50% / 18px 18px; }
 .logogrid figure.none img { visibility: hidden; }
 .logogrid figure.none figcaption { position: relative; top: -3.5em; text-align: center; color: var(--text); }
 .logogrid figure.broken { display: none; }

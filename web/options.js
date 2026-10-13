@@ -1040,18 +1040,25 @@ function renderLogoPicker() {
   grid.innerHTML = (L.list || []).map((c, i) =>
     `<figure class="${i === L.idx ? "sel" : ""}${c.id === "none" ? " none" : ""}" data-i="${i}">` +
     (c.id === "none" ? `<div class="nologo">${esc(SO.d.display)}</div>`
-      : `<img src="${esc(c.url)}" alt="" referrerpolicy="no-referrer" data-i="${i}">`) +
+      : `<img src="${esc(c.url)}" alt="" referrerpolicy="no-referrer" loading="lazy" decoding="async" data-i="${i}">`) +
     `<figcaption>${esc(c.source)}<br><small>${esc(c.label)}</small></figcaption></figure>`).join("");
   grid.querySelectorAll("figure").forEach((f) => f.addEventListener("click", () => { L.idx = +f.dataset.i; soInput("a"); }));
   // logo, które się nie wczytało, usuwamy z listy (ukryty kafelek psuł nawigację:
-  // zerowa szerokość = nieskończona liczba kolumn, zaznaczenie na niewidocznym)
+  // zerowa szerokość = nieskończona liczba kolumn, zaznaczenie na niewidocznym) — tylko ten
+  // kafelek: przebudowa całej siatki pobierała od nowa wszystkie obrazki przy każdym błędzie
   grid.querySelectorAll("img[data-i]").forEach((img) => img.addEventListener("error", () => {
     const c = L.list[+img.dataset.i];
     if (!c) return;
     const cur = L.list[L.idx];
     L.list = L.list.filter((x) => x !== c);
     L.idx = Math.max(0, cur === c ? Math.min(L.idx, L.list.length - 1) : L.list.indexOf(cur));
-    renderLogoPicker();
+    img.closest("figure").remove();
+    grid.querySelectorAll("figure").forEach((f, i) => {
+      f.dataset.i = i;
+      f.classList.toggle("sel", i === L.idx);
+      const im = f.querySelector("img[data-i]");
+      if (im) im.dataset.i = i;
+    });
   }, { once: true }));
   grid.querySelector("figure.sel")?.scrollIntoView({ block: "nearest" });
   setHints([["a", "Ustaw"], ["b", "Wstecz"]], $("soHints"));

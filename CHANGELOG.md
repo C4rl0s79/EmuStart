@@ -94,6 +94,15 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   w folderze, np. z RetroBata) — pobiera tylko zmienione pliki jednym ZIP-em, konfiguracji i
   zapisów nie rusza, działającego emulatora nie podmienia (później). Pasek „⬇ emulatory”
   pokazuje postęp. Komputer nie pobiera już emulatorów z internetu.
+- **Więcej propozycji logo systemów** (2 → do 14 na system): motywy EmulationStation / ES-DE
+  (Art Book Next, Carbon, Alekfull NX, Canvas, Simple, Pixel, SNES Mini) i ikony z sześciu
+  motywów RetroArcha — prosto z internetu, sprawdzane naraz. Wcześniej część propozycji
+  pochodziła z plików na komputerze deweloperskim (paczka PyLinks, motywy RetroArcha), których
+  serwer nie ma; własna paczka logo — nowe ustawienie w panelu (Konfiguracja → Foldery).
+  Wybór logo przyjmuje tylko adresy z propozycji.
+- **Klucze źródeł grafik z PyLinks na serwer**: EmuStart na komputerze administratora →
+  Ustawienia → *Wyślij klucze źródeł grafik z PyLinks na serwer* (PyLinks szyfruje klucze
+  kluczem tego komputera, więc serwer nie mógł ich odczytać sam).
 - **Panel serwera → Konfiguracja → Foldery**: foldery z grami (kilka, z kolejnością), BIOS-y,
   emulatory, profile graczy, kopie kont i MAME. Wybór folderu w oknie panelu; serwer
   sprawdza każdy folder tak, jak sam go widzi (konto systemowe), i pokazuje, co tam jest
@@ -154,6 +163,10 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   uruchamianie gier tylko z serwera, kilka urządzeń z jednym serwerem — bez SMB.
 
 ### Naprawione
+- Okno wyboru logo: podgląd, który się nie wczytał, przebudowywał całą siatkę — przeglądarka
+  pobierała wtedy od nowa wszystkie obrazki (powolne ładowanie, puste kafelki). Teraz znika
+  tylko ten kafelek; podglądy z serwera zostają w pamięci okna na godzinę. Ciemne logo na
+  szachownicy w szarościach zamiast na czarnym tle (wcześniej warianty „czarne” były niewidoczne).
 - **Nowe konto nie pojawiało się na komputerze ani w panelu** („Kto gra?” pokazywał tylko
   „Inny użytkownik”, panel — „Brak kont”): świeży serwer bez ustawionego folderu profili
   szukał jeszcze folderu z czasów SMB i nie miał żadnego. Teraz zakłada `profiles` we

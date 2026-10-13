@@ -275,3 +275,34 @@ def test_client_always_lists_its_own_account(monkeypatch):
     assert any(p["nas_name"] == "Jezus" for p in profiles.all_profiles())
     lst = profiles.visible({}, profiles.all_profiles())
     assert [p["nas_name"] for p in lst] == ["Jezus"]
+
+
+def test_logo_candidates_from_web_themes_without_local_files(monkeypatch):
+    """Serwer nie ma paczki ani RetroArcha z motywami — propozycje z motywów w internecie
+    (ES / ES-DE, ikony RetroArcha), sprawdzane naraz; wybór tylko z tych adresów."""
+    from emustart import logos
+    asked = []
+    monkeypatch.setattr(logos, "_exists", lambda u: asked.append(u) or "carbon" in u or "/systematic/" in u)
+    c = logos.candidates({}, "psx")
+    assert [x["source"] for x in c if x["id"].startswith("url:")] == ["Carbon", "RetroArch (systematic)"]
+    assert any("Sony%20-%20PlayStation.png" in u for u in asked)
+    assert len(asked) == len(logos.ES_THEMES) + len(logos.RA_THEMES)
+    assert not logos.choose({}, "psx", "url:http://10.0.0.1/admin")              # dowolny adres — nie
+
+
+def test_admin_pc_sends_pylinks_keys_to_server(monkeypatch):
+    """Klucze PyLinks odszyfrowuje komputer administratora, serwer dostaje je połączeniem
+    szyfrowanym i szyfruje swoim kluczem."""
+    from emustart import art_sources, secure
+    a = api.Api.__new__(api.Api)
+    a._cfg = {}
+    sent = {}
+    monkeypatch.setattr(a, "_is_admin", lambda: True, raising=False)
+    monkeypatch.setattr(art_sources, "import_pylinks_keys",
+                        lambda path="": {"source": "x", "sgdb_key": secure.protect("SG"), "tgdb_key": secure.protect("TG"),
+                                         "igdb_client_id": "", "igdb_client_secret": ""})
+    monkeypatch.setattr(a, "_admin_call", lambda m, p, b=None: sent.update(m=m, p=p, b=b) or {"ok": True}, raising=False)
+    r = a.art_keys_push()
+    assert r["ok"] and sent == {"m": "PUT", "p": "art_keys", "b": {"sgdb_key": "SG", "tgdb_key": "TG"}}
+    monkeypatch.setattr(a, "_is_admin", lambda: False, raising=False)
+    assert not a.art_keys_push()["ok"]

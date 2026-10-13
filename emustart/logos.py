@@ -1,13 +1,14 @@
 """logos — logo systemów do karuzeli.
 
 Kolejność:
-  1. wbudowane (assets/systems/<kod>.png, z PyLinks) — 40 systemów,
-  2. pobrane z motywu Carbon dla EmulationStation (RetroPie/es-theme-carbon,
-     <folder ES>/art/system.svg) — nazwy folderów ES pasują 1:1,
-  3. ikona systemu z RetroArcha (assets/xmb/systematic/png/<nazwa libretro>.png),
-     kopiowana lokalnie — bez sieci.
-Pobrane trafiają do data/media/_systems/. Brak logo zapamiętujemy (plik .none),
-żeby nie pytać sieci przy każdym starcie.
+  1. wybrane ręcznie (panel serwera albo urządzenie administratora),
+  2. wbudowane (assets/systems.media, z PyLinks) — 40 systemów,
+  3. pobrane w tle: motyw Carbon dla EmulationStation (<folder ES>/art/system.svg), a gdy go
+     nie ma — ikona systemu z motywu RetroArcha (libretro/retroarch-assets).
+Do ręcznego wyboru: motywy ES / ES-DE i RetroArcha z internetu (ES_THEMES, RA_THEMES) oraz
+paczka logo z folderu ustawionego w panelu serwera.
+Pobrane trafiają do media/_systems.media. Brak logo zapamiętujemy (wpis .none), żeby nie
+pytać sieci przy każdym starcie.
 """
 
 from __future__ import annotations
@@ -21,7 +22,8 @@ from emustart import art_sources, systems
 
 log = logging.getLogger("emustart.logos")
 
-CARBON = "https://raw.githubusercontent.com/RetroPie/es-theme-carbon/master/{es}/art/system.svg"
+GH = "https://raw.githubusercontent.com/"
+CARBON = GH + "RetroPie/es-theme-carbon/master/{es}/art/system.svg"
 _ALIAS = {"FBNEO": "ARCADE", "SUPERGRAFX": "PCENGINE", "SNESMSU1": "SNES"}
 _busy: set = set()
 _lock = threading.Lock()
@@ -99,12 +101,21 @@ def url_for(es: str, cfg: dict | None = None) -> dict:
 
 # ── ręczny wybór logo ──
 
-ARTBOOK = ("https://raw.githubusercontent.com/anthonycaccese/art-book-next-es-de/main/"
-           "_inc/systems/logos/{es}.svg")
-PACK_DEFAULT = Path(r"D:\py\PyLinks\platform_logos")
+# motywy EmulationStation / ES-DE z logo systemów (nazwy folderów ES pasują 1:1) — pobiera
+# serwer, bez żadnych plików na dysku; propozycje sprawdzane naraz (puste ramki pomijane)
+ES_THEMES = (
+    ("Art Book Next", GH + "anthonycaccese/art-book-next-es-de/main/_inc/systems/logos/{es}.svg"),
+    ("Carbon", CARBON),
+    ("Alekfull NX", GH + "anthonycaccese/alekfull-nx-es-de/main/_inc/systems/logos/{es}.svg"),
+    ("Canvas", GH + "Siddy212/canvas-es-de/main/_inc/system-logo/{es}.svg"),
+    ("Simple", GH + "RetroPie/es-theme-simple/master/{es}/art/{es}.svg"),
+    ("Pixel", GH + "ehettervik/es-theme-pixel/master/{es}/logo.png"),
+    ("SNES Mini", GH + "ruckage/es-theme-snes-mini/master/art/logos/{es}.png"),
+)
+# ikony systemów z motywów menu RetroArcha (repozytorium libretro/retroarch-assets)
+RA_ICON = GH + "libretro/retroarch-assets/master/xmb/{theme}/png/{name}.png"
+RA_THEMES = ("systematic", "monochrome", "flatui", "retrosystem", "pixel", "dot-art")
 PACK_LABELS = {"Light_Just_White": "białe", "Light_Color": "kolorowe", "Dark_Just_Black": "czarne"}
-RA_THEMES = ("systematic", "flatui", "flatux", "retrosystem", "pixel", "dot-art",
-             "monochrome", "daite", "automatic")
 _IMG = {".png", ".svg", ".jpg", ".jpeg", ".webp"}
 
 # nazwy platform w stylu LaunchBox (tak nazwane są pliki w paczkach logo)
@@ -129,8 +140,10 @@ def _clean(stem: str) -> str:
 
 
 def pack_dirs(cfg: dict) -> list:
-    """[(folder, etykieta)] paczek logo: ustawienie `logo_pack_dir` albo paczka PyLinks."""
-    root = Path(cfg.get("logo_pack_dir") or PACK_DEFAULT)
+    """[(folder, etykieta)] paczek logo z folderu `logo_pack_dir` (panel serwera → Konfiguracja)."""
+    if not cfg.get("logo_pack_dir"):
+        return []
+    root = Path(cfg["logo_pack_dir"])
     out = []
     if (root / "_variants").is_dir():
         root = root / "_variants"
@@ -153,10 +166,16 @@ def candidates(cfg: dict, es: str) -> list:
     d = downloaded(es)
     if d:
         out.append({"id": "downloaded", "url": d, "source": "pobrane wcześniej", "label": es})
-    for tpl, src in ((ARTBOOK, "Art Book Next"), (CARBON, "Carbon")):
-        u = tpl.format(es=es)
-        if _exists(u):                       # pustych ramek (404) nie pokazujemy
-            out.append({"id": "url:" + u, "url": u, "source": src, "label": es})
+    import urllib.parse
+    from concurrent.futures import ThreadPoolExecutor
+    web = [(src, tpl.format(es=es), es) for src, tpl in ES_THEMES]
+    web += [(f"RetroArch ({t})", RA_ICON.format(theme=t, name=urllib.parse.quote(info["libretro"])),
+             info["libretro"]) for t in RA_THEMES if info["libretro"]]
+    with ThreadPoolExecutor(max_workers=8) as ex:     # pustych ramek (404) nie pokazujemy
+        found = list(ex.map(lambda w: _exists(w[1]), web))
+    for (src, u, label), ok in zip(web, found):
+        if ok:
+            out.append({"id": "url:" + u, "url": u, "source": src, "label": label})
     targets = [t for t in {info["display"], info["libretro"].replace(" - ", " "),
                            LB_NAMES.get(es, "")} if t]
     scored = []
@@ -172,12 +191,6 @@ def candidates(cfg: dict, es: str) -> list:
     for sc, f, folder, label, name in scored[:60]:
         out.append({"id": "file:" + str(f), "url": server.local_url(folder, f),
                     "source": f"paczka ({label})", "label": name})
-    ra = Path(cfg.get("emu_root") or "") / "RetroArch" / "assets" / "xmb"
-    for theme in RA_THEMES:
-        f = ra / theme / "png" / f"{info['libretro']}.png"
-        if f.is_file():
-            out.append({"id": "file:" + str(f), "url": server.local_url(ra, f),
-                        "source": f"RetroArch ({theme})", "label": info["libretro"]})
     return out
 
 
@@ -208,6 +221,8 @@ def choose(cfg: dict, es: str, cid: str) -> bool:
         sc["logo"] = "none"
         return True
     if cid.startswith("url:"):
+        if not cid[4:].startswith(GH):        # tylko adresy z propozycji (motywy na GitHubie)
+            return False
         data = art_sources.fetch(cid[4:], timeout=20)
         if not data or (b"<svg" not in data[:3000] and not art_sources.is_image(data)):
             return False
@@ -252,10 +267,12 @@ def _run(cfg: dict, todo: list) -> None:
             if data and b"<svg" in data[:2000]:
                 _put(f"{es}.svg", data)
                 continue
-            ra = Path(cfg.get("emu_root") or "") / "RetroArch" / "assets" / "xmb" / "systematic" / "png"
-            icon = ra / f"{systems.info(es)['libretro']}.png"
-            if icon.is_file():
-                _put(f"{es}.png", icon.read_bytes())
+            import urllib.parse
+            name = systems.info(es)["libretro"]
+            icon = art_sources.fetch(RA_ICON.format(theme="systematic", name=urllib.parse.quote(name)),
+                                     timeout=15) if name else None
+            if icon and art_sources.is_image(icon):
+                _put(f"{es}.png", icon)
             elif data is not None or art_sources.online():
                 _put(f"{es}.none", b"")                 # sprawdzone — logo nie ma
         except Exception:

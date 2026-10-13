@@ -296,7 +296,7 @@ async function sysPick(es) {
   const list = [...(r?.list || []), { id: "none", url: "", source: "bez logo (sama nazwa)" }];
   $("sysPickInfo").textContent = `Logo systemu ${es} — kliknij, żeby wybrać.`;
   $("sysPickList").innerHTML = list.map((c, i) =>
-    `<button data-i="${i}">${c.url ? `<img src="${esc(c.url)}" alt="">` : ""}<span>${esc(c.source || "")}${c.label ? " · " + esc(c.label) : ""}</span></button>`).join("");
+    `<button data-i="${i}">${c.url ? `<img src="${esc(c.url)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ""}<span>${esc(c.source || "")}${c.label ? " · " + esc(c.label) : ""}</span></button>`).join("");
   $("sysPickList").querySelectorAll("[data-i]").forEach((b) => b.addEventListener("click", async () => {
     const res = await admin("system_logo_choose", { es, id: list[+b.dataset.i].id }).catch(() => null);
     sysMsg(res?.ok ? "Logo zapisane — urządzenia pokażą je po odświeżeniu biblioteki." : res?.reason || "Serwer nie odpowiada.", res?.ok);

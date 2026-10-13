@@ -609,6 +609,11 @@ def _admin_route(handler, method: str, p: list) -> None:
             out = API.system_logo_choose(es, q.get("id", ""))
         elif not p[2:] and method == "PUT":
             out = API.system_set(es, {k: body[k] for k in ("name", "glow", "enabled", "emu_rec", "core_rec") if k in body})
+    elif p == ["art_keys"] and method == "PUT":
+        # klucze źródeł grafik z komputera administratora (np. z PyLinks, odszyfrowane tam) —
+        # tylko połączeniem szyfrowanym (_v1_ok); serwer szyfruje je własnym kluczem
+        from emustart import srvadmin
+        out = srvadmin.art_keys_set(API, body)
     if out is None:
         return _json(handler, {"error": "nieznany adres"}, 404)
     _games_cache.clear()

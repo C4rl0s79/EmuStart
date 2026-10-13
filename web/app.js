@@ -1072,6 +1072,12 @@ function buildSetRows() {
   rows.push({ k: "Wykryj emulatory", type: "action", run: async () => { toast("Wykrywam emulatory…", 60000); const r = await api().autodetect(); if (!r.ok) return toast(r.reason, 4000); toast(`Przypisano emulatory: ${r.assigned}`); await openSettings(); } });
   rows.push({ k: "Pobierz brakujące emulatory", type: "action", run: () => askInstallMissing() });
   rows.push({ k: "Odśwież bibliotekę z serwera", type: "action", run: () => startScan(async () => { await openSettings(); }) });
+  if (c.is_admin)                                   // klucze PyLinks da się odszyfrować tylko na tym komputerze
+    rows.push({ k: "Wyślij klucze źródeł grafik z PyLinks na serwer", type: "action", run: async () => {
+      const r = await api().art_keys_push();
+      toast(r.ok ? `Klucze na serwerze (${(r.sent || []).length}). Źródła grafik: ${(r.sources || []).join(", ")}.`
+        : r.reason || "Serwer nie odpowiada.", 6000);
+    } });
   rows.push({ k: "Gotowe, przejdź do gier", type: "action", run: async () => { const st = await refreshState(); if (st.setup_needed) openProfiles("setup"); else show("systems"); } });
   rows.push({ head: "Systemy  ·  ←/→ emulator  ·  A włącz/wyłącz" });
   for (const s of c.systems) rows.push({ type: "system", sys: s });

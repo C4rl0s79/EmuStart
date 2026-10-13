@@ -23,7 +23,9 @@ serwerze trafia do wszystkich urządzeń (PC sprawdza zmiany przy starcie i co 5
 2. libretro (dopasowanie po liście plików: inna wersja nazwy, „, The”, „(Disc 1)”),
 3. LaunchBox,
 4. SteamGridDB, 5. IGDB, 6. TheGamesDB — wymagają kluczy API (panel → Grafiki i opisy →
-   Źródła; zapisane zaszyfrowane na serwerze).
+   Źródła; zapisane zaszyfrowane na serwerze). Klucze z PyLinks: EmuStart na komputerze
+   administratora → Ustawienia → **Wyślij klucze źródeł grafik z PyLinks na serwer** (PyLinks
+   szyfruje je kluczem tego komputera — odczytać da się je tylko tam).
 
 Dopasowanie po nazwie w zewnętrznych bazach wymaga podobieństwa ≥ 0,8, żeby nie wstawiać
 okładek innych gier.
@@ -44,6 +46,12 @@ Ręczne zmiany wygrywają z automatycznymi.
 Panel serwera → Konfiguracja → **Systemy — logo i nazwy** (logo, nazwa, poświata) albo
 administrator na urządzeniu: przytrzymane A na logo systemu → Logo / Poświata logo / Nazwa.
 Tak samo na wszystkich urządzeniach.
+
+Propozycje logo: wbudowane, motywy EmulationStation / ES-DE (Art Book Next, Carbon, Alekfull NX,
+Canvas, Simple, Pixel, SNES Mini), ikony z motywów RetroArcha (systematic, monochrome, flatui,
+retrosystem, pixel, dot-art) — z internetu, bez plików na serwerze — oraz własna paczka logo
+(panel → Konfiguracja → Foldery → Paczka logo platform). Kafelki mają szachownicę w szarościach:
+widać na niej i czarne, i białe warianty.
 
 ## Amiga WHDLoad
 

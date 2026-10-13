@@ -944,6 +944,27 @@ class Api:
         i = netsrc.info_nowait(self._cfg) or {}
         return bool(i.get("admin"))
 
+    def art_keys_push(self) -> dict:
+        """Administrator: klucze źródeł grafik (SteamGridDB, IGDB, TheGamesDB) z PyLinks na tym
+        komputerze → serwer. PyLinks szyfruje je kluczem tego komputera, więc odszyfrować je
+        da się tylko tutaj; na serwer idą połączeniem szyfrowanym, serwer szyfruje je swoim."""
+        from emustart import art_sources, secure
+        if not self._is_admin():
+            return {"ok": False, "reason": "Tylko na urządzeniu administratora."}
+        found = art_sources.import_pylinks_keys()
+        if not found:
+            return {"ok": False, "reason": "Nie znaleziono config.json PyLinksWeb ("
+                    + ", ".join(art_sources.PYLINKS_CONFIGS) + ")."}
+        plain = {k: secure.unprotect(found.get(k, "")) for k in art_sources.KEY_NAMES}
+        plain = {k: v for k, v in plain.items() if v}
+        if not plain:
+            return {"ok": False, "reason": "W PyLinks nie ma kluczy (albo nie da się ich odszyfrować na tym koncie)."}
+        r = self._admin_call("PUT", "art_keys", plain)
+        if r.get("ok"):
+            log.info("klucze źródeł grafik wysłane na serwer: %s", ", ".join(sorted(plain)))
+            r["sent"] = sorted(plain)
+        return r
+
     def _admin_call(self, method: str, path: str, body: dict | None = None) -> dict:
         """Zapytanie do /v1/admin/… serwera. Po zmianie — biblioteka z serwera w tle (wersja
         systemu na serwerze wzrosła), żeby ten komputer od razu pokazał nową grafikę / opis."""
@@ -1393,6 +1414,7 @@ class Api:
                 "server_key": cfg.get("server_key", ""),
                 "server_keykind": {"tpm": "TPM", "dpapi": "DPAPI", "plik": "plik"}.get(cfg.get("server_keykind", ""), ""),
                 "server_account": cfg.get("server_account", ""),
+                "is_admin": self._is_admin(),
                 "server_via": netsrc.current_kind(cfg),
                 "enroll": ({k: cfg["enroll_pending"].get(k) for k in ("url", "code", "account", "mode")}
                            if cfg.get("enroll_pending") else None),

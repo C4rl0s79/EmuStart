@@ -259,7 +259,7 @@ class _Handler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(data)))
-            self.send_header("Cache-Control", "no-store")
+            self.send_header("Cache-Control", "private, max-age=3600")   # ponowne otwarcie okna — z pamięci
             self.end_headers()
             self.wfile.write(data)
             return

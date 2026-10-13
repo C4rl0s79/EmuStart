@@ -32,6 +32,9 @@ FIELDS = {
     "emu_store_dir": ("Magazyn emulatorów", "dir", True,
                       "Emulatory, które serwer pobiera i rozdaje komputerom (zakładka Emulatory). "
                       "Pusty — folder emulators w katalogu serwera."),
+    "logo_pack_dir": ("Paczka logo platform (opcjonalnie)", "dir", True,
+                      "Własne logo systemów do wyboru (np. platform_logos z PyLinks) — dodatkowo do motywów "
+                      "z internetu."),
     "backup_dir": ("Folder kopii kont", "dir", True,
                    "Kopie zapasowe kont (ZIP). Pusty — folder backup w katalogu serwera."),
     "mame_exe": ("MAME (opcjonalnie)", "file", True,
