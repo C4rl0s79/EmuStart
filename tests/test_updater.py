@@ -202,7 +202,14 @@ def test_two_programs_pick_own_release_files(monkeypatch, tmp_path):
             return False
     monkeypatch.setattr(updater.urllib.request, "urlopen", lambda *a, **k: R(json.dumps(rel).encode()))
     assert updater.latest(app="client")["url"] == "u/c"
-    assert updater.latest(app="server")["url"] == "u/s"
+    assert updater.latest(app="server")["url"] == "u/s" and updater.latest(app="server")["root"] == "EmuStartServer"
+    # wydanie sprzed rozdziału (jeden program): serwer bierze dotychczasowy plik i zostaje EmuStart.exe --server
+    rel["assets"] = rel["assets"][:1]
+    old = updater.latest(app="server")
+    assert old["url"] == "u/c" and old["root"] == "EmuStart"
+    s = updater.write_script(tmp_path, tmp_path / "app", 1, ["--server"], exe_name=old["root"]).read_text("utf-8-sig")
+    assert "'--server --restarted'" in s and str(tmp_path / "app" / "EmuStart.exe") in s
+    assert str(tmp_path / "app" / "EmuStartServer.exe") not in s
     monkeypatch.setattr(updater.sys, "argv", ["x", "--service"])
     assert updater.kind() == "server"
     z = tmp_path / "s.zip"

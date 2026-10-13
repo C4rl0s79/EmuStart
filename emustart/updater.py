@@ -69,11 +69,17 @@ def latest(timeout: float = 15, app: str = "") -> dict:
         rel = json.loads(r.read())
     tag = rel.get("tag_name") or ""
     ver = tag.lstrip("v")
+    root = APPS[app][0]
     asset = next((a for a in rel.get("assets") or []
                   if APPS[app][1].fullmatch(a.get("name") or "")), None)
+    if asset is None and app == "server":
+        # wydanie sprzed rozdziału (jeden program z trybem serwera) — dotychczasowy plik
+        asset = next((a for a in rel.get("assets") or []
+                      if APPS["client"][1].fullmatch(a.get("name") or "")), None)
+        root = APPS["client"][0]
     sig = next((a for a in rel.get("assets") or []
                 if asset and a.get("name") == asset["name"] + ".sig"), None)
-    return {"version": ver, "tag": tag, "current": __version__, "app": app,
+    return {"version": ver, "tag": tag, "current": __version__, "app": app, "root": root,
             "newer": vtuple(ver) > vtuple(__version__),
             "url": asset["browser_download_url"] if asset else "", "size": asset["size"] if asset else 0,
             "sha256": ((asset or {}).get("digest") or "").removeprefix("sha256:").lower(),
@@ -115,7 +121,7 @@ class Job:
             self._download(self.info["url"], zp)
             self.phase = "extracting"
             new = d / "new"
-            _extract(zp, new, APPS[self.info.get("app") or kind()][0])
+            _extract(zp, new, self.info.get("root") or APPS[self.info.get("app") or kind()][0])
             zp.unlink(missing_ok=True)
             self.phase = "ready"
             log.info("aktualizacja %s gotowa do podmiany", self.info["version"])
@@ -167,7 +173,7 @@ class Job:
         if os.name != "nt" or not getattr(sys, "frozen", False):
             return {"ok": False, "reason": "Podmiana działa tylko w EmuStart.exe na Windows."}
         script = write_script(update_dir(), paths.APP, os.getpid(), argv, server=server,
-                              exe_name=APPS[self.info.get("app") or kind()][0])
+                              exe_name=self.info.get("root") or APPS[self.info.get("app") or kind()][0])
         ulog = paths.APP / "logs" / "update.log"
         before = ulog.stat().st_size if ulog.is_file() else 0
         how = _launch(script, server)
@@ -296,7 +302,8 @@ def write_script(udir: Path, app: Path, pid: int, argv: list, server: bool = Tru
     exe_name = exe_name or ("EmuStartServer" if server else "EmuStart")
     exe = app / f"{exe_name}.exe"
     # dawny EmuStart.exe --server → EmuStartServer.exe --service (przejście na osobny program)
-    argv = ["--service" if a == "--server" else a for a in argv]
+    if exe_name == "EmuStartServer":
+        argv = ["--service" if a == "--server" else "--panel" if a == "--server-panel" else a for a in argv]
     args = " ".join(a if re.fullmatch(r"[\w\-=.:]+", a) else '"' + a.replace('"', '') + '"'
                     for a in argv if a != "--restarted")
     if server:
@@ -336,9 +343,15 @@ if ($rc1 -ge 8 -or $rc2 -ge 8) {{
     $old = Join-Path $app 'EmuStart.exe'
     if ($old -ne $exe -and (Test-Path -LiteralPath $old)) {{ Remove-Item -LiteralPath $old -Force -ErrorAction SilentlyContinue; L 'usunięto dawny EmuStart.exe z folderu serwera' }}
     schtasks /Query /TN {_ps(TASK)} 2>$null | Out-Null
-    if ($LASTEXITCODE -eq 0) {{
+    if ($LASTEXITCODE -eq 0 -and $exe -like '*EmuStartServer.exe') {{
       schtasks /Change /TN {_ps(TASK)} /TR ('"' + $exe + '" --service') 2>&1 | Out-Null
       L "zadanie Harmonogramu → $exe --service (kod $LASTEXITCODE)"
+      $lnk = Join-Path $env:ProgramData 'Microsoft\\Windows\\Start Menu\\Programs\\EmuStart Server.lnk'
+      if (Test-Path -LiteralPath $lnk) {{
+        $s = (New-Object -ComObject WScript.Shell).CreateShortcut($lnk)
+        $s.TargetPath = $exe; $s.Arguments = '--panel'; $s.IconLocation = $exe + ',0'; $s.Save()
+        L 'skrót EmuStart Server → panel nowego programu'
+      }}
     }}
   }}
 }}
@@ -375,7 +388,7 @@ if (Test-Path -LiteralPath $pu) {{
   Remove-Item -LiteralPath $pu -Force -ErrorAction SilentlyContinue
   if ($u) {{
     Start-Sleep 3
-    $tr = '"' + $exe + '" --panel'
+    $tr = '"' + $exe + '" ' + $(if ($exe -like '*EmuStartServer.exe') {{ '--panel' }} else {{ '--server-panel' }})
     schtasks /Create /F /TN {_ps(PANEL_TASK)} /SC ONCE /ST 00:00 /RU $u /IT /TR $tr 2>&1 | Out-Null
     $c1 = $LASTEXITCODE
     schtasks /Run /TN {_ps(PANEL_TASK)} 2>&1 | Out-Null
