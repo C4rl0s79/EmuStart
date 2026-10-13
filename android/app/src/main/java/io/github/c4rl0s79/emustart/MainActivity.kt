@@ -77,7 +77,10 @@ class MainActivity : Activity() {
         }
     }
 
-    fun js(code: String) = web.evaluateJavascript(code, null)
+    /** Kod w interfejsie — zawsze na wątku interfejsu (WebView zamyka aplikację, gdy wołany
+     *  z innego wątku: 0.44.2 wychodziła na pulpit zaraz po starcie). Z wątku interfejsu —
+     *  od razu. */
+    fun js(code: String) = runOnUiThread { web.evaluateJavascript(code, null) }
 
     private fun immersive() {
         window.insetsController?.let {

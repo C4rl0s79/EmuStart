@@ -75,7 +75,7 @@ class Bridge(private val act: MainActivity) {
                 is List<*> -> JSONArray(res).toString()
                 else -> JSONObject.quote(res.toString())
             }
-            act.runOnUiThread { act.js("window.__emuResolve($id, ${JSONObject.quote(json)})") }
+            act.js("window.__emuResolve($id, ${JSONObject.quote(json)})")
         }
     }
 

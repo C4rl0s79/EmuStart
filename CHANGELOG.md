@@ -17,6 +17,14 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   RetroArchu na Androidzie; ocena „wyświetlania nad innymi aplikacjami” i usługi ułatwień
   dostępu dla pozostałych emulatorów na Androidzie.
 
+## [0.44.3] — 2026-10-13
+
+### Poprawione
+- **Android: aplikacja wychodziła na pulpit zaraz po starcie** (0.44.2): odświeżenie listy
+  systemów w tle wywoływało kod interfejsu (WebView) z wątku w tle, a Android na to nie
+  pozwala. Teraz każde wywołanie kodu interfejsu przechodzi na wątek interfejsu — także
+  przyszłe z dowolnego miejsca.
+
 ## [0.44.2] — 2026-10-13
 
 Zmiany, które miały wejść do 0.44.1, ale trafiły na gałąź już po jego wydaniu.
