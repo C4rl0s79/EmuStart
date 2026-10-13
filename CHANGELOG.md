@@ -17,6 +17,23 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   RetroArchu na Androidzie; ocena „wyświetlania nad innymi aplikacjami” i usługi ułatwień
   dostępu dla pozostałych emulatorów na Androidzie.
 
+## [0.44.7] — 2026-10-13
+
+### Poprawione
+- **PC z biblioteką z serwera: brak logo systemów** (i grafik, których komputer nie ma
+  u siebie). Pobieranie brakujących grafik z serwera działało tylko w trybie przeglądarki —
+  w zwykłym oknie EmuStart nigdy. Teraz w obu. Chwilowy błąd logowania nie blokuje już
+  grafiki na 10 minut (pamiętany jest tylko prawdziwy brak na serwerze).
+- **PC: odrzucane przez serwer (401) wysyłanie wyglądu systemów, zgłaszanie folderów
+  z grami i czytanie gry w trakcie pobierania** — szły z identyfikatorem urządzenia zamiast
+  tokenu sesji (pozostałość sprzed logowania kluczem urządzenia). Teraz z tokenem, a po
+  wygaśnięciu tokenu — z nowym.
+- **PC z biblioteką z serwera nie wysyła przy starcie swojego wyglądu systemów**: nadpisałby
+  logo wybrane na serwerze dawno pobranymi na tym komputerze. Wysyła tylko to, co zmienisz
+  na nim ręcznie.
+- **PC z biblioteką z serwera: bez „Grafiki i metadane” w menu** — grafiki i opisy pobiera
+  serwer, komputer bierze je od niego.
+
 ## [0.44.6] — 2026-10-13
 
 ### Poprawione

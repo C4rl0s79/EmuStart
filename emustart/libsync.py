@@ -187,10 +187,14 @@ def fetch_media(cfg: dict, rel: str, target: Path) -> bool:
         return False
     try:
         st, body, _rtt = netsrc._request(ep, "/media/" + urllib.parse.quote(rel), 20)
+        if st == 401 and ep[2].startswith(netsrc.DEV):     # token sesji wygasł — nowy
+            netsrc.drop_token()
+            st, body, _rtt = netsrc._request(ep, "/media/" + urllib.parse.quote(rel), 20)
     except OSError:
         return False
     if st != 200 or not body:
-        _media_miss[rel] = time.time()
+        if st == 404:
+            _media_miss[rel] = time.time()
         return False
     target.parent.mkdir(parents=True, exist_ok=True)
     tmp = target.with_name(target.name + ".tmp")

@@ -34,6 +34,10 @@ def local_url(root: Path, file: Path) -> str:
 # tryb deweloperski (main.py --browser): UI w zwykłej przeglądarce woła API przez
 # POST /api/<metoda> zamiast mostu pywebview. Domyślnie wyłączony.
 DEV_API = None
+# () → ustawienia: brakujące grafiki (/media/…) pobierane z serwera EmuStart — komputer
+# z biblioteką z serwera. Wcześniej tylko w trybie --browser (DEV_API), więc w zwykłym
+# oknie logo systemów i grafiki spoza pamięci komputera nigdy się nie pojawiały.
+MEDIA_CFG = None
 
 
 def _near(handler) -> bool:
@@ -243,9 +247,11 @@ class _Handler(BaseHTTPRequestHandler):
             target.relative_to(base.resolve())
         except ValueError:
             return self.send_error(403)
-        if not target.is_file() and base == ROUTES.get("/media/") and DEV_API is not None:
-            from emustart import libsync           # komputer z biblioteką z serwera — grafika z serwera
-            libsync.fetch_media(getattr(DEV_API, "_cfg", {}), rel, target)
+        if not target.is_file() and base == ROUTES.get("/media/"):
+            cfg = MEDIA_CFG() if MEDIA_CFG else getattr(DEV_API, "_cfg", None)
+            if cfg:
+                from emustart import libsync       # komputer z biblioteką z serwera — grafika z serwera
+                libsync.fetch_media(cfg, rel, target)
         if not target.is_file():
             return self.send_error(404)
         data = target.read_bytes()

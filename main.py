@@ -78,6 +78,7 @@ def main() -> None:
     if server_args:
         return _server_mode()
     api = api_mod.Api()
+    server.MEDIA_CFG = lambda: api._cfg
     if "--browser" in sys.argv:
         print(server.start(8765, dev_api=api) + "/index.html?dev")
         import time

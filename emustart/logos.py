@@ -311,7 +311,7 @@ def push_to_server(cfg: dict, only: list | None = None) -> int:
                 c = netsrc.conn(ep[0], ep[1], 20)
                 try:
                     c.request("PUT", "/v1/system?" + urllib.parse.urlencode(q), body=data,
-                              headers={"Authorization": f"Bearer {ep[2]}"})
+                              headers=netsrc.auth_headers(ep[2]))
                     r = c.getresponse()
                     r.read()
                 finally:
