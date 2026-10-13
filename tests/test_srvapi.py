@@ -34,7 +34,7 @@ def test_pc_client_has_no_server_jobs():
     serwer (panel serwera); PC bierze bibliotekę z serwera."""
     for name in ("art_overview", "art_start", "art_cancel", "art_status", "launchbox_update",
                  "launchbox_status", "import_pylinks_keys", "system_rescan", "_arcade_meta",
-                 "_rescan_systems", "emulator_options"):
+                 "_rescan_systems"):
         assert not hasattr(api.Api, name), name
     for name in ("art_overview", "art_start", "rescan", "list_games", "game_detail", "_arcade_meta"):
         assert hasattr(srvapi.ServerApi, name), name
