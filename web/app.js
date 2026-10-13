@@ -554,7 +554,21 @@ function layoutPreview() {
   const gap = parseFloat(getComputedStyle(pv).columnGap) || 0;
   const minMeta = Math.max(220, pv.clientWidth * 0.3);
   const fit = (pv.clientWidth - minMeta - 2 * gap) / (arBox + arSnap);
-  pv.style.setProperty("--pv-h", `${Math.max(80, Math.min(mediaH, fit))}px`);
+  // Za mało szerokości na okładkę i zrzut w jednym rzędzie (np. szeroka okładka SNES + zrzut
+  // 4:3): obrazki wychodziły niskie, a pół ekranu pod opisem zostawało puste. Wtedy zrzut
+  // schodzi do drugiego rzędu, obok opisu — oba obrazki dostają wysokość.
+  const rowGap = parseFloat(getComputedStyle(pv).rowGap) || 0;
+  const boxH = Math.max(80, Math.min(mediaH, (pv.clientWidth - minMeta - gap) / arBox));
+  const rest = pv.clientHeight - boxH - rowGap - (parseFloat(getComputedStyle(pv).paddingTop) || 0);
+  const stack = arSnap > 0 && fit < mediaH * 0.85 && rest > 160;
+  pv.classList.toggle("stack", stack);
+  if (stack) {
+    pv.style.setProperty("--pv-h", `${boxH}px`);
+    // zrzut najwyżej na 60 % szerokości — obok zostaje miejsce na opis
+    pv.style.setProperty("--pv-sh", `${Math.max(80, Math.min(rest, (pv.clientWidth * 0.6) / arSnap))}px`);
+  } else {
+    pv.style.setProperty("--pv-h", `${Math.max(80, Math.min(mediaH, fit))}px`);
+  }
   placeGameLogo();
 }
 
