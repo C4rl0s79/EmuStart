@@ -245,3 +245,33 @@ def test_update_apply_records_panel_user_safely(monkeypatch):
     (updater.update_dir() / "panel-user.txt").unlink()
     srvadmin.update_apply(None, {"panel_user": "a\" & calc.exe"})
     assert not (updater.update_dir() / "panel-user.txt").exists()
+
+
+def test_server_creates_profiles_folder_and_restores_approved_accounts(tmp_path, monkeypatch):
+    r"""Świeży serwer bez ustawionego folderu profili: <serwer>\profiles zakładany przy starcie;
+    konto zatwierdzone, gdy folderu nie było, dostaje swój folder (lista kont, „Kto gra?”)."""
+    from emustart import devices, paths, remote
+    monkeypatch.setattr(paths, "SERVER", tmp_path / "server")
+    monkeypatch.setattr(remote, "NAS_ROOT", None)
+    monkeypatch.setattr(devices, "accounts_in_use", lambda: {"Jezus", "../zle"})
+    remote.init_nas({"profiles_nas": ""})
+    assert remote.NAS_ROOT == tmp_path / "server" / "profiles"
+    assert remote.profile_names() == ["Jezus"]
+    assert not (tmp_path / "zle").exists()
+
+
+def test_client_always_lists_its_own_account(monkeypatch):
+    """Serwer nie podał listy kont — konto, którym urządzenie jest zalogowane, i tak jest
+    na liście „Kto gra?” (wcześniej tylko „Inny użytkownik”)."""
+    from emustart import nasfs, profiles
+
+    class Down:
+        def profiles(self):
+            raise OSError("serwer: lista profili 404")
+    monkeypatch.setattr(nasfs, "backend", lambda cfg: Down())
+    monkeypatch.setattr(profiles, "resolve_moves", lambda cfg: None)
+    monkeypatch.setattr(profiles, "account_of_device", lambda cfg: "Jezus")
+    profiles.import_from_nas({})
+    assert any(p["nas_name"] == "Jezus" for p in profiles.all_profiles())
+    lst = profiles.visible({}, profiles.all_profiles())
+    assert [p["nas_name"] for p in lst] == ["Jezus"]

@@ -359,24 +359,17 @@ def handle(handler) -> None:
 
 
 def find_nas_root(cfg: dict) -> Path | None:
-    r"""Folder profili na komputerze z serwerem: `profiles_nas` z ustawień, a gdy go tu
-    nie ma — `emustart\Profiles` w którymś folderze nadrzędnym folderów z grami
-    (klienci widzą go przez udział, np. Z:\emustart\Profiles = <udział>\emustart\Profiles)."""
-    own = cfg.get("profiles_nas") or ""
-    if own and Path(own).is_dir():
-        return Path(own)
+    r"""Folder profili (kont) serwera: `profiles_nas` z panelu, domyślnie <serwer>\profiles —
+    zakładany przy starcie. Bez niego serwer nie zna żadnego konta: nowe konto po zatwierdzeniu
+    nie miało folderu, a klient nie dostawał go na liście „Kto gra?”."""
     from emustart import paths
-    if (paths.SERVER / "profiles" / ".emustart-root").is_file():
-        return paths.SERVER / "profiles"          # 2.0: profile w katalogu serwera
-    for r in config.rom_roots(cfg):
-        for d in [Path(r), *Path(r).parents]:
-            cand = d / "emustart" / "Profiles"
-            try:
-                if cand.is_dir():
-                    return cand
-            except OSError:
-                continue
-    return None
+    own = Path(cfg.get("profiles_nas") or (paths.SERVER / "profiles"))
+    try:
+        own.mkdir(parents=True, exist_ok=True)
+        return own
+    except OSError as ex:                     # np. dysk z ustawień niepodłączony
+        log.error("folder profili %s: %s", own, ex)
+        return None
 
 
 def init_nas(cfg: dict) -> None:
@@ -386,7 +379,17 @@ def init_nas(cfg: dict) -> None:
     from emustart import nasfs
     NAS_ROOT = find_nas_root(cfg)
     NAS_ID = nasfs.root_id(NAS_ROOT, create=True) if NAS_ROOT else ""
-    log.info("folder profili serwera: %s", NAS_ROOT or "nie znaleziono (zapisy przez SMB)")
+    log.info("folder profili serwera: %s", NAS_ROOT or "niedostępny")
+    if NAS_ROOT is not None:
+        # konta zatwierdzone, gdy folderu profili nie było (albo po zmianie folderu) — bez
+        # swojego folderu nie ma ich na liście kont ani w „Kto gra?” na urządzeniach
+        from emustart import accounts, devices, enroll
+        have = {n.lower() for n in profile_names()}
+        known = devices.accounts_in_use() | {(accounts.record(n) or {}).get("name", n)
+                                             for n in accounts.names_with_password()}
+        for name in sorted(known):
+            if name.lower() not in have and enroll._safe_account(name) == name:
+                create_account(name)
 
 
 def handle_write(handler, method: str) -> None:

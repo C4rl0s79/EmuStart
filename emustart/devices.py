@@ -243,6 +243,12 @@ def games_ok(did: str) -> bool:
     return bool(d.get("games"))
 
 
+def accounts_in_use() -> set:
+    """Konta, którymi zalogowane są aktywne urządzenia."""
+    with _lock:
+        return {d["account"] for d in _load().values() if not d.get("revoked") and d.get("account")}
+
+
 def of_account(account: str) -> list:
     """Aktywne urządzenia konta."""
     with _lock:

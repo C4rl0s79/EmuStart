@@ -991,14 +991,17 @@ def align_account_name(cfg: dict) -> None:
 
 
 def import_from_nas(cfg: dict) -> list:
-    """Zakłada profile dla kont na serwerze, których nie ma w bazie. Zwraca nazwy."""
+    """Zakłada profile dla kont na serwerze, których nie ma w bazie. Zwraca nazwy.
+    Konto, którym urządzenie jest zalogowane, jest zawsze — także gdy serwer chwilowo nie
+    podał listy (inaczej „Kto gra?” pokazywał tylko „Inny użytkownik”)."""
     resolve_moves(cfg)
-    fs = nasfs.backend(cfg)
+    names = [account_of_device(cfg)] if account_of_device(cfg) else []
     try:
         # serwer zna wszystkie konta (też z hasłem, do których bez tokenu nie zajrzymy)
-        return _import_names([p["name"] for p in fs.profiles()])
-    except (OSError, ValueError):
-        return []
+        names += [p["name"] for p in nasfs.backend(cfg).profiles()]
+    except (OSError, ValueError) as ex:
+        log.warning("lista kont z serwera: %s", ex)
+    return _import_names(names)
 
 
 def _import_names(names: list) -> list:
@@ -1010,6 +1013,7 @@ def _import_names(names: list) -> list:
         with library.db() as c:
             c.execute("INSERT INTO profiles(name, nas_name, color) VALUES(?,?,?)", (d[:32], d, ""))
         added.append(d)
+        have.add(d.lower())
     if added:
         log.info("profile z serwera: %s", ", ".join(added))
     return added

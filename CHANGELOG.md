@@ -144,6 +144,14 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   i kopie, logowanie, adresy, API); instalacja dwóch programów; grafiki i opisy z serwera,
   uruchamianie gier tylko z serwera, kilka urządzeń z jednym serwerem — bez SMB.
 
+### Naprawione
+- **Nowe konto nie pojawiało się na komputerze ani w panelu** („Kto gra?” pokazywał tylko
+  „Inny użytkownik”, panel — „Brak kont”): świeży serwer bez ustawionego folderu profili
+  szukał jeszcze folderu z czasów SMB i nie miał żadnego. Teraz zakłada `profiles` we
+  własnym katalogu (albo w folderze z panelu), a konta zatwierdzone wcześniej bez folderu
+  dostają go przy starcie. EmuStart na PC zawsze pokazuje konto, którym jest zalogowany —
+  także gdy serwer chwilowo nie poda listy kont.
+
 ## [0.44.8] — 2026-10-13
 
 ### Zmienione
