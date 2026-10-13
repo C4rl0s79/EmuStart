@@ -32,6 +32,7 @@ DEFAULTS: dict = {
     "backup_keep": 14,              # serwer: tyle najnowszych kopii każdego konta
     "art_keys": {},                 # sgdb_key, igdb_client_id/secret, tgdb_key (z PyLinks)
     "systems": {},                  # es_name → {enabled, exe, args, label, extract}
+    "system_merge": {},             # serwer: platforma → platforma, z którą jest scalona
 }
 
 _lock = threading.Lock()

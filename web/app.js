@@ -850,7 +850,7 @@ function serverRows(rows, c) {
     rows.push({ k: "Wyloguj z serwera", type: "action", fmt: () => "to urządzenie straci dostęp — zalogujesz się ponownie kontem", run: () => logoutAsk() });
     return;
   }
-  const wait = c.enroll ? `czeka na zatwierdzenie — kod ${c.enroll.code}` : "";
+  const wait = c.enroll ? `czeka na zatwierdzenie na ${String(c.enroll.url || "").replace(/^https?:\/\//, "")} — kod ${c.enroll.code}` : "";
   if (S.platform === "android")
     rows.push({ k: "Zaloguj (kod QR)", type: "action", fmt: () => wait || "panel serwera → Dodaj urządzenie → zeskanuj", run: () => loginQr() });
   rows.push({ k: S.platform === "android" ? "Zaloguj (adres serwera)" : "Zaloguj", type: "action",
@@ -864,7 +864,8 @@ function enrollWait(code, account, mode) {
     ? "Czeka na zatwierdzenie przez administratora serwera (aplikacja EmuStart albo panel serwera). Sprawdź, czy kod się zgadza."
     : "Zatwierdź na innym urządzeniu tego konta (albo administrator). Sprawdź, czy kod się zgadza.";
   $("joinCode").textContent = code;
-  $("joinText").textContent = "Możesz zamknąć to okno albo aplikację — prośba czeka do 24 godzin.";
+  const srv = String(S.settings?.enroll?.url || "").replace(/^https?:\/\//, "");
+  $("joinText").textContent = (srv ? `Serwer: ${srv}. ` : "") + "Możesz zamknąć to okno albo aplikację — prośba czeka do 24 godzin.";
   S.modal = "join";
   $("join").classList.remove("hidden");
   setHints([["b", "Zamknij (prośba czeka)"], ["x", "Wycofaj prośbę"]]);

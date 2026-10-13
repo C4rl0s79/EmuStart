@@ -27,12 +27,19 @@ function ago(t) {
   const s = Date.now() / 1000 - t;
   return s < 5 ? "teraz" : s < 60 ? `${Math.floor(s)} s temu` : fmtDur(s) + " temu";
 }
-function msg(text, ok) {
-  $("msg").textContent = text || "";
-  $("msg").style.color = ok ? "var(--ok)" : "var(--warn)";
+/** Komunikat w dymku w rogu okna — widoczny bez względu na to, gdzie przewinięta jest strona. */
+let toastTimer = null;
+function toast(text, ok) {
+  const t = $("toast");
+  if (!text) return;
+  t.textContent = text;
+  t.className = "on" + (ok ? "" : " bad");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.className = ok ? "" : "bad"; }, ok ? 5000 : 10000);
 }
+function msg(text, ok) { toast(text, ok); }
 
-let restarting = false, lastStatus = null;
+let restarting = false, lastStatus = null, curTab = "stan", sysScanWatch = false, lastScanRunning = false;
 
 /* ── zakładki ── */
 function showTab(t) {
@@ -40,6 +47,7 @@ function showTab(t) {
   document.querySelectorAll("main > section").forEach((s) => { s.hidden = s.dataset.in !== t; });
   try { localStorage.setItem("tab", t); } catch (e) { /* bez pamięci zakładki */ }
   if (t === "konfig") { refreshConfig(); refreshSysLook(); }
+  curTab = t;
   clearInterval(artTimer);
   if (t === "art") { refreshArt(); artTimer = setInterval(refreshArt, 1500); }
 }
@@ -47,10 +55,8 @@ function showTab(t) {
 /* ── grafiki i opisy (emustart/art.py — pobiera serwer) ── */
 let artTimer = null;
 const SRC = { libretro: "libretro (bez klucza)", sgdb: "SteamGridDB", igdb: "IGDB", tgdb: "TheGamesDB" };
-function artMsg(text, ok) {
-  $("artMsg").textContent = text || "";
-  $("artMsg").style.color = ok ? "var(--ok)" : "var(--warn)";
-}
+function artMsg(text, ok) { toast(text, ok); }
+let lbWasRunning = false;
 async function refreshArt() {
   const d = await admin("art").catch(() => null);
   if (!d?.ok) return;
@@ -58,6 +64,8 @@ async function refreshArt() {
     $("ges").innerHTML = `<option value="">wszystkie systemy</option>` +
       d.systems.map((s) => `<option value="${esc(s.es)}">${esc(s.display)}</option>`).join("");
   const job = d.job, run = !!job?.running, up = d.lb_update;
+  if (lbWasRunning && up && !up.running) toast(up.error ? "Baza LaunchBox: " + up.error : "Baza LaunchBox gotowa.", !up.error);
+  lbWasRunning = !!up?.running;
   document.querySelectorAll("[data-art]").forEach((b) => { b.disabled = run; });
   $("bArtStop").hidden = !run;
   $("artJob").hidden = !job && !(up && (up.running || up.error));
@@ -105,7 +113,7 @@ const META = [["title", "Tytuł"], ["developer", "Producent"], ["publisher", "Wy
               ["genre", "Gatunek"], ["players", "Gracze"], ["description", "Opis"]];
 const KINDS = { box: "Okładka", snap: "Zrzut ekranu", logo: "Logo gry" };
 let gCur = null, gPickKind = "";
-function gMsg(text, ok) { $("gMsg").textContent = text || ""; $("gMsg").style.color = ok ? "var(--ok)" : "var(--warn)"; }
+function gMsg(text, ok) { toast(text, ok); }
 async function gSearch() {
   const r = await admin("games_search", { q: $("gq").value, es: $("ges").value }).catch(() => null);
   if (!r?.ok) return;
@@ -191,17 +199,21 @@ $("bMetaFetch").addEventListener("click", async () => {
 
 /* ── systemy: logo, nazwa, poświata (emustart/logos.py) ── */
 let sysPickEs = "";
-function sysMsg(text, ok) { $("sysMsg").textContent = text || ""; $("sysMsg").style.color = ok ? "var(--ok)" : "var(--warn)"; }
+function sysMsg(text, ok) { toast(text, ok); }
 async function refreshSysLook() {
   const r = await admin("systems_look").catch(() => null);
   if (!r?.ok) return;
   $("sysLook").innerHTML = r.systems.map((s) =>
     `<tr><td>${s.logo ? `<img class="syslogo" src="${esc(s.logo)}" alt="" style="${s.glow ? "filter:drop-shadow(0 0 6px #fff8)" : ""}">` : '<span class="muted">bez logo</span>'}</td>` +
-    `<td><input data-name="${esc(s.es)}" value="${esc(s.display)}" placeholder="${esc(s.default_name)}" style="width:100%"></td>` +
+    `<td><input data-name="${esc(s.es)}" value="${esc(s.display)}" placeholder="${esc(s.default_name)}" style="width:100%">` +
+    `<div class="sysdirs">${esc(s.es)} · ${(s.dirs || []).map(esc).join(" · ") || "brak folderu"}` +
+    `${(s.merged || []).length ? ` · scalone: ${s.merged.map((m) => `${esc(m)} <button data-split="${esc(m)}">Rozdziel</button>`).join(" ")}` : ""}</div></td>` +
     `<td class="n">${s.games}</td>` +
     `<td class="n"><label><input type="checkbox" data-glow="${esc(s.es)}" ${s.glow ? "checked" : ""}> poświata</label> ` +
     `<label><input type="checkbox" data-en="${esc(s.es)}" ${s.enabled ? "checked" : ""}> widoczny</label> ` +
-    `<button data-logo="${esc(s.es)}">Logo…</button></td></tr>` +
+    `<button data-logo="${esc(s.es)}">Logo…</button> <select data-merge="${esc(s.es)}"><option value="">scal z…</option>` +
+    r.systems.filter((o) => o.es !== s.es).map((o) => `<option value="${esc(o.es)}">${esc(o.display)} (${esc(o.es)})</option>`).join("") +
+    `</select></td></tr>` +
     `<tr><td></td><td colspan="3" class="muted">zalecany emulator: <select data-emu="${esc(s.es)}">` +
     `<option value="" ${s.emu_rec ? "" : "selected"}>domyślny urządzenia</option>` +
     `<option value="retroarch" ${s.emu_rec === "retroarch" ? "selected" : ""}>RetroArch</option>` +
@@ -213,6 +225,19 @@ async function refreshSysLook() {
     const res = await admin("system_set", { es, ...data }).catch(() => null);
     sysMsg(res?.ok ? "Zapisano — urządzenia pokażą to po odświeżeniu biblioteki." : res?.reason || "Serwer nie odpowiada.", res?.ok);
   };
+  const merge = async (es, into) => {
+    const res = await admin("system_merge", { es, into }).catch(() => null);
+    sysMsg(res?.ok ? (into ? `Scalono ${es} z ${into} — przeładowuję listę gier.` : `Rozdzielono ${es} — przeładowuję listę gier.`)
+                   : res?.reason || "Serwer nie odpowiada.", res?.ok);
+    sysScanWatch = true;
+  };
+  $("sysLook").querySelectorAll("[data-merge]").forEach((el) => el.addEventListener("change", () => {
+    if (!el.value) return;
+    if (!confirm(`Scalić platformę ${el.dataset.merge} z ${el.value}? Gry z obu folderów będą na jednej liście ` +
+                 "(te same gry raz). Można to cofnąć (Rozdziel).")) { el.value = ""; return; }
+    merge(el.dataset.merge, el.value);
+  }));
+  $("sysLook").querySelectorAll("[data-split]").forEach((b) => b.addEventListener("click", () => merge(b.dataset.split, "")));
   $("sysLook").querySelectorAll("[data-name]").forEach((el) => el.addEventListener("change", () => set(el.dataset.name, { name: el.value })));
   $("sysLook").querySelectorAll("[data-glow]").forEach((el) => el.addEventListener("change", async () => { await set(el.dataset.glow, { glow: el.checked }); refreshSysLook(); }));
   $("sysLook").querySelectorAll("[data-en]").forEach((el) => el.addEventListener("change", () => set(el.dataset.en, { enabled: el.checked })));
@@ -250,10 +275,7 @@ document.querySelectorAll("#tabs button").forEach((b) => b.addEventListener("cli
 
 /* ── konfiguracja: foldery (emustart/srvconfig.py) ── */
 let cfgFields = [];
-function cfgMsg(text, ok) {
-  $("cfgMsg").textContent = text || "";
-  $("cfgMsg").style.color = ok ? "var(--ok)" : "var(--warn)";
-}
+function cfgMsg(text, ok) { toast(text, ok); }
 const stHtml = (s) => `<span class="st ${s.ok ? "ok" : "bad"}">${esc(s.text)}</span>`;
 async function refreshConfig() {
   const r = await admin("config").catch(() => null);
@@ -351,6 +373,10 @@ async function refresh() {
   $("info").innerHTML = rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("");
 
   const sc = st.scan || {};
+  // skan skończony (nowe foldery, scalenie platform) — lista systemów i stany folderów od nowa
+  if (lastScanRunning && !sc.running && curTab === "konfig") { refreshSysLook(); refreshConfig(); }
+  if (lastScanRunning && !sc.running && sysScanWatch) { sysScanWatch = false; toast("Lista gier przeładowana.", true); }
+  lastScanRunning = !!sc.running;
   $("bRescan").disabled = !!sc.running;
   $("scanBox").hidden = !sc.running && !sc.result;
   if (sc.running) {

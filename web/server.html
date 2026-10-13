@@ -65,6 +65,12 @@
   .meta { display: grid; grid-template-columns: max-content 1fr; gap: 6px 10px; margin-top: 12px; align-items: start; }
   .meta textarea { min-height: 120px; resize: vertical; }
   .syslogo { width: 120px; height: 40px; object-fit: contain; }
+  .sysdirs { font-size: 11px; color: var(--dim); overflow-wrap: anywhere; margin-top: 2px; }
+  #toast { position: fixed; right: 18px; bottom: 18px; max-width: 520px; background: #222a3d; border: 1px solid var(--line);
+           border-left: 4px solid var(--ok); border-radius: 8px; padding: 10px 14px; box-shadow: 0 6px 24px #0008;
+           opacity: 0; transform: translateY(8px); transition: opacity .2s, transform .2s; pointer-events: none; z-index: 10; }
+  #toast.on { opacity: 1; transform: none; }
+  #toast.bad { border-left-color: var(--warn); }
 </style>
 </head>
 <body>
@@ -273,6 +279,7 @@
       <tbody id="clients"></tbody></table>
   </section>
 </main>
+<div id="toast"></div>
 <script src="server.js"></script>
 </body>
 </html>

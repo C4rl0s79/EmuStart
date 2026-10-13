@@ -127,3 +127,38 @@ def test_server_version_grows_with_art_and_description_changes(tmp_path, monkeyp
         assert row["art_m"].get("box") and row["meta"]["edits"] == {"description": "Opis"}
     finally:
         remote.API = None
+
+
+def test_merge_platforms_with_dedupe(tmp_path):
+    """Dwa foldery tej samej platformy (x360 i xbox360): scalenie — jedna lista, ta sama gra
+    raz, platforma scalona znika razem ze swoimi grami; rozdzielenie przywraca obie."""
+    import time
+    roms = tmp_path / "roms"
+    _write(roms / "xbox360" / "Halo 3 (USA).iso")
+    _write(roms / "x360" / "Halo 3 (USA).iso")
+    _write(roms / "x360" / "Gears (USA).iso")
+    cfg = config.load()
+    cfg["rom_roots"] = [str(roms)]
+    config.save(cfg)
+    s = srvapi.ServerApi(start_background=False)
+
+    def scan():
+        assert s.rescan()["ok"] or True
+        end = time.monotonic() + 20
+        while s.scan_status()["running"] and time.monotonic() < end:
+            time.sleep(0.05)
+    scan()
+    look = {x["es"]: x for x in s.systems_look()}
+    assert {"x360", "xbox360"} <= set(look) and look["x360"]["dirs"][0].endswith("x360")
+    assert not s.system_merge("x360", "x360")["ok"] and not s.system_merge("nie-ma", "xbox360")["ok"]
+    assert s.system_merge("x360", "xbox360")["ok"]
+    scan()
+    look = {x["es"]: x for x in s.systems_look()}
+    assert "x360" not in look and look["xbox360"]["merged"] == ["x360"] and len(look["xbox360"]["dirs"]) == 2
+    names = sorted(g["name"] for g in s.list_games("xbox360"))
+    assert names == ["Gears (USA)", "Halo 3 (USA)"]                       # Halo raz
+    assert library.db().execute("SELECT COUNT(*) FROM games WHERE es='x360'").fetchone()[0] == 0
+    assert not s.system_merge("xbox360", "x360")["ok"]                      # scalona nie może być celem
+    assert s.system_merge("x360", "")["ok"]
+    scan()
+    assert {"x360", "xbox360"} <= {x["es"] for x in s.systems_look()}

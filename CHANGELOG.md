@@ -57,6 +57,8 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   obsługi padów, profili gracza i wysyłania zapisów, które są potrzebne tylko na PC.
 
 ### Poprawione
+- **Skan: system, który zniknął (usunięty folder, scalony), zostawiał swoje gry w bazie** —
+  teraz znika razem z nimi.
 - **Wersje gier arcade (FBA) na PC bez gry nadrzędnej i BIOS-u** — PC szukał ich tylko
   w swoich folderach z grami, więc emulator zgłaszał brak plików. Teraz serwer podaje je
   razem z grą, a PC pobiera je obok gry (także przy przypinaniu), jak telefon.
@@ -99,6 +101,13 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   poprawką, przywróceniem danych pobranych i pobraniem opisu z sieci.
 - **Panel serwera → Konfiguracja → Systemy**: logo (propozycje, bez logo), nazwa,
   poświata, widoczność na urządzeniach, zalecany emulator i rdzeń RetroArcha.
+- **Scalanie platform** (panel → Konfiguracja → Systemy → *scal z…*): np. dwa foldery
+  Xbox 360 (`x360` i `xbox360`) — gry z obu na jednej liście, ta sama gra raz (pierwszeństwo:
+  kolejność folderów z grami); *Rozdziel* cofa. Przy każdym systemie widać jego folder(y).
+- Panel: komunikaty w dymku w rogu okna (zapis widać bez przewijania); lista systemów
+  odświeża się po zapisie i po skanie; LaunchBox — „gotowa” po pobraniu zamiast wiszącego
+  „Pobieram…”.
+- EmuStart: okno oczekiwania na zatwierdzenie pokazuje, na którym serwerze czeka prośba.
 - **Panel serwera → konta: pliki i kopie zapasowe.** „Pliki i kopie” przy koncie pokazuje,
   co jest w profilu (zapisy, stany gry, ustawienia — liczba plików, rozmiar, ostatnia
   zmiana, ostatnio zmienione pliki). Kopia konta to jeden ZIP (profil + wpis konta z hasłem)

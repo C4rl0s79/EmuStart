@@ -572,6 +572,7 @@ GAME_ACTIONS = {
                                                                                          "emu_rec", "core_rec") if k in a}),
     "system_logo_candidates": lambda api, a: {"ok": True, "list": api.system_logo_candidates(str(a.get("es", "")))},
     "system_logo_choose": lambda api, a: api.system_logo_choose(str(a.get("es", "")), str(a.get("id", ""))),
+    "system_merge": lambda api, a: api.system_merge(str(a.get("es", "")), str(a.get("into", ""))),
 }
 ACTIONS_ARGS.update(GAME_ACTIONS)
 ACTIONS_ARGS.update({"config_set": config_set, "art_start": art_start, "art_keys_set": art_keys_set,

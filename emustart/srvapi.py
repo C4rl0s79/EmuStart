@@ -303,7 +303,10 @@ class ServerApi:
 
     # ── wygląd systemów (logo, nazwa, poświata) — urządzenia pokazują to samo ──
     def systems_look(self) -> list:
+        import json as _json
         out = []
+        merge = self._cfg.get("system_merge") or {}
+        dirs = {r["es"]: r["rom_dir"] for r in library.db().execute("SELECT es, rom_dir FROM systems")}
         for s_ in sorted(library.systems_summary(), key=lambda x: x["display"].lower()):
             es = s_["es"]
             sc = (self._cfg.get("systems") or {}).get(es) or {}
@@ -315,8 +318,32 @@ class ServerApi:
                         "logo": lg["url"], "glow": bool(lg["glow"]), "logo_choice": sc.get("logo", ""),
                         "enabled": sc.get("enabled", True),
                         "emu_rec": sc.get("emu_rec", ""), "core_rec": sc.get("core_rec", ""),
-                        "core_default": installer.CORES.get(plat, ""), "cores": emulators.cores_for(plat)})
+                        "core_default": installer.CORES.get(plat, ""), "cores": emulators.cores_for(plat),
+                        "dirs": _json.loads(dirs.get(es) or "[]"),
+                        "merged": sorted(k for k, v in merge.items() if v == es)})
         return out
+
+    def system_merge(self, src: str, dst: str) -> dict:
+        """Platforma `src` scalona z `dst` (np. dwa foldery Xbox 360): gry z obu folderów na
+        jednej liście, te same gry raz (pierwszeństwo — kolejność folderów z grami).
+        `dst` puste — rozdzielenie. Lista gier przeładowuje się sama."""
+        merge = dict(self._cfg.get("system_merge") or {})
+        known = {s_["es"] for s_ in library.systems_summary()} | set(merge)
+        if src not in known:
+            return {"ok": False, "reason": "Nie ma takiej platformy."}
+        if dst:
+            if dst == src or dst not in known or dst in merge:
+                return {"ok": False, "reason": "Nie można scalić z tą platformą."}
+            if any(v == src for v in merge.values()):
+                return {"ok": False, "reason": "Z tą platformą scalono już inne — najpierw je rozdziel."}
+            merge[src] = dst
+        else:
+            merge.pop(src, None)
+        self._cfg["system_merge"] = merge
+        config.save(self._cfg)
+        log.info("platformy scalone: %s", merge)
+        self.rescan()
+        return {"ok": True}
 
     def system_set(self, es: str, data: dict) -> dict:
         if es not in {s_["es"] for s_ in library.systems_summary()}:
