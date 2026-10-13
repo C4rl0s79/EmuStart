@@ -270,3 +270,20 @@ def test_all_retroarch_cores_on_server_and_alternatives_on_pc(emu_server, tmp_pa
     cores = tmp_path / "emu" / "RetroArch" / "cores"
     assert (cores / "bsnes_libretro.dll").read_bytes() == b"BSNES" and (cores / "snes9x_libretro.dll").is_file()
     assert not (cores / "fceumm_libretro.dll").exists()                        # tylko dla systemów biblioteki
+
+
+def test_retroarch_default_pad_and_auto_index(tmp_path):
+    """Domyślnie: każdy zapis stanu z nowym numerem, Start+Select — menu, Select — skróty,
+    Select+RB — przyspieszenie, Select+Y — zapis stanu (sterownik XInput)."""
+    from emustart import emupolicy, ingame
+    home = tmp_path / "RetroArch"
+    home.mkdir()
+    (home / "retroarch.cfg").write_text("", encoding="utf-8")
+    ra = ingame.RetroArch(str(home / "retroarch.exe"))
+    ra.apply_policy(emupolicy.DEFAULTS["retroarch"])
+    ra.launch_args(tmp_path / "run", resume=False)
+    lines = set((tmp_path / "run" / "emustart_ra.cfg").read_text(encoding="utf-8").splitlines())
+    for line in ('savestate_auto_index = "true"', 'input_joypad_driver = "xinput"',
+                 'input_menu_toggle_gamepad_combo = "4"', 'input_enable_hotkey_btn = "6"',
+                 'input_toggle_fast_forward_btn = "5"', 'input_save_state_btn = "3"'):
+        assert line in lines, line

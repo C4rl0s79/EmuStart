@@ -105,6 +105,9 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   profilu — wygrywają). Domyślnie: wyjście z gry bez okna z pytaniem, w RetroArchu pauza
   w tle, obrazki stanów i zamknięcie gry = wyjście z RetroArcha; zmiana i powrót do domyślnych
   w panelu.
+- **RetroArch domyślnie (PC i telefon)**: każdy zapis stanu z nowym numerem
+  (`savestate_auto_index`), Start + Select — menu RetroArcha, Select — przycisk skrótów,
+  Select + RB — przyspieszenie (wł./wył.), Select + Y — zapis stanu. Na PC sterownik pada XInput.
 - **Więcej propozycji logo systemów** (np. Dreamcast 43 → 57, PS1 77): motywy EmulationStation /
   ES-DE (Art Book Next, Carbon, Alekfull NX, Canvas, Simple, Pixel, SNES Mini) i ikony z 9 motywów
   RetroArcha — prosto z internetu, sprawdzane naraz — oraz paczka logo (np. `platform_logos`

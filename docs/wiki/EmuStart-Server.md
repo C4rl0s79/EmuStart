@@ -142,8 +142,10 @@ przed każdą grą — wygrywają z ustawieniami profilu. RetroArch: `klucz = wa
 w `retroarch.cfg`, na czas gry), DuckStation / PCSX2 / Dolphin: `Sekcja|Klucz = wartość` (w pliku
 ini emulatora). Domyślnie to, czego EmuStart potrzebuje: wyjście z gry bez pytań
 (`Main|ConfirmPowerOff = false`, `UI|ConfirmShutdown = false`, `Interface|ConfirmStop = False`),
-w RetroArchu pauza w tle, obrazki stanów i `quit_on_close_content = 2`. **Przywróć domyślne** —
-wartości EmuStart.
+w RetroArchu pauza w tle, obrazki stanów, `quit_on_close_content = 2`, **każdy zapis stanu z nowym
+numerem** (`savestate_auto_index`) i pad: **Start + Select** — menu RetroArcha, **Select** —
+przycisk skrótów, **Select + RB** — przyspieszenie (wł./wył.), **Select + Y** — zapis stanu
+(sterownik XInput; na telefonie te same skróty). **Przywróć domyślne** — wartości EmuStart.
 
 ### Aktualizacja
 **Sprawdź aktualizacje** → **Aktualizuj do …**: pobranie pliku serwera z wydania,

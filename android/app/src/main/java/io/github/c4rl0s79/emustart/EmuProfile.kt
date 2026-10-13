@@ -33,8 +33,14 @@ class EmuProfile(private val server: Server, private val prefs: Prefs) {
         private val AUTOSTATE = setOf("savestate_auto_save", "savestate_auto_load")
         /** Zawsze przy starcie z EmuStart: RetroArch zamyka się po zamknięciu gry (inaczej na
          *  Androidzie zostaje w tle z menu i nie wraca do EmuStart), a stan gry ma obrazek
-         *  (podgląd przy wyborze zapisu w EmuStart). */
-        val LAUNCH = linkedMapOf("quit_on_close_content" to "2", "savestate_thumbnail_enable" to "true")
+         *  (podgląd przy wyborze zapisu w EmuStart). Pad jak na PC (emustart/emupolicy.py):
+         *  każdy zapis stanu z nowym numerem, Start+Select — menu, Select — skróty,
+         *  Select+RB — przyspieszenie, Select+Y — zapis stanu (kody przycisków Androida:
+         *  Y=100, R1=103, SELECT=109). */
+        val LAUNCH = linkedMapOf("quit_on_close_content" to "2", "savestate_thumbnail_enable" to "true",
+            "savestate_auto_index" to "true", "input_menu_toggle_gamepad_combo" to "4",
+            "input_enable_hotkey_btn" to "109", "input_toggle_fast_forward_btn" to "103",
+            "input_save_state_btn" to "100")
         private val KEY = Regex("""^\s*([A-Za-z0-9_]+)\s*=""")
     }
 
