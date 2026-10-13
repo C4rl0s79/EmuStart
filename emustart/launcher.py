@@ -488,6 +488,11 @@ class Session:
             adapter.apply_cheevos(ra)
         except Exception:
             log.exception("RetroAchievements profilu")
+        try:
+            from emustart import installer           # wymagane ustawienia z serwera (wygrywają z profilem)
+            adapter.apply_policy(installer.policy(adapter.family))
+        except Exception:
+            log.exception("wymagane ustawienia emulatora")
         dirs = adapter.save_dirs()               # foldery z (już podmienionych) ustawień
         names = [d.name for d in dirs]
         try:

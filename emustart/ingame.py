@@ -264,10 +264,27 @@ class Adapter:
     family = ""
     pause_key = ""            # pusty = emulator pauzuje się sam po utracie fokusu
     state_glob = ""
+    policy: dict = {}         # wymagane ustawienia z serwera (apply_policy; tylko podmieniane, nie zmieniane)
 
     def __init__(self, exe: str):
         self.exe = Path(exe)
         self.home = self.exe.parent
+        self.policy: dict = {}
+
+    def policy_ini(self) -> Path | None:
+        """Plik ini, do którego trafiają wymagane ustawienia z serwera (emustart/emupolicy.py)."""
+        return None
+
+    def apply_policy(self, values: dict) -> None:
+        """Wymagane ustawienia z serwera — tuż przed grą, po ustawieniach profilu (wygrywają).
+        Pliku, którego jeszcze nie ma (emulator nigdy nie uruchomiony), nie zakładamy —
+        pierwsze uruchomienie emulatora tworzy go sam, z kreatorem."""
+        from emustart import emupolicy
+        self.policy = dict(values or {})
+        p = self.policy_ini()
+        changes = emupolicy.ini_changes(self.policy)
+        if p and changes and p.is_file():
+            ini_set(p, changes)
 
     # możliwości
     def can_states(self) -> bool:
@@ -409,10 +426,14 @@ class RetroArch(Adapter):
     def state_dirs(self) -> list:
         return [self._cfg_dir("savestate_directory", "states")]
 
+    def apply_policy(self, values: dict) -> None:
+        self.policy = {k: v for k, v in (values or {}).items() if "|" not in k}
+
     def launch_args(self, run_dir: Path, resume: bool, pad_order: list | None = None) -> list:
         run_dir.mkdir(parents=True, exist_ok=True)
         cfg = run_dir / "emustart_ra.cfg"
-        lines = [
+        # najpierw wymagane ustawienia z serwera — niżej ustawienia sesji EmuStart (wygrywają)
+        lines = [f'{k} = "{v}"' for k, v in self.policy.items()] + [
             'network_cmd_enable = "true"',
             f'network_cmd_port = "{RA_PORT}"',
             'savestate_auto_save = "true"',
@@ -555,6 +576,9 @@ class DuckStation(Adapter):
     pause_key = "SPACE"
     state_glob = "*.sav"
 
+    def policy_ini(self) -> Path:
+        return self._ini()
+
     def _ini(self) -> Path:
         portable = (self.home / "portable.txt").exists() or (self.home / "settings.ini").exists()
         return (self.home if portable else Path.home() / "Documents" / "DuckStation") / "settings.ini"
@@ -630,6 +654,9 @@ class PCSX2(Adapter):
     family = "pcsx2"
     state_glob = "*.p2s"
 
+    def policy_ini(self) -> Path:
+        return self._ini()
+
     def _ini(self) -> Path:
         if (self.home / "portable.ini").exists() or (self.home / "portable.txt").exists():
             return self.home / "inis" / "PCSX2.ini"
@@ -703,6 +730,9 @@ class PCSX2(Adapter):
 class Dolphin(Adapter):
     family = "dolphin"
     state_glob = "*.s[0-9][0-9]"
+
+    def policy_ini(self) -> Path:
+        return self._user() / "Config" / "Dolphin.ini"
 
     def _user(self) -> Path:
         if (self.home / "portable.txt").exists():

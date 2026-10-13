@@ -58,7 +58,28 @@ function showTab(t) {
   clearInterval(artTimer);
   if (t === "art") { refreshArt(); artTimer = setInterval(refreshArt, 1500); }
   clearInterval(emuTimer);
-  if (t === "emu") { refreshEmu(); emuTimer = setInterval(refreshEmu, 1500); }
+  if (t === "emu") { refreshEmu(); emuTimer = setInterval(refreshEmu, 1500); refreshPolicy(); }
+}
+
+/* ── wymagane ustawienia emulatorów (emustart/emupolicy.py) ── */
+function renderPolicy(d) {
+  $("emuPolicy").innerHTML = d.families.map((f) =>
+    `<div class="field" style="margin-top:10px"><b>${esc(f.label)}</b>` +
+    `${f.default ? ' <span class="muted">(domyślne EmuStart)</span>' : ""}` +
+    `<textarea data-fam="${esc(f.family)}" rows="4" spellcheck="false" style="width:100%;font-family:monospace">${esc(f.text)}</textarea>` +
+    `<div class="actions"><button data-save="${esc(f.family)}" class="primary">Zapisz</button>` +
+    `<button data-reset="${esc(f.family)}"${f.default ? " disabled" : ""}>Przywróć domyślne</button></div></div>`).join("");
+  $("emuPolicy").querySelectorAll("[data-save],[data-reset]").forEach((b) => b.addEventListener("click", async () => {
+    const fam = b.dataset.save || b.dataset.reset;
+    const text = $("emuPolicy").querySelector(`textarea[data-fam="${fam}"]`).value;
+    const r = await admin("emu_policy_set", b.dataset.reset ? { family: fam, reset: true } : { family: fam, text }).catch(() => null);
+    msg(r?.ok ? "Zapisane — komputery nałożą je przed następną grą." : r?.reason || "Serwer nie odpowiada.", r?.ok);
+    if (r?.ok) renderPolicy(r);
+  }));
+}
+async function refreshPolicy() {
+  const d = await admin("emu_policy").catch(() => null);
+  if (d?.ok) renderPolicy(d);
 }
 
 /* ── emulatory: magazyn serwera (emustart/emustore.py) ── */

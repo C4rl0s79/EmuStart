@@ -129,6 +129,14 @@ Tabela: systemy, wersja na serwerze (i poprzednia — zostaje na wszelki wypadek
 ostatni błąd pobierania. Komputery doinstalowują i aktualizują emulatory same
 (zob. [[Emulatory]]). Wersja to pliki z sumami SHA-256 — komputer pobiera tylko zmienione.
 
+**Wymagane ustawienia emulatorów** (ta sama zakładka): wartości, które komputery nakładają tuż
+przed każdą grą — wygrywają z ustawieniami profilu. RetroArch: `klucz = wartość` (jak
+w `retroarch.cfg`, na czas gry), DuckStation / PCSX2 / Dolphin: `Sekcja|Klucz = wartość` (w pliku
+ini emulatora). Domyślnie to, czego EmuStart potrzebuje: wyjście z gry bez pytań
+(`Main|ConfirmPowerOff = false`, `UI|ConfirmShutdown = false`, `Interface|ConfirmStop = False`),
+w RetroArchu pauza w tle, obrazki stanów i `quit_on_close_content = 2`. **Przywróć domyślne** —
+wartości EmuStart.
+
 ### Aktualizacja
 **Sprawdź aktualizacje** → **Aktualizuj do …**: pobranie pliku serwera z wydania,
 sprawdzenie skrótu SHA-256 i podpisu wydania, podmiana plików po zamknięciu serwera,

@@ -171,3 +171,48 @@ def test_pack_refuses_files_outside_manifest(emu_server):
     c.request("POST", "/v1/emulators/pack", body=b'{"item": "duckstation", "version": "v1", "files": "*"}',
               headers={"Content-Type": "application/json"})
     assert c.getresponse().status == 401                                         # bez klucza — nic
+
+
+def test_required_settings_from_server_applied_before_game(emu_server, tmp_path):
+    """Wymagane ustawienia z panelu serwera: komputer dostaje je z indeksem emulatorów i nakłada
+    przed grą (ini — w pliku emulatora, RetroArch — w konfiguracji sesji)."""
+    from emustart import emupolicy, ingame, srvadmin
+
+    class A:
+        _cfg = emu_server
+    # domyślne, zanim komputer cokolwiek dostał
+    assert installer.policy("duckstation") == {"Main|ConfirmPowerOff": "false"}
+    assert not srvadmin.emu_policy_set(A(), {"family": "pcsx2", "text": "bez znaku rownosci"})["ok"]
+    assert not srvadmin.emu_policy_set(A(), {"family": "retroarch", "text": "Sekcja|klucz = 1"})["ok"]
+    assert not srvadmin.emu_policy_set(A(), {"family": "duckstation", "text": "Main|X = a\"b"})["ok"]
+    r = srvadmin.emu_policy_set(A(), {"family": "duckstation",
+                                     "text": "# komentarz\nMain|ConfirmPowerOff = false\nDisplay|VSync = true"})
+    assert r["ok"], r
+    srvadmin.emu_policy_set(A(), {"family": "retroarch", "text": "video_vsync = true\nsavestate_thumbnail_enable = false"})
+    installer.refresh_index({})
+    assert installer.policy("duckstation") == {"Main|ConfirmPowerOff": "false", "Display|VSync": "true"}
+
+    ds_home = tmp_path / "DuckStation"
+    ds_home.mkdir()
+    (ds_home / "settings.ini").write_text("[Main]\nConfirmPowerOff = true\n[Display]\nVSync = false\n", encoding="utf-8")
+    ds = ingame.DuckStation(str(ds_home / "duckstation-qt-x64-ReleaseLTCG.exe"))
+    ds.apply_policy(installer.policy("duckstation"))
+    ini = (ds_home / "settings.ini").read_text(encoding="utf-8")
+    assert "ConfirmPowerOff = false" in ini and "VSync = true" in ini
+    # emulator jeszcze nieuruchamiany: pliku nie zakładamy (zrobi to sam, z kreatorem)
+    pc = ingame.PCSX2(str(tmp_path / "PCSX2" / "pcsx2-qt.exe"))
+    pc.apply_policy({"UI|ConfirmShutdown": "false"})
+    assert not pc.policy_ini().exists()
+
+    ra_home = tmp_path / "RetroArch"
+    ra_home.mkdir()
+    (ra_home / "retroarch.cfg").write_text('savefile_directory = "default"\n', encoding="utf-8")
+    ra = ingame.RetroArch(str(ra_home / "retroarch.exe"))
+    ra.apply_policy(installer.policy("retroarch"))
+    ra.launch_args(tmp_path / "run", resume=False)
+    lines = (tmp_path / "run" / "emustart_ra.cfg").read_text(encoding="utf-8").splitlines()
+    assert lines[0] == 'video_vsync = "true"'
+    # ustawienie sesji EmuStart stoi niżej — wygrywa (RetroArch bierze ostatnią wartość)
+    assert lines.index('savestate_thumbnail_enable = "true"') > lines.index('savestate_thumbnail_enable = "false"')
+    srvadmin.emu_policy_set(A(), {"family": "duckstation", "reset": True})
+    assert emupolicy.effective(emu_server)["duckstation"] == emupolicy.DEFAULTS["duckstation"]

@@ -652,8 +652,39 @@ def emu_update(api, args: dict) -> dict:
     return emustore.start_update(api._cfg, items, bool(args.get("force")))
 
 
+def emu_policy_get(api) -> dict:
+    """Panel: wymagane ustawienia emulatorów (emustart/emupolicy.py) — tekst do edycji."""
+    from emustart import emupolicy
+    eff = emupolicy.effective(api._cfg)
+    own = api._cfg.get("emu_policy") or {}
+    return {"ok": True, "families": [{"family": f, "label": label, "text": emupolicy.format_values(eff[f]),
+                                      "default": f not in own} for f, label in emupolicy.FAMILIES.items()]}
+
+
+def emu_policy_set(api, args: dict) -> dict:
+    """Panel: zapis wymaganych ustawień jednej rodziny; `reset` — wartości domyślne EmuStart."""
+    from emustart import config, emupolicy
+    fam = str(args.get("family", ""))
+    if fam not in emupolicy.FAMILIES:
+        return {"ok": False, "reason": "Nieznany emulator."}
+    pol = dict(api._cfg.get("emu_policy") or {})
+    if args.get("reset"):
+        pol.pop(fam, None)
+    else:
+        values, why = emupolicy.parse(fam, str(args.get("text", "")))
+        if why:
+            return {"ok": False, "reason": why}
+        pol[fam] = values
+    api._cfg["emu_policy"] = pol
+    config.save(api._cfg)
+    log.info("panel: wymagane ustawienia %s: %s", fam, "domyślne" if args.get("reset") else pol[fam])
+    return {"ok": True, **emu_policy_get(api)}
+
+
 ACTIONS["emu_status"] = emu_status
 ACTIONS_ARGS["emu_update"] = emu_update
+ACTIONS["emu_policy"] = emu_policy_get
+ACTIONS_ARGS["emu_policy_set"] = emu_policy_set
 ACTIONS.update({"config": config_get, "public_status": public_status, "devices": devices_list, "login_code": login_code, "profiles_migrate_status": profiles_migrate_status,
                 "accounts": accounts_list})
 

@@ -78,12 +78,22 @@ def amiga_kickstart_missing(emu_root: str) -> bool:
 # ── indeks emulatorów serwera ──
 
 def index() -> dict:
-    """Ostatnio pobrany indeks /v1/emulators ({items, systems})."""
+    """Ostatnio pobrany indeks /v1/emulators ({items, systems, policy})."""
     try:
         d = json.loads(library.meta_get(INDEX_META, "{}") or "{}")
     except ValueError:
         d = {}
-    return {"items": d.get("items") or {}, "systems": d.get("systems") or {}}
+    return {"items": d.get("items") or {}, "systems": d.get("systems") or {}, "policy": d.get("policy")}
+
+
+def policy(family: str) -> dict:
+    """Wymagane ustawienia emulatora z serwera (emustart/emupolicy.py); przed pierwszym
+    połączeniem z serwerem — domyślne."""
+    from emustart import emupolicy
+    pol = index()["policy"]
+    if isinstance(pol, dict):
+        return dict(pol.get(family) or {})
+    return dict(emupolicy.DEFAULTS.get(family, {}))
 
 
 def refresh_index(cfg: dict) -> dict:
@@ -94,7 +104,8 @@ def refresh_index(cfg: dict) -> dict:
             if st == 200:
                 d = json.loads(body)
                 library.meta_set(INDEX_META, json.dumps({"items": d.get("items") or {},
-                                                         "systems": d.get("systems") or {}}))
+                                                         "systems": d.get("systems") or {},
+                                                         "policy": d.get("policy") or {}}))
         except (OSError, ValueError) as ex:
             log.info("emulatory z serwera: %s", ex)
     return index()

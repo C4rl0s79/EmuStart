@@ -117,7 +117,8 @@ def public_index(cfg: dict) -> dict:
     for item, ess in need.items():
         for es in ess:
             systems_.setdefault(es, []).append(item)
-    return {"items": items, "systems": systems_}
+    from emustart import emupolicy
+    return {"items": items, "systems": systems_, "policy": emupolicy.effective(cfg)}
 
 
 # ── pobieranie i budowa wersji ──

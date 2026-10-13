@@ -94,6 +94,11 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   w folderze, np. z RetroBata) — pobiera tylko zmienione pliki jednym ZIP-em, konfiguracji i
   zapisów nie rusza, działającego emulatora nie podmienia (później). Pasek „⬇ emulatory”
   pokazuje postęp. Komputer nie pobiera już emulatorów z internetu.
+- **Wymagane ustawienia emulatorów z serwera** (panel → Emulatory): dla RetroArcha, DuckStation,
+  PCSX2 i Dolphina lista wartości, które każdy komputer nakłada tuż przed grą (po ustawieniach
+  profilu — wygrywają). Domyślnie: wyjście z gry bez okna z pytaniem, w RetroArchu pauza
+  w tle, obrazki stanów i zamknięcie gry = wyjście z RetroArcha; zmiana i powrót do domyślnych
+  w panelu.
 - **Więcej propozycji logo systemów** (2 → do 14 na system): motywy EmulationStation / ES-DE
   (Art Book Next, Carbon, Alekfull NX, Canvas, Simple, Pixel, SNES Mini) i ikony z sześciu
   motywów RetroArcha — prosto z internetu, sprawdzane naraz. Wcześniej część propozycji

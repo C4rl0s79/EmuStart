@@ -20,7 +20,9 @@ potrzebnych systemom biblioteki i trzyma je u siebie. EmuStart na PC bierze emul
   pliki programu; **konfiguracja i zapisy zostają** (np. `settings.ini`, `inis\`, `memcards\`,
   `retroarch.cfg`, `saves\`, `states\`), plików spoza wydania nic nie usuwa,
 - działający emulator nie jest ruszany — aktualizacja przy następnej okazji,
-- bez serwera nic się nie pobiera; EmuStart działa na tym, co jest zainstalowane.
+- bez serwera nic się nie pobiera; EmuStart działa na tym, co jest zainstalowane,
+- **wymagane ustawienia** emulatorów (panel serwera → Emulatory) EmuStart nakłada tuż przed
+  każdą grą — np. wyjście z gry bez okna z pytaniem.
 
 Uruchomienie gry z systemu bez emulatora proponuje jego instalację od razu
 (`<folder emulatorów>\<Emulator>`); wszystkie brakujące naraz: Ustawienia →
