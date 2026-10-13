@@ -53,6 +53,8 @@ class Api:
         # pierwsze przejście na serwer); gra uruchomiona w tym czasie poczeka (post_busy)
         launcher.start_post(lambda: profiles.push_all(self._cfg), "zapisy profili")
         threading.Thread(target=self._profiles_bootstrap, daemon=True, name="profiles").start()
+        from emustart import mediastore
+        mediastore.migrate_later()                # lokalna kopia grafik: jeden plik na system
         from emustart import libsync
         self._lib_version = 0                  # rośnie, gdy biblioteka z serwera się zmieniła (UI przerysowuje)
         if libsync.thin(self._cfg):            # biblioteka z serwera przy starcie i co 5 minut (zmienione systemy)
@@ -1003,7 +1005,7 @@ class Api:
         """Lokalna kopia grafiki po zmianie na serwerze — usunięta, pobierze się nowa."""
         g = library.game(int(game_id))
         if g and kind in ("box", "snap", "logo"):
-            art.media_path(g["es"], g["name"], kind).unlink(missing_ok=True)
+            art.delete(g["es"], g["name"], kind)
             if state is not None:
                 with library.db() as c:
                     c.execute(f"UPDATE games SET art_{kind}=? WHERE id=?", (state, g["id"]))

@@ -145,13 +145,8 @@ def _drop_changed_art(es: str, rows: list) -> int:
         now = r.get("art_m") or {}
         for kind in ("box", "snap", "logo"):
             if before.get(kind) != now.get(kind) or prev[0] != r["name"]:
-                f = art.media_path(es, prev[0], kind)
-                if f.exists():
-                    try:
-                        f.unlink()
-                        n += 1
-                    except OSError:
-                        pass
+                if art.delete(es, prev[0], kind):
+                    n += 1
     return n
 
 
@@ -250,6 +245,11 @@ def fetch_media(cfg: dict, rel: str, target: Path) -> bool:
         if st == 404:
             _media_miss[rel] = time.time()
         return False
+    from emustart import mediastore
+    where = mediastore.file_name(rel)
+    if where:                                   # grafika gry — do pliku systemu (lokalna kopia)
+        mediastore.put(where[0], where[1], body)
+        return True
     target.parent.mkdir(parents=True, exist_ok=True)
     tmp = target.with_name(target.name + ".tmp")
     tmp.write_bytes(body)
@@ -292,7 +292,6 @@ def server_systems() -> list:
 
 def server_games(es: str) -> list:
     """Gry systemu dla PC: kolumny biblioteki, czasy grafik (PC podmienia zmienione) i opisy."""
-    import os
     from emustart import art
     cols = ", ".join(f"g.{c}" for c in COLS)
     out = []
@@ -302,10 +301,9 @@ def server_games(es: str) -> list:
         art_m = {}
         for kind in ("box", "snap", "logo"):
             if r[f"art_{kind}"] == art.HAS:
-                try:
-                    art_m[kind] = int(os.stat(art.media_path(es, r["name"], kind)).st_mtime)
-                except OSError:
-                    pass
+                t = art.mtime(es, r["name"], kind)
+                if t:
+                    art_m[kind] = int(t)
         d["art_m"] = art_m
         if r["m_data"] or r["m_edits"]:
             d["meta"] = {"data": json.loads(r["m_data"] or "{}"), "edits": json.loads(r["m_edits"] or "{}")}

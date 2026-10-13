@@ -260,6 +260,22 @@ class _Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(data)
             return
+        if base == ROUTES.get("/media/"):
+            from emustart import mediastore
+            where = mediastore.file_name(rel)
+            if where:                                  # grafika gry — z pliku systemu (.media)
+                got = mediastore.get(*where)
+                if got is None and not target.is_file():
+                    cfg = MEDIA_CFG() if MEDIA_CFG else getattr(DEV_API, "_cfg", None)
+                    if cfg:
+                        from emustart import libsync   # PC: lokalna kopia z serwera
+                        libsync.fetch_media(cfg, rel, target)
+                        got = mediastore.get(*where)
+                if got is not None:
+                    return self._send_bytes(got[0], mimetypes.guess_type(where[1])[0] or "image/png")
+                if not target.is_file():
+                    return self.send_error(404)
+                # stary plik grafiki, jeszcze nieprzeniesiony do pliku systemu — jak dotąd
         if not target.is_file() and base == ROUTES.get("/media/"):
             cfg = MEDIA_CFG() if MEDIA_CFG else getattr(DEV_API, "_cfg", None)
             if cfg:
@@ -278,6 +294,19 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Referrer-Policy", "no-referrer")
         self.end_headers()
         self.wfile.write(data)
+
+
+def _send_bytes(self, data: bytes, ctype: str) -> None:
+    self.send_response(200)
+    self.send_header("Content-Type", ctype)
+    self.send_header("Content-Length", str(len(data)))
+    self.send_header("Cache-Control", "max-age=86400")
+    self.send_header("Referrer-Policy", "no-referrer")
+    self.end_headers()
+    self.wfile.write(data)
+
+
+_Handler._send_bytes = _send_bytes
 
 
 class _TLSServer(ThreadingHTTPServer):

@@ -32,7 +32,10 @@ serwera** — okna na tym samym komputerze.
    ([logowanie urządzeń](#logowanie-urządzeń)).
 
 Dane serwera (ustawienia, biblioteka, grafiki, konta, profile, kopie) są w folderze
-`server\` obok `EmuStartServer.exe` — skopiowanie folderu programu przenosi serwer.
+`server\` obok `EmuStartServer.exe` — skopiowanie folderu programu przenosi serwer. Grafiki
+gier są w jednym pliku na system (`server\media\<system>.media`) zamiast tysięcy małych
+plików — szybkie kopiowanie i kopie zapasowe. Stare pliki grafik serwer przenosi sam przy
+starcie (każdy usuwany dopiero po odczycie kontrolnym).
 
 ### Przejście z EmuStart sprzed 0.45
 

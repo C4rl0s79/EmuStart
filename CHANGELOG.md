@@ -101,6 +101,11 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   poprawką, przywróceniem danych pobranych i pobraniem opisu z sieci.
 - **Panel serwera → Konfiguracja → Systemy**: logo (propozycje, bez logo), nazwa,
   poświata, widoczność na urządzeniach, zalecany emulator i rdzeń RetroArcha.
+- **Grafiki gier w jednym pliku na system** (`media/<system>.media`, SQLite) zamiast osobnego
+  pliku na każdą okładkę, zrzut i logo — na serwerze ok. 100 tys. plików mniej, serwer da się
+  szybko skopiować i przenieść. Tak samo lokalna kopia na PC. Adresy grafik bez zmian. Stare
+  pliki przenoszą się same przy starcie (w tle; każdy plik usuwany dopiero po odczycie
+  kontrolnym z bazy, do tego czasu jest serwowany jak dotąd). Logo systemów zostają plikami.
 - **Scalanie platform** (panel → Konfiguracja → Systemy → *scal z…*): np. dwa foldery
   Xbox 360 (`x360` i `xbox360`) — gry z obu na jednej liście, ta sama gra raz (pierwszeństwo:
   kolejność folderów z grami); *Rozdziel* cofa. Przy każdym systemie widać jego folder(y).

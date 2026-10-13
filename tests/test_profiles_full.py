@@ -612,15 +612,15 @@ def test_demoscene_matching_by_group(monkeypatch):
 
 
 def test_reset_demo_art(env, tmp_path, monkeypatch):
-    from emustart import art, library
+    from emustart import art, library, mediastore
     monkeypatch.setattr(paths, "MEDIA", tmp_path / "media")
-    _write(tmp_path / "media" / "amigawhddemos" / "X.box.png", b"zla")
+    mediastore.put("amigawhddemos", "X.box.png", b"zla")
     with library.db() as c:
         c.execute("INSERT INTO games(es, rel, name, title, tags, files, size, art_box, seen) "
                   "VALUES('amigawhddemos','X.lha','X','X','','[]',0,1,0)")
     assert art.reset_system("amigawhddemos") == 1
     assert library.db().execute("SELECT art_box FROM games WHERE es='amigawhddemos'").fetchone()[0] == 0
-    assert not (tmp_path / "media" / "amigawhddemos").exists()
+    assert not mediastore.exists("amigawhddemos", "X.box.png")
 
 
 # ── pobieranie blokami, równolegle, na żądanie ──
@@ -741,14 +741,12 @@ def test_partial_converts_old_4mb_map(tmp_path):
 
 
 def test_media_url_changes_when_art_replaced(tmp_path, monkeypatch):
-    from emustart import art
+    from emustart import art, mediastore
     monkeypatch.setattr(paths, "MEDIA", tmp_path / "media")
-    f = art.media_path("snes", "Gra (USA)", "box")
-    _write(f, b"stara")
-    os.utime(f, (1000, 1000))
+    f = art.media_file("Gra (USA)", "box")
+    mediastore.put("snes", f, b"stara", 1000)
     u1 = art.media_url("snes", "Gra (USA)", "box")
-    _write(f, b"nowa")
-    os.utime(f, (2000, 2000))
+    mediastore.put("snes", f, b"nowa", 2000)
     u2 = art.media_url("snes", "Gra (USA)", "box")
     assert u1 != u2 and u2.endswith("?v=2000")
 

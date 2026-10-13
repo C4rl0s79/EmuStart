@@ -31,6 +31,8 @@ class ServerApi:
         self._art_job = None
         self._lb_update = None
         if start_background:
+            from emustart import mediastore
+            mediastore.migrate_later()            # stare pliki grafik → jeden plik na system
             threading.Thread(target=self._arcade_meta, daemon=True, name="arcade-meta").start()
             threading.Thread(target=self._platforms_meta, daemon=True, name="platforms").start()
 
@@ -296,7 +298,7 @@ class ServerApi:
     def art_clear(self, game_id: int, kind: str) -> dict:
         g = library.game(int(game_id))
         if g and kind in ("box", "snap", "logo"):
-            art.media_path(g["es"], g["name"], kind).unlink(missing_ok=True)
+            art.delete(g["es"], g["name"], kind)
             library.set_art(g["id"], kind, art.MISSING)
             _clear_device_lists()
         return {"ok": True}

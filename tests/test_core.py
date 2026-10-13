@@ -218,16 +218,17 @@ def test_fbneo_names_and_versions_without_mame(env, tmp_path):
     for n in ("1941", "1941j", "neogeo"):
         _write(roms / "fbneo" / f"{n}.zip", b"zip")
     scanner.scan_system("fbneo", roms / "fbneo")                    # bez indeksu: nazwy setów
-    _write(art.media_path("fbneo", "1941", "box"), b"png")          # grafika pod nazwą setu
+    from emustart import mediastore
+    mediastore.put("fbneo", art.media_file("1941", "box"), b"png")   # grafika pod nazwą setu
     assert arcade.refresh_fbneo(force=True, url=dat.as_uri())["sets"] == 3
     assert arcade.refresh_fbneo()["cached"]                          # raz na 30 dni
     scanner.scan_system("fbneo", roms / "fbneo")
     # nowa nazwa gry — grafika przeniesiona za nią (0.44.4: grafiki znikały)
-    assert art.media_path("fbneo", "1941 - Counter Attack (World)", "box").is_file()
-    assert not (paths.MEDIA / "fbneo" / "1941.box.png").exists()
-    _write(art.media_path("fbneo", "1941j", "snap"), b"png")         # naprawa po fakcie
+    assert art.has("fbneo", "1941 - Counter Attack (World)", "box")
+    assert not art.has("fbneo", "1941", "box")
+    mediastore.put("fbneo", art.media_file("1941j", "snap"), b"png")   # naprawa po fakcie
     assert art.adopt_set_names("fbneo") == 1
-    assert art.media_path("fbneo", "1941 - Counter Attack (Japan)", "snap").is_file()
+    assert art.has("fbneo", "1941 - Counter Attack (Japan)", "snap")
     games = library.list_games("fbneo", library.default_profile(), True)
     assert [g["title"] for g in games] == ["1941 - Counter Attack"]  # bez wersji i BIOS-u
     assert arcade.dependencies("1941j") == ["1941"]                  # wersja potrzebuje rodzica

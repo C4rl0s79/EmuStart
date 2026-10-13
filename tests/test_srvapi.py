@@ -162,3 +162,25 @@ def test_merge_platforms_with_dedupe(tmp_path):
     assert s.system_merge("x360", "")["ok"]
     scan()
     assert {"x360", "xbox360"} <= {x["es"] for x in s.systems_look()}
+
+
+def test_media_store_one_file_per_system_and_migration(tmp_path):
+    """Grafiki w jednym pliku na system (media/<system>.media) zamiast tysięcy plików;
+    stare pliki przenoszone i usuwane dopiero po odczycie kontrolnym."""
+    import os as _os
+    from emustart import art, mediastore, paths
+    old = paths.MEDIA / "snes"
+    old.mkdir(parents=True)
+    (old / "A (USA).box.png").write_bytes(b"okladka A")
+    (old / "B (USA).snap.png").write_bytes(b"zrzut B")
+    _os.utime(old / "A (USA).box.png", (1000, 1000))
+    mediastore.put("snes", "B (USA).snap.png", b"nowszy zrzut", 9e9)   # nowsza wersja już w bazie
+    assert mediastore.migrate() == 2
+    assert not old.exists() and (paths.MEDIA / "snes.media").is_file()
+    assert mediastore.get("snes", "A (USA).box.png") == (b"okladka A", 1000.0)
+    assert mediastore.get("snes", "B (USA).snap.png")[0] == b"nowszy zrzut"
+    assert art.media_url("snes", "A (USA)", "box").endswith("?v=1000")
+    assert mediastore.rename("snes", "A (USA).box.png", "A2.box.png") and art.has("snes", "A2", "box")
+    assert art.delete("snes", "A2", "box") and not art.has("snes", "A2", "box")
+    assert mediastore.file_name("snes/A.box.png") == ("snes", "A.box.png")
+    assert mediastore.file_name("_systems/snes.png") is None and mediastore.file_name("../x/y") is None

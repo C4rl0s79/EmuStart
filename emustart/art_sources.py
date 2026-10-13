@@ -410,11 +410,9 @@ class Sources:
         out = {}
         for kind in need if sib else ():
             if sib.get(f"art_{kind}") == 1:
-                p = art.media_path("amiga", sib["name"], kind)
-                try:
-                    out[kind] = (p.read_bytes(), "kolekcja Amiga")
-                except OSError:
-                    pass
+                data = art.read("amiga", sib["name"], kind)
+                if data:
+                    out[kind] = (data, "kolekcja Amiga")
         return out
 
     def _scene(self, name: str, need: set) -> dict:

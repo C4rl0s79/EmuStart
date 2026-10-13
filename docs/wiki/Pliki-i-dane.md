@@ -6,7 +6,7 @@
 |---|---|
 | `config.json` | ustawienia komputera: serwer, emulator per system, wygląd |
 | `data\library.sqlite` | kopia biblioteki z serwera, opisy, historia gry, stan pamięci podręcznej |
-| `data\media\<system>\` | kopia grafik z serwera (pobierane przy wyświetleniu) |
+| `data\media\<system>.media` | kopia grafik z serwera — jeden plik na system (pobierane przy wyświetleniu) |
 | `data\media\_stany\` | obrazki stanów gry (z plików stanów emulatorów) |
 | `data\resume\<profil>\` | stany „wznowienia” |
 | `cache\<system>\` | lokalne kopie gier |

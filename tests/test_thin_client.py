@@ -76,10 +76,12 @@ def test_library_comes_from_server_without_scanning(srv, monkeypatch, tmp_path):
 
 
 def test_media_fetched_from_server_on_demand(srv, monkeypatch, tmp_path):
+    from emustart import mediastore
     cfg, media = srv
     target = tmp_path / "lokalne" / "snes" / "Gra (USA).box.png"
-    assert libsync.fetch_media(cfg, "snes/Gra (USA).box.png", target)
-    assert target.read_bytes().endswith(b"okladka")
+    assert libsync.fetch_media(cfg, "snes/Gra (USA).box.png", target)    # stary plik serwera (przed przeniesieniem)
+    assert mediastore.get("snes", "Gra (USA).box.png")[0].endswith(b"okladka")   # lokalna kopia: plik systemu
+    assert not target.exists()
     assert not libsync.fetch_media(cfg, "snes/Nie ma.box.png", tmp_path / "x.png")      # brak — bez błędu
 
 
@@ -138,9 +140,8 @@ def test_server_changes_reach_pc_cache(srv, monkeypatch):
     assert libsync.sync(cfg)["ok"]
     gid = library.db().execute("SELECT id FROM games WHERE rel='Gra (USA).sfc'").fetchone()["id"]
     assert metadata.get(gid)["description"] == "Stary opis"
-    local = art.media_path("snes", "Gra (USA)", "box")
-    local.parent.mkdir(parents=True, exist_ok=True)
-    local.write_bytes(b"stara okladka")                      # lokalna kopia (pobrana wcześniej)
+    from emustart import mediastore
+    mediastore.put("snes", art.media_file("Gra (USA)", "box"), b"stara okladka")   # lokalna kopia
     logo = paths.MEDIA / "_systems" / "snes.custom.png"
     logo.parent.mkdir(parents=True, exist_ok=True)
     logo.write_bytes(b"stare logo")
@@ -152,6 +153,6 @@ def test_server_changes_reach_pc_cache(srv, monkeypatch):
          "logo": "/media/_systems/snes.custom.png?v=2", "logo_glow": False}])
     assert libsync.sync(cfg)["changed"] == 1
     assert metadata.get(gid)["description"] == "Nowy opis"
-    assert not local.exists()                                 # pobierze się nowa przy wyświetleniu
+    assert not art.has("snes", "Gra (USA)", "box")           # pobierze się nowa przy wyświetleniu
     assert libsync.sync(cfg)["changed"] == 0                  # bez zmian — nic
     assert not logo.exists()                                  # nowe logo systemu — też od nowa
