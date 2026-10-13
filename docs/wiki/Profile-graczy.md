@@ -40,9 +40,11 @@ Nowy profil zaczyna od bieżących ustawień.
   zamknięciu zmiany zapisują się w profilu i na NAS-ie. Zmiany zrobione w trakcie gry
   (RetroArch: menu F1 → Ustawienia, Opcje rdzenia, nadpisania) też zostają — RetroArch
   musi zostać zamknięty normalnie (menu EmuStart → Wyjdź, albo z menu RetroArcha).
-- **Telefon:** ustawienia RetroArcha (i konto RetroAchievements w RetroArchu i ArmSX2)
-  należą do profilu i są wspólne dla wszystkich telefonów tego profilu
+- **Telefon:** ustawienia RetroArcha (i konto RetroAchievements w RetroArchu) należą do
+  profilu i są wspólne dla wszystkich telefonów tego profilu
   (`<profil>\settings\android\retroarch\`). Opcje rdzeni RetroArcha zostają na telefonie.
+  ArmSX2 trzyma ustawienia i konto RetroAchievements u siebie (zaloguj raz w ArmSX2);
+  od wersji 2.8.2 stosuje ustawienia osobne dla gry także przy starcie z EmuStart.
 - **Windows i Android mają osobne ustawienia** (inne wersje emulatorów i rdzeni, inne
   ścieżki): na NAS-ie ustawienia z Windows są w `<profil>\settings\windows\<emulator>\`,
   telefon ma własne — na telefonie **Ustawienia emulatora** otwiera emulator na tym

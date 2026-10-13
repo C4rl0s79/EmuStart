@@ -210,7 +210,7 @@ class Bridge(private val act: MainActivity) {
             .put("profiles", profList.size.coerceAtLeast(1))
             .put("account", if (prefs.deviceId.isNotEmpty()) prefs.serverAccount else "")
             .put("server", if (prefs.configured) JSONObject().put("ok", online).put("name", "")
-                .put("key_rejected", keyRejected) else JSONObject.NULL)
+                .put("checking", checking && !online).put("key_rejected", keyRejected) else JSONObject.NULL)
             .put("py_pad", false).put("pad_backend", "android")
     }
 
@@ -365,12 +365,30 @@ class Bridge(private val act: MainActivity) {
     }
 
     @Volatile private var systemsFailAt = 0L
+    /** Od startu aplikacji serwer jeszcze nie odpowiedział ani nie zawiódł — pasek: „łączę…”. */
+    @Volatile private var checking = true
+    private val systemsRefreshing = java.util.concurrent.atomic.AtomicBoolean(false)
 
+    /** Lista systemów bez czekania na sieć: z pamięci (ostatnie połączenie), a serwer w tle —
+     *  po odpowiedzi interfejs odświeża się sam. Wcześniej start czekał na wybór adresu
+     *  serwera i logowanie (z wyłączonym Tailscale ponad 10 s), zanim cokolwiek się pokazało. */
     private fun systems(): JSONArray {
         // po błędzie połączenia lista z pamięci — ale nie na zawsze: ponowna próba co 30 s
         if (!online && systemsCache != null && System.currentTimeMillis() - systemsFailAt > 30_000) systemsCache = null
         systemsCache?.let { return it }
         if (!prefs.configured) return JSONArray()
+        val f = cacheFile("systemy")
+        if (f.isFile) {
+            if (systemsRefreshing.compareAndSet(false, true)) pool.execute {
+                try { fetchSystems() } finally { systemsRefreshing.set(false) }
+                act.js("window.refreshState && refreshState().then(() => S.screen === 'systems' && renderSystems())")
+            }
+            return decorate(try { JSONArray(f.readText()) } catch (e: Exception) { JSONArray() })
+        }
+        return fetchSystems()                 // pierwsze uruchomienie — nie ma czego pokazać bez serwera
+    }
+
+    private fun fetchSystems(): JSONArray {
         val arr = try {
             server.systems().also { online = true; keyRejected = false; cacheFile("systemy").writeText(it.toString()); learnAddresses() }
         } catch (e: Exception) {
@@ -381,12 +399,17 @@ class Bridge(private val act: MainActivity) {
             val f = cacheFile("systemy")
             if (f.isFile) JSONArray(f.readText()) else JSONArray()
         }
+        checking = false
+        systemsCache = decorate(arr)
+        return systemsCache!!
+    }
+
+    private fun decorate(arr: JSONArray): JSONArray {
         for (i in 0 until arr.length()) {
             val s = arr.getJSONObject(i)
             s.put("logo", remote(s.optString("logo")))
             s.put("emulator", emuLabel(s, chosenEmu(s)))
         }
-        systemsCache = arr
         return arr
     }
 
@@ -893,14 +916,11 @@ class Bridge(private val act: MainActivity) {
                     if (warn.isNotEmpty()) { Log.w(tag, warn); l.message = warn }
                 }
             }
-            // ustawienia i konto RetroAchievements profilu (osobno od komputera, wspólne dla telefonów)
+            // ustawienia i konto RetroAchievements profilu w RetroArchu (osobno od komputera,
+            // wspólne dla telefonów); ArmSX2 trzyma swoje we własnych ustawieniach — bez zmian
             var raCfg: String? = null
-            if (prefs.profile.isNotEmpty()) {
-                when (Emulators.baseId(emu)) {
-                    "retroarch" -> raCfg = emuProfile.retroarchBefore(prefs.profile, Emulators.raConfig(act, emu))?.absolutePath
-                    "armsx2" -> emuProfile.armsx2(prefs.profile, prefs.saveDir("armsx2").ifEmpty { prefs.learnedDir("armsx2") })
-                }
-            }
+            if (prefs.profile.isNotEmpty() && Emulators.baseId(emu) == "retroarch")
+                raCfg = emuProfile.retroarchBefore(prefs.profile, Emulators.raConfig(act, emu))?.absolutePath
             val intent = Emulators.intent(act, emu, main, l.sys.optString("plat"), l.sys.optString("core"), raCfg)
             l.startedAt = System.currentTimeMillis()
             l.phase = "running"

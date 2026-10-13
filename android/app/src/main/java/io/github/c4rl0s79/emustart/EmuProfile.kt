@@ -15,8 +15,10 @@ import java.io.File
  * traktuje jako tylko do odczytu — przy wyjściu zapisuje do pliku profilu wyłącznie to,
  * co gracz zmienił (z powrotem z `#include`), więc oryginał zostaje nietknięty.
  *
- * ArmSX2: konto RetroAchievements w `inis/PCSX2.ini` i `inis/secrets.ini` folderu danych
- * (tego samego, w którym leżą karty pamięci) — jak PCSX2 na komputerze.
+ * ArmSX2 trzyma ustawienia i konto RetroAchievements we własnych ustawieniach aplikacji
+ * (niedostępnych dla innych aplikacji) — EmuStart ich nie zmienia; konto loguje się raz
+ * w ArmSX2. Ustawienia osobne dla gry ArmSX2 (od 2.8.2) stosuje też przy uruchomieniu
+ * z EmuStart (rozpoznaje grę po numerze z płyty).
  */
 class EmuProfile(private val server: Server, private val prefs: Prefs) {
     private val tag = "EmuStart"
@@ -106,50 +108,5 @@ class EmuProfile(private val server: Server, private val prefs: Prefs) {
         } catch (e: Exception) { Log.w(tag, "ustawienia RetroArcha na serwer: $e") }
     }
 
-    /** ArmSX2: konto RA profilu w PCSX2.ini / secrets.ini folderu danych (obok kart pamięci). */
-    fun armsx2(profile: String, memcardsDir: String) {
-        if (profile.isEmpty() || memcardsDir.isEmpty()) return
-        val acc = account(profile) ?: return
-        val inis = File(File(memcardsDir).parentFile ?: return, "inis")
-        if (!inis.isDirectory) return
-        val on = acc.optString("user").isNotEmpty() && acc.optString("token").isNotEmpty()
-        try {
-            iniSet(File(inis, "PCSX2.ini"), "Achievements", mapOf(
-                "Enabled" to (if (on) "true" else "false"),
-                "Username" to (if (on) acc.optString("user") else ""),
-                "LoginTimestamp" to (if (on) (System.currentTimeMillis() / 1000).toString() else "0"),
-                "ChallengeMode" to (if (on && acc.optBoolean("hardcore")) "true" else "false")))
-            iniSet(File(inis, "secrets.ini"), "Achievements", mapOf("Token" to (if (on) acc.optString("token") else "")))
-        } catch (e: Exception) { Log.w(tag, "konto RA w ArmSX2: $e") }
-    }
 
-    /** Zmienia / dopisuje klucze w sekcji pliku ini (resztę pliku zostawia bez zmian). */
-    private fun iniSet(f: File, section: String, values: Map<String, String>) {
-        val src = if (f.isFile) f.readLines() else emptyList()
-        val out = mutableListOf<String>()
-        val todo = values.toMutableMap()
-        var cur = ""
-        var lastInSection = -1
-        for (line in src) {
-            val sec = Regex("""^\s*\[(.+?)]\s*$""").find(line)?.groupValues?.get(1)
-            if (sec != null) {
-                cur = sec
-                out += line
-                if (cur == section) lastInSection = out.size - 1
-                continue
-            }
-            val k = Regex("""^\s*([^=;#]+?)\s*=""").find(line)?.groupValues?.get(1)
-            if (cur == section && k != null && k in todo) {
-                out += "$k = ${todo.remove(k)}"
-            } else out += line
-            if (cur == section && line.isNotBlank()) lastInSection = out.size - 1
-        }
-        if (todo.isNotEmpty()) {
-            val add = todo.map { "${it.key} = ${it.value}" }
-            if (lastInSection >= 0) out.addAll(lastInSection + 1, add)
-            else { if (out.isNotEmpty()) out += ""; out += "[$section]"; out += add }
-        }
-        f.parentFile?.mkdirs()
-        f.writeText(out.joinToString("\n") + "\n")
-    }
 }

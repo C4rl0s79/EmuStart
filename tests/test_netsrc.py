@@ -213,3 +213,20 @@ def test_system_look_pushed_to_server(srv, monkeypatch, tmp_path):
     assert logos.push_to_server(cfg) == 0                         # bez zmian — nic nie idzie
     cfg["systems"]["lynx"]["logo_glow"] = False
     assert logos.push_to_server(cfg, ["lynx"]) == 1 and server_cfg["systems"]["lynx"]["logo_glow"] is False
+
+
+def test_server_status_never_waits_for_the_network(srv, monkeypatch):
+    """Pasek stanu przy starcie: bez czekania na wybór adresu i logowanie (telefon/PC czekały
+    ponad 10 s z wyłączonym Tailscale); wynik dochodzi w tle."""
+    import time as _t
+    cfg, _roms, _tmp = srv
+    netsrc._info.clear()
+    slow = netsrc.info
+    monkeypatch.setattr(netsrc, "info", lambda c, fresh=False: (_t.sleep(1.0), slow(c, fresh))[1])
+    t = _t.monotonic()
+    assert netsrc.info_nowait(cfg) is None and _t.monotonic() - t < 0.2       # od razu: „łączę…”
+    for _ in range(50):
+        if netsrc.info_nowait(cfg):
+            break
+        _t.sleep(0.1)
+    assert netsrc.info_nowait(cfg)["ok"]

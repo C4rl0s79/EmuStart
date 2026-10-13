@@ -589,6 +589,24 @@ def info(cfg: dict, fresh: bool = False) -> dict:
     return res
 
 
+_info_bg = threading.Lock()
+
+
+def info_nowait(cfg: dict) -> dict | None:
+    """Ostatni znany stan serwera bez czekania (pasek, start programu): odświeżenie w tle,
+    gdy nieaktualny. None = jeszcze nic nie wiadomo (łączenie)."""
+    with _info_lock:
+        res, fresh = _info.get("res"), time.monotonic() - _info.get("t", 0) < INFO_TTL
+    if not fresh and _info_bg.acquire(blocking=False):
+        def run():
+            try:
+                info(cfg, fresh=True)
+            finally:
+                _info_bg.release()
+        threading.Thread(target=run, daemon=True, name="stan-serwera").start()
+    return res
+
+
 def sources(cfg: dict, g: dict) -> dict:
     """{rel: RemoteFile} dla plików gry dostępnych na serwerze w tym samym rozmiarze.
     Pusty słownik = wszystko jak dotąd przez SMB."""

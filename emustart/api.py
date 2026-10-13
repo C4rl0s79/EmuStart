@@ -355,7 +355,10 @@ class Api:
         """Serwer EmuStart (pasek u góry): nazwa i czy odpowiada; None = nie ustawiony."""
         if not (self._cfg.get("server_url") and self._cfg.get("server_key")):
             return None
-        i = netsrc.info(self._cfg)
+        i = netsrc.info_nowait(self._cfg)           # bez czekania na sieć (start, pasek co 15 s)
+        if i is None:
+            return {"ok": False, "checking": True, "name": "", "account": self._cfg.get("server_account", ""),
+                    "key_rejected": False}
         return {"ok": bool(i.get("ok")), "name": i.get("name", ""), "account": self._cfg.get("server_account", ""),
                 "key_rejected": bool(i.get("key_rejected"))}
 
