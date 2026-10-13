@@ -1246,6 +1246,13 @@ async function pollCopies() {
     }
     if (lv !== undefined) libVersion = S.state.lib_version;
     profilesRecheck();
+    if (S.platform !== "android") {                 // emulatory z serwera (w tle, emustart/installer.py)
+      const e = await api().emu_sync_status();
+      const on = e && e.running && e.current;
+      $("emuInfo").textContent = on ? `⬇ emulatory: ${e.current}` + (e.total ? ` · ${Math.floor((100 * e.done) / e.total)}%` : "") +
+        (e.steps > 1 ? ` (${e.step}/${e.steps})` : "") : "";
+      $("emuInfo").classList.toggle("hidden", !on);
+    }
     const post = await api().post_status();
     $("syncInfo").textContent = post ? `⇅ wysyłam zapisy: ${post}` : "";
     $("syncInfo").classList.toggle("hidden", !post);

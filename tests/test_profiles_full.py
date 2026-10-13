@@ -484,30 +484,6 @@ def test_amiga_multidisk_zip_becomes_m3u(tmp_path):
     assert s._extract(z, info, m3u_ok=False).name.endswith("(Disk 1).ipf")      # bez m3u: pierwsza dyskietka
 
 
-def test_capsimg_install_from_tar(tmp_path, monkeypatch):
-    import io
-    import tarfile
-    from emustart import installer
-    ra = tmp_path / "emu" / "RetroArch"
-    _write(ra / "retroarch.exe", b"")
-    _write(ra / "retroarch.cfg", b'system_directory = ":\\system"\n')
-    assert installer.ra_system_dir(ra) == ra / "system"
-    assert installer.amiga_extras(str(tmp_path / "emu"))[0]["kind"] == "capsimg"
-    assert installer.amiga_kickstart_missing(str(tmp_path / "emu"))
-    buf = io.BytesIO()
-    with tarfile.open(fileobj=buf, mode="w:xz") as t:
-        for name, data in (("../evil.dll", b"X"), ("CAPSImg/Windows/x86-64/capsimg.dll", b"DLL")):
-            ti = tarfile.TarInfo(name); ti.size = len(data); t.addfile(ti, io.BytesIO(data))
-    monkeypatch.setattr(installer, "_capsimg_url", lambda: {"url": "x", "size": 3, "version": "v5", "name": "c.tar.xz"})
-    monkeypatch.setattr(installer, "_download", lambda url, dest, p, c: dest.write_bytes(buf.getvalue()))
-    monkeypatch.setattr(installer, "_save_version", lambda k, v: None)
-    job = installer.Job({"emu_root": str(tmp_path / "emu")}, [])
-    job._install(tmp_path / "emu", {"kind": "capsimg", "key": "capsimg", "label": "capsimg"})
-    assert (ra / "system" / "capsimg.dll").read_bytes() == b"DLL"
-    assert not (ra / "evil.dll").exists() and not (tmp_path / "emu" / "evil.dll").exists()
-    assert installer.amiga_extras(str(tmp_path / "emu")) == []
-
-
 def test_bios_from_server(tmp_path, monkeypatch):
     """BIOS-y z serwera EmuStart (folder BIOS-ów ustawia się w panelu serwera)."""
     from emustart import bios, libsync

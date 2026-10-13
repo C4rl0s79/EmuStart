@@ -120,6 +120,15 @@ Szczegóły: [Grafiki i metadane](Grafiki-i-metadane).
     (do zmiany),
   - **Przywróć** — najpierw kopia obecnego stanu; pliki, których w kopii nie ma, zostają.
 
+### Emulatory
+Magazyn emulatorów (domyślnie `server\emulators`, zmiana: Konfiguracja → Foldery → Magazyn
+emulatorów): emulatory i rdzenie RetroArcha potrzebne systemom biblioteki — wg zalecanego
+emulatora i rdzenia systemu (Konfiguracja → Systemy). Serwer sprawdza nowe wydania raz dziennie;
+**Sprawdź i pobierz teraz** — od razu, **Pobierz ponownie** — jeden emulator jeszcze raz.
+Tabela: systemy, wersja na serwerze (i poprzednia — zostaje na wszelki wypadek), rozmiar,
+ostatni błąd pobierania. Komputery doinstalowują i aktualizują emulatory same
+(zob. [[Emulatory]]). Wersja to pliki z sumami SHA-256 — komputer pobiera tylko zmienione.
+
 ### Aktualizacja
 **Sprawdź aktualizacje** → **Aktualizuj do …**: pobranie pliku serwera z wydania,
 sprawdzenie skrótu SHA-256 i podpisu wydania, podmiana plików po zamknięciu serwera,
@@ -196,6 +205,9 @@ Każde zapytanie z tokenem sesji (`Authorization: Bearer <token>`), połączenie
 | `GET /v1/find?es=&rel=` | gra po ścieżce: pliki i zależności arcade (PC) |
 | `GET /v1/games/<id>`, `/v1/games/<id>/file/<ścieżka>` | szczegóły gry, plik (`Range`) |
 | `GET /v1/bios?core=`, `/v1/bios?name=` | BIOS-y rdzenia |
+| `GET /v1/emulators` | emulatory w magazynie serwera (wersje) i które potrzebuje dany system |
+| `GET /v1/emulators/manifest?item=&version=` | pliki wersji z rozmiarem i SHA-256 |
+| `POST /v1/emulators/pack` | `{item, version, files}` — wybrane pliki wersji w jednym ZIP-ie |
 | `GET /media/…` | grafiki |
 | `GET/PUT/DELETE /v1/nas/…` | folder profilu konta (zapisy, ustawienia) |
 | `GET/PUT/DELETE /v1/admin/…` | administrator: grafiki i opis gry, logo i nazwa systemu |

@@ -635,6 +635,25 @@ ACTIONS_ARGS.update({"config_set": config_set, "art_start": art_start, "art_keys
                      "account_files": account_files, "account_backup": account_backup,
                      "account_restore": account_restore, "backup_settings": backup_settings})
 ACTIONS.update({"art": art_overview, "art_cancel": art_cancel, "launchbox_update": launchbox_update})
+
+
+# ── emulatory: magazyn serwera (emustart/emustore.py) ──
+def emu_status(api) -> dict:
+    from emustart import emustore
+    return emustore.status(api._cfg)
+
+
+def emu_update(api, args: dict) -> dict:
+    """Panel: sprawdź i pobierz nowe wersje teraz (wszystkie albo wybrane, `force` — ponownie)."""
+    from emustart import emucatalog, emustore
+    items = args.get("items")
+    if items is not None:
+        items = [str(i) for i in items if emucatalog.valid_item(str(i))]
+    return emustore.start_update(api._cfg, items, bool(args.get("force")))
+
+
+ACTIONS["emu_status"] = emu_status
+ACTIONS_ARGS["emu_update"] = emu_update
 ACTIONS.update({"config": config_get, "public_status": public_status, "devices": devices_list, "login_code": login_code, "profiles_migrate_status": profiles_migrate_status,
                 "accounts": accounts_list})
 

@@ -84,7 +84,16 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   zostawał w tle z menu. Stany gry RetroArcha mają obrazek (podgląd stanu).
 
 ### Dodane
-- **Panel serwera: zakładki** (Stan, Konfiguracja, Urządzenia i konta, Aktualizacja).
+- **Panel serwera: zakładki** (Stan, Konfiguracja, Grafiki i opisy, Urządzenia i konta, Emulatory, Aktualizacja).
+- **Emulatory z serwera.** EmuStart Server trzyma emulatory i rdzenie RetroArcha potrzebne
+  systemom biblioteki (zalecany emulator i rdzeń z panelu): raz dziennie i przyciskiem w nowej
+  zakładce **Emulatory** pobiera nowe wydania (GitHub, Dolphin, Eden, Citron, buildbot
+  libretro — jak skrypt emu_updater), zapisuje je z sumami SHA-256 i zostawia też poprzednią
+  wersję. EmuStart na PC bierze emulatory **tylko z serwera**: po wybraniu folderu emulatorów,
+  przy starcie i co 5 minut sam doinstalowuje brakujące i aktualizuje starsze (także zastane
+  w folderze, np. z RetroBata) — pobiera tylko zmienione pliki jednym ZIP-em, konfiguracji i
+  zapisów nie rusza, działającego emulatora nie podmienia (później). Pasek „⬇ emulatory”
+  pokazuje postęp. Komputer nie pobiera już emulatorów z internetu.
 - **Panel serwera → Konfiguracja → Foldery**: foldery z grami (kilka, z kolejnością), BIOS-y,
   emulatory, profile graczy, kopie kont i MAME. Wybór folderu w oknie panelu; serwer
   sprawdza każdy folder tak, jak sam go widzi (konto systemowe), i pokazuje, co tam jest

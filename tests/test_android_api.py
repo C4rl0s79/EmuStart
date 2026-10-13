@@ -17,7 +17,7 @@ BRIDGE = ROOT / "android" / "app" / "src" / "main" / "java" / "io" / "github" / 
 # menu i ustawienia) albo zablokowane w interfejsie; Bridge odpowiada komunikatem „na komputerze”
 WINDOWS_ONLY = {
     # emulatory na komputerze, odświeżenie biblioteki z serwera
-    "autodetect", "scan_status", "set_game_emulator", "emulator_options",
+    "autodetect", "scan_status", "set_game_emulator", "emulator_options", "emu_sync_status",
     # opcje gier i systemów (openGameOptions / openSystemOptions zablokowane na Androidzie)
     "game_options",
 
@@ -64,8 +64,8 @@ def test_windows_only_list_is_current():
 
 
 def test_server_lists_every_core_for_platform():
-    from emustart import emulators, installer
+    from emustart import emucatalog, emulators
     assert emulators.cores_for("SNES")[:2] == ["snes9x", "bsnes"]       # domyślny pierwszy
-    for plat, default in installer.CORES.items():
+    for plat, default in emucatalog.CORES.items():
         cores = emulators.cores_for(plat)
         assert cores[0] == default and len(cores) == len(set(cores))

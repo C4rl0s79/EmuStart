@@ -29,6 +29,9 @@ FIELDS = {
                  "RetroArch i inne emulatory na serwerze — listy BIOS-ów rdzeni (pliki .info) i BIOS-y z folderu system RetroArcha."),
     "profiles_nas": ("Folder profili graczy", "dir", True,
                      "Zapisy, stany gry i ustawienia emulatorów kont. Pusty — folder profiles w katalogu serwera."),
+    "emu_store_dir": ("Magazyn emulatorów", "dir", True,
+                      "Emulatory, które serwer pobiera i rozdaje komputerom (zakładka Emulatory). "
+                      "Pusty — folder emulators w katalogu serwera."),
     "backup_dir": ("Folder kopii kont", "dir", True,
                    "Kopie zapasowe kont (ZIP). Pusty — folder backup w katalogu serwera."),
     "mame_exe": ("MAME (opcjonalnie)", "file", True,
@@ -40,7 +43,8 @@ _UNC_HINT = ("Serwer działa na koncie systemowym i nie widzi dysków sieciowych
 
 
 def default_dir(key: str) -> Path | None:
-    return {"profiles_nas": paths.SERVER / "profiles", "backup_dir": paths.SERVER / "backup"}.get(key)
+    return {"profiles_nas": paths.SERVER / "profiles", "backup_dir": paths.SERVER / "backup",
+            "emu_store_dir": paths.SERVER / "emulators"}.get(key)
 
 
 def _value(cfg: dict, key: str):

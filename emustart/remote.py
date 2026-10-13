@@ -265,7 +265,7 @@ def handle(handler) -> None:
     parts = [p for p in path.split("/") if p][1:]           # bez „v1”
     try:
         if parts == ["info"]:
-            feats = ["find", "system", "bios", "media", "library"] + (["nas", "savemgr", "profiles"] if NAS_ROOT else [])
+            feats = ["find", "system", "bios", "media", "library", "emulators"] + (["nas", "savemgr", "profiles"] if NAS_ROOT else [])
             return _json(handler, {"name": socket.gethostname(), "version": __version__, "api": 1,
                                    "features": feats + ["admin"], "nas_id": NAS_ID, "endpoints": endpoints(),
                                    "admin": _admin(handler),
@@ -296,8 +296,10 @@ def handle(handler) -> None:
             return _profiles_get(handler)
         if parts == ["bios"]:
             return _bios_get(handler)
+        if parts and parts[0] == "emulators":
+            return _emulators_get(handler, parts[1:])
         if parts == ["systems"]:
-            from emustart import emulators, installer, systems
+            from emustart import emucatalog, emulators, systems
             out = []
             for s_ in API.list_systems():
                 d = {k: s_.get(k) for k in ("es", "display", "games", "logo", "logo_glow", "kind")}
@@ -305,7 +307,7 @@ def handle(handler) -> None:
                 d["plat"] = plat
                 sc = (API._cfg.get("systems") or {}).get(s_["es"]) or {}
                 # rdzeń RetroArcha (Android: *_libretro_android.so) — ten, którego używa komputer, gdy go zgłosił
-                d["core"] = sc.get("core_rec") or installer.CORES.get(plat, "")
+                d["core"] = sc.get("core_rec") or emucatalog.CORES.get(plat, "")
                 d["emu_rec"] = sc.get("emu_rec", "")
                 d["cores"] = emulators.cores_for(plat)         # wszystkie pasujące — wybór na telefonie
                 out.append(d)
@@ -926,6 +928,73 @@ def _bios_get(handler) -> None:
     handler.send_header("Content-Length", str(len(data)))
     handler.end_headers()
     handler.wfile.write(data)
+
+
+def _emulators_get(handler, parts: list) -> None:
+    """GET /v1/emulators — wersje emulatorów w magazynie serwera i co potrzebuje który system;
+    GET /v1/emulators/manifest?item=&version= — pliki wersji z rozmiarem i sumą SHA-256."""
+    from emustart import emucatalog, emustore
+    if not parts:
+        return _json(handler, emustore.public_index(API._cfg))
+    q = urllib.parse.parse_qs(urllib.parse.urlsplit(handler.path).query)
+    item, version = (q.get("item") or [""])[0], (q.get("version") or [""])[0]
+    if parts == ["manifest"] and emucatalog.valid_item(item):
+        m = emustore.manifest(API._cfg, item, version)
+        if m:
+            return _json(handler, m)
+    return _json(handler, {"error": "nie ma takiej wersji emulatora"}, 404)
+
+
+class _Sink:
+    """Zapis ZIP-a prosto do gniazda (bez długości z góry) — zipfile pisze sekwencyjnie."""
+
+    def __init__(self, w):
+        self.w, self.n = w, 0
+
+    def write(self, b) -> int:
+        self.w.write(b)
+        self.n += len(b)
+        return len(b)
+
+    def tell(self) -> int:
+        return self.n
+
+    def flush(self) -> None:
+        self.w.flush()
+
+
+def emulators_pack(handler) -> None:
+    """POST /v1/emulators/pack {item, version, files: [rel…] | "*"} — wybrane pliki wersji
+    emulatora w jednym ZIP-ie (bez kompresji: binaria i tak źle się kompresują, a postęp jest
+    dokładny). Nagłówek X-Total-Size: suma rozmiarów plików."""
+    import zipfile
+    from emustart import emucatalog, emustore
+    if not authorized(handler):
+        return _json(handler, {"error": "brak lub zły klucz serwera"}, 401)
+    _seen(handler)
+    n = int(handler.headers.get("Content-Length") or 0)
+    if n > 8 << 20:
+        return _json(handler, {"error": "za duże zapytanie"}, 413)
+    try:
+        d = json.loads(handler.rfile.read(n) or b"{}") if n else {}
+    except ValueError:
+        d = {}
+    item, version = str(d.get("item", "")), str(d.get("version", ""))
+    m = emustore.manifest(API._cfg, item, version) if emucatalog.valid_item(item) else None
+    if not m:
+        return _json(handler, {"error": "nie ma takiej wersji emulatora"}, 404)
+    files = m["files"]
+    want = sorted(files) if d.get("files") == "*" else         sorted({str(f) for f in (d.get("files") or []) if str(f) in files})
+    base = emustore.version_dir(API._cfg, item, version)
+    handler.send_response(200)
+    handler.send_header("Content-Type", "application/zip")
+    handler.send_header("X-Total-Size", str(sum(files[f][0] for f in want)))
+    handler.send_header("Connection", "close")
+    handler.end_headers()
+    handler.close_connection = True
+    with zipfile.ZipFile(_Sink(handler.wfile), "w", zipfile.ZIP_STORED, allowZip64=True) as z:
+        for rel in want:
+            z.write(base / rel, rel)
 
 
 def _send_file(handler, gid: int, rel: str) -> None:

@@ -313,14 +313,14 @@ class ServerApi:
             es = s_["es"]
             sc = (self._cfg.get("systems") or {}).get(es) or {}
             lg = logos.url_for(es, self._cfg)
-            from emustart import emulators, installer
+            from emustart import emucatalog, emulators
             plat = systems.info(es)["plat"]
             out.append({"es": es, "display": sc.get("name") or systems.info(es)["display"],
                         "default_name": systems.info(es)["display"], "games": s_["games"],
                         "logo": lg["url"], "glow": bool(lg["glow"]), "logo_choice": sc.get("logo", ""),
                         "enabled": sc.get("enabled", True),
                         "emu_rec": sc.get("emu_rec", ""), "core_rec": sc.get("core_rec", ""),
-                        "core_default": installer.CORES.get(plat, ""), "cores": emulators.cores_for(plat),
+                        "core_default": emucatalog.CORES.get(plat, ""), "cores": emulators.cores_for(plat),
                         "dirs": _json.loads(dirs.get(es) or "[]"),
                         "merged": sorted(k for k, v in merge.items() if v == es)})
         return out

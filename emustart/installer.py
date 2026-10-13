@@ -1,259 +1,47 @@
-"""installer — pobieranie brakujących emulatorów i rdzeni RetroArcha.
+"""installer — emulatory i rdzenie RetroArcha na tym komputerze, wyłącznie z EmuStart Server.
 
-Źródła i nazwy plików z aktualizatora ROM Helpera (chd_buddy/core/updater.py):
-GitHub Releases, dolphin-emu.org, strona wydań Edena, buildbot.libretro.com.
-Instalacja do <emu_root>\\<Folder>\\ — tak jak Twoje obecne emulatory.
+Serwer jest źródłem prawdy o wersjach (emustart/emustore.py): trzyma emulatory potrzebne
+systemom biblioteki, a ten moduł porównuje z nimi folder emulatorów komputera
+(<emu_root>\\<Folder>\\, jak dotąd) i pobiera z serwera tylko brakujące albo zmienione pliki:
 
-Wybór dla systemu („jak obecnie”): samodzielny emulator tam, gdzie EmuStart go
-preferuje (emulators.STANDALONE_PREF), w pozostałych systemach rdzeń RetroArcha
-(CORES). Brak RetroArcha → najpierw sam RetroArch.
+- brakujący emulator — instalacja; starszy — aktualizacja (także emulator zastany w folderze,
+  np. z RetroBata: wymieniane są tylko pliki programu z manifestu serwera),
+- pliki użytkownika (konfiguracja, zapisy — emucatalog.keep_file) — tylko gdy ich nie ma,
+- plików spoza manifestu nic nie usuwa,
+- działający emulator (jego .exe/.dll nie da się otworzyć do zapisu) — podmiana później.
 
-Archiwa .7z rozpakowuje 7-Zip (zainstalowany albo 7zr.exe pobrany z 7-zip.org
-do data/tools przy pierwszej potrzebie).
+Bez serwera nic się nie pobiera (EmuStart działa na tym, co jest zainstalowane).
 """
 
 from __future__ import annotations
 
+import hashlib
+import http.client
 import json
 import logging
 import os
 import re
-import shutil
-import subprocess
-import tempfile
 import threading
-import urllib.request
+import time
+import urllib.parse
 import zipfile
 from pathlib import Path
 
-from emustart import emulators, paths, systems
+from emustart import emucatalog, emulators, library, netsrc, paths, systems
 
 log = logging.getLogger("emustart.installer")
 
-BUILDBOT = "https://buildbot.libretro.com"
-UA = {"User-Agent": "EmuStart-installer/1.0"}
-_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-
-# samodzielne emulatory (z ROM Helpera); klucz = podłańcuch nazwy w STANDALONE_PREF
-STANDALONE = {
-    "duckstation": {"type": "github", "repo": "stenzek/duckstation",
-                    "asset": r"duckstation-windows-x64-release\.zip$", "dir": "DuckStation",
-                    "portable": "portable.txt"},
-    "pcsx2": {"type": "github", "repo": "PCSX2/pcsx2", "prerelease": True,
-              "asset": r"pcsx2-.*-windows-x64-Qt\.7z$", "dir": "PCSX2", "portable": "portable.ini"},
-    "rpcs3": {"type": "github", "repo": "RPCS3/rpcs3-binaries-win",
-              "asset": r"rpcs3-.*_win64.*\.7z$", "dir": "RPCS3"},
-    "ppsspp": {"type": "github", "repo": "hrydgard/ppsspp",
-               "asset": r"PPSSPP-v.*-Windows-x64\.zip$", "dir": "PPSSPP"},
-    "vita3k": {"type": "github", "repo": "Vita3K/Vita3K",
-               "asset": r"windows-latest\.zip$", "dir": "Vita3K"},
-    "dolphin": {"type": "dolphin", "dir": "Dolphin", "portable": "portable.txt"},
-    "cemu": {"type": "github", "repo": "cemu-project/Cemu",
-             "asset": r"cemu-.*-windows-x64\.zip$", "dir": "Cemu", "strip_root": True},
-    "eden": {"type": "eden", "asset": r"Eden-Windows-.*amd64-clang-pgo\.zip$", "dir": "Eden"},
-    "azahar": {"type": "github", "repo": "azahar-emu/azahar",
-               "asset": r"azahar-windows-msvc-[\d.]+\.zip$", "dir": "Azahar", "strip_root": True},
-    "melonds": {"type": "github", "repo": "melonDS-emu/melonDS",
-                "asset": r"melonDS-.*-windows-x86_64\.zip$", "dir": "melonDS"},
-    "ares": {"type": "github", "repo": "ares-emulator/ares",
-             "asset": r"ares-windows-x64\.zip$", "dir": "ares", "strip_root": True},
-    "snes9x": {"type": "github", "repo": "snes9xgit/snes9x",
-               "asset": r"snes9x-.*-win32-x64\.zip$", "dir": "Snes9x"},
-    "mgba": {"type": "github", "repo": "mgba-emu/mgba",
-             "asset": r"mGBA-.*-win64\.7z$", "dir": "mGBA", "strip_root": True},
-    "flycast": {"type": "github", "repo": "flyinghead/flycast",
-                "asset": r"flycast-win64-.*\.zip$", "dir": "Flycast"},
-    "xenia": {"type": "github", "repo": "xenia-canary/xenia-canary-releases",
-              "asset": r"xenia_canary_windows_?\.zip$", "dir": "Xenia"},
-    "xemu": {"type": "github", "repo": "xemu-project/xemu",
-             "asset": r"xemu-win-x86_64-release\.zip$", "dir": "xemu"},
-    "shadps4": {"type": "github", "repo": "shadps4-emu/shadPS4",
-                "asset": r"shadps4-win64-(qt|sdl)-?.*\.zip$", "dir": "shadPS4"},
-    "mame": {"type": "github", "repo": "mamedev/mame",
-             "asset": r"mame\d+b_x64\.exe$", "dir": "MAME", "sfx": True},
-}
-
-# rdzeń RetroArcha dla systemów bez preferowanego emulatora samodzielnego
-CORES = {
-    "NES": "nestopia", "SNES": "snes9x", "SNESMSU1": "snes9x", "N64": "mupen64plus_next",
-    "GB": "gambatte", "GBC": "gambatte", "GBA": "mgba", "NDS": "melonds",
-    "MD": "genesis_plus_gx", "SMS": "genesis_plus_gx", "GG": "genesis_plus_gx",
-    "SEGACD": "genesis_plus_gx", "32X": "picodrive", "PICO": "picodrive",
-    "SATURN": "mednafen_saturn", "PCENGINE": "mednafen_pce_fast",
-    "SUPERGRAFX": "mednafen_supergrafx", "ATARI2600": "stella", "ATARI5200": "a5200",
-    "ATARI7800": "prosystem", "JAGUAR": "virtualjaguar", "LYNX": "handy", "3DO": "opera",
-    "AMIGA": "puae", "C64": "vice_x64", "VIC20": "vice_xvic", "PLUS4": "vice_xplus4",
-    "MSX": "bluemsx", "MSX2": "bluemsx", "NGP": "mednafen_ngp", "WSWAN": "mednafen_wswan",
-    "ODYSSEY2": "o2em", "ZX": "fuse", "GW": "gw", "PC88": "quasi88", "PC98": "np2kai",
-    "FBNEO": "fbneo", "NEOGEO": "fbneo", "ATARI800": "atari800", "ATARIST": "hatari",
-    "COLECO": "gearcoleco", "INTV": "freeintv", "VECTREX": "vecx", "VB": "mednafen_vb",
-    "POKEMINI": "pokemini", "CHANNELF": "freechaf", "SUPERVISION": "potator",
-    "MEGADUCK": "sameduck", "DC": "flycast", "PS1": "swanstation", "PSP": "ppsspp",
-}
+INDEX_META = "server_emu_index"
+KICKSTARTS = ("kick34005.A500", "kick40068.A1200", "kick40063.A600", "kick37175.A500")
 
 
-# ── sieć ──
-
-def _open(url: str, hdrs: dict | None = None, timeout: int = 60):
-    return urllib.request.urlopen(urllib.request.Request(url, headers={**UA, **(hdrs or {})}),
-                                  timeout=timeout)
-
-
-def _json(url: str):
-    with _open(url, {"Accept": "application/vnd.github+json"}, 30) as r:
-        return json.loads(r.read())
-
-
-def _download(url: str, dest: Path, progress, cancel: threading.Event | None) -> None:
-    with _open(url, timeout=120) as r:
-        total = int(r.headers.get("Content-Length") or 0)
-        if progress:
-            progress(0, total)
-        done = 0
-        with open(dest, "wb") as f:
-            while True:
-                if cancel and cancel.is_set():
-                    raise InterruptedError("anulowano")
-                buf = r.read(1 << 20)
-                if not buf:
-                    break
-                f.write(buf)
-                done += len(buf)
-                if progress:
-                    progress(done, total)
-
-
-def _head_size(url: str) -> int:
-    try:
-        req = urllib.request.Request(url, headers=UA, method="HEAD")
-        with urllib.request.urlopen(req, timeout=20) as r:
-            return int(r.headers.get("Content-Length") or 0)
-    except Exception:
-        return 0
-
-
-# ── 7-Zip ──
-
-def _find_7z() -> str | None:
-    for cand in ("7z", "7zz", "7za", r"C:\Program Files\7-Zip\7z.exe",
-                 r"C:\Program Files (x86)\7-Zip\7z.exe", str(paths.DATA / "tools" / "7zr.exe")):
-        if shutil.which(cand) or Path(cand).is_file():
-            return shutil.which(cand) or cand
-    return None
-
-
-def _ensure_7z() -> str:
-    found = _find_7z()
-    if found:
-        return found
-    dest = paths.DATA / "tools" / "7zr.exe"
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    log.info("pobieram 7zr.exe z 7-zip.org")
-    _download("https://www.7-zip.org/a/7zr.exe", dest, None, None)
-    return str(dest)
-
-
-def _extract(archive: Path, target: Path, strip_root: bool = False, sfx: bool = False) -> None:
-    target.mkdir(parents=True, exist_ok=True)
-    tmp = Path(tempfile.mkdtemp(prefix="emustart_inst_"))
-    try:
-        if archive.suffix.lower() == ".zip":
-            with zipfile.ZipFile(archive) as z:
-                z.extractall(tmp)
-        else:   # .7z albo samorozpakowujący .exe (MAME)
-            subprocess.run([_ensure_7z(), "x", str(archive), f"-o{tmp}", "-y"],
-                           check=True, capture_output=True, creationflags=_NO_WINDOW)
-        src = tmp
-        entries = list(tmp.iterdir())
-        if strip_root and len(entries) == 1 and entries[0].is_dir():
-            src = entries[0]
-        for root, _dirs, files in os.walk(src):
-            for fname in files:
-                rel = Path(root).relative_to(src) / fname
-                dst = target / rel
-                if dst.exists():
-                    continue          # świeża instalacja: istniejących plików nie ruszamy
-                dst.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(Path(root) / fname, dst)
-    finally:
-        shutil.rmtree(tmp, ignore_errors=True)
-
-
-# ── wersje (wspólny format z ROM Helperem) ──
-
-def _versions_file() -> Path:
-    return paths.DATA / "emu_versions.json"
-
-
-def _save_version(key: str, ver: str) -> None:
-    f = _versions_file()
-    try:
-        v = json.loads(f.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        v = {}
-    v[key] = ver
-    f.parent.mkdir(parents=True, exist_ok=True)
-    f.write_text(json.dumps(v, indent=2), encoding="utf-8")
-
-
-# ── źródła: znajdź plik do pobrania ──
-
-def _resolve_standalone(key: str) -> dict:
-    """{'url', 'size', 'version', 'name'} najnowszego wydania."""
-    c = STANDALONE[key]
-    if c["type"] == "github":
-        base = f"https://api.github.com/repos/{c['repo']}/releases"
-        rel = next((r for r in _json(base + "?per_page=10") if not r.get("draft")), None) \
-            if c.get("prerelease") else _json(base + "/latest")
-        rx = re.compile(c["asset"], re.I)
-        a = next((a for a in rel.get("assets", []) if rx.search(a["name"])), None)
-        if not a:
-            raise RuntimeError(f"brak pliku {c['asset']} w wydaniu {rel.get('tag_name')}")
-        return {"url": a["browser_download_url"], "size": a.get("size", 0),
-                "version": rel.get("tag_name") or "", "name": a["name"]}
-    if c["type"] == "dolphin":
-        tags = [t["name"] for t in _json("https://api.github.com/repos/dolphin-emu/dolphin/tags?per_page=30")
-                if re.fullmatch(r"\d{4}[a-z]?", t["name"])]
-        ver = max(tags)
-        url = f"https://dl.dolphin-emu.org/releases/{ver}/dolphin-{ver}-x64.7z"
-        return {"url": url, "size": _head_size(url), "version": ver, "name": f"dolphin-{ver}-x64.7z"}
-    if c["type"] == "eden":
-        with _open("https://git.eden-emu.dev/eden-emu/eden/releases", timeout=30) as r:
-            html = r.read().decode("utf-8", "replace")
-        m = re.search(r"https://stable\.eden-emu\.dev/(v[\d.]+(?:-rc\d+)?)/", html)
-        rx = re.compile(c["asset"], re.I)
-        url = next((u for u in re.findall(r'https://stable\.eden-emu\.dev/[^"\'<>\s)]+', html)
-                    if m and f"/{m.group(1)}/" in u and rx.search(u.rsplit("/", 1)[-1])), None)
-        if not url:
-            raise RuntimeError("nie umiem odczytać strony wydań Edena")
-        return {"url": url, "size": _head_size(url), "version": m.group(1),
-                "name": url.rsplit("/", 1)[-1]}
-    raise RuntimeError(f"nieznane źródło {c['type']}")
-
-
-def _retroarch_url() -> tuple:
-    with _open(f"{BUILDBOT}/stable/", timeout=30) as r:
-        html = r.read().decode("utf-8", "replace")
-    vers = set(re.findall(r'href="[^"]*?/?(\d+\.\d+(?:\.\d+)?)/?"', html))
-    ver = max(vers, key=lambda v: [int(x) for x in v.split(".")])
-    return f"{BUILDBOT}/stable/{ver}/windows/x86_64/RetroArch.7z", ver
-
-
-def core_url(core: str) -> str:
-    return f"{BUILDBOT}/nightly/windows/x86_64/latest/{core}_libretro.dll.zip"
-
-
-# ── plan ──
+# ── RetroArch na tym komputerze ──
 
 def _retroarch_exe(emu_root: Path) -> Path | None:
     for p in (emu_root / "RetroArch" / "retroarch.exe", emu_root / "retroarch" / "retroarch.exe"):
         if p.is_file():
             return p
     return None
-
-
-CAPSIMG_REPO = "FrodeSolheim/capsimg"
-KICKSTARTS = ("kick34005.A500", "kick40068.A1200", "kick40063.A600", "kick37175.A500")
 
 
 def ra_system_dir(ra_root: Path) -> Path:
@@ -270,81 +58,280 @@ def ra_system_dir(ra_root: Path) -> Path:
     return Path(d) if d and d != "default" else ra_root / "system"
 
 
+def _ra_root(root: Path) -> Path:
+    ra = _retroarch_exe(root)
+    return ra.parent if ra else root / "RetroArch"
+
+
 def amiga_extras(emu_root: str) -> list:
     """Brakujące dodatki Amigi w RetroArchu: capsimg.dll (pliki .ipf)."""
-    ra = _retroarch_exe(Path(emu_root))
-    ra_root = ra.parent if ra else Path(emu_root) / "RetroArch"
-    if (ra_system_dir(ra_root) / "capsimg.dll").is_file():
+    if (ra_system_dir(_ra_root(Path(emu_root))) / "capsimg.dll").is_file():
         return []
-    return [{"kind": "capsimg", "key": "capsimg", "label": "capsimg — obsługa obrazów .ipf (Amiga)"}]
+    return [{"kind": "capsimg", "key": "capsimg", "label": emucatalog.item_info("capsimg")["label"]}]
 
 
 def amiga_kickstart_missing(emu_root: str) -> bool:
-    ra = _retroarch_exe(Path(emu_root))
-    sysdir = ra_system_dir(ra.parent if ra else Path(emu_root) / "RetroArch")
+    sysdir = ra_system_dir(_ra_root(Path(emu_root)))
     return not any((sysdir / k).is_file() for k in KICKSTARTS)
 
 
-def _capsimg_url() -> dict:
-    rel = _json(f"https://api.github.com/repos/{CAPSIMG_REPO}/releases/latest")
-    for a in rel.get("assets", []):
-        if re.search(r"Windows_x86-64\.(tar\.xz|zip)$", a["name"]):
-            return {"url": a["browser_download_url"], "size": a.get("size", 0),
-                    "version": rel.get("tag_name", ""), "name": a["name"]}
-    raise OSError("brak paczki capsimg dla Windows x64")
+# ── indeks emulatorów serwera ──
 
+def index() -> dict:
+    """Ostatnio pobrany indeks /v1/emulators ({items, systems})."""
+    try:
+        d = json.loads(library.meta_get(INDEX_META, "{}") or "{}")
+    except ValueError:
+        d = {}
+    return {"items": d.get("items") or {}, "systems": d.get("systems") or {}}
+
+
+def refresh_index(cfg: dict) -> dict:
+    ep = netsrc.endpoint(cfg)
+    if ep:
+        try:
+            st, body, _rtt = netsrc._request(ep, "/v1/emulators", 30)
+            if st == 200:
+                d = json.loads(body)
+                library.meta_set(INDEX_META, json.dumps({"items": d.get("items") or {},
+                                                         "systems": d.get("systems") or {}}))
+        except (OSError, ValueError) as ex:
+            log.info("emulatory z serwera: %s", ex)
+    return index()
+
+
+def _meta(item: str) -> dict:
+    return index()["items"].get(item) or {}
+
+
+def target(root: Path, item: str) -> Path:
+    info = emucatalog.item_info(item)
+    if info["kind"] == "capsimg":
+        return ra_system_dir(_ra_root(root))
+    if info["kind"] == "core":
+        return _ra_root(root) / "cores"
+    if info["kind"] == "retroarch":
+        return _ra_root(root)
+    return root / info["dir"]
+
+
+def present(root: Path, item: str) -> bool:
+    """Pozycja jest na tym komputerze (w jakiejkolwiek wersji)."""
+    kind = emucatalog.item_info(item)["kind"]
+    if kind == "retroarch":
+        return _retroarch_exe(root) is not None
+    if kind == "core":
+        return (target(root, item) / f"{item[5:]}_libretro.dll").is_file()
+    if kind == "capsimg":
+        return (target(root, item) / "capsimg.dll").is_file()
+    d = target(root, item)
+    return d.is_dir() and any(d.glob("*.exe"))
+
+
+# ── stan: wersje zainstalowane z serwera ──
+
+def _state_file() -> Path:
+    return paths.DATA / "emu_state.json"
+
+
+def _state() -> dict:
+    try:
+        d = json.loads(_state_file().read_text(encoding="utf-8"))
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_state(item: str, version: str) -> None:
+    d = _state()
+    d[item] = {"version": version, "at": time.time()}
+    f = _state_file()
+    f.parent.mkdir(parents=True, exist_ok=True)
+    tmp = f.with_name(f.name + ".tmp")
+    tmp.write_text(json.dumps(d, indent=1), encoding="utf-8")
+    os.replace(tmp, f)
+
+
+def current(root: Path, item: str) -> bool:
+    """Ta pozycja ma tu wersję z serwera."""
+    ver = _meta(item).get("version")
+    return bool(ver) and _state().get(item, {}).get("version") == ver and present(root, item)
+
+
+# ── plan dla systemu ──
 
 def plan_for(es: str, emu_root: str) -> list:
-    """Co trzeba pobrać, żeby system `es` miał emulator: lista kroków
-    [{kind: standalone|retroarch|core, key, label}] (pusta = nie umiemy)."""
+    """Czego brakuje systemowi `es` (wg serwera): [{kind, key, label}]; pusta lista — nic albo
+    serwer nie zna emulatora dla tego systemu."""
     root = Path(emu_root)
-    plat = systems.info(es)["plat"]
-    for pref in emulators.STANDALONE_PREF.get(plat, []):
-        if pref in STANDALONE:
-            return [{"kind": "standalone", "key": pref, "label": STANDALONE[pref]["dir"]}]
-    core = CORES.get(plat)
-    if not core:
-        return []
-    steps = []
-    if not _retroarch_exe(root):
-        steps.append({"kind": "retroarch", "key": "retroarch", "label": "RetroArch"})
-    steps.append({"kind": "core", "key": core, "label": f"RetroArch: rdzeń {core}"})
-    if plat == "AMIGA":
-        steps += amiga_extras(emu_root)
-    return steps
+    out = []
+    for item in index()["systems"].get(es, []):
+        if emucatalog.valid_item(item) and not present(root, item):
+            out.append({"kind": emucatalog.item_info(item)["kind"], "key": item,
+                        "label": emucatalog.item_info(item)["label"]})
+    return out
 
 
 def describe(steps: list) -> list:
-    """Uzupełnia kroki o rozmiar i wersję (zapytania do sieci)."""
+    """Kroki z rozmiarem i wersją z serwera."""
     out = []
     for s in steps:
-        d = dict(s)
-        try:
-            if s["kind"] == "standalone":
-                r = _resolve_standalone(s["key"])
-                d.update(size=r["size"], version=r["version"])
-            elif s["kind"] == "retroarch":
-                url, ver = _retroarch_url()
-                d.update(size=_head_size(url), version=ver)
-            elif s["kind"] == "capsimg":
-                r = _capsimg_url()
-                d.update(size=r["size"], version=r["version"])
-            else:
-                d.update(size=_head_size(core_url(s["key"])), version="nightly")
-        except Exception as ex:
-            d.update(size=0, version="", error=str(ex))
+        m = _meta(s["key"])
+        d = dict(s, size=m.get("size", 0), version=m.get("version", ""))
+        if not m:
+            d["error"] = "serwer nie ma tego emulatora (jeszcze go nie pobrał?)"
         out.append(d)
     return out
 
 
-# ── wykonanie ──
+# ── instalacja z serwera ──
+
+def _sha256(p: Path) -> str:
+    h = hashlib.sha256()
+    with open(p, "rb") as f:
+        for buf in iter(lambda: f.read(1 << 20), b""):
+            h.update(buf)
+    return h.hexdigest()
+
+
+def _locked(p: Path) -> bool:
+    """Plik programu w użyciu (działający emulator) — nie da się go otworzyć do zapisu."""
+    try:
+        with open(p, "r+b"):
+            return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+
+
+class Busy(Exception):
+    """Emulator działa — podmiana później."""
+
+
+def _get_json(ep, path: str) -> dict:
+    st, body, _rtt = netsrc._request(ep, path, 60)
+    if st != 200:
+        raise OSError(f"serwer: {path.split('?')[0]} {st}")
+    return json.loads(body)
+
+
+def _fetch_pack(ep, item: str, version: str, files: list, dest: Path, progress, cancel) -> None:
+    host, port, key = ep
+    body = json.dumps({"item": item, "version": version, "files": files}).encode("utf-8")
+    c = netsrc.conn(host, port, 120)
+    try:
+        c.request("POST", "/v1/emulators/pack", body=body,
+                  headers={**netsrc.auth_headers(key), "Content-Type": "application/json"})
+        r = c.getresponse()
+        if r.status != 200:
+            raise OSError(f"serwer: pliki emulatora {r.status}")
+        total = int(r.headers.get("X-Total-Size") or 0)
+        done = 0
+        with open(dest, "wb") as f:
+            while True:
+                if cancel and cancel.is_set():
+                    raise InterruptedError("anulowano")
+                buf = r.read(1 << 20)
+                if not buf:
+                    break
+                f.write(buf)
+                done += len(buf)
+                if progress:
+                    progress(min(done, total), total)
+    except http.client.HTTPException as ex:
+        raise OSError(f"serwer: {ex}") from ex
+    finally:
+        c.close()
+
+
+def install(cfg: dict, item: str, progress=None, cancel: threading.Event | None = None) -> bool:
+    """Wyrównuje pozycję do wersji z serwera. True — coś się zmieniło. Busy — emulator działa."""
+    root = Path(cfg.get("emu_root") or "")
+    if not str(root) or str(root) == ".":
+        raise OSError("najpierw wybierz folder emulatorów (Ustawienia)")
+    ver = _meta(item).get("version")
+    if not ver:
+        raise OSError("serwer nie ma tego emulatora")
+    ep = netsrc.endpoint(cfg)
+    if not ep:
+        raise OSError("brak połączenia z serwerem EmuStart")
+    if item == "capsimg" and not _retroarch_exe(root):
+        raise OSError("najpierw potrzebny RetroArch")
+    man = _get_json(ep, "/v1/emulators/manifest?" + urllib.parse.urlencode({"item": item, "version": ver}))
+    tgt = target(root, item)
+    todo, replace = [], []
+    base = tgt.resolve()
+    for rel, (size, sha) in man["files"].items():
+        p = tgt / rel
+        if base not in (tgt / rel).resolve().parents:   # tylko wewnątrz folderu emulatora
+            raise OSError(f"podejrzana ścieżka w emulatorze z serwera: {rel}")
+        if p.is_file():
+            if emucatalog.keep_file(item, rel):
+                continue                     # konfiguracja / zapisy użytkownika
+            if p.stat().st_size == size and _sha256(p) == sha:
+                continue
+            replace.append(p)
+        todo.append(rel)
+    if any(_locked(p) for p in replace if p.suffix.lower() in (".exe", ".dll")):
+        raise Busy(item)
+    changed = bool(todo)
+    if todo:
+        tmpdir = root / ".emustart-tmp"
+        tmpdir.mkdir(parents=True, exist_ok=True)
+        pack = tmpdir / f"{item}.zip"
+        try:
+            _fetch_pack(ep, item, ver, todo, pack, progress, cancel)
+            with zipfile.ZipFile(pack) as z:
+                for rel in todo:
+                    size, sha = man["files"][rel]
+                    p = tgt / rel
+                    p.parent.mkdir(parents=True, exist_ok=True)
+                    new = p.with_name(p.name + ".emustart-new")
+                    h = hashlib.sha256()
+                    with z.open(rel) as src, open(new, "wb") as out:
+                        for buf in iter(lambda: src.read(1 << 20), b""):
+                            h.update(buf)
+                            out.write(buf)
+                    if h.hexdigest() != sha:
+                        new.unlink(missing_ok=True)
+                        raise OSError(f"uszkodzony plik z serwera: {rel}")
+                    try:
+                        os.replace(new, p)
+                    except PermissionError as ex:
+                        new.unlink(missing_ok=True)
+                        raise Busy(item) from ex
+        finally:
+            pack.unlink(missing_ok=True)
+    portable = emucatalog.item_info(item)["portable"]
+    if portable and not (tgt / portable).exists():
+        # tryb przenośny: ustawienia i save'y w folderze emulatora (profile podpinają je stamtąd)
+        (tgt / portable).touch()
+    _save_state(item, ver)
+    if changed:
+        log.info("emulatory: %s %s (%d plików z serwera)", item, ver, len(todo))
+    return changed
+
+
+def assign(cfg: dict, es: str) -> None:
+    """Po instalacji: emulator systemu = domyślna opcja (jak po „Wykryj emulatory”)."""
+    emulators.forget_scan()
+    cur0 = (cfg.get("systems") or {}).get(es) or {}
+    if cur0.get("exe") and Path(cur0["exe"]).is_file():
+        return
+    opt = emulators.default_option(systems.info(es), cfg.get("emu_root", ""))
+    if opt:
+        cur = cfg.setdefault("systems", {}).setdefault(es, {"enabled": True})
+        cur.update(label=opt["label"], exe=opt["exe"], args=opt["args"], enabled=True)
+
 
 class Job:
-    """Instalacja kroków dla systemów (kolejno). UI odpytuje status()."""
+    """Instalacja z serwera: kroki dla systemów (okno „Pobierz emulatory”) albo wyrównanie
+    wszystkich (sync). UI odpytuje status()."""
 
-    def __init__(self, cfg: dict, items: list, on_done=None):
-        """items = [(es, [kroki])]"""
-        self.cfg, self.items, self.on_done = cfg, items, on_done
+    def __init__(self, cfg: dict, items: list, on_done=None, quiet_busy: bool = False):
+        """items = [(es, [kroki])]; es="" — bez przypisywania emulatora."""
+        self.cfg, self.items, self.on_done, self.quiet_busy = cfg, items, on_done, quiet_busy
         self.cancel = threading.Event()
         self.total_steps = sum(len(s) for _es, s in items)
         self.step = 0
@@ -352,8 +339,9 @@ class Job:
         self.done_bytes = self.total_bytes = 0
         self.errors: list = []
         self.installed: list = []
+        self.postponed: list = []
         self.finished = False
-        self.thread = threading.Thread(target=self._run, daemon=True, name="installer")
+        self.thread = threading.Thread(target=self._run, daemon=True, name="emulatory")
 
     def start(self) -> None:
         self.thread.start()
@@ -362,14 +350,14 @@ class Job:
         return {"running": not self.finished, "step": self.step, "steps": self.total_steps,
                 "current": self.current, "done": self.done_bytes, "total": self.total_bytes,
                 "errors": list(self.errors), "installed": list(self.installed),
-                "cancelled": self.cancel.is_set()}
+                "postponed": list(self.postponed), "cancelled": self.cancel.is_set()}
 
     def _progress(self, done: int, total: int) -> None:
         self.done_bytes, self.total_bytes = done, total
 
     def _run(self) -> None:
-        root = Path(self.cfg.get("emu_root") or "")
         try:
+            seen: set = set()
             for es, steps in self.items:
                 for s in steps:
                     if self.cancel.is_set():
@@ -377,14 +365,23 @@ class Job:
                     self.step += 1
                     self.current = s["label"]
                     self.done_bytes = self.total_bytes = 0
+                    if s["key"] in seen:      # RetroArch, rdzeń wspólny dla kilku systemów
+                        continue
+                    seen.add(s["key"])
                     try:
-                        self._install(root, s)
-                        self.installed.append(s["label"])
+                        if install(self.cfg, s["key"], self._progress, self.cancel):
+                            self.installed.append(s["label"])
+                    except Busy:
+                        self.postponed.append(s["label"])
+                        if not self.quiet_busy:
+                            self.errors.append(f"{s['label']}: emulator działa — zamknij go i spróbuj ponownie")
+                        break
                     except Exception as ex:
                         log.exception("instalacja %s", s["label"])
                         self.errors.append(f"{s['label']}: {ex}")
                         break             # bez emulatora dalsze kroki systemu nie mają sensu
-                self._assign(es)
+                if es:
+                    assign(self.cfg, es)
         finally:
             self.finished = True
             if self.on_done:
@@ -393,91 +390,17 @@ class Job:
                 except Exception:
                     log.exception("on_done")
 
-    def _install(self, root: Path, s: dict) -> None:
-        # kilka systemów może potrzebować tego samego (RetroArch, rdzeń gambatte
-        # dla GB i GBC) — drugi raz nie pobieramy
-        if s["kind"] == "core" and (root / "RetroArch" / "cores" / f"{s['key']}_libretro.dll").is_file():
-            return
-        if s["kind"] == "retroarch" and _retroarch_exe(root):
-            return
-        if s["kind"] == "capsimg":
-            return self._capsimg(root)
-        with tempfile.TemporaryDirectory(prefix="emustart_dl_") as td:
-            if s["kind"] == "standalone":
-                c = STANDALONE[s["key"]]
-                r = _resolve_standalone(s["key"])
-                arch = Path(td) / r["name"]
-                _download(r["url"], arch, self._progress, self.cancel)
-                target = root / c["dir"]
-                _extract(arch, target, c.get("strip_root", False), c.get("sfx", False))
-                if c.get("portable"):
-                    # tryb przenośny: ustawienia i save'y w folderze emulatora,
-                    # tak jak u Ciebie (profile podpinają foldery save'ów stamtąd)
-                    (target / c["portable"]).touch(exist_ok=True)
-                _save_version(s["key"], r["version"])
-            elif s["kind"] == "retroarch":
-                url, ver = _retroarch_url()
-                arch = Path(td) / "RetroArch.7z"
-                _download(url, arch, self._progress, self.cancel)
-                _extract(arch, root / "RetroArch", strip_root=True)
-                _save_version("retroarch", ver)
-                self._ra_info(root / "RetroArch")
-            else:
-                cores = root / "RetroArch" / "cores"
-                cores.mkdir(parents=True, exist_ok=True)
-                arch = Path(td) / f"{s['key']}.zip"
-                _download(core_url(s["key"]), arch, self._progress, self.cancel)
-                with zipfile.ZipFile(arch) as z:
-                    z.extractall(cores)
-                self._ra_info(root / "RetroArch")
 
-    def _capsimg(self, root: Path) -> None:
-        """capsimg.dll do folderu system RetroArcha — z niej rdzeń PUAE czyta .ipf."""
-        ra = _retroarch_exe(root)
-        if not ra:
-            raise OSError("najpierw potrzebny RetroArch")
-        target = ra_system_dir(ra.parent) / "capsimg.dll"
-        if target.is_file():
-            return
-        r = _capsimg_url()
-        with tempfile.TemporaryDirectory(prefix="emustart_dl_") as td:
-            arch = Path(td) / r["name"]
-            _download(r["url"], arch, self._progress, self.cancel)
-            data = None
-            if r["name"].endswith(".zip"):
-                with zipfile.ZipFile(arch) as z:
-                    for m in z.infolist():
-                        if Path(m.filename).name.lower() == "capsimg.dll":
-                            data = z.read(m)
-            else:
-                import tarfile
-                with tarfile.open(arch, "r:*") as t:
-                    for m in t.getmembers():
-                        if m.isfile() and Path(m.name).name.lower() == "capsimg.dll":
-                            data = t.extractfile(m).read()   # sam plik, bez ścieżek z archiwum
-            if not data:
-                raise OSError("w paczce capsimg nie ma capsimg.dll")
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(data)
-        _save_version("capsimg", r["version"])
-
-    def _ra_info(self, ra: Path) -> None:
-        """Pliki info/*.info — z nich EmuStart rozpoznaje, który rdzeń obsługuje system."""
-        if (ra / "info").is_dir() and any((ra / "info").glob("*.info")):
-            return
-        with tempfile.TemporaryDirectory(prefix="emustart_info_") as td:
-            arch = Path(td) / "info.zip"
-            _download(f"{BUILDBOT}/assets/frontend/info.zip", arch, None, self.cancel)
-            with zipfile.ZipFile(arch) as z:
-                z.extractall(ra / "info")
-
-    def _assign(self, es: str) -> None:
-        """Po instalacji: emulator systemu = domyślna opcja (jak po „Wykryj emulatory”)."""
-        emulators.forget_scan()
-        cur0 = (self.cfg.get("systems") or {}).get(es) or {}
-        if cur0.get("exe") and Path(cur0["exe"]).is_file():
-            return                    # system ma już emulator (np. doinstalowany capsimg)
-        opt = emulators.default_option(systems.info(es), self.cfg.get("emu_root", ""))
-        if opt:
-            cur = self.cfg.setdefault("systems", {}).setdefault(es, {"enabled": True})
-            cur.update(label=opt["label"], exe=opt["exe"], args=opt["args"], enabled=True)
+def sync_items(cfg: dict, es_list: list) -> list:
+    """[(es, kroki)] — wszystko, co dla tych systemów jest na serwerze w innej wersji niż tu
+    (brakujące i do aktualizacji)."""
+    root = Path(cfg.get("emu_root") or "")
+    idx = index()
+    out = []
+    for es in es_list:
+        steps = [{"kind": emucatalog.item_info(i)["kind"], "key": i, "label": emucatalog.item_info(i)["label"]}
+                 for i in idx["systems"].get(es, []) if emucatalog.valid_item(i) and i in idx["items"]
+                 and not current(root, i)]
+        if steps:
+            out.append((es, steps))
+    return out

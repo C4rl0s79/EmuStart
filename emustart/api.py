@@ -1086,7 +1086,8 @@ class Api:
 
     # ── pobieranie emulatorów ──
     def install_missing(self) -> list:
-        """Systemy w bibliotece bez emulatora i co dla nich pobrać."""
+        """Systemy w bibliotece bez emulatora i co dla nich pobrać (z serwera)."""
+        installer.refresh_index(self._cfg)
         out = []
         for s in library.systems_summary():
             sc = (self._cfg.get("systems") or {}).get(s["es"]) or {}
@@ -1121,6 +1122,40 @@ class Api:
         job = getattr(self, "_install_job", None)
         if job:
             job.cancel.set()
+
+    def _emu_sync(self) -> None:
+        """Emulatory jak na serwerze: brakujące dla systemów biblioteki — instalacja, starsze —
+        aktualizacja (działający emulator — przy następnej okazji). W tle, bez pytania."""
+        if not self._cfg.get("emu_root"):
+            return
+        for j in (getattr(self, "_install_job", None), getattr(self, "_emu_job", None)):
+            if j and not j.finished:
+                return
+        installer.refresh_index(self._cfg)
+        hidden = {es for es, sc in (self._cfg.get("systems") or {}).items() if sc.get("enabled") is False}
+        items = installer.sync_items(self._cfg, [s["es"] for s in library.systems_summary() if s["es"] not in hidden])
+        if not items:
+            return
+
+        def done(job):
+            config.save(self._cfg)
+            if job.installed:
+                log.info("emulatory z serwera: %s", ", ".join(job.installed))
+            if job.postponed:
+                log.info("emulatory: później (działają): %s", ", ".join(job.postponed))
+        self._emu_job = installer.Job(self._cfg, items, on_done=done, quiet_busy=True)
+        self._emu_job.start()
+
+    def _emu_sync_quiet(self) -> None:
+        try:
+            self._emu_sync()
+        except Exception:
+            log.exception("emulatory z serwera")
+
+    def emu_sync_status(self) -> dict | None:
+        """Pobieranie emulatorów z serwera w tle — do paska u góry ekranu."""
+        job = getattr(self, "_emu_job", None)
+        return job.status() if job else None
 
     # ── pady ──
     def pads_state(self, battery: bool = False) -> dict:
@@ -1297,6 +1332,10 @@ class Api:
                     self._thin_sync()
                 except Exception:
                     log.exception("biblioteka z serwera")
+                try:
+                    self._emu_sync()
+                except Exception:
+                    log.exception("emulatory z serwera")
             time.sleep(300)
 
     def rescan(self) -> dict:
@@ -1525,7 +1564,11 @@ class Api:
     def save_settings(self, data: dict) -> dict:
         cfg = self._cfg
         if "emu_root" in data:
-            cfg["emu_root"] = str(data["emu_root"]).strip()
+            new_root = str(data["emu_root"]).strip()
+            if new_root != cfg.get("emu_root"):
+                # nowy folder emulatorów: brakujące i starsze emulatory z serwera (w tle)
+                threading.Timer(1.0, self._emu_sync_quiet).start()
+            cfg["emu_root"] = new_root
         if "cache_dir" in data:
             cd = str(data["cache_dir"]).strip()
             cfg["cache_dir"] = "" if Path(cd) == paths.DEFAULT_CACHE else cd

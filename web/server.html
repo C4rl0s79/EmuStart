@@ -86,6 +86,7 @@
   <button data-tab="konfig">Konfiguracja</button>
   <button data-tab="art">Grafiki i opisy</button>
   <button data-tab="urz">Urządzenia i konta</button>
+  <button data-tab="emu">Emulatory</button>
   <button data-tab="akt">Aktualizacja</button>
 </nav>
 <main>
@@ -166,6 +167,21 @@
       <div class="bar"><div id="scanBar"></div></div>
     </div>
     <div id="msg"></div>
+  </section>
+  <section data-in="emu">
+    <h2>Emulatory</h2>
+    <div class="muted">Serwer pobiera z internetu emulatory potrzebne systemom biblioteki (zalecany emulator
+      i rdzeń — Konfiguracja → Systemy) i rozdaje je komputerom: po wybraniu folderu emulatorów EmuStart na PC
+      sam doinstaluje brakujące i zaktualizuje starsze (konfiguracja i zapisy zostają). Nowe wersje — raz dziennie
+      albo przyciskiem.</div>
+    <div class="actions" style="margin-top:8px">
+      <button id="bEmuUpd" class="primary">Sprawdź i pobierz teraz</button>
+      <span id="emuChecked" class="muted"></span></div>
+    <div id="emuJob" class="muted" style="margin-top:6px"></div>
+    <div id="emuBarBox" class="bar" hidden><div id="emuBar"></div></div>
+    <table style="margin-top:8px"><thead><tr><th>Emulator</th><th>Systemy</th><th>Wersja na serwerze</th>
+      <th class="n">Rozmiar</th><th>Pobrano</th><th></th></tr></thead><tbody id="emuRows"></tbody></table>
+    <div class="muted" id="emuDir" style="margin-top:6px"></div>
   </section>
   <section data-in="akt">
     <h2>Aktualizacja</h2>

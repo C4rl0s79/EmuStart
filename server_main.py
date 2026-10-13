@@ -105,6 +105,8 @@ def _server_mode() -> None:
     remote.init_nas(api._cfg)             # folder profili (zapisy klientów przez serwer)
     from emustart import acctbackup
     acctbackup.start_auto(lambda: api._cfg)   # kopie kont raz dziennie
+    from emustart import emustore
+    emustore.scheduler(lambda: api._cfg)      # nowe wersje emulatorów raz dziennie
     from emustart import srvadmin
     srvadmin.ENABLED = True
     # po restarcie z panelu poprzedni proces zwalnia port po chwili — czekamy na niego

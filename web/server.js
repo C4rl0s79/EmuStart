@@ -57,7 +57,42 @@ function showTab(t) {
   curTab = t;
   clearInterval(artTimer);
   if (t === "art") { refreshArt(); artTimer = setInterval(refreshArt, 1500); }
+  clearInterval(emuTimer);
+  if (t === "emu") { refreshEmu(); emuTimer = setInterval(refreshEmu, 1500); }
 }
+
+/* ── emulatory: magazyn serwera (emustart/emustore.py) ── */
+let emuTimer = null;
+async function refreshEmu() {
+  const d = await admin("emu_status").catch(() => null);
+  if (!d?.ok) return;
+  const j = d.job;
+  $("emuChecked").textContent = d.checked ? `ostatnie sprawdzenie: ${ago(d.checked)}` : "jeszcze nie sprawdzano";
+  $("bEmuUpd").disabled = j.running;
+  $("emuJob").innerHTML = j.running
+    ? `Pobieram: <b>${esc(j.item || "…")}</b> (${j.step}/${j.steps})` + (j.total ? ` — ${fmtBytes(j.done)} z ${fmtBytes(j.total)}` : "")
+    : (j.log.length ? esc(j.log.slice(-6).join(" · ")) : "");
+  $("emuBarBox").hidden = !(j.running && j.total);
+  if (j.running && j.total) $("emuBar").style.width = `${Math.floor((100 * j.done) / j.total)}%`;
+  $("emuRows").innerHTML = d.items.length ? d.items.map((r) =>
+    `<tr><td>${esc(r.label)}</td><td class="muted">${esc(r.systems.join(", ") || "— (nieużywany)")}</td>` +
+    `<td>${esc(r.version || "—")}${r.previous ? `<div class="muted">poprzednia: ${esc(r.previous)}</div>` : ""}` +
+    `${r.error ? `<div style="color:var(--err)">${esc(r.error)}</div>` : ""}</td>` +
+    `<td class="n">${r.size ? fmtBytes(r.size) : ""}</td><td class="muted">${r.updated ? ago(r.updated) : ""}</td>` +
+    `<td class="n"><button data-emu="${esc(r.item)}" ${j.running ? "disabled" : ""}>Pobierz ponownie</button></td></tr>`).join("")
+    : `<tr><td colspan="6" class="muted">Biblioteka nie ma jeszcze systemów — najpierw foldery z grami (Konfiguracja).</td></tr>`;
+  $("emuRows").querySelectorAll("[data-emu]").forEach((b) => b.addEventListener("click", async () => {
+    const r = await admin("emu_update", { items: [b.dataset.emu], force: true }).catch(() => null);
+    msg(r?.ok ? "Pobieram ponownie…" : r?.reason || "Serwer nie odpowiada.", r?.ok);
+    refreshEmu();
+  }));
+  $("emuDir").textContent = `Magazyn: ${d.dir}`;
+}
+$("bEmuUpd").addEventListener("click", async () => {
+  const r = await admin("emu_update", {}).catch(() => null);
+  msg(r?.ok ? "Sprawdzam nowe wersje emulatorów…" : r?.reason || "Serwer nie odpowiada.", r?.ok);
+  refreshEmu();
+});
 
 /* ── grafiki i opisy (emustart/art.py — pobiera serwer) ── */
 let artTimer = null;
