@@ -112,6 +112,15 @@ ES_THEMES = (
     ("Pixel", GH + "ehettervik/es-theme-pixel/master/{es}/logo.png"),
     ("SNES Mini", GH + "ruckage/es-theme-snes-mini/master/art/logos/{es}.png"),
 )
+# nazwy folderów w motywach ES / ES-DE inne niż kody EmuStart (próbowane po kolei)
+ES_NAMES = {
+    "lynx": ["atarilynx"], "gamecube": ["gc"], "wswan": ["wonderswan"], "wswanc": ["wonderswancolor"],
+    "x360": ["xbox360"], "fbneo": ["fbneo", "fba", "arcade"], "SNESMSU1": ["snes-msu1", "snes"],
+    "amigawhddemos": ["amiga"], "amigawhdgames": ["amiga"], "pico": ["segapico"], "vic20": ["c20"],
+    "psvita": ["vita"], "msx2": ["msx"], "n64dd": ["n64"], "plus4": ["c16"], "pc98": ["pc9800"],
+    "pc88": ["pc8800"],
+}
+
 # ikony systemów z motywów menu RetroArcha (repozytorium libretro/retroarch-assets)
 RA_ICON = GH + "libretro/retroarch-assets/master/xmb/{theme}/png/{name}.png"
 RA_THEMES = ("systematic", "monochrome", "flatui", "flatux", "retrosystem", "pixel", "dot-art", "daite", "automatic")
@@ -194,13 +203,16 @@ def candidates(cfg: dict, es: str) -> list:
         out.append({"id": "downloaded", "url": d, "source": "pobrane wcześniej", "label": es})
     import urllib.parse
     from concurrent.futures import ThreadPoolExecutor
-    web = [(src, tpl.format(es=es), es) for src, tpl in ES_THEMES]
+    names = list(dict.fromkeys([es] + ES_NAMES.get(es, [])))
+    web = [(src, tpl.format(es=n), n) for src, tpl in ES_THEMES for n in names]
     web += [(f"RetroArch ({t})", RA_ICON.format(theme=t, name=urllib.parse.quote(info["libretro"])),
              info["libretro"]) for t in RA_THEMES if info["libretro"]]
-    with ThreadPoolExecutor(max_workers=8) as ex:     # pustych ramek (404) nie pokazujemy
+    with ThreadPoolExecutor(max_workers=12) as ex:    # pustych ramek (404) nie pokazujemy
         found = list(ex.map(lambda w: _exists(w[1]), web))
+    seen = set()
     for (src, u, label), ok in zip(web, found):
-        if ok:
+        if ok and src not in seen:                    # z motywu pierwsza istniejąca nazwa
+            seen.add(src)
             out.append({"id": "url:" + u, "url": u, "source": src, "label": label})
     targets = [t for t in {info["display"], info["libretro"].replace(" - ", " "),
                            LB_NAMES.get(es, "")} if t]

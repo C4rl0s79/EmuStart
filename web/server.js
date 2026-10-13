@@ -315,7 +315,7 @@ async function sysPick(es) {
   $("sysPickList").innerHTML = "";
   const r = await admin("system_logo_candidates", { es }).catch(() => null);
   const list = [...(r?.list || []), { id: "none", url: "", source: "bez logo (sama nazwa)" }];
-  $("sysPickInfo").textContent = `Logo systemu ${es} — kliknij, żeby wybrać.`;
+  $("sysPickInfo").textContent = `Logo systemu ${es} — ${list.length - 1} propozycji, kliknij, żeby wybrać (Esc — zamknij).`;
   $("sysPickList").innerHTML = list.map((c, i) =>
     `<button data-i="${i}">${c.url ? `<img src="${esc(c.url)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ""}<span>${esc(c.source || "")}${c.label ? " · " + esc(c.label) : ""}</span></button>`).join("");
   $("sysPickList").querySelectorAll("[data-i]").forEach((b) => b.addEventListener("click", async () => {
@@ -326,6 +326,11 @@ async function sysPick(es) {
   }));
 }
 $("bSysPickClose").addEventListener("click", () => { $("sysPick").hidden = true; });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("sysPick").hidden) $("sysPick").hidden = true; });
+document.addEventListener("mousedown", (e) => {          // kliknięcie obok okna — zamyka
+  const box = $("sysPick");
+  if (!box.hidden && !box.contains(e.target) && !e.target.closest("[data-logo]")) box.hidden = true;
+});
 
 /* ── przeniesienie serwera (emustart/tls.py: export_move / import_move) ── */
 $("bMvPrep").addEventListener("click", async () => {
