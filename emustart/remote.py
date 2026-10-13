@@ -688,8 +688,8 @@ def _safe_profile_name(name: str) -> str:
 
 
 def _find(handler) -> None:
-    """Gra po (system, ścieżka względna) — EmuStart na Windows pobiera ją stąd zamiast
-    przez SMB. Odpowiedź: id i pliki (ścieżka, rozmiar); pobieranie jak dla Androida."""
+    """Gra po (system, ścieżka względna) — EmuStart na PC pobiera ją stąd. Odpowiedź: id, pliki
+    (ścieżka, rozmiar) i — arcade — zależności (gra nadrzędna, BIOS: obok gry, jak na telefonie)."""
     from emustart import library
     q = urllib.parse.parse_qs(urllib.parse.urlsplit(handler.path).query)
     es, rel = (q.get("es") or [""])[0], (q.get("rel") or [""])[0].replace("\\", "/")
@@ -699,7 +699,8 @@ def _find(handler) -> None:
     for r in rows:
         if r["rel"].replace("\\", "/") == rel:
             files = [{"path": f.replace("\\", "/"), "size": size} for f, size, _m in json.loads(r["files"])]
-            return _json(handler, {"id": r["id"], "files": files})
+            deps = [{"path": p.replace("\\", "/"), "size": size} for p, _f, size in _arcade_deps(library.game(r["id"]))]
+            return _json(handler, {"id": r["id"], "files": files, "deps": deps})
     return _json(handler, {"error": "nie ma takiej gry"}, 404)
 
 

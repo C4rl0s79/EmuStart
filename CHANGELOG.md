@@ -56,6 +56,11 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 - Serwer ma własny, mniejszy zestaw funkcji (emustart/srvapi.py) — nie uruchamia już
   obsługi padów, profili gracza i wysyłania zapisów, które są potrzebne tylko na PC.
 
+### Poprawione
+- **Wersje gier arcade (FBA) na PC bez gry nadrzędnej i BIOS-u** — PC szukał ich tylko
+  w swoich folderach z grami, więc emulator zgłaszał brak plików. Teraz serwer podaje je
+  razem z grą, a PC pobiera je obok gry (także przy przypinaniu), jak telefon.
+
 ### Dodane
 - **Panel serwera: zakładki** (Stan, Konfiguracja, Urządzenia i konta, Aktualizacja).
 - **Panel serwera → Konfiguracja → Foldery**: foldery z grami (kilka, z kolejnością), BIOS-y,

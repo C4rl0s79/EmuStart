@@ -612,32 +612,41 @@ def info_nowait(cfg: dict) -> dict | None:
 def sources(cfg: dict, g: dict) -> dict:
     """{rel: RemoteFile} dla plików gry dostępnych na serwerze w tym samym rozmiarze.
     Pusty / niepełny = serwer niedostępny albo nie ma tej gry."""
+    return find(cfg, g)[0]
+
+
+def find(cfg: dict, g: dict) -> tuple[dict, list]:
+    """(pliki gry {rel: RemoteFile}, zależności arcade [(rel, RemoteFile, rozmiar)] — gra
+    nadrzędna i BIOS, które serwer ma obok gry). Serwer niedostępny: ({}, [])."""
     ep = endpoint(cfg)
     if not ep:
-        return {}
+        return {}, []
     i = info(cfg)
     if not i.get("ok") or "find" not in i.get("features", []):
         if i.get("ok"):
             log.info("serwer %s (EmuStart %s) nie umie szukać gier — zaktualizuj go",
                      i.get("name"), i.get("version"))
-        return {}
+        return {}, []
     q = urllib.parse.urlencode({"es": g["es"], "rel": g["rel"].replace("\\", "/")})
     try:
         st, body, _rtt = _request(ep, f"/v1/find?{q}", timeout=10)
     except (OSError, http.client.HTTPException) as ex:
         log.info("serwer: szukanie %s: %s", g["title"], ex)
-        return {}
+        return {}, []
     if st != 200:
         log.info("serwer nie ma gry %s (%s)", g["title"], st)
-        return {}
+        return {}, []
     d = json.loads(body)
     remote = {f["path"].replace("\\", "/"): f["size"] for f in d.get("files", [])}
     out = {}
     for rel, size, _mt in g["files"]:
         if remote.get(rel.replace("\\", "/")) == size:
             out[rel] = RemoteFile(ep[0], ep[1], ep[2], int(d["id"]), rel, size)
-    log.info("serwer %s: %d/%d plików gry %s", ep[0], len(out), len(g["files"]), g["title"])
-    return out
+    deps = [(f["path"], RemoteFile(ep[0], ep[1], ep[2], int(d["id"]), f["path"], int(f["size"])), int(f["size"]))
+            for f in d.get("deps") or [] if f.get("path") and ".." not in f["path"].split("/")]
+    log.info("serwer %s: %d/%d plików gry %s%s", ep[0], len(out), len(g["files"]), g["title"],
+             f" + zależności: {', '.join(r for r, _s, _n in deps)}" if deps else "")
+    return out, deps
 
 
 def parse_login(text: str) -> dict:

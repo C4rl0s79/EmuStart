@@ -23,7 +23,7 @@ import time
 import zipfile
 from pathlib import Path
 
-from emustart import (arcade, bios, cache, emulators, hotkey, ingame, library, pads,
+from emustart import (bios, cache, emulators, hotkey, ingame, library, pads,
                       paths, profiles, systems, winutil)
 
 log = logging.getLogger("emustart.launcher")
@@ -140,21 +140,13 @@ class Session:
         cache_dir = cache.root(self.cfg) / es
 
         extra = []
+        self._found = None
         if info["kind"] == "arcade":
-            # rodzic/BIOS najpierw obok gry, potem w innych folderach tego systemu
-            search = [rom_dir] + [d for d in library.system_dirs(es) if d != rom_dir]
-            for dep in arcade.dependencies(Path(g["rel"]).stem):
-                st = None
-                for d in search:
-                    src = d / f"{dep}.zip"
-                    try:
-                        st = src.stat()
-                        break
-                    except OSError:
-                        continue
-                if st is None:
-                    continue
-                extra.append((src, cache_dir / f"{dep}.zip", st.st_size, st.st_mtime))
+            # gra nadrzędna i BIOS (np. neogeo.zip) z serwera — obok gry w pamięci podręcznej;
+            # bez serwera gra startuje z tego, co już jest pobrane
+            from emustart import netsrc
+            self._found = netsrc.find(self.cfg, g)
+            extra = [(src, cache_dir / rel, size, 0) for rel, src, size in self._found[1]]
 
         cache.touch(g["id"])
         if cache.is_complete(self.cfg, g) and all(
@@ -170,7 +162,7 @@ class Session:
         """Pobiera grę z serwera EmuStart do pamięci podręcznej; zwraca katalog, z którego
         uruchamiamy (długie pobieranie gry płytowej — dysk strumieniowy, gra od razu)."""
         from emustart import netsrc
-        self.srcs = netsrc.sources(self.cfg, g)
+        self.srcs = self._found[0] if self._found else netsrc.sources(self.cfg, g)
         if len(self.srcs) != len(g["files"]):
             raise LaunchError("Serwer EmuStart nie odpowiada (albo nie ma tej gry), a tej gry nie ma "
                               "na tym komputerze. Połącz się z siecią domową lub Tailscale.")

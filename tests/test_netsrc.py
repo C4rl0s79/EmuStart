@@ -209,3 +209,26 @@ def test_server_status_never_waits_for_the_network(srv, monkeypatch):
             break
         _t.sleep(0.1)
     assert netsrc.info_nowait(cfg)["ok"]
+
+
+def test_arcade_version_gets_parent_from_server(srv):
+    """Wersja gry FBA na PC: gra nadrzędna (i BIOS) z serwera, obok gry w pamięci podręcznej —
+    wcześniej PC szukał ich tylko w swoich folderach, więc emulator zgłaszał brak plików."""
+    from emustart import arcade
+    cfg, roms, tmp = srv
+    dat = tmp / "fbneo.dat"
+    dat.write_text('<?xml version="1.0"?><datafile>'
+                   '<game name="1941"><description>1941 (World)</description></game>'
+                   '<game name="1941j" cloneof="1941" romof="1941"><description>1941 (Japan)</description></game>'
+                   '</datafile>', encoding="utf-8")
+    assert arcade.refresh_fbneo(force=True, url=dat.as_uri())["ok"]
+    _write(roms / "fbneo" / "1941.zip", b"RODZIC")
+    _write(roms / "fbneo" / "1941j.zip", b"WERSJA")
+    scanner.scan_system("fbneo", roms / "fbneo")
+    g = library.game(library.db().execute("SELECT id FROM games WHERE rel='1941j.zip'").fetchone()["id"])
+    files, deps = netsrc.find(cfg, g)
+    assert set(files) == {"1941j.zip"} and [(r, n) for r, _s, n in deps] == [("1941.zip", 6)]
+    dst = tmp / "cache" / "fbneo" / "1941.zip"
+    p = partial.Partial(deps[0][1], dst, 6, 0)
+    p.run(streams=1)
+    assert dst.read_bytes() == b"RODZIC"

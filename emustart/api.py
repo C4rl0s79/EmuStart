@@ -758,10 +758,11 @@ class Api:
 
         def run():
             try:
-                srcs = netsrc.sources(self._cfg, g)
+                srcs, deps = netsrc.find(self._cfg, g)
                 if len(srcs) != len(g["files"]):
                     return    # serwer niedostępny — dociągniemy przy następnym uruchomieniu gry
-                cache.copy_game(self._cfg, g, rom_dir, prog, cancel, srcs=srcs)
+                extra = [(src, cache.root(self._cfg) / g["es"] / rel, size, 0) for rel, src, size in deps]
+                cache.copy_game(self._cfg, g, rom_dir, prog, cancel, extra, srcs=srcs)
             except cache.Cancelled:
                 pass
             except Exception:
