@@ -17,9 +17,10 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   RetroArchu na Androidzie; ocena „wyświetlania nad innymi aplikacjami” i usługi ułatwień
   dostępu dla pozostałych emulatorów na Androidzie.
 
-## [0.43.0] — 2026-10-13
+## [0.43.1] — 2026-10-13
 
-Zawiera też niewydane 0.41.1 (poprawka startu na Androidzie) i 0.42.0 (podpis wydań).
+Pierwsze wydanie zmian 0.43.0 (jego budowa przerwała się na błędzie opisanym niżej). Zawiera
+też niewydane 0.41.1 (poprawka startu na Androidzie) i 0.42.0 (podpis wydań).
 
 ### Zmienione
 - **Jedna droga do serwera: logowanie kontem** (PC, Android, serwer, panel). W Ustawieniach
@@ -65,6 +66,10 @@ Zawiera też niewydane 0.41.1 (poprawka startu na Androidzie) i 0.42.0 (podpis w
   logowanie z adresu domu (blokada adresu). Teraz sonda bez klucza (wyzwanie logowania),
   rozpoznająca odpowiedź serwera EmuStart i niczego nieliczącą.
 - Ekran pierwszego uruchomienia nie każe już wpisywać klucza serwera.
+- **Pierwsze otwarcie bazy w kilku wątkach naraz** (serwer, pobieranie, interfejs) — migracja
+  kolumn potrafiła się wykonać dwa razy („duplicate column name”), a przełączanie w tryb WAL
+  kończyło się „database is locked”. Teraz inicjalizacja i migracje (gry, profile, arcade)
+  raz — blokada w procesie i transakcja IMMEDIATE.
 
 
 ## [0.41.0] — 2026-10-13
