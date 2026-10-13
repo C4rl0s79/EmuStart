@@ -188,14 +188,17 @@ def test_system_logo_choice(env, tmp_path, monkeypatch):
     pack = tmp_path / "pack" / "_variants" / "Light_Just_White"
     _write(pack / "Sony Playstation-03.png", b"\x89PNG\r\n\x1a\nWHITE")
     _write(pack / "Sega Saturn-01.png", b"\x89PNG\r\n\x1a\nX")
-    cfg = {"logo_pack_dir": str(tmp_path / "pack"), "emu_root": str(tmp_path / "emu"), "systems": {}}
+    cfg = {"emu_root": str(tmp_path / "emu"), "systems": {}}
+    assert logos.import_pack(tmp_path / "pack") == 2                  # paczka w jednym pliku magazynu
     c = [x for x in logos.candidates(cfg, "psx") if x["source"].startswith("paczka")]
     assert [x["label"] for x in c] == ["Sony Playstation"] and c[0]["source"] == "paczka (białe)"
+    assert c[0]["url"] == "/media/_logopack/Light_Just_White~Sony%20Playstation-03.png"
     assert logos.choose(cfg, "psx", c[0]["id"])
     u = logos.url_for("psx", cfg)
     assert "/media/_systems/psx.custom.png" in u["url"]
     assert logos.choose(cfg, "psx", "none") and logos.url_for("psx", cfg)["url"] == ""
-    assert not logos.choose(cfg, "psx", "file:" + str(tmp_path / "x.exe"))   # tylko obrazy
+    assert not logos.choose(cfg, "psx", "file:" + str(tmp_path / "x.exe"))   # tylko z paczki i propozycji
+    assert not logos.choose(cfg, "psx", "pack:Light_Just_White~brak.png")
 
 
 def test_filter_fields_regions_players():

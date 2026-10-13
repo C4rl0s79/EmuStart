@@ -63,7 +63,7 @@ class PinnedHTTPS(http.client.HTTPSConnection):
         der = self.sock.getpeercert(binary_form=True) or b""
         if not self.fp or hashlib.sha256(der).hexdigest() != self.fp:
             self.close()
-            raise ssl.SSLError(f"certyfikat serwera {self.host} nie zgadza się z zapamiętanym — "
+            raise CertMismatch(f"certyfikat serwera {self.host} nie zgadza się z zapamiętanym — "
                                "połącz urządzenie z serwerem ponownie")
 
 
@@ -440,6 +440,11 @@ def hw_id() -> str:
 DEV = "dev:"
 TOKEN_MARGIN = 300               # odnowienie tokenu tyle s przed wygaśnięciem
 _session: dict = {}              # {"did", "tok", "exp"}
+# serwer odpowiedział jednoznacznie „nie” (nie zna urządzenia, inny certyfikat) — {"reason", "at"};
+# przez REJECT_TTL bez ponownych prób: wcześniej klient w kółko pytał wszystkie adresy (po 10 s
+# na każdy martwy), a pasek długo pokazywał „łączę”
+_rejected: dict = {}
+REJECT_TTL = 120
 _signer: dict = {}               # id urządzenia → (nazwa klucza, rodzaj)
 _session_lock = threading.Lock()
 _login_lock = threading.Lock()   # jedno logowanie naraz — reszta wątków czeka i bierze ten sam token
@@ -458,6 +463,14 @@ def use_device(cfg: dict) -> None:
 def drop_token() -> None:
     with _session_lock:
         _session.clear()
+        _rejected.clear()
+
+
+def rejected() -> str:
+    """Powód ostatniej jednoznacznej odmowy serwera ('' — brak, albo minęło REJECT_TTL)."""
+    if _rejected and time.time() - _rejected.get("at", 0) < REJECT_TTL:
+        return _rejected.get("reason", "")
+    return ""
 
 
 def forget_server() -> None:
@@ -506,12 +519,12 @@ def _login(did: str, sp) -> str:
     name, kind = _signer[did]
     ch = _post_sp(sp, "/v1/auth/challenge", {"device": did})
     if not ch.get("ok"):
-        raise OSError(ch.get("reason") or "serwer nie zna tego urządzenia")
+        raise Rejected(ch.get("reason") or "serwer nie zna tego urządzenia")
     msg = f"emustart-auth|{did}|{ch['nonce']}".encode("utf-8")
     sig = base64.b64encode(keystore.sign(name, kind, msg)).decode()
     t = _post_sp(sp, "/v1/auth/token", {"device": did, "nonce": ch["nonce"], "sig": sig})
     if not t.get("ok"):
-        raise OSError(t.get("reason") or "logowanie odrzucone")
+        raise Rejected(t.get("reason") or "logowanie odrzucone")
     with _session_lock:
         _session.update(did=did, tok=t["token"], exp=float(t["expires"]))
     return t["token"]
@@ -529,7 +542,17 @@ def session_token(did: str, sp=None) -> str:
         with _session_lock:
             if _session.get("did") == did and _session.get("exp", 0) - TOKEN_MARGIN > time.time():
                 return _session["tok"]        # zalogował się inny wątek, gdy ten czekał
+        if rejected():
+            return ""                         # serwer niedawno odmówił — bez kolejnej rundy
         return _login_any(did, sp)
+
+
+class Rejected(OSError):
+    """Serwer odpowiedział, ale nie wpuszcza tego urządzenia (nieznane, unieważnione)."""
+
+
+class CertMismatch(ssl.SSLError):
+    """Pod adresem serwera jest inny certyfikat niż zapamiętany (inny serwer albo podmiana)."""
 
 
 def _login_any(did: str, sp) -> str:
@@ -541,7 +564,16 @@ def _login_any(did: str, sp) -> str:
         try:
             tok = _login(did, t)
             _hint[:] = [t]
+            _rejected.clear()
             return tok
+        except (Rejected, CertMismatch) as ex:
+            # odpowiedź jednoznaczna — pozostałe adresy prowadzą do tego samego serwera
+            log.info("logowanie urządzenia przez %s:%s: %s", t[1], t[2], ex)
+            _rejected.update(reason=("Serwer nie zna tego komputera — zaloguj się ponownie (Ustawienia → Zaloguj)."
+                                     if isinstance(ex, Rejected) else
+                                     "Serwer ma inny certyfikat niż zapamiętany (inny serwer?) — zaloguj się "
+                                     "ponownie (Ustawienia → Zaloguj)."), at=time.time())
+            return ""
         except (OSError, http.client.HTTPException, ValueError, KeyError) as ex:
             log.info("logowanie urządzenia przez %s:%s: %s", t[1], t[2], ex)
     return ""
@@ -569,13 +601,13 @@ def info(cfg: dict, fresh: bool = False) -> dict:
             return _info["res"]
     try:
         st, body, rtt = _request(ep, "/v1/info")
-        if st == 401 and ep[2].startswith(DEV):
+        if st == 401 and ep[2].startswith(DEV) and not rejected():
             drop_token()
             st, body, rtt = _request(ep, "/v1/info")
         if st == 401:
             res = {"ok": False, "key_rejected": True,
                    "reason": "zły klucz serwera" if not ep[2].startswith(DEV)
-                   else "serwer nie przyjął klucza urządzenia (unieważnione?)"}
+                   else rejected() or "serwer nie przyjął klucza urządzenia (unieważnione?)"}
         elif st != 200:
             res = {"ok": False, "reason": f"serwer odpowiedział {st}"}
         else:

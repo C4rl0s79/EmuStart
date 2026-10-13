@@ -100,12 +100,13 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   profilu — wygrywają). Domyślnie: wyjście z gry bez okna z pytaniem, w RetroArchu pauza
   w tle, obrazki stanów i zamknięcie gry = wyjście z RetroArcha; zmiana i powrót do domyślnych
   w panelu.
-- **Więcej propozycji logo systemów** (2 → do 14 na system): motywy EmulationStation / ES-DE
-  (Art Book Next, Carbon, Alekfull NX, Canvas, Simple, Pixel, SNES Mini) i ikony z sześciu
-  motywów RetroArcha — prosto z internetu, sprawdzane naraz. Wcześniej część propozycji
-  pochodziła z plików na komputerze deweloperskim (paczka PyLinks, motywy RetroArcha), których
-  serwer nie ma; własna paczka logo — nowe ustawienie w panelu (Konfiguracja → Foldery).
-  Wybór logo przyjmuje tylko adresy z propozycji.
+- **Więcej propozycji logo systemów** (np. Dreamcast 43 → 57, PS1 77): motywy EmulationStation /
+  ES-DE (Art Book Next, Carbon, Alekfull NX, Canvas, Simple, Pixel, SNES Mini) i ikony z 9 motywów
+  RetroArcha — prosto z internetu, sprawdzane naraz — oraz paczka logo (np. `platform_logos`
+  z PyLinks) w **jednym pliku** magazynu serwera (`media\_logopack.media`, 4315 logo zamiast
+  tylu plików): wczytywana z folderu ustawionego w panelu (Konfiguracja → Foldery) albo
+  skopiowana gotowa. Wcześniej paczka i motywy RetroArcha były plikami na komputerze
+  deweloperskim, których serwer nie ma. Wybór logo przyjmuje tylko propozycje.
 - **Klucze źródeł grafik z pliku**: `art_keys.json` w folderze `server` serwera — przy starcie
   serwer zapisuje je zaszyfrowane i usuwa plik.
 - **Klucze źródeł grafik z PyLinks na serwer**: EmuStart na komputerze administratora →
@@ -171,6 +172,10 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   uruchamianie gier tylko z serwera, kilka urządzeń z jednym serwerem — bez SMB.
 
 ### Naprawione
+- Serwer, który nie zna komputera (np. inny serwer pod tym samym adresem) albo ma inny
+  certyfikat: EmuStart w kółko pytał wszystkie adresy, czekając po 10 s na każdy niedostępny,
+  a pasek bez końca pokazywał „Serwer: łączę…”. Teraz pierwsza jednoznaczna odpowiedź kończy
+  próby, pasek od razu mówi, co zrobić (Ustawienia → Zaloguj), a kolejna próba jest po 2 minutach.
 - Pobieranie emulatorów: okno „Pobierz brakujące emulatory” i wyrównanie w tle pisały naraz do
   tych samych plików (WinError 32, „emulator działa”, znikające pliki) — teraz jedna
   instalacja naraz. Zamiast składania ZIP-a z tysięcy plików przy każdym pobraniu serwer

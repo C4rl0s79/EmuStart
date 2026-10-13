@@ -34,7 +34,8 @@ FIELDS = {
                       "Pusty — folder emulators w katalogu serwera."),
     "logo_pack_dir": ("Paczka logo platform (opcjonalnie)", "dir", True,
                       "Własne logo systemów do wyboru (np. platform_logos z PyLinks) — dodatkowo do motywów "
-                      "z internetu."),
+                      "z internetu. Serwer wczytuje paczkę do jednego pliku (media\_logopack.media); "
+                      "folder może potem zniknąć."),
     "backup_dir": ("Folder kopii kont", "dir", True,
                    "Kopie zapasowe kont (ZIP). Pusty — folder backup w katalogu serwera."),
     "mame_exe": ("MAME (opcjonalnie)", "file", True,
@@ -60,6 +61,10 @@ def _status(key: str, value: str) -> dict:
     """Co serwer widzi pod ścieżką: {ok, text}."""
     kind = FIELDS[key][1]
     if not value:
+        if key == "logo_pack_dir":
+            from emustart import mediastore
+            n = len(mediastore.files("_logopack"))
+            return {"ok": True, "text": f"logo w magazynie: {n}" if n else "nie ustawiono"}
         d = default_dir(key)
         return {"ok": True, "text": f"domyślnie: {d}" if d else "nie ustawiono"}
     p = Path(value)
@@ -76,6 +81,9 @@ def _status(key: str, value: str) -> dict:
         if key == "bios_dir":
             n = sum(1 for _ in p.rglob("*") if _.is_file())
             return {"ok": True, "text": f"plików: {n}"}
+        if key == "logo_pack_dir":
+            from emustart import mediastore
+            return {"ok": True, "text": f"logo w magazynie: {len(mediastore.files('_logopack'))}"}
         if key == "emu_root":
             ra = any((p / d / "retroarch.exe").is_file() for d in ("", "RetroArch", "retroarch")) or \
                 any(p.glob("*/retroarch.exe"))
@@ -159,6 +167,14 @@ def _apply(api, key: str) -> None:
     elif key == "profiles_nas":
         from emustart import remote
         remote.init_nas(api._cfg)
+    elif key == "logo_pack_dir" and api._cfg.get("logo_pack_dir"):
+        def run(folder=api._cfg["logo_pack_dir"]):
+            from emustart import logos
+            try:
+                logos.import_pack(Path(folder))
+            except Exception:
+                log.exception("paczka logo")
+        threading.Thread(target=run, daemon=True, name="paczka-logo").start()
     elif key == "mame_exe":
         threading.Thread(target=api._arcade_meta, daemon=True, name="arcade").start()
 

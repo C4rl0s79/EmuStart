@@ -48,9 +48,10 @@ administrator na urządzeniu: przytrzymane A na logo systemu → Logo / Poświat
 Tak samo na wszystkich urządzeniach.
 
 Propozycje logo: wbudowane, motywy EmulationStation / ES-DE (Art Book Next, Carbon, Alekfull NX,
-Canvas, Simple, Pixel, SNES Mini), ikony z motywów RetroArcha (systematic, monochrome, flatui,
-retrosystem, pixel, dot-art) — z internetu, bez plików na serwerze — oraz własna paczka logo
-(panel → Konfiguracja → Foldery → Paczka logo platform). Kafelki mają szachownicę w szarościach:
+Canvas, Simple, Pixel, SNES Mini), ikony z 9 motywów RetroArcha — z internetu, bez plików na
+serwerze — oraz własna paczka logo (np. `platform_logos` z PyLinks): panel → Konfiguracja →
+Foldery → Paczka logo platform. Serwer wczytuje ją do jednego pliku `server\media\_logopack.media`
+(folder może potem zniknąć); ten plik można też po prostu skopiować do `server\media`. Kafelki mają szachownicę w szarościach:
 widać na niej i czarne, i białe warianty.
 
 ## Amiga WHDLoad

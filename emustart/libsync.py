@@ -257,7 +257,7 @@ def fetch_media(cfg: dict, rel: str, target: Path) -> bool:
 
 def fetch_preview(cfg: dict, path: str):
     """Podgląd z serwera (logo z paczki serwera, grafika) dla okna wyboru — (dane, typ) albo None."""
-    if not path.startswith(("/media/", "/local/")) or ".." in path.split("/"):
+    if not path.startswith("/media/") or ".." in path.split("/"):
         return None
     ep = netsrc.endpoint(cfg)
     if not ep:

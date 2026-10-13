@@ -36,7 +36,7 @@ EXT = ".media"
 IMG = (".png", ".jpg", ".jpeg", ".webp", ".gif")
 
 
-SPECIAL = ("_systems", "_stany")         # logo systemów, obrazki stanów gry
+SPECIAL = ("_systems", "_stany", "_logopack")   # logo systemów, obrazki stanów gry, paczka logo
 
 
 def valid_es(es: str) -> bool:
@@ -110,6 +110,18 @@ def put(es: str, file: str, data: bytes, when: float | None = None) -> None:
     with con:
         con.execute("INSERT OR REPLACE INTO art(file, data, mtime) VALUES(?,?,?)",
                     (file, sqlite3.Binary(data), when or time.time()))
+
+
+def put_many(es: str, items) -> int:
+    """Wiele plików w jednej transakcji: [(nazwa, dane, czas)]."""
+    con = _con(es)
+    n = 0
+    with con:
+        for file, data, when in items:
+            con.execute("INSERT OR REPLACE INTO art(file, data, mtime) VALUES(?,?,?)",
+                        (file, sqlite3.Binary(data), when))
+            n += 1
+    return n
 
 
 def delete(es: str, file: str) -> bool:

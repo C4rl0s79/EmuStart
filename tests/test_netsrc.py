@@ -232,3 +232,29 @@ def test_arcade_version_gets_parent_from_server(srv):
     p = partial.Partial(deps[0][1], dst, 6, 0)
     p.run(streams=1)
     assert dst.read_bytes() == b"RODZIC"
+
+
+def test_login_stops_at_definite_rejection(monkeypatch):
+    """Serwer nie zna urządzenia (albo ma inny certyfikat): koniec prób od razu, bez czekania
+    na martwe adresy, i bez kolejnej rundy przez REJECT_TTL — pasek nie wisi na „łączę”."""
+    from emustart import netsrc
+    asked = []
+
+    def login(did, sp):
+        asked.append(sp)
+        if sp[1] == "martwy":
+            raise TimeoutError("timed out")
+        raise netsrc.Rejected("nieznane urządzenie")
+    monkeypatch.setattr(netsrc, "_login", login)
+    monkeypatch.setattr(netsrc, "_hint", [])
+    monkeypatch.setattr(netsrc, "_cfg_ref", [{}])
+    monkeypatch.setattr(netsrc, "candidates", lambda cfg: [("https", "martwy", 1), ("https", "tunel", 443),
+                                                          ("https", "inny", 8741)])
+    monkeypatch.setitem(netsrc._signer, "d1", ("n", "tpm"))
+    netsrc.drop_token()
+    assert netsrc.session_token("d1") == ""
+    assert [a[1] for a in asked] == ["martwy", "tunel"]                    # „inny” już niepytany
+    assert "zaloguj się ponownie" in netsrc.rejected()
+    assert netsrc.session_token("d1") == "" and len(asked) == 2            # bez kolejnej rundy
+    netsrc.drop_token()
+    assert netsrc.rejected() == ""

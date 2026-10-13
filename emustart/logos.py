@@ -114,7 +114,7 @@ ES_THEMES = (
 )
 # ikony systemów z motywów menu RetroArcha (repozytorium libretro/retroarch-assets)
 RA_ICON = GH + "libretro/retroarch-assets/master/xmb/{theme}/png/{name}.png"
-RA_THEMES = ("systematic", "monochrome", "flatui", "retrosystem", "pixel", "dot-art")
+RA_THEMES = ("systematic", "monochrome", "flatui", "flatux", "retrosystem", "pixel", "dot-art", "daite", "automatic")
 PACK_LABELS = {"Light_Just_White": "białe", "Light_Color": "kolorowe", "Dark_Just_Black": "czarne"}
 _IMG = {".png", ".svg", ".jpg", ".jpeg", ".webp"}
 
@@ -139,25 +139,51 @@ def _clean(stem: str) -> str:
     return s.strip(" -_.,;'")
 
 
-def pack_dirs(cfg: dict) -> list:
-    """[(folder, etykieta)] paczek logo z folderu `logo_pack_dir` (panel serwera → Konfiguracja)."""
-    if not cfg.get("logo_pack_dir"):
-        return []
-    root = Path(cfg["logo_pack_dir"])
-    out = []
+PACK_STORE = "_logopack"      # paczka logo w jednym pliku: media/_logopack.media
+PACK_SEP = "~"                # nazwa w magazynie: <wariant>~<plik>, np. Light_Color~Sega Saturn-01.png
+
+
+def import_pack(folder: Path) -> int:
+    """Folder paczki logo (np. platform_logos z PyLinks: _variants/<wariant>/*.png albo same
+    obrazy) → magazyn _logopack — jeden plik zamiast tysięcy małych (kopiowanie serwera,
+    kopie zapasowe). Zastępuje poprzednią zawartość. Zwraca liczbę logo."""
+    from emustart import mediastore
+    root = Path(folder)
     if (root / "_variants").is_dir():
         root = root / "_variants"
-    if root.is_dir():
-        subs = [d for d in sorted(root.iterdir()) if d.is_dir() and not d.name.startswith("_")]
-        out += [(d, PACK_LABELS.get(d.name, d.name)) for d in subs]
-        if any(f.suffix.lower() in _IMG for f in root.iterdir() if f.is_file()):
-            out.append((root, "paczka"))
+    if not root.is_dir():
+        raise OSError(f"nie ma folderu {folder}")
+    dirs = [(d, d.name) for d in sorted(root.iterdir()) if d.is_dir() and not d.name.startswith("_")]
+    dirs.append((root, "paczka"))
+    names = set()
+
+    def items():
+        for d, variant in dirs:
+            for f in sorted(d.iterdir()):
+                if f.is_file() and f.suffix.lower() in _IMG and PACK_SEP not in f.name:
+                    names.add(f"{variant}{PACK_SEP}{f.name}")
+                    yield f"{variant}{PACK_SEP}{f.name}", f.read_bytes(), f.stat().st_mtime
+    n = mediastore.put_many(PACK_STORE, items())
+    for old in set(mediastore.files(PACK_STORE)) - names:
+        mediastore.delete(PACK_STORE, old)
+    log.info("paczka logo z %s: %d plików", folder, n)
+    return n
+
+
+def _pack_entries() -> list:
+    """[(nazwa w magazynie, etykieta wariantu, nazwa pliku)]."""
+    from emustart import mediastore
+    out = []
+    for name in mediastore.files(PACK_STORE):
+        variant, _, f = name.partition(PACK_SEP)
+        if f:
+            out.append((name, PACK_LABELS.get(variant, variant), f))
     return out
 
 
 def candidates(cfg: dict, es: str) -> list:
     """Propozycje logo: [{id, url, source, label}]. `id` przekazuje się do choose()."""
-    from emustart import art_sources, server
+    from emustart import art_sources
     info = systems.info(es)
     out = []
     b = bundled(info["plat"])
@@ -179,17 +205,14 @@ def candidates(cfg: dict, es: str) -> list:
     targets = [t for t in {info["display"], info["libretro"].replace(" - ", " "),
                            LB_NAMES.get(es, "")} if t]
     scored = []
-    for folder, label in pack_dirs(cfg):
-        for f in folder.iterdir():
-            if f.suffix.lower() not in _IMG:
-                continue
-            name = _clean(f.stem)
-            sc = max(art_sources.similarity(name, t) for t in targets)
-            if sc >= 0.72:
-                scored.append((sc, f, folder, label, name))
-    scored.sort(key=lambda x: (-x[0], x[3], x[1].name.lower()))
-    for sc, f, folder, label, name in scored[:60]:
-        out.append({"id": "file:" + str(f), "url": server.local_url(folder, f),
+    for key, label, f in _pack_entries():
+        name = _clean(Path(f).stem)
+        sc = max(art_sources.similarity(name, t) for t in targets)
+        if sc >= 0.72:
+            scored.append((sc, key, label, name))
+    scored.sort(key=lambda x: (-x[0], x[2], x[1].lower()))
+    for sc, key, label, name in scored[:60]:
+        out.append({"id": "pack:" + key, "url": f"/media/{PACK_STORE}/" + urllib.parse.quote(key),
                     "source": f"paczka ({label})", "label": name})
     return out
 
@@ -227,11 +250,13 @@ def choose(cfg: dict, es: str, cid: str) -> bool:
         if not data or (b"<svg" not in data[:3000] and not art_sources.is_image(data)):
             return False
         _store_custom(es, data, "svg" if b"<svg" in data[:3000] else "png")
-    elif cid.startswith("file:"):
-        f = Path(cid[5:])
-        if not f.is_file() or f.suffix.lower() not in _IMG:
+    elif cid.startswith("pack:"):
+        from emustart import mediastore
+        key = cid[5:]
+        got = mediastore.get(PACK_STORE, key) if Path(key).suffix.lower() in _IMG else None
+        if not got:
             return False
-        _store_custom(es, f.read_bytes(), f.suffix.lower().lstrip("."))
+        _store_custom(es, got[0], Path(key).suffix.lower().lstrip("."))
     else:
         return False
     sc["logo"] = "custom"

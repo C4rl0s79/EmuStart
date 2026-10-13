@@ -1222,8 +1222,8 @@ async function refreshState() {
       : st.server.key_rejected ? "Klucz urządzenia nieważny" : "Serwer niedostępny";
     if (st.server.key_rejected && !S.keyWarned) {
       S.keyWarned = true;
-      toast("Serwer nie przyjmuje tego urządzenia (unieważnione?) — zaloguj się ponownie: " +
-            "Ustawienia → Wyloguj z serwera → Zaloguj.", 9000);
+      toast(st.server.reason || ("Serwer nie przyjmuje tego urządzenia (unieważnione?) — zaloguj się ponownie: " +
+            "Ustawienia → Wyloguj z serwera → Zaloguj."), 9000);
     }
     net.className = "pill " + (st.server.ok || st.server.checking ? "ok" : "warn");
   } else {

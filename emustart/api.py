@@ -327,7 +327,8 @@ class Api:
             return {"ok": False, "checking": True, "name": "", "account": self._cfg.get("server_account", ""),
                     "key_rejected": False}
         return {"ok": bool(i.get("ok")), "name": i.get("name", ""), "account": self._cfg.get("server_account", ""),
-                "key_rejected": bool(i.get("key_rejected"))}
+                "key_rejected": bool(i.get("key_rejected")) or bool(netsrc.rejected()),
+                "reason": netsrc.rejected() or i.get("reason", "")}
 
     # ── stan ogólny ──
     def get_state(self) -> dict:
