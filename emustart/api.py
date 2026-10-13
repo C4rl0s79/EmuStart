@@ -832,8 +832,13 @@ class Api:
             if res and res["path"] and Path(res["path"]).is_file() and res["family"] == ad.family:
                 states.insert(0, {"path": res["path"], "name": "Quicksave EmuStart",
                                   "time": res["created"], "resume": True})
+        states = states[:30]
+        for st in states:                     # obrazek stanu (jeśli emulator go zapisał)
+            th = ingame.state_thumb(Path(st["path"]))
+            if th:
+                st["thumb"] = "/media/_stany/" + th.name
         return {"id": g["id"], "title": g["title"], "emulator": emu, "options": opts,
-                "states": states[:30]}
+                "states": states}
 
     # ── menedżer zapisów (opcje gry → Zapisy i stany) ──
     def _savemgr_ctx(self, g: dict):

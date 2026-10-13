@@ -29,13 +29,24 @@ def _digest(p) -> str:
 def pytest_sessionstart(session):
     for k, p in _REAL.items():
         _BEFORE[k] = _digest(p)
+    # poza testem (wątki w tle, które otwierają bazę już po teście) — też folder tymczasowy,
+    # nigdy prawdziwe dane programu
+    import tempfile
+    from pathlib import Path
+    base = Path(tempfile.mkdtemp(prefix="emustart-sesja-"))
+    for name, rel in {"APP": "", "DATA": "data", "MEDIA": "data/media", "DB_PATH": "data/library.sqlite",
+                      "CONFIG_PATH": "config.json", "LOGS": "logs", "DEFAULT_CACHE": "cache",
+                      "RUN_TMP": "run", "SERVER": "server"}.items():
+        setattr(paths, name, base / rel if rel else base)
 
 
 def pytest_sessionfinish(session, exitstatus):
     changed = [str(p) for k, p in _REAL.items() if _digest(p) != _BEFORE.get(k)]
     if changed:
         session.exitstatus = 1
-        print("\n\nBŁĄD: testy zmieniły prawdziwe pliki EmuStart: " + ", ".join(changed))
+        # bez polskich znaków w konsoli CI (cp1252) — inaczej sam komunikat kończył się błędem
+        msg = "\n\nBŁĄD: testy zmieniły prawdziwe pliki EmuStart: " + ", ".join(changed)
+        print(msg.encode("ascii", "backslashreplace").decode("ascii"))
 
 
 @pytest.fixture(autouse=True)

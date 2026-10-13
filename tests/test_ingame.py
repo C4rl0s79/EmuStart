@@ -166,3 +166,41 @@ def test_quicksave_failure_keeps_game_running(env):
         assert library.get_resume(S.profile_id, 1) is None
     finally:
         S.proc.kill()
+
+
+def test_state_thumbnails_from_emulators(tmp_path):
+    """Obrazek stanu przy wyborze zapisu: RetroArch (.png obok), PCSX2 (zrzut w .p2s),
+    DuckStation (RGBA w nagłówku .sav); bez obrazka — None."""
+    import io
+    import struct
+    import zipfile
+    from PIL import Image
+    from emustart import ingame
+
+    def png(color):
+        b = io.BytesIO()
+        Image.new("RGB", (4, 3), color).save(b, "PNG")
+        return b.getvalue()
+    ra = tmp_path / "Gra.state1"
+    ra.write_bytes(b"STAN")
+    (tmp_path / "Gra.state1.png").write_bytes(png("red"))
+    t = ingame.state_thumb(ra)
+    assert t and t.read_bytes() == png("red")
+    assert ingame.state_thumb(ra) == t                                  # drugi raz — z pamięci
+    p2s = tmp_path / "Gra.01.p2s"
+    with zipfile.ZipFile(p2s, "w") as z:
+        z.writestr("Screenshot.png", png("blue"))
+        z.writestr("eeMemory.bin", b"x")
+    assert ingame.state_thumb(p2s).read_bytes() == png("blue")
+    w, h = 2, 2
+    head = bytearray(200)
+    head[:4] = b"DUCS"
+    struct.pack_into("<4I", head, 184, w, h, w * h * 4, 200)
+    sav = tmp_path / "Gra_1.sav"
+    sav.write_bytes(bytes(head) + bytes([0, 255, 0, 255]) * 4 + b"DANE")
+    img = Image.open(io.BytesIO(ingame.state_thumb(sav).read_bytes()))
+    assert img.size == (2, 2) and img.getpixel((0, 0))[:3] == (0, 255, 0)
+    bad = tmp_path / "Inna_1.sav"
+    bad.write_bytes(b"DUCS" + bytes(300))                               # bez zrzutu — nic
+    assert ingame.state_thumb(bad) is None
+    assert ingame.state_thumb(tmp_path / "brak.state") is None

@@ -417,6 +417,7 @@ class RetroArch(Adapter):
             f'network_cmd_port = "{RA_PORT}"',
             'savestate_auto_save = "true"',
             f'savestate_auto_load = "{"true" if resume else "false"}"',
+            'savestate_thumbnail_enable = "true"',      # obrazek stanu (podgląd w EmuStart)
             # save'y zawsze w podpiętym folderze — także gdy retroarch.cfg każe
             # trzymać je obok gry (gra bywa w RAM-ie albo w pamięci podręcznej)
             f'savefile_directory = "{self._cfg_dir("savefile_directory", "saves")}"',
@@ -829,6 +830,76 @@ def list_states(adapter: Adapter, game: dict, meta: dict, learned: list) -> list
                 out.append({"path": str(f), "name": f.name, "time": f.stat().st_mtime})
     out.sort(key=lambda x: x["time"], reverse=True)
     return out
+
+
+def state_thumb(state: Path) -> Path | None:
+    """Obrazek stanu gry zapisany przez emulator → plik PNG w pamięci grafik (podgląd przy
+    wyborze zapisu). RetroArch: `<stan>.png` obok (savestate_thumbnail_enable); PCSX2: zrzut
+    w archiwum .p2s; DuckStation: zrzut w nagłówku .sav (nieskompresowany). None = brak."""
+    import hashlib
+    try:
+        st = state.stat()
+    except OSError:
+        return None
+    out = paths.MEDIA / "_stany" / (hashlib.sha1(f"{state}|{st.st_mtime_ns}".encode("utf-8", "replace"))
+                                     .hexdigest()[:20] + ".png")
+    if out.is_file():
+        return out
+    data = _state_png(state)
+    if not data:
+        return None
+    try:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        tmp = out.with_suffix(".tmp")
+        tmp.write_bytes(data)
+        tmp.replace(out)
+    except OSError:
+        return None
+    return out
+
+
+def _state_png(state: Path) -> bytes | None:
+    side = state.with_name(state.name + ".png")
+    if side.is_file():                                     # RetroArch
+        try:
+            return side.read_bytes()
+        except OSError:
+            return None
+    suf = state.suffix.lower()
+    if suf == ".p2s":                                      # PCSX2: archiwum z zrzutem ekranu
+        import zipfile
+        try:
+            with zipfile.ZipFile(state) as z:
+                name = next((n for n in z.namelist() if n.lower() == "screenshot.png"), None)
+                return z.read(name) if name else None
+        except (OSError, zipfile.BadZipFile, KeyError):
+            return None
+    if suf == ".sav":                                      # DuckStation: RGBA w nagłówku
+        return _duckstation_png(state)
+    return None
+
+
+def _duckstation_png(state: Path) -> bytes | None:
+    import io
+    import struct
+    try:
+        with open(state, "rb") as f:
+            head = f.read(200)
+            if len(head) < 200 or head[:4] != b"DUCS":
+                return None
+            w, h, size, off = struct.unpack_from("<4I", head, 184)
+            if not (0 < w <= 4096 and 0 < h <= 4096 and size == w * h * 4):
+                return None                                 # inny format (np. skompresowany zrzut)
+            f.seek(off)
+            raw = f.read(size)
+        if len(raw) != size:
+            return None
+        from PIL import Image
+        buf = io.BytesIO()
+        Image.frombytes("RGBA", (w, h), raw).save(buf, "PNG")
+        return buf.getvalue()
+    except Exception:
+        return None
 
 
 def glob_escape(s: str) -> str:

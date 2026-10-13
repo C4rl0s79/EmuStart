@@ -200,7 +200,7 @@ function goptItems() {
     }))];
   }
   if (GO.page === "states") return d.states.map((st) => ({
-    label: st.resume ? "★ " + st.name : st.name, value: fmtDate(st.time),
+    label: st.resume ? "★ " + st.name : st.name, value: fmtDate(st.time), thumb: st.thumb || "",
     act: () => { closeGopt(); launch(st.path); },
   }));
   if (GO.page === "saves") return saveManagerItems();
@@ -327,7 +327,9 @@ function renderGopt() {
   GO.items = goptItems();
   GO.idx = Math.min(GO.idx, GO.items.length - 1);
   $("goItems").innerHTML = GO.items.map((it, i) =>
-    `<li class="${i === GO.idx ? "sel" : ""}" data-i="${i}"><span>${esc(it.label)}</span><span class="gv">${esc(it.value || "")}</span></li>`).join("");
+    `<li class="${i === GO.idx ? "sel" : ""}${it.thumb ? " withthumb" : ""}" data-i="${i}">` +
+    (it.thumb ? `<img class="gothumb" src="${esc(it.thumb)}" alt="">` : "") +
+    `<span>${esc(it.label)}</span><span class="gv">${esc(it.value || "")}</span></li>`).join("");
   $("goItems").querySelectorAll("li").forEach((li) => li.addEventListener("click", () => { GO.idx = +li.dataset.i; goptInput("a"); }));
   $("goItems").querySelector("li.sel")?.scrollIntoView({ block: "nearest" });
   setHints([["a", "Wybierz"], ["b", GO.page === "main" ? "Zamknij" : "Wstecz"]], $("goHints"));

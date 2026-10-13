@@ -73,6 +73,9 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   logo, teraz także na telefonie): logo, poświata, nazwa. Zapis idzie na serwer (źródło prawdy),
   a pozostałe urządzenia dostają zmianę przy najbliższej synchronizacji. Zwykłe konto widzi
   opis tylko do odczytu. Serwer: `/v1/admin/…` tylko dla urządzenia administratora.
+- **Obrazek stanu gry przy wyborze zapisu** (opcje gry → Wczytaj zapis): zrzut, który
+  zapisał emulator — RetroArch (obrazek obok stanu; EmuStart włącza go przy starcie gry),
+  PCSX2 (zrzut w pliku .p2s), DuckStation (zrzut w nagłówku stanu, gdy nieskompresowany).
 - **Opisy gier szuka serwer** — gdy urządzenie ogląda grę bez opisu, serwer pobiera go w tle
   (PC wcześniej szukał sam).
 - **Android: RetroArch zamyka się po zamknięciu gry** („Quit on Close Content: CLI”) — wcześniej
