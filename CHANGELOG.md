@@ -45,6 +45,12 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   i opisów (wszystkie systemy albo jeden), z Wikipedią, zmniejszanie zapisanych grafik,
   baza LaunchBox i klucze źródeł (SteamGridDB, IGDB, TheGamesDB — zaszyfrowane na
   serwerze). Pobiera serwer; EmuStart na PC i telefony biorą grafiki i opisy od niego.
+- **Panel serwera → konta: pliki i kopie zapasowe.** „Pliki i kopie” przy koncie pokazuje,
+  co jest w profilu (zapisy, stany gry, ustawienia — liczba plików, rozmiar, ostatnia
+  zmiana, ostatnio zmienione pliki). Kopia konta to jeden ZIP (profil + wpis konta z hasłem)
+  w folderze kopii; **kopie automatyczne raz dziennie**, gdy konto się zmieniło, zostaje
+  14 najnowszych (do zmiany). **Przywrócenie** zaczyna się od kopii obecnego stanu, a pliki,
+  których w kopii nie ma, zostają.
 
 ## [0.44.7] — 2026-10-13
 

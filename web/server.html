@@ -199,6 +199,23 @@
       </form>
     </dialog>
   </section>
+  <section data-in="urz" id="acctBox" hidden>
+    <h2>Konto <span id="acctName"></span> — pliki i kopie</h2>
+    <table><thead><tr><th>Folder</th><th class="n">Pliki</th><th class="n">Rozmiar</th><th class="n">Ostatnia zmiana</th></tr></thead>
+      <tbody id="acctParts"></tbody></table>
+    <details style="margin-top:8px"><summary class="muted">Ostatnio zmienione pliki</summary>
+      <table><tbody id="acctRecent"></tbody></table></details>
+    <div class="actions" style="margin-top:10px"><button id="bAcctBackup" class="primary">Zrób kopię teraz</button>
+      <button id="bAcctClose">Zamknij</button></div>
+    <table style="margin-top:10px"><thead><tr><th>Kopia</th><th class="n">Rozmiar</th><th></th></tr></thead>
+      <tbody id="acctBackups"></tbody></table>
+    <div class="row actions" style="margin-top:10px;align-items:center">
+      <label><input type="checkbox" id="bakAuto"> kopie automatyczne (raz dziennie, gdy konto się zmieniło)</label>
+      <span class="muted">zostaw</span><input id="bakKeep" type="number" min="1" max="365" style="width:70px"><span class="muted">najnowszych</span>
+      <button id="bBakSave">Zapisz</button></div>
+    <div class="muted" style="margin-top:6px">Folder kopii: Konfiguracja → Folder kopii kont. Przywrócenie najpierw robi
+      kopię obecnego stanu; pliki, których w kopii nie ma, zostają.</div>
+  </section>
   <section data-in="stan">
     <h2>Pobierane gry</h2>
     <table><thead><tr><th>Gra</th><th>Urządzenie</th><th class="n">Wysłano</th><th class="n">Ostatnio</th></tr></thead>

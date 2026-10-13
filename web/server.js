@@ -365,9 +365,11 @@ async function refreshAccounts() {
     `<tr><td>${esc(a.name)}${a.admin ? ' <span class="muted">· administrator</span>' : ""}</td>` +
     `<td>${a.password ? `ustawione <span class="muted">${a.set ? ago(a.set) : ""}</span>` : "<b>brak</b>"}</td>` +
     `<td class="n">${a.devices}</td><td class="n"><button data-pw="${esc(a.name)}">${a.password ? "Nowe hasło" : "Ustaw hasło"}</button> ` +
-    `<button data-adm="${esc(a.name)}" data-on="${a.admin ? 1 : 0}">${a.admin ? "Odbierz admina" : "Administrator"}</button></td></tr>`).join("")
+    `<button data-adm="${esc(a.name)}" data-on="${a.admin ? 1 : 0}">${a.admin ? "Odbierz admina" : "Administrator"}</button> ` +
+    `<button data-files="${esc(a.name)}">Pliki i kopie</button></td></tr>`).join("")
     : `<tr><td colspan="4" class="muted">Brak kont.</td></tr>`;
   $("accounts").querySelectorAll("[data-pw]").forEach((b) => b.addEventListener("click", () => askAccountPassword(b.dataset.pw)));
+  $("accounts").querySelectorAll("[data-files]").forEach((b) => b.addEventListener("click", () => openAccount(b.dataset.files)));
   $("accounts").querySelectorAll("[data-adm]").forEach((b) => b.addEventListener("click", async () => {
     const make = b.dataset.on !== "1";
     if (!confirm(make ? `Konto „${b.dataset.adm}” administratorem? Wszystkie jego urządzenia zatwierdzą nowe konta i zobaczą wszystkie konta.`
@@ -394,6 +396,50 @@ function askAccountPassword(name) {
 }
 refreshAccounts();
 setInterval(refreshAccounts, 30000);
+
+/* ── konto: pliki i kopie zapasowe (emustart/acctbackup.py) ── */
+let acctOpen = "";
+const fmtTime = (t) => t ? new Date(t * 1000).toLocaleString("pl-PL", { dateStyle: "short", timeStyle: "short" }) : "—";
+async function openAccount(name) {
+  acctOpen = name;
+  $("acctBox").hidden = false;
+  $("acctName").textContent = `„${name}”`;
+  $("acctParts").innerHTML = `<tr><td colspan="4" class="muted">Wczytuję…</td></tr>`;
+  const r = await admin("account_files", { name }).catch(() => null);
+  if (!r?.ok) { $("acctParts").innerHTML = `<tr><td colspan="4" class="muted">${esc(r?.reason || "Serwer nie odpowiada.")}</td></tr>`; return; }
+  $("acctParts").innerHTML = r.parts.length ? r.parts.map((p) =>
+    `<tr><td>${esc(p.name)}</td><td class="n">${p.files}</td><td class="n">${fmtBytes(p.size)}</td><td class="n">${fmtTime(p.changed)}</td></tr>`).join("")
+    : `<tr><td colspan="4" class="muted">Profil jest pusty.</td></tr>`;
+  $("acctRecent").innerHTML = r.recent.map((f) =>
+    `<tr><td>${esc(f.path)}</td><td class="n">${fmtBytes(f.size)}</td><td class="n">${fmtTime(f.changed)}</td></tr>`).join("");
+  $("acctBackups").innerHTML = r.backups.length ? r.backups.map((b) =>
+    `<tr><td>${esc(b.file)}<div class="muted">${fmtTime(b.time)}</div></td><td class="n">${fmtBytes(b.size)}</td>` +
+    `<td class="n"><button class="danger" data-restore="${esc(b.file)}">Przywróć</button></td></tr>`).join("")
+    : `<tr><td colspan="3" class="muted">Brak kopii.</td></tr>`;
+  $("acctBackups").querySelectorAll("[data-restore]").forEach((b) => b.addEventListener("click", async () => {
+    if (!confirm(`Przywrócić konto „${name}” z kopii ${b.dataset.restore}?\n\nNajpierw powstanie kopia obecnego stanu. ` +
+                 "Urządzenia tego konta nie powinny teraz grać.")) return;
+    const res = await admin("account_restore", { name, file: b.dataset.restore }).catch(() => null);
+    msg(res?.ok ? `Przywrócono ${res.files} plików konta „${name}” (kopia sprzed: ${res.before}).` : res?.reason || "Serwer nie odpowiada.", res?.ok);
+    openAccount(name);
+  }));
+  $("bakAuto").checked = !!r.auto;
+  $("bakKeep").value = r.keep;
+  $("acctBox").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+$("bAcctBackup").addEventListener("click", async () => {
+  if (!acctOpen) return;
+  $("bAcctBackup").disabled = true;
+  const r = await admin("account_backup", { name: acctOpen }).catch(() => null);
+  $("bAcctBackup").disabled = false;
+  msg(r?.ok ? `Kopia konta „${acctOpen}”: ${r.file} (${fmtBytes(r.size)}).` : r?.reason || "Serwer nie odpowiada.", r?.ok);
+  openAccount(acctOpen);
+});
+$("bAcctClose").addEventListener("click", () => { acctOpen = ""; $("acctBox").hidden = true; });
+$("bBakSave").addEventListener("click", async () => {
+  const r = await admin("backup_settings", { auto: $("bakAuto").checked, keep: $("bakKeep").value }).catch(() => null);
+  msg(r?.ok ? "Ustawienia kopii zapisane." : r?.reason || "Serwer nie odpowiada.", r?.ok);
+});
 
 let pairTimer = null;
 $("bPair").addEventListener("click", async () => {

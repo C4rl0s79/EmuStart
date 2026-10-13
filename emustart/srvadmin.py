@@ -507,7 +507,52 @@ def art_keys_set(api, args: dict) -> dict:
     return {"ok": True, "sources": art_sources.Sources(api._cfg).enabled()}
 
 
-ACTIONS_ARGS.update({"config_set": config_set, "art_start": art_start, "art_keys_set": art_keys_set})
+# ── konta: pliki i kopie zapasowe (emustart/acctbackup.py) ──
+def _acct(fn):
+    def run(api, args: dict) -> dict:
+        try:
+            return fn(api, args)
+        except ValueError as ex:
+            return {"ok": False, "reason": str(ex)}
+    return run
+
+
+@_acct
+def account_files(api, args: dict) -> dict:
+    from emustart import acctbackup
+    name = str(args.get("name", ""))
+    return {**acctbackup.browse(name), "backups": acctbackup.backups(api._cfg, name),
+            "auto": api._cfg.get("backup_auto") is not False, "keep": int(api._cfg.get("backup_keep") or 14)}
+
+
+@_acct
+def account_backup(api, args: dict) -> dict:
+    from emustart import acctbackup
+    return acctbackup.backup(api._cfg, str(args.get("name", "")))
+
+
+@_acct
+def account_restore(api, args: dict) -> dict:
+    from emustart import acctbackup
+    return acctbackup.restore(api._cfg, str(args.get("name", "")), str(args.get("file", "")))
+
+
+def backup_settings(api, args: dict) -> dict:
+    from emustart import config
+    if "auto" in args:
+        api._cfg["backup_auto"] = bool(args["auto"])
+    if "keep" in args:
+        try:
+            api._cfg["backup_keep"] = max(1, min(365, int(args["keep"])))
+        except (TypeError, ValueError):
+            return {"ok": False, "reason": "Podaj liczbę kopii (1–365)."}
+    config.save(api._cfg)
+    return {"ok": True, "auto": api._cfg.get("backup_auto") is not False, "keep": api._cfg["backup_keep"]}
+
+
+ACTIONS_ARGS.update({"config_set": config_set, "art_start": art_start, "art_keys_set": art_keys_set,
+                     "account_files": account_files, "account_backup": account_backup,
+                     "account_restore": account_restore, "backup_settings": backup_settings})
 ACTIONS.update({"art": art_overview, "art_cancel": art_cancel, "launchbox_update": launchbox_update})
 ACTIONS.update({"config": config_get, "public_status": public_status, "devices": devices_list, "login_code": login_code, "profiles_migrate_status": profiles_migrate_status,
                 "accounts": accounts_list})

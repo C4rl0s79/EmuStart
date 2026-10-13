@@ -30,6 +30,8 @@ DEFAULTS: dict = {
     "mame_exe": "",                 # "" → wykryj w emu_root
     "bios_dir": "",                 # BIOS-y (serwer: dla urządzeń; PC: kopiowane do RetroArcha)
     "backup_dir": "",               # serwer: kopie kont ("" → <serwer>\backup)
+    "backup_auto": True,            # serwer: kopia konta raz dziennie, gdy się zmieniło
+    "backup_keep": 14,              # serwer: tyle najnowszych kopii każdego konta
     "art_keys": {},                 # sgdb_key, igdb_client_id/secret, tgdb_key (z PyLinks)
     "systems": {},                  # es_name → {enabled, exe, args, label, extract}
 }

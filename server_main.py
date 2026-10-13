@@ -96,6 +96,8 @@ def _server_mode() -> None:
         return _message(("Serwer będzie startował razem z Windows." if ok else
                          "Nie wszystko się udało — uruchom jako administrator.") + "\n\n" + "\n".join(lines))
     remote.init_nas(api._cfg)             # folder profili (zapisy klientów przez serwer)
+    from emustart import acctbackup
+    acctbackup.start_auto(lambda: api._cfg)   # kopie kont raz dziennie
     from emustart import srvadmin
     srvadmin.ENABLED = True
     # po restarcie z panelu poprzedni proces zwalnia port po chwili — czekamy na niego
