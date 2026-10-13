@@ -1120,6 +1120,34 @@ function renderSettings() {
   setHints(h);
 }
 
+async function saveSetting(key, value) {
+  S.settings[key] = value;
+  await api().save_settings({ [key]: value });
+}
+
+/** Emulator systemu na tym komputerze — strzałkami w Ustawieniach (emulatory są lokalne). */
+async function changeSystem(r, dir) {
+  const s = r.sys;
+  if (!S.emuOpts[s.es]) S.emuOpts[s.es] = await api().emulator_options(s.es);
+  const opts = S.emuOpts[s.es];
+  if (!opts.length) return toast(`Nie znaleziono emulatora dla: ${s.display}`);
+  let i = opts.findIndex((o) => o.exe === s.exe && o.args === s.args);
+  i = (i + dir + opts.length) % opts.length;
+  if (i < 0) i = 0;
+  const o = opts[i];
+  Object.assign(s, { label: o.label, exe: o.exe, args: o.args, enabled: true });
+  await api().save_settings({ systems: { [s.es]: { label: o.label, exe: o.exe, args: o.args, enabled: true } } });
+}
+
+let editing = null;
+function startEdit(i) {
+  const r = S.setRows[i];
+  const v = $("sv" + i);
+  editing = { i, r };
+  v.innerHTML = `<input value="${esc(S.settings[r.key])}">`;
+  const inp = v.querySelector("input");
+  inp.focus(); inp.select();
+}
 async function commitEdit(ok) {
   if (!editing) return;
   const { r } = editing;

@@ -157,6 +157,10 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 - Panel serwera: pusta sekcja „Konto — pliki i kopie” (i ostrzeżenie o kluczu TLS) nie
   pokazuje się już sama po przejściu na zakładkę — tylko po „Pliki i kopie”. Wygasły kod
   „Dodaj urządzenie” znika razem z pustym linkiem i przyciskiem „Kopiuj link”.
+- Ustawienia na PC: wybór folderu (np. z emulatorami), wpisanie ścieżki i zmiana emulatora
+  systemu kończyły się „Błąd interfejsu: saveSetting is not defined” — przy podziale na serwer
+  i klienta wypadły funkcje, których Ustawienia nadal używają. Test sprawdza teraz, że
+  interfejs nie woła funkcji ani metod programu, których nie ma.
 
 ## [0.44.8] — 2026-10-13
 

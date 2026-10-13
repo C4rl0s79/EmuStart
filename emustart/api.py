@@ -1518,6 +1518,10 @@ class Api:
         return netsrc.authed_post(self._cfg, "/v1/enroll/decide", {"id": req_id, "allow": bool(allow),
                                                                   "games": bool(games)})
 
+    def emulator_options(self, es: str) -> list:
+        """Emulatory systemu znalezione na tym komputerze (wybór w Ustawieniach)."""
+        return emulators.options_for(systems.info(es), self._cfg.get("emu_root", ""))
+
     def save_settings(self, data: dict) -> dict:
         cfg = self._cfg
         if "emu_root" in data:
