@@ -202,6 +202,55 @@ FOLDER_ALIASES = {
     "NEC - PC-9801": "pc98", "Nintendo - Nintendo DSi": "nds", "Nintendo - Nintendo DS": "nds",
     "Nintendo - Family Computer Disk System": "fds", "Nintendo - Nintendo 64": "n64",
 }
+# Inne nazwy systemów — ES-DE (foldery ROM-ów i motywy: „atarilynx”, „gc”, „genesis”), nazwy
+# zwyczajowe i skróty („Super Famicom”, „PS1”). Porównanie bez wielkości liter, spacji i znaków
+# (_fold), więc „Atari - Lynx”, „Atari Lynx” i „atarilynx” to ta sama nazwa. Razem z kodem ES,
+# nazwą wyświetlaną, nazwą libretro (No-Intro / Redump) i FOLDER_ALIASES — systems.names().
+OTHER_NAMES = {
+    "psx": ["ps1", "Sony PlayStation", "PlayStation 1"], "ps2": ["Sony PlayStation 2"],
+    "ps3": ["Sony PlayStation 3"], "psp": ["Sony PSP"], "psvita": ["vita", "PS Vita"],
+    "nes": ["famicom", "Nintendo Famicom"], "fds": ["famicom disk system"],
+    "snes": ["sfc", "snesna", "Super Famicom", "Super Nintendo Entertainment System"],
+    "SNESMSU1": ["snes-msu1", "snesmsu", "msu1"],
+    "satellaview": ["bs-x"], "sufami": ["sufamiturbo"],
+    "n64": ["Nintendo64"], "n64dd": ["64dd"],
+    "gb": ["gameboy"], "gbc": ["gameboy color"], "gba": ["gameboy advance"],
+    "nds": ["ds", "Nintendo DS"], "gameandwatch": ["gw", "Game and Watch", "Nintendo Game & Watch"],
+    "gamecube": ["gc", "ngc", "Nintendo GameCube"], "wii": ["Nintendo Wii"],
+    "mastersystem": ["sms", "Sega Master System", "markiii"],
+    "megadrive": ["genesis", "md", "Sega Genesis", "Sega Mega Drive"],
+    "gamegear": ["gg", "Sega Game Gear"], "sega32x": ["32x"],
+    "segacd": ["megacd", "Sega Mega-CD", "Mega CD"], "saturn": ["Sega Saturn"],
+    "dreamcast": ["dc", "Sega Dreamcast"],
+    "pcengine": ["pce", "NEC PC Engine"], "tg16": ["turbografx16", "TurboGrafx"],
+    "supergrafx": ["sgx"], "pc88": ["pc8800", "pc8801"], "pc98": ["pc9800", "pc9801"],
+    "atari2600": ["2600", "vcs", "Atari VCS"], "atari5200": ["5200"], "atari7800": ["7800"],
+    "atarijaguar": ["jaguar"], "lynx": ["atarilynx"],
+    "3do": ["3DO Interactive Multiplayer", "Panasonic 3DO"],
+    "amiga": ["Commodore Amiga"], "c64": ["Commodore 64"], "msx": ["msx1"],
+    "ngp": ["neogeopocket"], "ngpc": ["neogeopocketcolor"],
+    "wswan": ["wonderswan"], "wswanc": ["wonderswancolor"],
+    "odyssey2": ["videopac", "Magnavox Odyssey 2"], "zxspectrum": ["zx", "spectrum"],
+    "x360": ["Microsoft Xbox 360"], "atari800": ["atari8bit", "Atari XL", "Atari XE"],
+    "colecovision": ["coleco"], "intellivision": ["intv"], "virtualboy": ["vb"],
+    "pokemini": ["Pokemon Mini"], "channelf": ["Fairchild Channel F"],
+    "supervision": ["Watara Supervision"], "megaduck": ["Mega Duck"],
+    "pico": ["segapico", "Sega Pico"], "scv": ["Epoch SCV"], "gamecom": ["Tiger Game.com"],
+    "vic20": ["c20", "VIC-20"], "plus4": ["c16", "Commodore Plus 4"], "gamepock": ["Game Pocket"],
+    "fbneo": ["fba", "fbalpha", "FinalBurn Alpha"], "neogeo": ["neo geo", "neogeoaes", "aes", "mvs"],
+}
+
+
+def names(es: str) -> list:
+    """Wszystkie nazwy systemu: kod ES, wyświetlana, libretro (No-Intro / Redump), aliasy
+    folderów i OTHER_NAMES — bez dokładnych powtórzeń (motywy potrzebują pisowni „atarilynx”
+    obok „Atari Lynx”)."""
+    i = info(es)
+    cand = [es, i["display"], i["libretro"]] + [k for k, v in FOLDER_ALIASES.items() if v == es] \
+        + OTHER_NAMES.get(es, [])
+    return [n for n in dict.fromkeys(cand) if n]
+
+
 _ALIAS_NORM = {}
 
 
@@ -215,7 +264,8 @@ def _fold(name: str) -> str:
 def match_folder(name: str) -> str | None:
     """Folder kolekcji → klucz systemu (folder ES) albo None (nieznany/archiwalny).
 
-    Kolejno: nazwa ES („psx”), alias No-Intro/Redump, nazwa systemu libretro."""
+    Kolejno: kod ES („psx”), alias No-Intro/Redump, nazwa systemu libretro, nazwa wyświetlana,
+    inne nazwy (ES-DE „atarilynx”, „Super Famicom”, „PS1”…)."""
     if name in SYSTEMS:
         return name
     if name.lower() in SYSTEMS:
@@ -225,6 +275,11 @@ def match_folder(name: str) -> str | None:
             _ALIAS_NORM[_fold(k)] = v
         for es, info_ in SYSTEMS.items():
             _ALIAS_NORM.setdefault(_fold(info_["libretro"]), es)
+        for es, info_ in SYSTEMS.items():
+            _ALIAS_NORM.setdefault(_fold(info_["display"]), es)
+        for es, other in OTHER_NAMES.items():
+            for n in other:
+                _ALIAS_NORM.setdefault(_fold(n), es)
     return _ALIAS_NORM.get(_fold(name))
 
 

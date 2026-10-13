@@ -177,9 +177,10 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   uruchamianie gier tylko z serwera, kilka urządzeń z jednym serwerem — bez SMB.
 
 ### Naprawione
-- Logo systemów: motywy EmulationStation nazywają część systemów inaczej niż EmuStart (np. Lynx —
-  `atarilynx`, GameCube — `gc`, WonderSwan — `wonderswan`) — dla 28 systemów żaden motyw nie dawał
-  propozycji. Teraz próbowane są też nazwy z motywów.
+- **Systemy rozpoznawane po każdej nazwie**: kod ES, ES-DE (`atarilynx`, `gc`, `genesis`,
+  `wonderswan`), No-Intro / Redump, libretro i nazwy zwyczajowe (`Atari Lynx`, `PS1`, `Super
+  Famicom`) — jedna tabela dla folderów z grami, motywów logo i paczki logo. Wcześniej m.in. folder
+  `atarilynx` nie był rozpoznawany, a dla 28 systemów żaden motyw nie dawał logo (np. Lynx 0 → 6).
 - Panel serwera: wybór logo systemu w oknie nad listą (Esc / kliknięcie obok zamyka) zamiast na
   dole długiej listy systemów; podaje liczbę propozycji.
 - Lista gier na PC: okładka i zrzut miały stałą wysokość z edytora wyglądu, choć pod krótkim

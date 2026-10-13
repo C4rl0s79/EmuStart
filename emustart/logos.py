@@ -112,14 +112,24 @@ ES_THEMES = (
     ("Pixel", GH + "ehettervik/es-theme-pixel/master/{es}/logo.png"),
     ("SNES Mini", GH + "ruckage/es-theme-snes-mini/master/art/logos/{es}.png"),
 )
-# nazwy folderów w motywach ES / ES-DE inne niż kody EmuStart (próbowane po kolei)
-ES_NAMES = {
-    "lynx": ["atarilynx"], "gamecube": ["gc"], "wswan": ["wonderswan"], "wswanc": ["wonderswancolor"],
-    "x360": ["xbox360"], "fbneo": ["fbneo", "fba", "arcade"], "SNESMSU1": ["snes-msu1", "snes"],
-    "amigawhddemos": ["amiga"], "amigawhdgames": ["amiga"], "pico": ["segapico"], "vic20": ["c20"],
-    "psvita": ["vita"], "msx2": ["msx"], "n64dd": ["n64"], "plus4": ["c16"], "pc98": ["pc9800"],
-    "pc88": ["pc8800"],
-}
+# gdy motyw nie ma własnego logo systemu — logo systemu „rodzica” (WHDLoad → Amiga, MSU-1 → SNES)
+ES_PARENT = {"amigawhddemos": "amiga", "amigawhdgames": "amiga", "SNESMSU1": "snes", "msx2": "msx",
+             "n64dd": "n64", "fbneo": "arcade", "xbox360": "x360"}
+
+
+def theme_names(es: str) -> list:
+    """Nazwy folderów do sprawdzenia w motywach ES / ES-DE: kod ES i inne nazwy w stylu ES
+    (systems.names: „atarilynx”, „gc”, „genesis”…), potem system „rodzica"."""
+    out = []
+    for e in [es] + ([ES_PARENT[es]] if es in ES_PARENT else []):
+        names_ = systems.names(e)
+        # + nazwa wyświetlana i libretro sklejone: „Atari Lynx” → atarilynx (styl ES-DE)
+        for n in names_ + [re.sub(r"[^a-z0-9]+", "", n.lower()) for n in names_[1:3]]:
+            v = n.lower()
+            if re.fullmatch(r"[a-z0-9-]+", v) and v not in out:
+                out.append(v)
+    return out
+
 
 # ikony systemów z motywów menu RetroArcha (repozytorium libretro/retroarch-assets)
 RA_ICON = GH + "libretro/retroarch-assets/master/xmb/{theme}/png/{name}.png"
@@ -203,7 +213,7 @@ def candidates(cfg: dict, es: str) -> list:
         out.append({"id": "downloaded", "url": d, "source": "pobrane wcześniej", "label": es})
     import urllib.parse
     from concurrent.futures import ThreadPoolExecutor
-    names = list(dict.fromkeys([es] + ES_NAMES.get(es, [])))
+    names = theme_names(es)
     web = [(src, tpl.format(es=n), n) for src, tpl in ES_THEMES for n in names]
     web += [(f"RetroArch ({t})", RA_ICON.format(theme=t, name=urllib.parse.quote(info["libretro"])),
              info["libretro"]) for t in RA_THEMES if info["libretro"]]
@@ -214,8 +224,9 @@ def candidates(cfg: dict, es: str) -> list:
         if ok and src not in seen:                    # z motywu pierwsza istniejąca nazwa
             seen.add(src)
             out.append({"id": "url:" + u, "url": u, "source": src, "label": label})
-    targets = [t for t in {info["display"], info["libretro"].replace(" - ", " "),
-                           LB_NAMES.get(es, "")} if t]
+    # paczka (nazwy jak LaunchBox: „Atari Lynx”, „Sony Playstation”) — po wszystkich pełnych nazwach
+    targets = [t for t in dict.fromkeys([n.replace(" - ", " ") for n in systems.names(es) if " " in n]
+                                        + [info["display"], LB_NAMES.get(es, "")]) if t]
     scored = []
     for key, label, f in _pack_entries():
         name = _clean(Path(f).stem)

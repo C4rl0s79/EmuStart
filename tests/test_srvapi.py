@@ -286,7 +286,7 @@ def test_logo_candidates_from_web_themes_without_local_files(monkeypatch):
     c = logos.candidates({}, "psx")
     assert [x["source"] for x in c if x["id"].startswith("url:")] == ["Carbon", "RetroArch (systematic)"]
     assert any("Sony%20-%20PlayStation.png" in u for u in asked)
-    assert len(asked) == len(logos.ES_THEMES) + len(logos.RA_THEMES)
+    assert len(asked) == len(logos.ES_THEMES) * len(logos.theme_names("psx")) + len(logos.RA_THEMES)
     assert not logos.choose({}, "psx", "url:http://10.0.0.1/admin")              # dowolny adres — nie
 
 
@@ -315,13 +315,13 @@ def test_server_imports_art_keys_file_and_deletes_it(monkeypatch):
     monkeypatch.setattr("emustart.config.save", lambda c: None)
     paths.SERVER.mkdir(parents=True, exist_ok=True)
     f = paths.SERVER / "art_keys.json"
-    f.write_text(json.dumps({"sgdb_key": "SG", "tgdb_key": "TG", "inne": "x"}), encoding="utf-8")
+    f.write_text(json.dumps({"sgdb_key": "jawny-klucz-sgdb-123", "tgdb_key": "TG", "inne": "x"}), encoding="utf-8")
 
     class A:
         _cfg = {}
     a = A()
     assert srvadmin.import_keys_file(a) == 2
     assert not f.exists()
-    assert "SG" not in json.dumps(a._cfg)                                      # zaszyfrowane
-    assert art_sources.keys(a._cfg)["sgdb_key"] == "SG"
+    assert "jawny-klucz-sgdb-123" not in json.dumps(a._cfg)                    # zaszyfrowane
+    assert art_sources.keys(a._cfg)["sgdb_key"] == "jawny-klucz-sgdb-123"
     assert srvadmin.import_keys_file(a) == 0

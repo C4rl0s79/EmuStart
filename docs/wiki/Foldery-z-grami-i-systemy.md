@@ -23,9 +23,14 @@ sieciowych podłączonych literą — folder wybrany w panelu na takim dysku zam
 
 Podfoldery rozpoznawane są po nazwach:
 
-- **EmulationStation**: `psx`, `snes`, `megadrive`, `ps2`…
+- **EmulationStation / ES-DE**: `psx`, `snes`, `megadrive`, `atarilynx`, `gc`, `genesis`, `wonderswan`…
 - **No-Intro / Redump**: `Sony - PlayStation`, `Nintendo - Super Nintendo Entertainment System`…
-- **libretro**: nazwy z bazy RetroArcha.
+- **libretro**: nazwy z bazy RetroArcha (`Atari - Lynx`),
+- **zwyczajowe**: `Atari Lynx`, `PlayStation`, `PS1`, `Super Famicom`, `Sega Genesis`, `Commodore 64`…
+
+Wielkość liter, spacje, myślniki i dopiski w nawiasach kwadratowych (`[zstd-19-128k]`) nie mają
+znaczenia: `Atari - Lynx`, `Atari Lynx` i `atarilynx` to ten sam system. Tych samych nazw
+używają propozycje logo systemów (motywy ES-DE, paczka logo).
 
 Panel pokazuje przy każdym folderze, ile systemów rozpoznał.
 
