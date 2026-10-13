@@ -17,6 +17,16 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   RetroArchu na Androidzie; ocena „wyświetlania nad innymi aplikacjami” i usługi ułatwień
   dostępu dla pozostałych emulatorów na Androidzie.
 
+## [0.44.8] — 2026-10-13
+
+### Zmienione
+- **Przygotowanie do rozdziału na EmuStart i EmuStart Server (0.45).** Aktualizacja serwera
+  pobiera plik serwera (`EmuStart-Server-…-win64.zip`), gdy wydanie go ma, i sama przechodzi
+  na nowy program: `EmuStartServer.exe` w folderze serwera, zadanie Harmonogramu
+  „EmuStart Server” i skrót w menu Start przestawione na niego, dawny `EmuStart.exe`
+  z folderu serwera usunięty; dane serwera (folder `server`) zostają. Wydania bez pliku
+  serwera — jak dotąd. EmuStart na PC aktualizuje się jak dotąd.
+
 ## [0.44.7] — 2026-10-13
 
 ### Poprawione

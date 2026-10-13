@@ -59,7 +59,8 @@ def test_extract_checks_archive(tmp_path):
 def test_script(tmp_path):
     s = updater.write_script(tmp_path, tmp_path / "app", 1234, ["--server", "--restarted"]).read_text("utf-8-sig")
     assert "Wait-Process -Id 1234" in s and "EmuStart Server" in s
-    assert "'--server --restarted'" in s                     # parametry serwera, bez dublowania
+    assert "'--service --restarted'" in s                    # dawne --server → --service, bez dublowania
+    assert "EmuStartServer.exe" in s and "/Change /TN 'EmuStart Server'" in s   # zadanie → nowy program
     assert "_internal" in s and "przywracam" in s            # kopia i przywrócenie przy błędzie
 
 
@@ -182,6 +183,43 @@ def test_release_must_be_signed_with_our_key(tmp_path, monkeypatch):
     import base64
     monkeypatch.undo()
     assert len(base64.b64decode(signing.RELEASE_PUBKEY)) == 32
+
+
+def test_two_programs_pick_own_release_files(monkeypatch, tmp_path):
+    """EmuStart i EmuStart Server — osobne pliki wydania; serwer nie pobierze EmuStart na PC."""
+    import io
+    import json
+    import zipfile
+    rel = {"tag_name": "v9.0.0", "assets": [
+        {"name": "EmuStart-9.0.0-win64.zip", "browser_download_url": "u/c", "size": 1},
+        {"name": "EmuStart-Server-9.0.0-win64.zip", "browser_download_url": "u/s", "size": 2}]}
+
+    class R(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+    monkeypatch.setattr(updater.urllib.request, "urlopen", lambda *a, **k: R(json.dumps(rel).encode()))
+    assert updater.latest(app="client")["url"] == "u/c"
+    assert updater.latest(app="server")["url"] == "u/s" and updater.latest(app="server")["root"] == "EmuStartServer"
+    # wydanie sprzed rozdziału (jeden program): serwer bierze dotychczasowy plik i zostaje EmuStart.exe --server
+    rel["assets"] = rel["assets"][:1]
+    old = updater.latest(app="server")
+    assert old["url"] == "u/c" and old["root"] == "EmuStart"
+    s = updater.write_script(tmp_path, tmp_path / "app", 1, ["--server"], exe_name=old["root"]).read_text("utf-8-sig")
+    assert "'--server --restarted'" in s and str(tmp_path / "app" / "EmuStart.exe") in s
+    assert str(tmp_path / "app" / "EmuStartServer.exe") not in s
+    monkeypatch.setattr(updater.sys, "argv", ["x", "--service"])
+    assert updater.kind() == "server"
+    z = tmp_path / "s.zip"
+    with zipfile.ZipFile(z, "w") as w:
+        w.writestr("EmuStartServer/EmuStartServer.exe", b"x")
+        w.writestr("EmuStartServer/_internal/a", b"x")
+    updater._extract(z, tmp_path / "n", "EmuStartServer")
+    assert (tmp_path / "n" / "EmuStartServer.exe").is_file()
+    with pytest.raises(RuntimeError):
+        updater._extract(z, tmp_path / "n2", "EmuStart")              # EmuStart na PC z pliku serwera — nie
 
 
 def test_script_runs_as_own_task_and_confirms_start(tmp_path):
