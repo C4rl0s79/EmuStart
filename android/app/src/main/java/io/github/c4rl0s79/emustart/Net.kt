@@ -18,6 +18,12 @@ import javax.net.ssl.X509TrustManager
 object Net {
     private val factories = HashMap<String, SSLSocketFactory>()
 
+    /** Jeden obiekt na cały program: pula połączeń Androida (OkHttp) używa połączenia ponownie
+     *  tylko przy tym samym SSLSocketFactory i HostnameVerifier. Nowa lambda przy każdym
+     *  otwarciu = nowe TCP + TLS + wolny start na każdy 4-MB blok gry (0.43–0.44: wolne
+     *  pobieranie). O zaufaniu decyduje odcisk certyfikatu (Pin). */
+    private val pinnedHosts = javax.net.ssl.HostnameVerifier { _, _ -> true }
+
     /** Połączenie z adresem serwera; `fp` — odcisk certyfikatu (wymagany dla https z własnym
      *  certyfikatem serwera); `ca` — zwykłe sprawdzanie certyfikatu (tunel Cloudflare). */
     fun open(url: String, fp: String, ca: Boolean = false): HttpURLConnection {
@@ -25,7 +31,7 @@ object Net {
         if (c is HttpsURLConnection && !ca) {
             if (fp.isEmpty()) throw javax.net.ssl.SSLException("brak zapamiętanego certyfikatu serwera — połącz telefon z serwerem ponownie")
             c.sslSocketFactory = factory(fp)
-            c.hostnameVerifier = javax.net.ssl.HostnameVerifier { _, _ -> true }   // o zaufaniu decyduje odcisk
+            c.hostnameVerifier = pinnedHosts      // o zaufaniu decyduje odcisk; ten sam obiekt — pula działa
         }
         return c
     }
