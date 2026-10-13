@@ -844,8 +844,8 @@ function logoutAsk() {
 /** Wiersze „Serwer EmuStart” — te same na komputerze i telefonie. */
 function serverRows(rows, c) {
   if (c.server_key) {
-    rows.push({ k: "Serwer", type: "info", fmt: () => `${c.server_url.replace(/^https:\/\//, "")} · konto ${c.server_account || "—"}` +
-                (S.state?.server?.ok === false ? " · nie odpowiada" : "") });
+    rows.push({ k: "Serwer", type: "info", fmt: () => `konto ${c.server_account || "—"}` +
+                (c.server_via ? ` · przez: ${c.server_via}` : "") + (S.state?.server?.ok === false ? " · nie odpowiada" : "") });
     rows.push({ k: "Wyloguj z serwera", type: "action", fmt: () => "to urządzenie straci dostęp — zalogujesz się ponownie kontem", run: () => logoutAsk() });
     return;
   }

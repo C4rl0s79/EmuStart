@@ -17,6 +17,22 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   RetroArchu na Androidzie; ocena „wyświetlania nad innymi aplikacjami” i usługi ułatwień
   dostępu dla pozostałych emulatorów na Androidzie.
 
+## [0.44.1] — 2026-10-13
+
+### Poprawione
+- **Wolne pobieranie gier na telefonie** (od 0.43): każdy 4-MB blok gry szedł nowym
+  połączeniem (TCP + TLS + wolny start), bo przy każdym otwarciu połączenia szyfrowanego
+  powstawał nowy obiekt sprawdzania nazwy hosta, a pula połączeń Androida używa połączenia
+  ponownie tylko przy tym samym. Teraz jeden obiekt — 8 strumieni na stałych połączeniach.
+- **„Serwer niedostępny” po wyłączeniu Tailscale** (telefon i komputer): test adresów
+  serwera logował się przez każdy badany adres pod wspólną blokadą logowania — martwy adres
+  trzymał ją do końca czasu połączenia, testy nie mieściły się w czasie i wybierany był
+  martwy adres na 5 minut. Teraz test bez logowania (szybki, niczego nie liczy); gdy żaden
+  adres nie odpowiada — ponowienie za 15 s; status serwera na telefonie wraca sam (lista
+  systemów z pamięci po błędzie — ponowna próba co 30 s).
+- Ustawienia → **Serwer**: którędy idzie połączenie (sieć lokalna / Tailscale / port
+  publiczny / tunel).
+
 ## [0.44.0] — 2026-10-13
 
 ### Dodane

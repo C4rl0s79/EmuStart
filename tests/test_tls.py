@@ -119,3 +119,21 @@ def test_typed_address_domain_means_https():
     assert netsrc._split("100.85.254.31") == ("http", "100.85.254.31", 8740)
     assert netsrc._split("EMUSTATION") == ("http", "emustation", 8740)
     assert netsrc._split("https://emustart.emucloud.org/") == ("https", "emustart.emucloud.org", 443)
+
+
+def test_dead_address_does_not_block_choosing_a_working_one(srv, monkeypatch):
+    """Tailscale wyłączony: adres, który przyjmuje połączenie i milczy, nie może zablokować
+    wyboru działającego (test adresów bez logowania — wcześniej logowanie pod wspólną blokadą)."""
+    _port, tport, fp = srv
+    hang = socket.socket()
+    hang.bind(("127.0.0.2", 0))
+    hang.listen(8)                                   # przyjmuje połączenia, nic nie odpowiada
+    hport = hang.getsockname()[1]
+    monkeypatch.setitem(netsrc._learned, "store", {"fp": fp, "endpoints": [
+        {"url": f"https://127.0.0.2:{hport}", "kind": "lan"}, {"url": f"https://127.0.0.1:{tport}", "kind": "tailscale"}]})
+    cfg = {"server_url": f"https://127.0.0.2:{hport}", "server_fp": fp, "server_key": netsrc.DEV + "abc",
+           "server_keyname": "x", "server_keykind": "dpapi"}
+    t = time.monotonic()
+    assert netsrc.best(cfg, fresh=True) == ("https", "127.0.0.1", tport)
+    assert time.monotonic() - t < netsrc.PROBE_TIMEOUT + 1.5
+    hang.close()

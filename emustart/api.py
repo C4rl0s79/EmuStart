@@ -1447,6 +1447,7 @@ class Api:
                 "server_key": cfg.get("server_key", ""),
                 "server_keykind": {"tpm": "TPM", "dpapi": "DPAPI", "plik": "plik"}.get(cfg.get("server_keykind", ""), ""),
                 "server_account": cfg.get("server_account", ""),
+                "server_via": netsrc.current_kind(cfg),
                 "enroll": ({k: cfg["enroll_pending"].get(k) for k in ("url", "code", "account", "mode")}
                            if cfg.get("enroll_pending") else None),
                 "server_games": cfg.get("server_games", True),

@@ -240,6 +240,7 @@ def _mode(sp) -> str:
 
 
 def _probe(sp, key: str, fp: str) -> float | None:
+    """Czy pod adresem odpowiada serwer EmuStart — czas albo None (`key` — dla zgodności wywołań)."""
     scheme, host, port = sp
     t = time.monotonic()
     mode = _mode(sp)
@@ -250,15 +251,13 @@ def _probe(sp, key: str, fp: str) -> float | None:
     else:
         c = http.client.HTTPConnection(host, port, timeout=PROBE_TIMEOUT)
     try:
-        if key.startswith(DEV):
-            tok = session_token(key[len(DEV):], sp)
-            hdr = {**auth_headers(""), "Authorization": f"Bearer {tok}"}
-        else:
-            hdr = auth_headers(key)
-        c.request("GET", "/v1/info", headers=hdr)
+        # bez logowania (wyzwanie dla pustego id): logowanie przez badany adres szło pod wspólną
+        # blokadą — martwy adres trzymał ją do końca czasu połączenia i testy innych adresów
+        # nie mieściły się w czasie (wybierany był martwy adres)
+        from emustart import public
+        c.request("POST", public.PROBE_PATH, body=public.PROBE_BODY, headers={"Content-Type": "application/json"})
         r = c.getresponse()
-        r.read()
-        return time.monotonic() - t if r.status == 200 else None
+        return time.monotonic() - t if public.ours(r.status, r.read()) else None
     except (OSError, http.client.HTTPException):
         return None
     finally:
@@ -312,6 +311,16 @@ def best(cfg: dict, fresh: bool = False):
             log.info("serwer: wybrany adres %s://%s:%d (%s)", pick[0], pick[1], pick[2], seen)
         _best.update(sig=sig, t=time.monotonic(), sp=pick)
     return pick
+
+
+def current_kind(cfg: dict) -> str:
+    """Którędy idzie połączenie z serwerem (do ustawień): sieć lokalna / Tailscale / … ."""
+    with _best_lock:
+        sp = _best.get("sp")
+    if not sp:
+        return ""
+    k = (_EPINFO.get(sp) or {}).get("kind") or ""
+    return {"lan": "sieć lokalna", "tailscale": "Tailscale", "public": "port publiczny", "tunnel": "tunel"}.get(k, "")
 
 
 def forget_best() -> None:

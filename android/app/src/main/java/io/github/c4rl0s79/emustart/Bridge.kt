@@ -364,13 +364,18 @@ class Bridge(private val act: MainActivity) {
         }
     }
 
+    @Volatile private var systemsFailAt = 0L
+
     private fun systems(): JSONArray {
+        // po błędzie połączenia lista z pamięci — ale nie na zawsze: ponowna próba co 30 s
+        if (!online && systemsCache != null && System.currentTimeMillis() - systemsFailAt > 30_000) systemsCache = null
         systemsCache?.let { return it }
         if (!prefs.configured) return JSONArray()
         val arr = try {
             server.systems().also { online = true; keyRejected = false; cacheFile("systemy").writeText(it.toString()); learnAddresses() }
         } catch (e: Exception) {
             online = false
+            systemsFailAt = System.currentTimeMillis()
             keyRejected = e is Server.HttpError && e.code == 401      // klucz unieważniony / nieznany
             Log.w(tag, "serwer: $e")
             val f = cacheFile("systemy")
@@ -597,7 +602,7 @@ class Bridge(private val act: MainActivity) {
         return JSONObject()
             .put("server_url", prefs.serverUrl).put("server_key", if (prefs.configured) "dev:" + prefs.deviceId else "")
             .put("server_keykind", if (prefs.deviceId.isNotEmpty()) "Android Keystore" else "")
-            .put("server_account", prefs.serverAccount)
+            .put("server_account", prefs.serverAccount).put("server_via", server.lastKind)
             .put("enroll", prefs.enrollPending.takeIf { it.isNotEmpty() }?.let { val o = JSONObject(it)
                 JSONObject().put("url", o.optString("url")).put("code", o.optString("code")).put("account", o.optString("account"))
                     .put("mode", o.optString("mode")) } ?: JSONObject.NULL)

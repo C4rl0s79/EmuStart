@@ -81,16 +81,21 @@ class Server(private val prefs: Prefs) {
         return list
     }
 
-    /** Czy adres odpowiada (GET /v1/info z kluczem) — czas w ms albo null. */
+    /** Czy pod adresem odpowiada serwer EmuStart — czas w ms albo null. Bez logowania: wyzwanie
+     *  logowania dla pustego id (odpowiedź „nieznane urządzenie”). Wcześniej test logował się
+     *  przez badany adres pod wspólną blokadą logowania — martwy adres (np. Tailscale wyłączony)
+     *  trzymał ją 8 s, testy nie mieściły się w czasie i wybierany był martwy adres. */
     private fun probe(url: String): Long? = try {
         val t = System.nanoTime()
-        val c = Net.open("$url/v1/info", prefs.serverFp, url in caUrls)
+        val c = Net.open("$url/v1/auth/challenge", prefs.serverFp, url in caUrls)
         c.connectTimeout = 2500; c.readTimeout = 2500
-        c.setRequestProperty("Authorization", "Bearer " + bearer(url))
-        val ok = c.responseCode == 200
-        try { c.inputStream.close() } catch (e: Exception) { }
-        c.disconnect()
-        if (ok) (System.nanoTime() - t) / 1_000_000 else null
+        c.requestMethod = "POST"; c.doOutput = true
+        c.setRequestProperty("Content-Type", "application/json")
+        c.outputStream.use { it.write("""{"device": ""}""".toByteArray()) }
+        val code = c.responseCode
+        val body = (if (code in 200..299) c.inputStream else c.errorStream)?.bufferedReader()?.readText() ?: ""
+        val ours = code in setOf(200, 403) && try { JSONObject(body).has("reason") } catch (e: Exception) { false }
+        if (ours) (System.nanoTime() - t) / 1_000_000 else null
     } catch (e: Exception) { null }
 
     /** Adres serwera do zapytań; sprawdzanie co 5 minut albo po błędzie połączenia. */
@@ -121,9 +126,20 @@ class Server(private val prefs: Prefs) {
         }
         val ok = cands.filter { res.containsKey(it.url) }
         val pick = ok.minWithOrNull(compareBy<Ep>({ it.rank }, { res[it.url] ?: 0L }))?.url ?: cands.first().url
-        if (pick != base) android.util.Log.i("EmuStart", "serwer: adres $pick")
-        base = pick; baseAt = System.currentTimeMillis(); baseSig = sig
+        if (pick != base) android.util.Log.i("EmuStart", "serwer: adres $pick" +
+            cands.joinToString(prefix = " (", postfix = ")") { e -> "${e.url} " + (res[e.url]?.let { "$it ms" } ?: "brak") })
+        base = pick; baseSig = sig
+        // żaden adres nie odpowiedział — nie trzymamy pierwszego z listy przez 5 minut: ponownie za 15 s
+        baseAt = if (ok.isEmpty()) System.currentTimeMillis() - 285_000 else System.currentTimeMillis()
+        lastKind = cands.firstOrNull { it.url == pick }?.let { kindName(it) } ?: ""
         return pick
+    }
+
+    /** Rodzaj wybranego adresu (sieć lokalna, Tailscale, port publiczny, tunel) — do ustawień. */
+    @Volatile var lastKind = ""
+
+    private fun kindName(e: Ep): String = when (e.rank / 2) {
+        0 -> "sieć lokalna"; 1 -> "Tailscale"; 2 -> "port publiczny"; else -> "tunel"
     }
 
     /** Adres przestał odpowiadać — następne zapytanie sprawdzi wszystkie od nowa. */
