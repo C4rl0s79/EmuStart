@@ -34,6 +34,36 @@ def media_path(es: str, name: str, kind: str) -> Path:
     return paths.MEDIA / es / f"{systems.thumb_name(name)}.{kind}.png"
 
 
+def rename(es: str, old: str, new: str) -> int:
+    """Grafiki gry, której zmieniła się nazwa (np. arcade: nazwa setu „10yard” → pełna nazwa
+    z indeksu MAME / DAT FinalBurn Neo), pod nową nazwę. Grafiki są zapisane pod nazwą gry —
+    bez tego lista pokazywała grafiki, których nie ma (0.44.4, FBA). Liczba przeniesionych."""
+    if not old or not new or systems.thumb_name(old) == systems.thumb_name(new):
+        return 0
+    n = 0
+    for kind in ("box", "snap", "logo"):
+        src, dst = media_path(es, old, kind), media_path(es, new, kind)
+        try:
+            if src.is_file() and not dst.exists():
+                os.replace(src, dst)
+                n += 1
+        except OSError as ex:
+            log.warning("grafika %s → %s: %s", src.name, dst.name, ex)
+    return n
+
+
+def adopt_set_names(es: str) -> int:
+    """Arcade: grafiki zapisane pod nazwą setu (z czasów bez indeksu nazw) pod pełną nazwę
+    gry — naprawa po zmianie nazw bez przeniesienia grafik (0.44.4)."""
+    from pathlib import PurePath
+    n = 0
+    for r in library.db().execute("SELECT rel, name FROM games WHERE es=?", (es,)).fetchall():
+        stem = PurePath(r["rel"].replace("\\", "/")).stem
+        if stem != r["name"]:
+            n += rename(es, stem, r["name"])
+    return n
+
+
 def media_url(es: str, name: str, kind: str) -> str:
     """Adres grafiki z wersją (czas modyfikacji pliku): po ręcznej zmianie okładki
     adres jest nowy, więc przeglądarka nie pokaże starej z pamięci podręcznej."""

@@ -17,6 +17,15 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   RetroArchu na Androidzie; ocena „wyświetlania nad innymi aplikacjami” i usługi ułatwień
   dostępu dla pozostałych emulatorów na Androidzie.
 
+## [0.44.6] — 2026-10-13
+
+### Poprawione
+- **FBA bez grafik po 0.44.4**: gry dostały pełne nazwy z pliku DAT FinalBurn Neo
+  („10yard” → „10-Yard Fight (World, set 1)”), a grafiki zostały zapisane pod starymi
+  nazwami setów — lista wskazywała pliki, których nie ma. Teraz zmiana nazwy gry przy
+  skanowaniu przenosi jej grafiki (okładka, zrzut, logo), a serwer przy starcie sam
+  przenosi grafiki zapisane pod nazwą setu (na serwerze: ok. 6300 gier FBA).
+
 ## [0.44.5] — 2026-10-13
 
 ### Poprawione
