@@ -40,7 +40,70 @@ function showTab(t) {
   document.querySelectorAll("main > section").forEach((s) => { s.hidden = s.dataset.in !== t; });
   try { localStorage.setItem("tab", t); } catch (e) { /* bez pamięci zakładki */ }
   if (t === "konfig") refreshConfig();
+  clearInterval(artTimer);
+  if (t === "art") { refreshArt(); artTimer = setInterval(refreshArt, 1500); }
 }
+
+/* ── grafiki i opisy (emustart/art.py — pobiera serwer) ── */
+let artTimer = null;
+const SRC = { libretro: "libretro (bez klucza)", sgdb: "SteamGridDB", igdb: "IGDB", tgdb: "TheGamesDB" };
+function artMsg(text, ok) {
+  $("artMsg").textContent = text || "";
+  $("artMsg").style.color = ok ? "var(--ok)" : "var(--warn)";
+}
+async function refreshArt() {
+  const d = await admin("art").catch(() => null);
+  if (!d?.ok) return;
+  const job = d.job, run = !!job?.running, up = d.lb_update;
+  document.querySelectorAll("[data-art]").forEach((b) => { b.disabled = run; });
+  $("bArtStop").hidden = !run;
+  $("artJob").hidden = !job && !(up && (up.running || up.error));
+  if (up && (up.running || up.error)) {
+    $("artLine").textContent = up.error ? "Baza LaunchBox: " + up.error : up.text;
+    $("artBar").style.width = up.total ? (100 * up.done / up.total).toFixed(0) + "%" : "5%";
+    $("artCur").textContent = "";
+  } else if (job) {
+    const m = job.mode || {};
+    $("artBar").style.width = job.total ? (100 * job.done / job.total).toFixed(1) + "%" : "100%";
+    $("artLine").textContent = job.error ? job.error : m.shrink
+      ? `${job.done} / ${job.total} plików · zmniejszono ${job.found.box} · odzyskano ${fmtBytes(job.saved)}`
+      : `${job.done} / ${job.total} gier` +
+        (m.art ? ` · nowe okładki ${job.found.box} · zrzuty ${job.found.snap}` + (job.found.logo ? ` · logo ${job.found.logo}` : "") : "") +
+        (m.meta ? ` · opisy ${(job.meta || {}).description || 0}` : "") +
+        (run ? (job.eta ? ` · zostało ${fmtDur(job.eta)}` : "") : job.cancelled ? " · zatrzymano" : " · gotowe");
+    $("artCur").textContent = run ? job.current || "" : "";
+  }
+  $("artSystems").innerHTML = d.systems.map((s) =>
+    `<tr><td>${esc(s.display)}</td><td class="n">${s.games}</td><td class="n">${s.box}</td><td class="n">${s.snap}</td>` +
+    `<td class="n">${s.desc}</td><td class="n"><button data-sys="${esc(s.es)}" ${run ? "disabled" : ""}>Pobierz</button></td></tr>`).join("");
+  $("artSystems").querySelectorAll("[data-sys]").forEach((b) => b.addEventListener("click", () => artStart("all", b.dataset.sys)));
+  $("artSources").innerHTML = Object.entries(SRC).map(([k, l]) =>
+    `${esc(l)}: <span class="${d.sources[k] ? "on" : "off"}">${d.sources[k] ? "aktywne" : "brak klucza"}</span>`).join(" · ");
+  const lb = d.launchbox || {};
+  $("lbInfo").textContent = lb.ready ? `Baza LaunchBox (opisy, logo, metadane offline): ${lb.games.toLocaleString("pl-PL")} gier, z ${lb.updated}.`
+                                     : "Baza LaunchBox (opisy, logo, metadane offline): nie pobrana (108 MB).";
+  $("bLb").textContent = lb.ready ? "Aktualizuj bazę LaunchBox" : "Pobierz bazę LaunchBox";
+  $("bLb").disabled = !!(up && up.running) || run;
+}
+async function artStart(mode, es) {
+  const r = await admin("art_start", { mode, es: es || "" }).catch(() => null);
+  artMsg(r?.ok ? "Pobieranie rozpoczęte." : r?.reason || "Serwer nie odpowiada.", !!r?.ok);
+  refreshArt();
+}
+document.querySelectorAll("[data-art]").forEach((b) => b.addEventListener("click", () => artStart(b.dataset.art)));
+$("bArtStop").addEventListener("click", async () => { await admin("art_cancel").catch(() => null); refreshArt(); });
+$("bLb").addEventListener("click", async () => {
+  const r = await admin("launchbox_update").catch(() => null);
+  artMsg(r?.ok ? "Pobieram bazę LaunchBox…" : r?.reason || "Serwer nie odpowiada.", !!r?.ok);
+  refreshArt();
+});
+$("bKeys").addEventListener("click", async () => {
+  const r = await admin("art_keys_set", { sgdb_key: $("kSgdb").value, igdb_client_id: $("kIgdbId").value,
+                                          igdb_client_secret: $("kIgdbSecret").value, tgdb_key: $("kTgdb").value }).catch(() => null);
+  artMsg(r?.ok ? "Klucze zapisane (zaszyfrowane na serwerze)." : r?.reason || "Serwer nie odpowiada.", !!r?.ok);
+  ["kSgdb", "kIgdbId", "kIgdbSecret", "kTgdb"].forEach((id) => { $(id).value = ""; });
+  refreshArt();
+});
 document.querySelectorAll("#tabs button").forEach((b) => b.addEventListener("click", () => showTab(b.dataset.tab)));
 
 /* ── konfiguracja: foldery (emustart/srvconfig.py) ── */

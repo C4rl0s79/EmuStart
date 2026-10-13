@@ -41,6 +41,10 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   (liczba systemów, plików BIOS-ów, czy jest RetroArch). Dysk sieciowy wybrany literą
   (np. `Z:`) zamieniany jest na ścieżkę sieciową, której serwer używa. Nowe foldery z grami
   — lista gier przeładowuje się sama.
+- **Panel serwera → Grafiki i opisy**: pobieranie brakujących okładek, zrzutów, logo
+  i opisów (wszystkie systemy albo jeden), z Wikipedią, zmniejszanie zapisanych grafik,
+  baza LaunchBox i klucze źródeł (SteamGridDB, IGDB, TheGamesDB — zaszyfrowane na
+  serwerze). Pobiera serwer; EmuStart na PC i telefony biorą grafiki i opisy od niego.
 
 ## [0.44.7] — 2026-10-13
 

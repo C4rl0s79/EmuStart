@@ -61,6 +61,7 @@
 <nav id="tabs">
   <button data-tab="stan" class="on">Stan</button>
   <button data-tab="konfig">Konfiguracja</button>
+  <button data-tab="art">Grafiki i opisy</button>
   <button data-tab="urz">Urządzenia i konta</button>
   <button data-tab="akt">Aktualizacja</button>
 </nav>
@@ -72,6 +73,40 @@
       dysków sieciowych nie zna.</div>
     <div id="cfgFields"></div>
     <div id="cfgMsg" style="min-height:1.4em"></div>
+  </section>
+  <section data-in="art">
+    <h2>Pobieranie</h2>
+    <div class="muted">Serwer pobiera okładki, zrzuty, logo i opisy gier — EmuStart na PC i telefonach
+      bierze je od niego.</div>
+    <div class="actions" style="margin-top:8px">
+      <button class="primary" data-art="all">Brakujące grafiki i opisy</button>
+      <button data-art="art">Tylko grafiki</button>
+      <button data-art="meta">Tylko opisy</button>
+      <button data-art="meta_wiki">Opisy + Wikipedia (wolniej)</button>
+      <button data-art="shrink">Zmniejsz zapisane grafiki</button>
+      <button id="bArtStop" class="danger" hidden>Zatrzymaj</button>
+    </div>
+    <div id="artJob" hidden>
+      <div id="artLine" class="muted" style="margin-top:8px"></div>
+      <div class="bar"><div id="artBar"></div></div>
+      <div id="artCur" class="muted" style="margin-top:4px;font-size:12px"></div>
+    </div>
+    <div id="artMsg" style="min-height:1.4em"></div>
+  </section>
+  <section data-in="art">
+    <h2>Systemy</h2>
+    <table><thead><tr><th>System</th><th class="n">Gry</th><th class="n">Okładki</th><th class="n">Zrzuty</th><th class="n">Opisy</th><th></th></tr></thead>
+      <tbody id="artSystems"></tbody></table>
+  </section>
+  <section data-in="art">
+    <h2>Źródła</h2>
+    <div id="artSources" class="muted"></div>
+    <div id="lbInfo" class="muted" style="margin-top:8px"></div>
+    <div class="actions" style="margin-top:6px"><button id="bLb">Pobierz bazę LaunchBox</button></div>
+    <div class="muted" style="margin-top:10px">Klucze (opcjonalnie — więcej grafik). Puste pole zostawia zapisany klucz, „-” go usuwa.</div>
+    <div class="field"><div class="row"><input id="kSgdb" placeholder="SteamGridDB — klucz API"></div>
+      <div class="row"><input id="kIgdbId" placeholder="IGDB — Client ID"><input id="kIgdbSecret" placeholder="IGDB — Client Secret"></div>
+      <div class="row"><input id="kTgdb" placeholder="TheGamesDB — klucz API"><button id="bKeys" class="primary">Zapisz klucze</button></div></div>
   </section>
   <section data-in="stan">
     <h2>Akcje</h2>

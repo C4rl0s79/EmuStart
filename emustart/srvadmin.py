@@ -469,7 +469,46 @@ def config_set(api, args: dict) -> dict:
     return srvconfig.set_value(api, str(args.get("key", "")), args.get("value"))
 
 
-ACTIONS_ARGS["config_set"] = config_set
+# ── grafiki i opisy (pobiera serwer; urządzenia biorą je od niego) ──
+def art_overview(api) -> dict:
+    return {"ok": True, **api.art_overview()}
+
+
+def art_start(api, args: dict) -> dict:
+    mode = str(args.get("mode") or "all")
+    if mode not in ("art", "meta", "meta_wiki", "all", "shrink"):
+        return {"ok": False, "reason": "Nieznany rodzaj pobierania."}
+    return api.art_start(str(args.get("es") or ""), mode)
+
+
+def art_cancel(api) -> dict:
+    api.art_cancel()
+    return {"ok": True}
+
+
+def launchbox_update(api) -> dict:
+    return api.launchbox_update()
+
+
+def art_keys_set(api, args: dict) -> dict:
+    """Klucze źródeł grafik (SteamGridDB, IGDB, TheGamesDB) — zaszyfrowane na serwerze;
+    puste pole zostawia zapisany klucz, „-” go usuwa."""
+    from emustart import art_sources, config, secure
+    keys = dict(api._cfg.get("art_keys") or {})
+    for name in art_sources.KEY_NAMES:
+        v = str(args.get(name) or "").strip()
+        if v == "-":
+            keys.pop(name, None)
+        elif v:
+            keys[name] = secure.protect(v)
+    keys["source"] = "panel serwera"
+    api._cfg["art_keys"] = keys
+    config.save(api._cfg)
+    return {"ok": True, "sources": art_sources.Sources(api._cfg).enabled()}
+
+
+ACTIONS_ARGS.update({"config_set": config_set, "art_start": art_start, "art_keys_set": art_keys_set})
+ACTIONS.update({"art": art_overview, "art_cancel": art_cancel, "launchbox_update": launchbox_update})
 ACTIONS.update({"config": config_get, "public_status": public_status, "devices": devices_list, "login_code": login_code, "profiles_migrate_status": profiles_migrate_status,
                 "accounts": accounts_list})
 
