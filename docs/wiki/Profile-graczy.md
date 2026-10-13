@@ -56,9 +56,10 @@ Hasło jest potrzebne:
 - przy dołączaniu nowego urządzenia — **Nowe konto** ustawia hasło, **Mam konto** je
   sprawdza (prośba i tak czeka na zatwierdzenie na innym urządzeniu konta albo przez
   administratora),
-- gdy na urządzeniu gra **inny użytkownik** — karta **Inny użytkownik** (albo nazwa zajęta
-  przy zakładaniu profilu) → nazwa konta i jego hasło; urządzenie pamięta logowanie do
-  **Wyloguj konto z tego urządzenia**.
+- gdy na urządzeniu gra **inny użytkownik** — karta **Inny użytkownik** → nazwa konta i jego
+  hasło; urządzenie pamięta logowanie do **Wyloguj konto z tego urządzenia**. Gdy takiego
+  konta nie ma: **Utwórz konto** → nowe hasło → prośba czeka na administratora (jego
+  urządzenie albo panel serwera); po zatwierdzeniu konto samo pojawia się na liście.
 
 Urządzenie przypisane do konta nie pyta o hasło swojego konta — loguje się kluczem
 urządzenia. Konta sprzed 0.40 przy pierwszym wyborze proszą o ustawienie hasła; zapomniane
