@@ -200,3 +200,21 @@ def test_tunnel_endpoint_is_listed_with_normal_certificate(monkeypatch):
     assert order[-1] == ("https", "emustart.emucloud.org", 443) and netsrc._mode(order[-1]) == "ca"
     assert order[0] == ("http", "192.168.1.130", 8740)
     assert netsrc._mode(("https", "81.2.69.142", 8742)) == "pin"
+
+
+def test_reachability_probe_recognises_us_without_counting_failures(monkeypatch):
+    """Kontrola tunelu i portu publicznego: bez klucza, bez liczenia do blokady adresu
+    (0.39–0.41: /v1/info bez klucza → 401, „tunel nie działa” i nieudane logowanie z adresu domu)."""
+    monkeypatch.setattr(remote, "API", _Api())
+    cert, key, fp = tls.ensure(paths.SERVER)
+    port = server.start_public(0, tls.server_context(cert, key), bind="127.0.0.1")
+    public._fails.clear()
+    for _ in range(3):
+        c = netsrc.PinnedHTTPS("127.0.0.1", port, fp, 5)
+        c.request("POST", public.PROBE_PATH, body=public.PROBE_BODY,
+                  headers={"Content-Type": "application/json", "CF-Connecting-IP": "81.2.69.50"})
+        r = c.getresponse()
+        assert public.ours(r.status, r.read())
+        c.close()
+    assert not public._fails.get("81.2.69.50")
+    assert not public.ours(401, b"<html>Unauthorized</html>") and not public.ours(200, b'{"version": "x"}')

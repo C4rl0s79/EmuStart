@@ -17,6 +17,18 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   RetroArchu na Androidzie; ocena „wyświetlania nad innymi aplikacjami” i usługi ułatwień
   dostępu dla pozostałych emulatorów na Androidzie.
 
+## [0.41.1] — 2026-10-13
+
+### Poprawione
+- **Android: po starcie samo tło z paskiem** („błąd interfejsu: applyLook is not defined”).
+  Start interfejsu wyprzedzał wczytanie `look.js` (pliki w WebView przychodzą
+  asynchronicznie); teraz rusza po wykonaniu wszystkich skryptów strony — także na PC.
+- **Kontrola tunelu i portu publicznego** (od 0.39): `/v1/info` bez klucza dawało 401 —
+  panel pokazywał „tunel: odpowiedź 401”, a każda kontrola liczyła się jako nieudane
+  logowanie z adresu domu (blokada adresu). Teraz sonda bez klucza (wyzwanie logowania),
+  rozpoznająca odpowiedź serwera EmuStart i niczego nieliczącą.
+- Ekran pierwszego uruchomienia nie każe już wpisywać klucza serwera.
+
 ## [0.41.0] — 2026-10-13
 
 Audyt bezpieczeństwa całości (serwer, PC, Android, interfejs) i sprzątanie kodu. Zawiera też

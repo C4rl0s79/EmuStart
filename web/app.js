@@ -1003,7 +1003,7 @@ async function openSettings(first) {
   S.setIdx = 0;
   $("setIntro").classList.toggle("hidden", !first);
   if (S.platform === "android") $("setIntro").textContent =
-    "Pierwsze uruchomienie. Wpisz adres i klucz serwera EmuStart (komputer z grami), potem „Sprawdź połączenie”.";
+    "Pierwsze uruchomienie. Połącz z serwerem EmuStart (komputer z grami): „Dołącz przez internet” (sam adres serwera) albo kod z panelu serwera.";
   $("setTitle").textContent = first ? "Witaj w EmuStart" : "Ustawienia";
   buildSetRows();
   show("settings");
@@ -1534,6 +1534,16 @@ window.addEventListener("pywebviewready", async () => {
 });
 
 // tryb deweloperski: UI w zwykłej przeglądarce (main.py --browser)
+/** Start interfejsu (pywebviewready) dopiero po wykonaniu wszystkich skryptów strony
+ *  (app.js, options.js, look.js). setTimeout(0) potrafił wyprzedzić look.js — na Androidzie
+ *  pliki przychodzą asynchronicznie i start padał na „applyLook is not defined”: zostawało
+ *  samo tło z paskiem. */
+function uiReady() {
+  const go = () => window.dispatchEvent(new Event("pywebviewready"));
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", go, { once: true });
+  else setTimeout(go, 0);
+}
+
 if (new URLSearchParams(location.search).has("dev")) {
   window.pywebview = {
     api: new Proxy({}, {
@@ -1541,7 +1551,7 @@ if (new URLSearchParams(location.search).has("dev")) {
                                                                  body: JSON.stringify(args) }).then((r) => r.json()),
     }),
   };
-  setTimeout(() => window.dispatchEvent(new Event("pywebviewready")), 0);
+  uiReady();
 }
 
 
@@ -1569,5 +1579,5 @@ if (new URLSearchParams(location.search).has("android") && window.EmuAndroid) {
   window.__emuPad = (a, up) => (up ? release(a) : press(a, true));
   // powrót z emulatora do EmuStart
   window.__emuResumed = () => { if (S.modal === "launch") updateLaunch(); };
-  setTimeout(() => window.dispatchEvent(new Event("pywebviewready")), 0);
+  uiReady();
 }
