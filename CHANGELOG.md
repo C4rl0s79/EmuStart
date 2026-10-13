@@ -19,6 +19,8 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
 ## [0.43.0] — 2026-10-13
 
+Zawiera też niewydane 0.41.1 (poprawka startu na Androidzie) i 0.42.0 (podpis wydań).
+
 ### Zmienione
 - **Jedna droga do serwera: logowanie kontem** (PC, Android, serwer, panel). W Ustawieniach
   zostały dwa wiersze: **Zaloguj (kod QR)** (telefon) i **Zaloguj (adres serwera)**, a po
@@ -45,7 +47,14 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   ponownie). Przejście starych kluczy-haseł (`/v1/auth/upgrade`), role per urządzenie,
   pola „Adres serwera” i „Klucz”, „Sprawdź połączenie”.
 
-## [0.41.1] — 2026-10-13
+### Bezpieczeństwo
+- **Podpis wydań** (Ed25519). CI podpisuje zip wydania kluczem z sekretu repozytorium
+  (`EMUSTART_SIGNING_KEY`, `tools/release_sign.py`) i dołącza `EmuStart-<wersja>-win64.zip.sig`;
+  aktualizacja w programie (aplikacja i panel serwera) sprawdza podpis kluczem publicznym
+  wbudowanym w EmuStart.exe i bez poprawnego podpisu niczego nie rozpakowuje. Skrót SHA-256
+  z GitHuba chronił tylko przed uszkodzonym pobraniem — podpis chroni też przed podmianą
+  wydania po przejęciu konta GitHub. Podpis obejmuje nazwę pliku: podpis starszej wersji nie
+  pasuje do nowszej. Budowa z tagu bez sekretu się przerywa.
 
 ### Poprawione
 - **Android: po starcie samo tło z paskiem** („błąd interfejsu: applyLook is not defined”).
@@ -56,6 +65,7 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   logowanie z adresu domu (blokada adresu). Teraz sonda bez klucza (wyzwanie logowania),
   rozpoznająca odpowiedź serwera EmuStart i niczego nieliczącą.
 - Ekran pierwszego uruchomienia nie każe już wpisywać klucza serwera.
+
 
 ## [0.41.0] — 2026-10-13
 

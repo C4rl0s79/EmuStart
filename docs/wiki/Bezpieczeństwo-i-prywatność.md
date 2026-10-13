@@ -69,8 +69,11 @@ tokenów, kluczy ani tytułów okien innych programów.
 - **Certyfikat:** urządzenia przypinają odcisk certyfikatu serwera; odpowiedź po zwykłym
   porcie nie zmienia już zapamiętanego odcisku ani adresów.
 - **Identyfikator sprzętu** z nagłówka tylko się zapisuje — nie unieważnia innych rejestracji.
-- **Aktualizacje:** tylko z wydań repozytorium (adres) i ze zgodnym skrótem SHA-256 podanym
-  przez GitHub.
+- **Aktualizacje:** tylko z wydań repozytorium (adres), ze zgodnym skrótem SHA-256 podanym
+  przez GitHub i (od 0.42) z **podpisem wydania** Ed25519 (`<zip>.sig`). Klucz prywatny jest
+  tylko w sekrecie repozytorium i u właściciela, publiczny — wbudowany w program. Podmienione
+  wydanie (np. po przejęciu konta GitHub) bez klucza prywatnego nie przejdzie; wydanie bez
+  podpisu też nie. APK chroni podpis Androida (aktualizacja tylko tym samym kluczem).
 - **Android:** adres interfejsu `emustart.local` nigdy nie idzie do sieci.
 
 ## Zalecenia
