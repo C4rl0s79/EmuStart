@@ -222,6 +222,13 @@ def scan_system(es: str, rom_dirs, progress=None) -> int:
              1 if x["g"].get("is_dir") else 0, 1 if x["g"]["multidisc"] else 0,
              x["parent"], x["hidden"], now, x["src"], x["trans"], x["tbase"]) for x in games]
 
+    # zmiana nazwy gry (np. arcade: nazwa setu → pełna nazwa z indeksu) — grafiki za nią
+    old = {r["rel"]: r["name"] for r in library.db().execute("SELECT rel, name FROM games WHERE es=?", (es,))}
+    from emustart import art
+    for x in games:
+        prev = old.get(x["g"]["rel"])
+        if prev and prev != x["name"]:
+            art.rename(es, prev, x["name"])
     with library.db() as c:
         c.executemany("""
             INSERT INTO games(es, rel, name, title, tags, files, size, is_dir,

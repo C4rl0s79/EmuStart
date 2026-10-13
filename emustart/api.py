@@ -151,6 +151,12 @@ class Api:
                 log.info("arcade (bez MAME): %s", r)
                 if r.get("ok") and not r.get("cached"):
                     self._rescan_systems(arc)
+            from emustart import art, remote
+            for es in arc:                  # grafiki pod nazwą setu → pod pełną nazwą (0.44.4)
+                n = art.adopt_set_names(es)
+                if n:
+                    log.info("grafiki %s: %d pod nowe nazwy gier", es, n)
+                    remote._games_cache.clear()
         except Exception:
             log.exception("arcade meta")
 
