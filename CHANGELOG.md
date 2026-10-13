@@ -172,10 +172,9 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   uruchamianie gier tylko z serwera, kilka urządzeń z jednym serwerem — bez SMB.
 
 ### Naprawione
-- Lista gier na PC: przy szerokiej okładce (np. SNES) i zrzucie 4:3 obrazki w jednym rzędzie ze
-  szczegółami wychodziły niskie, a pół ekranu pod opisem zostawało puste. Gdy w rzędzie brakuje
-  szerokości, zrzut schodzi do drugiego rzędu obok opisu — okładka i zrzut mają wtedy pełną
-  ustawioną wysokość.
+- Lista gier na PC: okładka i zrzut miały stałą wysokość z edytora wyglądu, choć pod krótkim
+  opisem zostawało dużo pustego miejsca. Teraz rosną w wolne miejsce (do granicy szerokości
+  panelu), a opis zostaje cały.
 - Serwer, który nie zna komputera (np. inny serwer pod tym samym adresem) albo ma inny
   certyfikat: EmuStart w kółko pytał wszystkie adresy, czekając po 10 s na każdy niedostępny,
   a pasek bez końca pokazywał „Serwer: łączę…”. Teraz pierwsza jednoznaczna odpowiedź kończy

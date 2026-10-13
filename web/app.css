@@ -359,15 +359,6 @@ img.glow { filter: drop-shadow(0 0 1px rgba(255,255,255,.9)) drop-shadow(0 0 6px
 .pv3 .noart { height: var(--pv-h, var(--media-h)); width: calc(var(--pv-h, var(--media-h)) * 0.75); }
 .pv3 .snap { max-width: none; }
 
-/* układ piętrowy (layoutPreview, gdy w rzędzie brakuje szerokości): okładka + szczegóły,
-   pod spodem zrzut + opis — bez pustej połowy ekranu pod opisem */
-.preview.pv3.stack { grid-template-columns: auto minmax(0, 1fr); grid-template-rows: var(--pv-h) var(--pv-sh); }
-.pv3.stack .box { grid-column: 1; grid-row: 1; }
-.pv3.stack .meta { grid-column: 2; grid-row: 1; }
-.pv3.stack .snap { grid-column: 1; grid-row: 2; height: var(--pv-sh); justify-self: start; }
-.pv3.stack .snap img { height: var(--pv-sh); }
-.pv3.stack .desc { grid-column: 2; grid-row: 2; overflow: hidden; }
-
 /* podpowiedzi przycisków działają też jako przyciski (mysz) */
 .hint[data-a] { cursor: pointer; border-radius: 99px; padding: .15em .5em .15em .15em; }
 .hint[data-a]:hover { background: var(--line); }
