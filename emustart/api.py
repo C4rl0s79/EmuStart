@@ -1386,6 +1386,8 @@ class Api:
         return r
 
     def rescan(self) -> dict:
+        from emustart import remote
+        remote._games_cache.clear()                  # listy gier dla urządzeń — od nowa
         if self._scan["running"]:
             return {"ok": False}
         self._scan.update(running=True, text="Start…", done=0, total=0, result=None)

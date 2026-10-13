@@ -350,3 +350,26 @@ def test_pc_core_becomes_server_recommendation(srv, monkeypatch):
     assert logos._system_emu(cfg, "snes") == ("retroarch", "bsnes")
     assert logos._system_emu(cfg, "ps2") == ("standalone", "")
     assert logos._system_emu(cfg, "nes") == ("", "")
+
+
+def test_game_list_in_pages_and_gzip(srv, monkeypatch):
+    """Duży system (FBA): lista stronami z jednego liczenia, duże odpowiedzi gzip."""
+    import gzip
+    rows = [{"id": i, "name": f"gra{i:05d}", "title": f"Gra {i}", "tags": "", "size": 1} for i in range(2500)]
+    calls = []
+    monkeypatch.setattr(remote.API, "list_games", lambda es: (calls.append(es), rows)[1], raising=False)
+    remote._games_cache.clear()
+    tok, _did, _ = _pair(srv, "Telefon", "phone")
+    st, d = _req(srv, "GET", "/v1/systems/fba/games?offset=0&limit=100", tok)
+    assert st == 200 and d["total"] == 2500 and [g["id"] for g in d["games"]] == list(range(100))
+    st, d = _req(srv, "GET", "/v1/systems/fba/games?offset=2400&limit=1000", tok)
+    assert [g["id"] for g in d["games"]][-1] == 2499 and len(d["games"]) == 100
+    assert calls == ["fba"]                                   # strony z jednego liczenia
+    st, full = _req(srv, "GET", "/v1/systems/fba/games", tok)
+    assert len(full) == 2500                                   # dawni klienci — cała lista
+    host, port, _n = srv
+    c = http.client.HTTPConnection(host, port, timeout=10)
+    c.request("GET", "/v1/systems/fba/games", headers={"Authorization": f"Bearer {tok}", "Accept-Encoding": "gzip"})
+    r = c.getresponse()
+    raw = r.read()
+    assert r.getheader("Content-Encoding") == "gzip" and len(json.loads(gzip.decompress(raw))) == 2500
