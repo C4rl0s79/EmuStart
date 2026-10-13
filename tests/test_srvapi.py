@@ -212,3 +212,36 @@ def test_bundled_platform_logos_in_one_file(tmp_path, monkeypatch):
     assert not (assets / "systems").exists()                          # bez osobnych plików
     base = server.start(0)
     assert urllib.request.urlopen(base + "/assets/systems/PSX.png", timeout=10).read() == b"\x89PNG logo psx"
+
+
+def test_install_locks_program_folder_for_normal_users(monkeypatch, tmp_path):
+    """--install: folder programu serwera tylko do odczytu dla zwykłych użytkowników (SYSTEM
+    i administratorzy — pełne), żeby nikt nie podmienił DLL wykonywanej potem jako SYSTEM."""
+    import subprocess
+    from emustart import remote
+    calls = []
+
+    class R:
+        returncode, stdout, stderr = 0, "", ""
+    monkeypatch.setattr(subprocess, "run", lambda c, **k: calls.append(c) or R())
+    remote.install_autostart(str(tmp_path / "EmuStartServer.exe"), 8740)
+    acl = calls[0]
+    assert acl[:3] == ["icacls", str(tmp_path), "/inheritance:r"]
+    assert "*S-1-5-18:(OI)(CI)F" in acl and "*S-1-5-32-544:(OI)(CI)F" in acl and "*S-1-5-32-545:(OI)(CI)RX" in acl
+    assert not any("S-1-5-11" in x for x in acl)                       # bez „Użytkownicy uwierzytelnieni: M”
+
+
+def test_update_apply_records_panel_user_safely(monkeypatch):
+    from emustart import srvadmin, updater
+
+    class Job:
+        info = {"version": "9"}
+
+        def apply(self, argv, **k):
+            return {"ok": False, "reason": "test"}
+    monkeypatch.setitem(srvadmin._update, "job", Job())
+    srvadmin.update_apply(None, {"panel_user": r"EMUSTATION\Jezus"})
+    assert (updater.update_dir() / "panel-user.txt").read_text(encoding="utf-8") == r"EMUSTATION\Jezus"
+    (updater.update_dir() / "panel-user.txt").unlink()
+    srvadmin.update_apply(None, {"panel_user": "a\" & calc.exe"})
+    assert not (updater.update_dir() / "panel-user.txt").exists()

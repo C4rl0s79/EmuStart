@@ -1019,7 +1019,14 @@ def install_autostart(exe: str, port: int) -> list:
     """Zadanie Harmonogramu (przy starcie systemu) i reguła zapory — uruchamiane
     przez użytkownika na komputerze z grami (wymaga uprawnień administratora)."""
     import subprocess
+    app = str(Path(exe).parent)
     cmds = [
+        # folder programu: zapis tylko SYSTEM (serwer) i administratorzy, zwykli użytkownicy —
+        # odczyt. Bez tego każdy zalogowany użytkownik mógł podmienić DLL w _internal, a serwer
+        # (konto SYSTEM) wykonałby ją przy starcie; także dane serwera (konta, profile, klucze).
+        # SID-y zamiast nazw grup (nazwy zależą od języka Windows).
+        ["icacls", app, "/inheritance:r", "/grant:r", "*S-1-5-18:(OI)(CI)F", "*S-1-5-32-544:(OI)(CI)F",
+         "*S-1-5-32-545:(OI)(CI)RX"],
         ["schtasks", "/Create", "/F", "/TN", "EmuStart Server", "/SC", "ONSTART", "/RU", "SYSTEM",
          "/RL", "HIGHEST", "/TR", f'"{exe}" --service'],
         # schtasks zakłada limit 72 h pracy zadania — serwer działa bez końca;

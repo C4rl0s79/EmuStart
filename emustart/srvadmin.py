@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -263,11 +264,21 @@ def update_status(_api) -> dict:
     return {"ok": True, **job.status()} if job else {"ok": True, "phase": "idle"}
 
 
-def update_apply(_api) -> dict:
-    """Skrypt podmiany startuje, ten proces kończy się po chwili (odpowiedź musi dojść)."""
+def update_apply(_api, args: dict | None = None) -> dict:
+    """Skrypt podmiany startuje, ten proces kończy się po chwili (odpowiedź musi dojść).
+    `panel_user` — konto Windows okna panelu: skrypt otworzy panel ponownie w jego sesji
+    (zapisuje serwer — folder programu jest dla panelu tylko do odczytu)."""
+    from emustart import updater
     job = _update["job"]
     if not job:
         return {"ok": False, "reason": "Brak pobranej aktualizacji."}
+    who = str((args or {}).get("panel_user") or "")
+    if re.fullmatch(r"[\w .$-]{1,64}(\\[\w .$-]{1,64})?", who):
+        try:
+            updater.update_dir().mkdir(parents=True, exist_ok=True)
+            (updater.update_dir() / "panel-user.txt").write_text(who, encoding="utf-8")
+        except OSError as ex:
+            log.warning("panel: %s", ex)
     r = job.apply(sys.argv[1:])
     if not r.get("ok"):
         return r
@@ -618,7 +629,8 @@ GAME_ACTIONS = {
     "system_merge": lambda api, a: api.system_merge(str(a.get("es", "")), str(a.get("into", ""))),
 }
 ACTIONS_ARGS.update(GAME_ACTIONS)
-ACTIONS_ARGS.update({"move_prepare": move_prepare, "move_import": move_import})
+ACTIONS_ARGS.update({"move_prepare": move_prepare, "move_import": move_import, "update_apply": update_apply})
+ACTIONS.pop("update_apply", None)
 ACTIONS_ARGS.update({"config_set": config_set, "art_start": art_start, "art_keys_set": art_keys_set,
                      "account_files": account_files, "account_backup": account_backup,
                      "account_restore": account_restore, "backup_settings": backup_settings})

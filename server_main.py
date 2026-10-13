@@ -29,10 +29,13 @@ _message = lambda text, title="EmuStart Server": boot.message(text, title)  # no
 
 
 def main() -> None:
-    service = any(a in sys.argv for a in ("--service", "--install", "--login-link"))
+    service = any(a in sys.argv for a in ("--service", "--install"))
     if not service:
-        boot.setup_logging("panel.log", _UNBLOCKED)     # osobny log — serwer pisze do emustart.log
+        # panel i link logowania — na koncie użytkownika: log w jego folderze, nic w folderze programu
+        boot.setup_logging("panel.log", _UNBLOCKED, boot.user_logs())
         _use_server_layout(migrate=False)
+        if "--login-link" in sys.argv:
+            return _login_link()
         return _server_panel()
     boot.setup_logging("emustart.log", _UNBLOCKED)
     boot.log_versions()
@@ -55,6 +58,24 @@ def _login_link_from_server(port: int) -> str:
         return ""
 
 
+def _login_link() -> None:
+    """Logowanie urządzenia bez aparatu (komputer): link z kodem jednorazowym wklejony w
+    „Zaloguj” — to samo co kod QR z panelu (Dodaj urządzenie), bez czekania na zatwierdzenie."""
+    from emustart import remote
+    port = int(config.load().get("server_port") or remote.DEFAULT_PORT)
+    link = _login_link_from_server(port)
+    if link:
+        try:
+            import subprocess
+            subprocess.run(["clip"], input=link.encode("utf-16-le"), check=True,
+                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        except Exception:
+            pass
+    return _message(("Link logowania (jednorazowy, ważny 10 minut) jest w schowku —\n"
+                     "wklej go w EmuStart: Ustawienia → Zaloguj.\n\n" + link) if link else
+                    "Serwer nie działa — uruchom go i spróbuj ponownie (albo panel serwera → Dodaj urządzenie).")
+
+
 def _use_server_layout(migrate: bool) -> None:
     """Katalog serwera (folder server): migracja z 0.x i przełączenie ścieżek; grafiki serwowane
     z nowego miejsca."""
@@ -73,20 +94,6 @@ def _server_mode() -> None:
     remote.API = api
     remote.ensure_token(api._cfg)           # wspólny klucz serwera (tylko ten komputer)
     port = int(api._cfg.get("server_port") or remote.DEFAULT_PORT)
-    if "--login-link" in sys.argv:
-        # logowanie urządzenia bez aparatu (komputer): link z kodem jednorazowym wklejony w
-        # „Zaloguj” — to samo co kod QR z panelu (Dodaj urządzenie), bez czekania na zatwierdzenie
-        link = _login_link_from_server(port)
-        if link:
-            try:
-                import subprocess
-                subprocess.run(["clip"], input=link.encode("utf-16-le"), check=True,
-                               creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-            except Exception:
-                pass
-        return _message(("Link logowania (jednorazowy, ważny 10 minut) jest w schowku —\n"
-                         "wklej go w EmuStart: Ustawienia → Zaloguj.\n\n" + link) if link else
-                        "Serwer nie działa — uruchom go i spróbuj ponownie (albo panel serwera → Dodaj urządzenie).")
     if "--install" in sys.argv:
         if not getattr(sys, "frozen", False):
             return _message("Autostart serwera instaluje się z EmuStartServer.exe (wersja zbudowana).")
@@ -181,24 +188,22 @@ def _server_panel() -> None:
             os.startfile(str(paths.LOGS))      # type: ignore[attr-defined]
             return {"ok": True}
 
+        def whoami(self):
+            """Konto Windows tego panelu — serwer (aktualizacja) otworzy panel ponownie w tej sesji."""
+            return f"{os.environ.get('USERDOMAIN', '')}\\{os.environ.get('USERNAME', '')}".strip("\\")
+
         def close_for_update(self, version: str = ""):
             """Aktualizacja: okno panelu (ten sam exe) zwalnia pliki programu. Panel wraca:
             1) skrypt aktualizacji uruchamia go po starcie serwera jednorazowym zadaniem
-               Harmonogramu w sesji tego użytkownika (update\\panel-user.txt);
-            2) zapasowo — osobny proces na tym koncie czeka na nową wersję serwera.
-            Przebieg obu — logs\\update.log."""
+               Harmonogramu w sesji tego użytkownika (konto podane serwerowi w update_apply);
+            2) zapasowo — osobny proces na tym koncie czeka na nową wersję serwera
+               (log w folderze użytkownika — folder programu jest tylko do odczytu)."""
             from emustart import updater
             exe = sys.executable if getattr(sys, "frozen", False) else ""
             log = logging.getLogger("emustart")
             log.info("panel: zamknięcie na czas aktualizacji do %s", version or "?")
             if exe and os.name == "nt":
-                user = f"{os.environ.get('USERDOMAIN', '')}\\{os.environ.get('USERNAME', '')}".strip("\\")
-                try:
-                    updater.update_dir().mkdir(parents=True, exist_ok=True)
-                    (updater.update_dir() / "panel-user.txt").write_text(user, encoding="utf-8")
-                except OSError as ex:
-                    log.warning("panel: %s", ex)
-                ulog = str(paths.LOGS / "update.log").replace("'", "''")
+                ulog = str(boot.user_logs() / "update.log").replace("'", "''")
                 ps = ("function L($m){ Add-Content -LiteralPath '" + ulog + "' -Value ('{0:yyyy-MM-dd HH:mm:ss} panel: {1}' -f (Get-Date),$m) }; "
                       "L 'czekam na serwer w nowej wersji'; "
                       "$end=(Get-Date).AddMinutes(10); $ok=$false; while((Get-Date) -lt $end){ Start-Sleep 3; try{ "
@@ -207,7 +212,7 @@ def _server_panel() -> None:
                       f"if('{version}' -eq '' -or $r.version -eq '{version}'){{ $ok=$true; break }} }}catch{{}} }}; "
                       "L ('serwer ' + $(if($ok){'gotowy'}else{'nie potwierdził wersji w 10 min'})); "
                       "Start-Sleep 6; "
-                      "$p = Get-CimInstance Win32_Process -Filter \"Name='EmuStart.exe'\" | "
+                      "$p = Get-CimInstance Win32_Process -Filter \"Name='EmuStartServer.exe'\" | "
                       "Where-Object { $_.CommandLine -like '*--panel*' }; "
                       "if($p){ L 'panel już działa (uruchomiony przez skrypt aktualizacji)' } "
                       f"else {{ Start-Process -FilePath '{exe}' -ArgumentList '--panel'; L 'panel uruchomiony' }}")

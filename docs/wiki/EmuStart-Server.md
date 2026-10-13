@@ -23,7 +23,9 @@ serwera** — okna na tym samym komputerze.
    ```
    Dodaje zadanie Harmonogramu „EmuStart Server” (start razem z Windows, bez limitu
    czasu, ponowny start po awarii), reguły zapory (porty 8740 i 8741) i skrót
-   **EmuStart Server** w menu Start.
+   **EmuStart Server** w menu Start, a folder programu (razem z danymi serwera) robi
+   tylko do odczytu dla zwykłych użytkowników — zapis tylko serwer (SYSTEM) i administratorzy.
+   Uruchom `--install` ponownie po przeniesieniu folderu.
 3. Uruchom **EmuStart Server** z menu Start (albo `EmuStartServer.exe`) — otwiera się
    panel; gdy serwer nie działa, panel go uruchamia.
 4. Panel → **Konfiguracja → Foldery**: foldery z grami, BIOS-y i pozostałe (niżej).

@@ -35,9 +35,20 @@ def unblock_self() -> int:
     return n
 
 
-def setup_logging(name: str = "emustart.log", unblocked: int = 0) -> None:
-    paths.ensure_dirs()
-    h = RotatingFileHandler(paths.LOGS / name, maxBytes=2_000_000,
+def user_logs() -> Path:
+    """Logi procesów na koncie użytkownika (panel serwera, link logowania): folder programu
+    serwera jest dla nich tylko do odczytu (--install blokuje zapis zwykłym użytkownikom)."""
+    base = os.environ.get("LOCALAPPDATA") or str(Path.home())
+    return Path(base) / "EmuStart Server" / "logs"
+
+
+def setup_logging(name: str = "emustart.log", unblocked: int = 0, logs_dir: Path | None = None) -> None:
+    if logs_dir is None:
+        paths.ensure_dirs()
+        logs_dir = paths.LOGS
+    else:
+        logs_dir.mkdir(parents=True, exist_ok=True)
+    h = RotatingFileHandler(logs_dir / name, maxBytes=2_000_000,
                             backupCount=3, encoding="utf-8")
     h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
     logging.basicConfig(level=logging.INFO, handlers=[h])

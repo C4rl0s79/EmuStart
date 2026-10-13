@@ -101,6 +101,14 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   poprawką, przywróceniem danych pobranych i pobraniem opisu z sieci.
 - **Panel serwera → Konfiguracja → Systemy**: logo (propozycje, bez logo), nazwa,
   poświata, widoczność na urządzeniach, zalecany emulator i rdzeń RetroArcha.
+- **Folder programu serwera tylko do odczytu dla zwykłych użytkowników** (`--install`):
+  zapis — tylko konto SYSTEM (serwer) i administratorzy. Wcześniej folder dziedziczył z dysku
+  „Użytkownicy uwierzytelnieni: modyfikacja” — każdy zalogowany użytkownik mógł podmienić DLL
+  w `_internal`, a serwer wykonałby ją przy starcie z najwyższymi uprawnieniami; mógł też
+  czytać i zmieniać dane serwera (konta, profile). Panel i link logowania (konto użytkownika)
+  piszą logi w `%LOCALAPPDATA%\EmuStart Server\logs`.
+- **Wbudowane logo platform w jednym pliku programu** (`assets/systems.media` zamiast 40 PNG),
+  bez zbędnej ikony — `_internal` ma 276 plików zamiast 316.
 - **Klucz certyfikatu serwera zaszyfrowany na dysku** — `tls-key.pem` zaszyfrowany (AES-256)
   losowym hasłem, a hasło chronione DPAPI tego komputera (`tls-key.pass`). Kopia folderu
   serwera (udział sieciowy, kopia zapasowa, dysk) na innym komputerze nic nie daje. Klucz

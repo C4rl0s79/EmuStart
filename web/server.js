@@ -489,7 +489,8 @@ async function updTick() {
   }
   if (st.phase !== "ready") return;
   updText("Podmieniam pliki i uruchamiam serwer ponownie — panel otworzy się sam po starcie nowej wersji (do kilku minut).");
-  const r = await admin("update_apply").catch(() => null);
+  const who = await (window.pywebview?.api?.whoami?.() ?? Promise.resolve("")).catch(() => "");
+  const r = await admin("update_apply", { panel_user: who || "" }).catch(() => null);
   if (!r?.ok) { $("bUpd").disabled = $("bUpdCheck").disabled = false; return updText(r?.reason || "Serwer nie odpowiada."); }
   restarting = true;
   // okno panelu to ten sam EmuStart.exe — zamyka się, żeby pliki dało się podmienić
