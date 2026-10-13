@@ -17,6 +17,13 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   RetroArchu na Androidzie; ocena „wyświetlania nad innymi aplikacjami” i usługi ułatwień
   dostępu dla pozostałych emulatorów na Androidzie.
 
+## [0.44.5] — 2026-10-13
+
+### Poprawione
+- **Telefon: przewijanie spustami po literach przeskakiwało co drugą literę** (A, B, D, F…).
+  Wiele padów zgłasza spust dwa razy — jako przycisk L2/R2 i jako oś — i każde zgłoszenie
+  liczyło się jako osobne naciśnięcie. Teraz jedno pociągnięcie spustu = jedna litera.
+
 ## [0.44.4] — 2026-10-13
 
 ### Poprawione

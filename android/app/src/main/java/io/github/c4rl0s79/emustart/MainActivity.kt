@@ -127,6 +127,13 @@ class MainActivity : Activity() {
             (e.source and InputDevice.SOURCE_DPAD) == InputDevice.SOURCE_DPAD ||
             e.keyCode == KeyEvent.KEYCODE_BACK || e.keyCode == KeyEvent.KEYCODE_MENU
         if (!fromPad) return super.dispatchKeyEvent(e)          // zwykła klawiatura — do pola tekstowego
+        if (a == "lt" || a == "rt") {                 // spust: przycisk i oś to jedno naciśnięcie
+            when (e.action) {
+                KeyEvent.ACTION_DOWN -> if (e.repeatCount == 0) trigger(a, key = true) else pad(a, false)
+                KeyEvent.ACTION_UP -> trigger(a, key = false)
+            }
+            return true
+        }
         when (e.action) {
             KeyEvent.ACTION_DOWN -> if (e.repeatCount == 0 || a in repeatable) pad(a, false)
             KeyEvent.ACTION_UP -> pad(a, true)
@@ -136,8 +143,19 @@ class MainActivity : Activity() {
 
     // gałka i krzyżak jako osie (część padów), spusty analogowe
     private var stickDir: String? = null
-    private var ltDown = false
-    private var rtDown = false
+    // Wiele padów zgłasza spust dwa razy: jako przycisk (L2/R2) i jako oś. Wcześniej każde
+    // zgłoszenie było osobnym naciśnięciem — przewijanie po literach przeskakiwało co drugą
+    // (A, B, D, F…). Spust jest wciśnięty, gdy wciska go którekolwiek źródło.
+    private val trigKey = HashMap<String, Boolean>()
+    private val trigAxis = HashMap<String, Boolean>()
+
+    private fun trigger(a: String, key: Boolean? = null, axis: Boolean? = null) {
+        val was = trigKey[a] == true || trigAxis[a] == true
+        key?.let { trigKey[a] = it }
+        axis?.let { trigAxis[a] = it }
+        val now = trigKey[a] == true || trigAxis[a] == true
+        if (now != was) pad(a, !now)
+    }
     private val repeatTask = object : Runnable {
         override fun run() {
             stickDir?.let { pad(it, false); ui.postDelayed(this, 90) }
@@ -160,8 +178,8 @@ class MainActivity : Activity() {
         }
         val lt = maxOf(e.getAxisValue(MotionEvent.AXIS_LTRIGGER), e.getAxisValue(MotionEvent.AXIS_BRAKE)) > 0.5f
         val rt = maxOf(e.getAxisValue(MotionEvent.AXIS_RTRIGGER), e.getAxisValue(MotionEvent.AXIS_GAS)) > 0.5f
-        if (lt != ltDown) { ltDown = lt; pad("lt", !lt) }
-        if (rt != rtDown) { rtDown = rt; pad("rt", !rt) }
+        trigger("lt", axis = lt)
+        trigger("rt", axis = rt)
         return true
     }
 }
