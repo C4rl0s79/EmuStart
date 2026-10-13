@@ -17,6 +17,17 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   RetroArchu na Androidzie; ocena „wyświetlania nad innymi aplikacjami” i usługi ułatwień
   dostępu dla pozostałych emulatorów na Androidzie.
 
+## [0.42.0] — 2026-10-13
+
+### Bezpieczeństwo
+- **Podpis wydań** (Ed25519). CI podpisuje zip wydania kluczem z sekretu repozytorium
+  (`EMUSTART_SIGNING_KEY`, `tools/release_sign.py`) i dołącza `EmuStart-<wersja>-win64.zip.sig`;
+  aktualizacja w programie (aplikacja i panel serwera) sprawdza podpis kluczem publicznym
+  wbudowanym w EmuStart.exe i bez poprawnego podpisu niczego nie rozpakowuje. Skrót SHA-256
+  z GitHuba chronił tylko przed uszkodzonym pobraniem — podpis chroni też przed podmianą
+  wydania po przejęciu konta GitHub. Podpis obejmuje nazwę pliku: podpis starszej wersji nie
+  pasuje do nowszej. Budowa z tagu bez sekretu się przerywa.
+
 ## [0.41.0] — 2026-10-13
 
 Audyt bezpieczeństwa całości (serwer, PC, Android, interfejs) i sprzątanie kodu. Zawiera też

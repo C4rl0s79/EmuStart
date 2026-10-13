@@ -17,6 +17,7 @@ on:
       - "build.ps1"
       - "requirements.txt"
       - "tests/**"
+      - "tools/release_sign.py"
       - ".github/workflows/windows.yml"
   pull_request:                  # sprawdzenie budowy przed scaleniem (artefakt do pobrania)
     paths:
@@ -66,6 +67,15 @@ jobs:
           name: ${{ steps.zip.outputs.file }}
           path: dist/${{ steps.zip.outputs.file }}
 
+      - name: Podpis wydania (emustart/signing.py)
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          EMUSTART_SIGNING_KEY: ${{ secrets.EMUSTART_SIGNING_KEY }}
+        run: |
+          python tools/release_sign.py sign "dist/${{ steps.zip.outputs.file }}"
+          python tools/release_sign.py verify "dist/${{ steps.zip.outputs.file }}"
+
       - name: Dołączenie do wydania
         if: startsWith(github.ref, 'refs/tags/v')
         shell: bash
@@ -81,4 +91,5 @@ jobs:
             gh release create "$GITHUB_REF_NAME" --title "EmuStart $GITHUB_REF_NAME" --notes-file notes.md \
               || gh release view "$GITHUB_REF_NAME" >/dev/null   # równolegle założył je ktoś inny
           fi
-          gh release upload "$GITHUB_REF_NAME" "dist/${{ steps.zip.outputs.file }}" --clobber
+          gh release upload "$GITHUB_REF_NAME" "dist/${{ steps.zip.outputs.file }}" \
+            "dist/${{ steps.zip.outputs.file }}.sig" --clobber
