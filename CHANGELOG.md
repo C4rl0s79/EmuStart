@@ -23,6 +23,9 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 - **Telefon: przewijanie spustami po literach przeskakiwało co drugą literę** (A, B, D, F…).
   Wiele padów zgłasza spust dwa razy — jako przycisk L2/R2 i jako oś — i każde zgłoszenie
   liczyło się jako osobne naciśnięcie. Teraz jedno pociągnięcie spustu = jedna litera.
+- **Telefon: brak grafik w systemach z małą listą gier** (do 100 gier, np. Sega CD, MSU-1;
+  błąd z 0.44.4): adresy grafik były przerabiane dwa razy („/remote/remote/…”). Duże systemy
+  (PSX, PS2) działały. Przerobienie adresu jest teraz jednorazowe z założenia.
 
 ## [0.44.4] — 2026-10-13
 
