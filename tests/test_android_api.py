@@ -16,14 +16,13 @@ BRIDGE = ROOT / "android" / "app" / "src" / "main" / "java" / "io" / "github" / 
 # tylko w EmuStart na komputerze — na telefonie niedostępne z menu (Android buduje własne
 # menu i ustawienia) albo zablokowane w interfejsie; Bridge odpowiada komunikatem „na komputerze”
 WINDOWS_ONLY = {
-    # grafiki i metadane: robi je serwer
-    "art_cancel", "art_candidates", "art_choose", "art_clear", "art_overview", "art_start",
-    "import_pylinks_keys", "launchbox_status", "launchbox_update", "meta_save",
-    # emulatory na komputerze, skanowanie folderów
-    "autodetect", "emulator_options", "scan_status", "set_game_emulator",
+    # grafiki i opis jednej gry wybrane ręcznie (opcje gry na komputerze → serwer)
+    "art_candidates", "art_choose", "art_clear", "meta_save",
+    # emulatory na komputerze, odświeżenie biblioteki z serwera
+    "autodetect", "scan_status", "set_game_emulator",
     # opcje gier i systemów (openGameOptions / openSystemOptions zablokowane na Androidzie)
     "game_options", "system_logo_candidates", "system_logo_choose", "system_options",
-    "system_rescan", "system_set",
+    "system_set",
     # menu w grze i pady Windows (XInput), RetroAchievements w emulatorach na komputerze
     "ingame_action", "pads_set", "pads_state", "ui_pad_poll",
     "ra_hardcore", "ra_import", "ra_login", "ra_logout", "ra_status",

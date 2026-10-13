@@ -225,7 +225,7 @@ def test_system_logo_choice(env, tmp_path, monkeypatch):
 
 
 def test_filter_fields_regions_players():
-    from emustart.api import _players, _regions
+    from emustart.catalog import players as _players, regions as _regions
     assert _regions("(USA, Europe) (Rev 1)") == ["USA", "Europa"]
     assert _regions("(World, set 1)") == []                  # wariant arcade, nie region
     assert _players("1-4") == 4 and _players("") == 0

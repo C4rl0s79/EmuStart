@@ -33,6 +33,16 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   - `EmuStart.exe` nie ma już trybu serwera (`--server`, `--server-panel`,
     `--install-server`, `--server-key`).
 
+- **EmuStart na PC bierze bibliotekę tylko z serwera** — bez własnych folderów z grami,
+  skanowania, pobierania grafik i opisów całej biblioteki, bazy LaunchBox i plików DAT
+  arcade (to robi serwer, panel → Grafiki i opisy). Z PC zniknęły: ekran „Grafiki
+  i metadane”, foldery z grami i BIOS-ami w ustawieniach, „Skanuj kolekcję” (zostaje
+  „Odśwież bibliotekę z serwera”), w opcjach systemu „Grafiki: pobierz brakujące”
+  i „Skanuj ponownie”. Bez serwera grają gry już pobrane na komputer. Okładkę, zrzut,
+  logo i opis jednej gry nadal można wybrać w opcjach gry — trafiają na serwer.
+- Serwer ma własny, mniejszy zestaw funkcji (emustart/srvapi.py) — nie uruchamia już
+  obsługi padów, profili gracza i wysyłania zapisów, które są potrzebne tylko na PC.
+
 ### Dodane
 - **Panel serwera: zakładki** (Stan, Konfiguracja, Urządzenia i konta, Aktualizacja).
 - **Panel serwera → Konfiguracja → Foldery**: foldery z grami (kilka, z kolejnością), BIOS-y,

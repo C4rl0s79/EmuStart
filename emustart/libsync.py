@@ -22,7 +22,7 @@ import time
 import urllib.parse
 from pathlib import Path
 
-from emustart import config, library, netsrc
+from emustart import library, netsrc
 
 log = logging.getLogger("emustart.libsync")
 
@@ -33,8 +33,8 @@ MISS_TTL = 600
 
 
 def thin(cfg: dict) -> bool:
-    """Komputer bierze bibliotekę z serwera: serwer ustawiony, brak folderów z grami."""
-    return bool(cfg.get("server_url") and cfg.get("server_key")) and not config.rom_roots(cfg)
+    """EmuStart na PC bierze bibliotekę z serwera — gdy jest zalogowany do serwera."""
+    return bool(cfg.get("server_url") and cfg.get("server_key"))
 
 
 def _get(cfg: dict, path: str, timeout: float = 30):

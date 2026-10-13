@@ -23,7 +23,7 @@ _UNBLOCKED = boot.unblock_self()
 
 import webview  # noqa: E402  (po zdjęciu blokady)
 
-from emustart import api as api_mod, config, paths, server  # noqa: E402
+from emustart import config, paths, server, srvapi  # noqa: E402
 
 _message = lambda text, title="EmuStart Server": boot.message(text, title)  # noqa: E731
 
@@ -69,7 +69,7 @@ def _server_mode() -> None:
     import time
     from emustart import remote
     log = logging.getLogger("emustart")
-    api = api_mod.Api()
+    api = srvapi.ServerApi()
     remote.API = api
     remote.ensure_token(api._cfg)           # wspólny klucz serwera (tylko ten komputer)
     port = int(api._cfg.get("server_port") or remote.DEFAULT_PORT)

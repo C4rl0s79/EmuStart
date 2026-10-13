@@ -220,7 +220,6 @@ function press(a, fromPad) {
   if (S.screen === "systems") return systemsInput(a);
   if (S.screen === "games") return gamesInput(a);
   if (S.screen === "settings") return settingsInput(a);
-  if (S.screen === "art") return artInput(a);
 }
 
 // Przytrzymanie A na grze: krótko = graj, ≥ 0,6 s = opcje gry.
@@ -239,11 +238,10 @@ function release(a) {
 /* ───────────── ekrany ───────────── */
 function show(screen) {
   S.screen = screen;
-  for (const id of ["systems", "games", "settings", "art", "pads", "profiles"]) $(id).classList.toggle("hidden", id !== screen);
+  for (const id of ["systems", "games", "settings", "pads", "profiles"]) $(id).classList.toggle("hidden", id !== screen);
   if (screen === "systems") renderSystems();
   if (screen === "games") renderGames();
   if (screen === "settings") renderSettings();
-  if (screen === "art") renderArt();
   if (screen === "pads") renderPads();
   if (screen === "profiles") renderProfiles();
 }
@@ -765,12 +763,9 @@ function openMenu() {
   const items = [
     ["Ustawienia", () => openSettings()],
     ["Wygląd (logo, czcionki, kolory)", () => openLook()],
-    // biblioteka z serwera: grafiki i metadane pobiera serwer (komputer bierze je od niego)
-    ...(S.state?.thin ? [] : [[S.artJob ? `Grafiki i metadane — trwa ${S.artJob.total ? Math.floor((100 * S.artJob.done) / S.artJob.total) : 0}%`
-              : "Grafiki i metadane", () => openArt()]]),
     ["Zmień profil", () => openProfiles()],
     ["Kolejność padów", () => openPads()],
-    [S.state?.thin ? "Odśwież bibliotekę z serwera" : "Skanuj kolekcję ponownie", () => startScan()],
+    ["Odśwież bibliotekę z serwera", () => startScan()],
     ["Aktualizuj EmuStart", () => appUpdate()],
     ["Wyjdź z EmuStart", () => api().quit()],
   ];
@@ -973,10 +968,10 @@ async function appUpdateStart() {
   }, 700);
 }
 
-/* ───────────── skanowanie ───────────── */
+/* ───────────── biblioteka z serwera (odświeżenie) ───────────── */
 async function startScan(after) {
   const r = await api().rescan();
-  if (!r.ok) return toast("Skanowanie już trwa.");
+  if (!r.ok) return toast("Odświeżanie biblioteki już trwa.");
   S.modal = "scan";
   $("scan").classList.remove("hidden");
   const t = setInterval(async () => {
@@ -1045,13 +1040,9 @@ function buildSetRows() {
   if (S.platform === "android") return buildSetRowsAndroid();
   const c = S.settings;
   const rows = [];
-  rows.push({ head: "Foldery z grami  ·  kolejność = pierwszeństwo przy duplikatach" });
-  (c.rom_roots || []).forEach((path, i) => rows.push({ k: `Folder ${i + 1}`, type: "root", idx: i, path }));
-  rows.push({ k: "Dodaj folder z grami", type: "addroot" });
-  rows.push({ head: "Inne foldery" });
+  rows.push({ head: "Foldery na tym komputerze  ·  gry, grafiki i BIOS-y są na serwerze" });
   rows.push({ k: "Emulatory", key: "emu_root", type: "path" });
-  rows.push({ k: "Pamięć podręczna", key: "cache_dir", type: "path" });
-  rows.push({ k: "BIOS-y", key: "bios_dir", type: "path", fmt: (v) => v || "nie ustawiono — A wybierz folder (np. bios z RetroBat)" });
+  rows.push({ k: "Pamięć podręczna (pobrane gry)", key: "cache_dir", type: "path" });
   rows.push({ head: "Serwer EmuStart  ·  gry, zapisy i profile przez serwer (połączenie szyfrowane)" });
   serverRows(rows, c);
   rows.push({ k: "Gry z serwera", key: "server_games", type: "bool",
@@ -1090,9 +1081,9 @@ function buildSetRows() {
   rows.push({ k: "Ustawienia emulatorów osobno dla profilu", key: "profile_settings", type: "bool",
               fmt: (v) => (v ? "tak (RetroArch, DuckStation, PCSX2 — kopia w profilu i na NAS)" : "nie (wspólne)") });
   rows.push({ head: "Akcje" });
-  rows.push({ k: "Wykryj emulatory i skanuj", type: "action", run: async () => { toast("Wykrywam emulatory…", 60000); const r = await api().autodetect(); if (!r.ok) return toast(r.reason, 4000); toast(`Przypisano emulatory: ${r.assigned}`); startScan(async () => { await openSettings(); }); } });
+  rows.push({ k: "Wykryj emulatory", type: "action", run: async () => { toast("Wykrywam emulatory…", 60000); const r = await api().autodetect(); if (!r.ok) return toast(r.reason, 4000); toast(`Przypisano emulatory: ${r.assigned}`); await openSettings(); } });
   rows.push({ k: "Pobierz brakujące emulatory", type: "action", run: () => askInstallMissing() });
-  rows.push({ k: "Skanuj kolekcję", type: "action", run: () => startScan(async () => { await openSettings(); }) });
+  rows.push({ k: "Odśwież bibliotekę z serwera", type: "action", run: () => startScan(async () => { await openSettings(); }) });
   rows.push({ k: "Gotowe, przejdź do gier", type: "action", run: async () => { const st = await refreshState(); if (st.setup_needed) openProfiles("setup"); else show("systems"); } });
   rows.push({ head: "Systemy  ·  ←/→ emulator  ·  A włącz/wyłącz" });
   for (const s of c.systems) rows.push({ type: "system", sys: s });
@@ -1141,50 +1132,12 @@ function renderSettings() {
   setHints(h);
 }
 
-async function saveRoots(roots) {
-  await api().save_settings({ rom_roots: roots });
-  S.settings = await api().get_settings();
-  buildSetRows();
-  renderSettings();
-  toast("Foldery zapisane. Wybierz „Skanuj kolekcję”, żeby wczytać gry.", 3500);
-}
-
-async function saveSetting(key, value) {
-  S.settings[key] = value;
-  await api().save_settings({ [key]: value });
-}
-
-async function changeSystem(r, dir) {
-  const s = r.sys;
-  if (!S.emuOpts[s.es]) S.emuOpts[s.es] = await api().emulator_options(s.es);
-  const opts = S.emuOpts[s.es];
-  if (!opts.length) return toast(`Nie znaleziono emulatora dla: ${s.display}`);
-  let i = opts.findIndex((o) => o.exe === s.exe && o.args === s.args);
-  i = (i + dir + opts.length) % opts.length;
-  if (i < 0) i = 0;
-  const o = opts[i];
-  Object.assign(s, { label: o.label, exe: o.exe, args: o.args, enabled: true });
-  await api().save_settings({ systems: { [s.es]: { label: o.label, exe: o.exe, args: o.args, enabled: true } } });
-}
-
-let editing = null;
-function startEdit(i) {
-  const r = S.setRows[i];
-  const v = $("sv" + i);
-  editing = { i, r };
-  v.innerHTML = `<input value="${esc(S.settings[r.key])}">`;
-  const inp = v.querySelector("input");
-  inp.focus(); inp.select();
-}
 async function commitEdit(ok) {
   if (!editing) return;
   const { r } = editing;
   const val = document.querySelector("#setList input")?.value ?? "";
   editing = null;
-  if (ok) {
-    await saveSetting(r.key, val);
-    if (r.key === "rom_root") { S.settings = await api().get_settings(); buildSetRows(); }
-  }
+  if (ok) await saveSetting(r.key, val);
   renderSettings();
 }
 
@@ -1201,25 +1154,7 @@ async function settingsInput(a) {
   else if (r.type === "text" && a === "a") {
     return oskOpen(r.k, r.prefill ? r.prefill() : (S.settings[r.key] || ""), async (v) => { await saveSetting(r.key, v.trim()); renderSettings(); }, false, !!r.secret);
   }
-  else if (r.type === "root" || r.type === "addroot") {
-    const roots = [...(S.settings.rom_roots || [])];
-    const at = r.type === "root" ? r.idx : roots.length;
-    const put = async (path) => {
-      if (!path) return;
-      roots[at] = path.trim();
-      await saveRoots(roots);
-    };
-    if (a === "a") return folderBrowse(r.type === "root" ? "Folder z grami" : "Nowy folder z grami", r.path || "", put);
-    if (a === "x") return put(await api().pick_folder(r.path || ""));
-    if (r.type === "root" && a === "y") { roots.splice(r.idx, 1); return saveRoots(roots); }
-    if (r.type === "root" && (a === "left" || a === "right")) {
-      const j = r.idx + (a === "left" ? -1 : 1);
-      if (j < 0 || j >= roots.length) return;
-      [roots[r.idx], roots[j]] = [roots[j], roots[r.idx]];
-      S.setIdx += a === "left" ? -1 : 1;
-      return saveRoots(roots);
-    }
-  } else if (r.type === "path") {
+  else if (r.type === "path") {
     if (a === "a") return folderBrowse(r.k, S.settings[r.key] || "", async (p) => { await saveSetting(r.key, p); renderSettings(); });
     if (a === "y") return startEdit(S.setIdx);      // wpisanie ścieżki klawiaturą — tylko na życzenie
     if (a === "x" && S.platform === "android") {      // bez okna Windows: wyczyszczenie = wykrywanie automatyczne
@@ -1227,7 +1162,7 @@ async function settingsInput(a) {
     }
     if (a === "x") {
       const p = await api().pick_folder(S.settings[r.key]);
-      if (p) { await saveSetting(r.key, p); if (r.key === "rom_root") { S.settings = await api().get_settings(); buildSetRows(); } }
+      if (p) await saveSetting(r.key, p);
     }
   } else if (r.type === "num" && (a === "left" || a === "right")) {
     const v = Math.min(r.max, Math.max(r.min, (+S.settings[r.key] || 0) + (a === "left" ? -r.step : r.step)));
@@ -1249,132 +1184,6 @@ async function settingsInput(a) {
   renderSettings();
 }
 
-/* ───────────── narzędzie: grafiki ───────────── */
-const SRC = { libretro: "libretro (bez klucza)", sgdb: "SteamGridDB", igdb: "IGDB", tgdb: "TheGamesDB" };
-const A = { data: null, rows: [], idx: 0, timer: null };
-
-async function openArt() {
-  A.data = await api().art_overview();
-  buildArtRows();
-  show("art");
-  clearInterval(A.timer);
-  A.timer = setInterval(artTick, 700);
-}
-function buildArtRows() {
-  const d = A.data, rows = [];
-  rows.push({ head: "Źródła (kolejność prób)" });
-  for (const [k, label] of Object.entries(SRC))
-    rows.push({ k: label, vh: d.sources[k] ? '<span class="ok">aktywne</span>' : '<span class="no">brak klucza</span>' });
-  rows.push({ k: "Importuj klucze z PyLinksWeb", act: "import",
-              v: d.keys_from ? "z " + d.keys_from : "SteamGridDB, IGDB, TheGamesDB" });
-  const lb = d.launchbox || {};
-  rows.push({ head: "Baza LaunchBox (opisy, metadane, grafiki w kategoriach — offline)" });
-  rows.push({ k: lb.ready ? "Aktualizuj bazę LaunchBox" : "Pobierz bazę LaunchBox (108 MB)", act: "lb",
-              v: lb.ready ? `${lb.games.toLocaleString("pl-PL")} gier · z ${lb.updated}` : "potrzebna do opisów i logo gier" });
-  rows.push({ head: "Pobieranie (wszystkie systemy)" });
-  const tot = d.systems.reduce((a, s) => ({ g: a.g + s.games, b: a.b + s.box, s: a.s + s.snap, d: a.d + s.desc, l: a.l + s.logo }),
-                               { g: 0, b: 0, s: 0, d: 0, l: 0 });
-  rows.push({ k: "Pobierz brakujące grafiki", act: "all", mode: "art",
-              v: `okładki ${tot.b}/${tot.g} · zrzuty ${tot.s}/${tot.g}` + (d.games_logo ? ` · logo ${tot.l}/${tot.g}` : "") });
-  rows.push({ k: "Pobierz brakujące metadane i opisy", act: "all", mode: "meta", v: `opisy ${tot.d}/${tot.g} · LaunchBox + baza RetroArcha` });
-  rows.push({ k: "… oraz Wikipedia dla gier bez opisu", act: "all", mode: "meta_wiki", v: "wolniej: ok. 1–2 s na grę" });
-  rows.push({ k: "Zmniejsz zapisane grafiki", act: "all", mode: "shrink", v: "WebP w rozmiarze ekranowym — zwykle ok. 8× mniej miejsca" });
-  rows.push({ head: "Systemy  ·  A pobierz brakujące grafiki i metadane" });
-  for (const s of d.systems)
-    rows.push({ k: s.display, act: "sys", es: s.es, mode: "all",
-                v: `okładki ${s.box}/${s.games} · zrzuty ${s.snap}/${s.games} · opisy ${s.desc}/${s.games}` +
-                   (d.games_logo ? ` · logo ${s.logo}/${s.games}` : "") });
-  A.rows = rows;
-  if (!A.rows[A.idx] || !A.rows[A.idx].act) A.idx = A.rows.findIndex((r) => r.act);
-}
-function renderArt() {
-  const list = $("artList");
-  list.innerHTML = A.rows.map((r, i) => r.head
-    ? `<div class="setrow head">${esc(r.head)}</div>`
-    : `<div class="setrow${i === A.idx ? " sel" : ""}${r.act ? " action" : ""}" data-i="${i}"><span class="k">${esc(r.k)}</span><span class="v">${r.vh ?? esc(r.v)}</span><span></span></div>`).join("");
-  list.querySelectorAll(".setrow[data-i]").forEach((el) => el.addEventListener("click", () => {
-    if (!A.rows[+el.dataset.i].act) return;
-    A.idx = +el.dataset.i; renderArt(); artInput("a");
-  }));
-  list.querySelector(".setrow.sel")?.scrollIntoView({ block: "nearest" });
-  const job = A.data?.job;
-  setHints(job?.running ? [["a", "Wybierz"], ["x", "Zatrzymaj pobieranie"], ["b", "Wstecz"]] : [["a", "Wybierz"], ["b", "Wstecz"]]);
-  renderArtJob(job);
-}
-function renderArtJob(job) {
-  const up = A.data?.lb_update;
-  if (up && (up.running || up.error)) {            // pobieranie bazy LaunchBox
-    $("artJob").classList.remove("hidden");
-    const pct = up.total ? (100 * up.done) / up.total : 0;
-    $("ajBar").style.width = (up.total ? pct : 100).toFixed(1) + "%";
-    $("ajPct").textContent = up.total ? Math.floor(pct) + "%" : "";
-    $("ajLine").textContent = up.error ? `Błąd: ${up.error}` : up.text;
-    $("ajCur").textContent = "";
-    return;
-  }
-  $("artJob").classList.toggle("hidden", !job);
-  if (!job) return;
-  const pct = job.total ? (100 * job.done) / job.total : 100;
-  $("ajBar").style.width = pct.toFixed(1) + "%";
-  $("ajPct").textContent = Math.floor(pct) + "%";
-  const src = Object.entries(job.by_source).map(([k, n]) => `${(SRC[k] || k).split(" ")[0]} ${n}`).join(", ");
-  const m = job.mode || { art: true };
-  if (m.shrink) {
-    $("ajLine").textContent = `${job.done} / ${job.total} plików · zmniejszono ${job.found.box} · odzyskano ${fmtBytes(job.saved)}` +
-      (job.running ? ` · zostało ${fmtEta(job.eta)}` : job.cancelled ? " · zatrzymano" : " · gotowe");
-    $("ajCur").textContent = job.running ? job.current : "";
-    return;
-  }
-  if (job.error) { $("ajLine").textContent = job.error; $("ajCur").textContent = ""; return; }
-  $("ajLine").textContent = `${job.done} / ${job.total} gier` +
-    (m.art ? ` · nowe okładki ${job.found.box} · nowe zrzuty ${job.found.snap}` + (job.found.logo ? ` · logo ${job.found.logo}` : "") + ` · bez grafiki ${job.missing}` : "") +
-    (m.meta ? ` · nowe opisy ${job.meta.description}` + (m.wiki ? ` · z Wikipedii ${job.meta.wiki}` : "") : "") +
-    (src ? ` · źródła: ${src}` : "") +
-    (job.running ? ` · zostało ${fmtEta(job.eta)}` : job.cancelled ? " · zatrzymano" : " · gotowe");
-  $("ajCur").textContent = job.running ? job.current : "";
-}
-async function artTick() {
-  if (S.screen !== "art") return clearInterval(A.timer);
-  if (A.data?.lb_update?.running) {
-    const st = await api().launchbox_status();
-    A.data.lb_update = st.update;
-    if (!st.update.running) { A.data = await api().art_overview(); buildArtRows(); renderArt();
-      toast(st.update.error ? `Baza LaunchBox: ${st.update.error}` : "Baza LaunchBox gotowa.", 4000); }
-    else renderArtJob(null);
-    return;
-  }
-  const job = await api().art_status();
-  const was = A.data.job && A.data.job.running;
-  A.data.job = job;
-  renderArtJob(job);
-  if (job && was && !job.running) { A.data = await api().art_overview(); buildArtRows(); renderArt(); }
-}
-async function artInput(a) {
-  const n = A.rows.length;
-  const move = (d) => { let i = A.idx; do { i = (i + d + n) % n; } while (!A.rows[i].act); A.idx = i; };
-  if (a === "up") move(-1);
-  else if (a === "down") move(1);
-  else if (a === "b") { clearInterval(A.timer); await refreshState(); return show("systems"); }
-  else if (a === "x") { await api().art_cancel(); toast("Zatrzymuję pobieranie grafik…"); }
-  else if (a === "start") return openMenu();
-  else if (a === "a") {
-    const r = A.rows[A.idx];
-    if (r.act === "import") {
-      const res = await api().import_pylinks_keys();
-      toast(res.ok ? "Zaimportowano klucze z PyLinksWeb." : res.reason, 3500);
-    } else if (r.act === "lb") {
-      const res = await api().launchbox_update();
-      if (!res.ok) toast(res.reason);
-    } else {
-      const res = await api().art_start(r.act === "sys" ? r.es : "", r.mode || "art");
-      if (!res.ok) toast(res.reason);
-    }
-    A.data = await api().art_overview();
-    buildArtRows();
-  }
-  renderArt();
-}
-
 /* ───────────── stan ogólny ───────────── */
 async function refreshState() {
   const st = await api().get_state();
@@ -1385,9 +1194,7 @@ async function refreshState() {
   const i = S.systems.findIndex((s) => s.es === keep);
   S.sysIdx = i >= 0 ? i : Math.min(S.sysIdx, Math.max(0, S.systems.length - 1));
   const net = $("netInfo");
-  const mode = { auto: "", lan: " · LAN", remote: " · zdalnie" }[st.network_mode] || "";
-  if (st.server && !(st.rom_roots || []).length) {
-    // klient serwera (bez folderów z grami): stan serwera EmuStart zamiast NAS-a
+  if (st.server) {
     net.textContent = st.server.ok ? `Serwer ${st.server.name || "EmuStart"}`
       : st.server.checking ? "Serwer: łączę…"
       : st.server.key_rejected ? "Klucz urządzenia nieważny" : "Serwer niedostępny";
@@ -1398,8 +1205,8 @@ async function refreshState() {
     }
     net.className = "pill " + (st.server.ok || st.server.checking ? "ok" : "warn");
   } else {
-    net.textContent = (st.rom_online ? "NAS dostępny" : "NAS offline, tylko gry lokalne") + mode;
-    net.className = "pill " + (st.rom_online ? "ok" : "warn");
+    net.textContent = "Nie zalogowano do serwera";
+    net.className = "pill warn";
   }
   S.copying = new Set(st.copying);
   $("profInfo").textContent = st.profile ? "👤 " + st.profile.name : "";
@@ -1413,12 +1220,6 @@ async function refreshState() {
 
 async function pollCopies() {
   try {
-    // pobieranie grafik/metadanych w tle — widoczne na każdym ekranie
-    const job = await api().art_status();
-    S.artJob = job && job.running ? job : null;
-    $("artInfo").classList.toggle("hidden", !S.artJob || S.screen === "art");
-    if (S.artJob) $("artInfo").textContent = `🖼 grafiki ${S.artJob.done}/${S.artJob.total}` +
-      (S.artJob.total ? ` (${Math.floor((100 * S.artJob.done) / S.artJob.total)}%)` : "");
     const post = await api().post_status();
     $("syncInfo").textContent = post ? `⇅ wysyłam zapisy: ${post}` : "";
     $("syncInfo").classList.toggle("hidden", !post);
