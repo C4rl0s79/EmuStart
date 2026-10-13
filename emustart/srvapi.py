@@ -8,10 +8,12 @@ komputerze i uruchamiania gier — to robi EmuStart na PC (emustart/api.py).
 from __future__ import annotations
 
 import logging
+import re
 import threading
+from pathlib import Path
 
-from emustart import (art, catalog, config, launchbox, library, logos, scanner, sysinfo,
-                      systems)
+from emustart import (art, catalog, config, launchbox, library, logos, metadata, scanner,
+                      sysinfo, systems)
 
 log = logging.getLogger("emustart.srvapi")
 
@@ -207,3 +209,143 @@ class ServerApi:
 
     def launchbox_status(self) -> dict:
         return {"db": launchbox.status(), "update": self._lb_update.status() if self._lb_update else None}
+
+    # ── jedna gra: grafiki i opis (panel → Grafiki i opisy → Gra) ──
+    def games_search(self, q: str = "", es: str = "", limit: int = 60) -> list:
+        """Gry po fragmencie nazwy (bez ukrytych), z adresami grafik."""
+        sql = "SELECT * FROM games WHERE hidden=0"
+        args: list = []
+        if es:
+            sql += " AND es=?"
+            args.append(es)
+        for word in (q or "").split()[:6]:
+            sql += " AND name LIKE ? ESCAPE '\\'"
+            args.append("%" + word.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%")
+        sql += " ORDER BY name COLLATE NOCASE LIMIT ?"
+        args.append(max(1, min(200, int(limit))))
+        names = {s_["es"]: s_["display"] for s_ in library.systems_summary()}
+        return [{"id": r["id"], "es": r["es"], "system": names.get(r["es"], r["es"]), "name": r["name"],
+                 **self._art_urls(r)} for r in library.db().execute(sql, args).fetchall()]
+
+    @staticmethod
+    def _art_urls(r) -> dict:
+        return {k: art.media_url(r["es"], r["name"], k) if r[f"art_{k}"] == art.HAS else ""
+                for k in ("box", "snap", "logo")}
+
+    def game_edit(self, game_id: int) -> dict:
+        g = library.game(int(game_id))
+        if not g:
+            return {"ok": False, "reason": "Nie ma takiej gry."}
+        m = metadata.get(g["id"])
+        r = library.db().execute("SELECT * FROM games WHERE id=?", (g["id"],)).fetchone()
+        return {"ok": True, "id": g["id"], "es": g["es"], "name": g["name"], "title": g["title"],
+                "system": systems.info(g["es"])["display"], "rel": g["rel"].replace("\\", "/"),
+                "meta": catalog.game_meta(self._cfg, g), "edits": m.get("_edits", {}),
+                "online": bool(m.get("_online")), **self._art_urls(r)}
+
+    def meta_fetch(self, game_id: int, full: bool = False) -> dict:
+        """Opis z sieci w tle (`full` — także TheGamesDB, limit miesięczny)."""
+        g = library.game(int(game_id))
+        if not g:
+            return {"ok": False, "reason": "Nie ma takiej gry."}
+
+        def run():
+            try:
+                metadata.fetch_online(self._cfg, g, tgdb=bool(full))
+            except Exception:
+                log.exception("metadane %s", g["name"])
+        threading.Thread(target=run, daemon=True, name="meta").start()
+        return {"ok": True}
+
+    def meta_save(self, game_id: int, edits: dict) -> dict:
+        clean = {k: str(v)[:20000] for k, v in (edits or {}).items() if k in META_FIELDS and str(v).strip()}
+        metadata.set_edits(int(game_id), clean)
+        return {"ok": True}
+
+    def art_candidates(self, game_id: int, kind: str, query: str = "") -> list:
+        from emustart import art_sources
+        g = library.game(int(game_id))
+        if not g or kind not in ("box", "snap", "logo"):
+            return []
+        setname = Path(g["rel"]).stem if systems.info(g["es"])["kind"] == "arcade" else ""
+        return art_sources.candidates(self._cfg, g["es"], g["name"], kind, query or "", setname)
+
+    def art_choose(self, game_id: int, kind: str, url: str) -> dict:
+        from emustart import art_sources
+        g = library.game(int(game_id))
+        if not g or kind not in ("box", "snap", "logo"):
+            return {"ok": False, "reason": "Nie ma takiej gry."}
+        data = art_sources.fetch(url)
+        if not art_sources.is_image(data):
+            return {"ok": False, "reason": "Nie udało się pobrać tej grafiki."}
+        art.save(g["es"], g["name"], kind, data)
+        library.set_art(g["id"], kind, art.HAS)
+        _clear_device_lists()
+        return {"ok": True, "url": art.media_url(g["es"], g["name"], kind)}
+
+    def art_clear(self, game_id: int, kind: str) -> dict:
+        g = library.game(int(game_id))
+        if g and kind in ("box", "snap", "logo"):
+            art.media_path(g["es"], g["name"], kind).unlink(missing_ok=True)
+            library.set_art(g["id"], kind, art.MISSING)
+            _clear_device_lists()
+        return {"ok": True}
+
+    # ── wygląd systemów (logo, nazwa, poświata) — urządzenia pokazują to samo ──
+    def systems_look(self) -> list:
+        out = []
+        for s_ in sorted(library.systems_summary(), key=lambda x: x["display"].lower()):
+            es = s_["es"]
+            sc = (self._cfg.get("systems") or {}).get(es) or {}
+            lg = logos.url_for(es, self._cfg)
+            from emustart import emulators, installer
+            plat = systems.info(es)["plat"]
+            out.append({"es": es, "display": sc.get("name") or systems.info(es)["display"],
+                        "default_name": systems.info(es)["display"], "games": s_["games"],
+                        "logo": lg["url"], "glow": bool(lg["glow"]), "logo_choice": sc.get("logo", ""),
+                        "enabled": sc.get("enabled", True),
+                        "emu_rec": sc.get("emu_rec", ""), "core_rec": sc.get("core_rec", ""),
+                        "core_default": installer.CORES.get(plat, ""), "cores": emulators.cores_for(plat)})
+        return out
+
+    def system_set(self, es: str, data: dict) -> dict:
+        if es not in {s_["es"] for s_ in library.systems_summary()}:
+            return {"ok": False, "reason": "Nie ma takiego systemu."}
+        sc = self._cfg.setdefault("systems", {}).setdefault(es, {})
+        if "name" in data:
+            name = str(data["name"] or "").strip()[:60]
+            if name and name != systems.info(es)["display"]:
+                sc["name"] = name
+            else:
+                sc.pop("name", None)
+        if "glow" in data:
+            sc["logo_glow"] = bool(data["glow"])
+        if "enabled" in data:
+            sc["enabled"] = bool(data["enabled"])
+        if "emu_rec" in data:                     # zalecany emulator dla urządzeń
+            if data["emu_rec"] not in ("", "retroarch", "standalone"):
+                return {"ok": False, "reason": "Nieznany rodzaj emulatora."}
+            sc["emu_rec"] = data["emu_rec"]
+        if "core_rec" in data:                    # rdzeń RetroArcha ("" = domyślny)
+            core = str(data["core_rec"] or "").strip().lower()
+            if core and not re.fullmatch(r"[a-z0-9_]{1,40}", core):
+                return {"ok": False, "reason": "Zła nazwa rdzenia RetroArcha."}
+            if core:
+                sc["core_rec"] = core
+            else:
+                sc.pop("core_rec", None)
+        config.save(self._cfg)
+        return {"ok": True}
+
+    def system_logo_candidates(self, es: str) -> list:
+        return logos.candidates(self._cfg, es)
+
+    def system_logo_choose(self, es: str, cid: str) -> dict:
+        if not logos.choose(self._cfg, es, cid):
+            return {"ok": False, "reason": "Nie udało się pobrać tego logo."}
+        self._cfg["systems"][es].setdefault("logo_glow", False)
+        config.save(self._cfg)
+        return {"ok": True, **logos.url_for(es, self._cfg)}
+
+
+META_FIELDS = ("title", "developer", "publisher", "year", "genre", "players", "description")

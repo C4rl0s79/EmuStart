@@ -148,11 +148,6 @@ function goptItems() {
       act: () => d.states.length ? goPage("states") : toast("Ten emulator nie ma zapisów tej gry.") },
     { label: "Zapisy i stany", value: "z komputera i telefonu", act: openSaveManager },
     { label: "Metadane i opis", value: [det.meta.developer, det.meta.year].filter(Boolean).join(" · "), act: () => goPage("meta") },
-    { label: "Okładka", value: g.box ? "jest" : "brak", act: () => openArtPicker("box") },
-    { label: "Zrzut ekranu", value: g.snap ? "jest" : "brak", act: () => openArtPicker("snap") },
-    { label: "Logo gry (tytuł jako grafika)", value: g.logo ? "jest" : "brak", act: () => openArtPicker("logo") },
-    { label: "Pobierz opis z sieci", value: "Wikipedia, IGDB, TheGamesDB", act: async () => {
-      await api().meta_fetch(GO.id, true); toast("Pobieram opis…"); setTimeout(refreshGoDetail, 4000); } },
     { label: g.pinned ? "Odepnij (pozwól usunąć z dysku)" : "Przypnij (trzymaj na dysku)", act: async () => { await togglePin(); closeGopt(); } },
     ...removeItem(),
   ];
@@ -189,19 +184,12 @@ function goptItems() {
   if (GO.page === "saves") return saveManagerItems();
   if (GO.page === "stateAct") return stateActItems();
   if (GO.page === "meta") {
-    const m = det.meta, ed = det.meta_edits || {};
-    const items = META_FIELDS.map(([k, label]) => ({
-      label: label + (ed[k] ? "  ✎" : ""), value: k === "title" ? (m.title || det.title) : (m[k] || "—"),
-      act: () => oskOpen(label, k === "title" ? (m.title || det.title) : (m[k] || ""), async (val) => {
-        const edits = { ...(det.meta_edits || {}), [k]: val };
-        await api().meta_save(GO.id, edits);
-        await refreshGoDetail();
-        if (k === "title") { const gg = S.games.find((x) => x.id === GO.id); if (gg) gg.title = val || gg.title; }
-      }, k === "description"),
+    // podgląd — grafiki i opis gry zmienia się w panelu serwera (Grafiki i opisy → Gra)
+    const m = det.meta;
+    return META_FIELDS.map(([k, label]) => ({
+      label, value: k === "title" ? (m.title || det.title) : (m[k] || "—"),
+      act: () => k === "description" && m.description ? toast(m.description, 12000) : null,
     }));
-    if (Object.keys(ed).length) items.push({ label: "Przywróć dane pobrane", value: "usuń ręczne zmiany",
-      act: async () => { await api().meta_save(GO.id, {}); await refreshGoDetail(); } });
-    return items;
   }
   return [];
 }
@@ -292,24 +280,14 @@ function stateActItems() {
   return items;
 }
 
-async function refreshGoDetail() {
-  GO.detail = await api().game_detail(GO.id);
-  if (S.modal === "gopt") renderGopt();
-  schedulePreview();
-}
 async function reloadGo(page) { GO.data = await api().game_options(GO.pid); goPage(page); }
 function goPage(page) { GO.page = page; GO.idx = 0; renderGopt(); }
 
 function renderGopt() {
   const titles = { main: "Opcje gry", variants: "Wersja gry", emus: "Emulator dla tej gry", states: "Wczytaj zapis", meta: "Metadane",
-                   saves: "Zapisy i stany", stateAct: "Stan gry",
-                   art: { snap: "Zrzut ekranu", logo: "Logo gry", box: "Okładka" }[GO.art?.kind] || "Okładka" };
+                   saves: "Zapisy i stany", stateAct: "Stan gry" };
   $("goTitle").textContent = GO.detail?.title || "";
   $("goPage").textContent = titles[GO.page];
-  const isArt = GO.page === "art";
-  $("goItems").classList.toggle("hidden", isArt);
-  $("goArt").classList.toggle("hidden", !isArt);
-  if (isArt) return renderArtPicker();
   GO.items = goptItems();
   GO.idx = Math.min(GO.idx, GO.items.length - 1);
   $("goItems").innerHTML = GO.items.map((it, i) =>
@@ -319,7 +297,6 @@ function renderGopt() {
   setHints([["a", "Wybierz"], ["b", GO.page === "main" ? "Zamknij" : "Wstecz"]], $("goHints"));
 }
 function goptInput(a) {
-  if (GO.page === "art") return artPickInput(a);
   const n = GO.items.length;
   if (a !== "a") GO.confirmDel = a === "b" ? GO.confirmDel : false;
   if (a === "up") GO.idx = (GO.idx - 1 + n) % n;
@@ -331,73 +308,6 @@ function goptInput(a) {
   else if (a === "b") return GO.page === "main" ? closeGopt() : goPage("main");
   else if (a === "a") return GO.items[GO.idx]?.act();
   renderGopt();
-}
-
-/* ── wybór grafiki ── */
-async function openArtPicker(kind, query = "") {
-  GO.art = { kind, query, list: null, idx: 0 };
-  GO.page = "art";
-  renderGopt();
-  const list = await api().art_candidates(GO.id, kind, query);
-  if (GO.page !== "art" || GO.art.kind !== kind) return;
-  GO.art.list = list;
-  renderGopt();
-}
-function renderArtPicker() {
-  const A_ = GO.art;
-  const grid = $("goArtGrid");
-  $("goArtInfo").textContent = A_.list === null ? "Szukam grafik…" :
-    A_.list.length ? `${A_.list.length} propozycji` + (A_.query ? ` dla „${A_.query}”` : "") :
-    "Nic nie znaleziono. X: szukaj pod inną nazwą.";
-  grid.classList.toggle("snapgrid", A_.kind === "snap");
-  grid.classList.toggle("logopick", A_.kind === "logo");
-  grid.innerHTML = (A_.list || []).map((c, i) =>
-    `<figure class="${i === A_.idx ? "sel" : ""}" data-i="${i}"><img src="${esc(c.thumb)}" alt="" referrerpolicy="no-referrer" data-i="${i}">` +
-    `<figcaption>${esc(c.source)}<br><small>${esc(c.label)}</small></figcaption></figure>`).join("");
-  grid.querySelectorAll("figure").forEach((f) => f.addEventListener("click", () => { A_.idx = +f.dataset.i; artPickInput("a"); }));
-  // miniatura, która się nie wczytała, znika z listy (pusty kafelek mylił nawigację)
-  grid.querySelectorAll("img[data-i]").forEach((img) => img.addEventListener("error", () => {
-    const c = A_.list[+img.dataset.i];
-    if (!c) return;
-    const cur = A_.list[A_.idx];
-    A_.list = A_.list.filter((x) => x !== c);
-    A_.idx = Math.max(0, cur === c ? Math.min(A_.idx, A_.list.length - 1) : A_.list.indexOf(cur));
-    renderArtPicker();
-  }, { once: true }));
-  grid.querySelector("figure.sel")?.scrollIntoView({ block: "nearest" });
-  setHints([["a", "Wybierz"], ["x", "Szukaj inną nazwą"], ["y", "Usuń grafikę"], ["b", "Wstecz"]], $("goHints"));
-}
-function artCols() {
-  return gridCols($("goArtGrid"));
-}
-async function artPickInput(a) {
-  const A_ = GO.art, n = (A_.list || []).length, cols = artCols();
-  if (a === "b") return goPage("main");
-  if (a === "x") return oskOpen("Szukaj grafiki", A_.query || (S.games[S.gameIdx]?.title || ""), (q) => openArtPicker(A_.kind, q));
-  if (a === "y") {
-    await api().art_clear(GO.id, A_.kind);
-    const g = S.games.find((x) => x.id === GO.id);
-    if (g) g[A_.kind] = "";
-    toast("Usunięto grafikę."); schedulePreview(); return goPage("main");
-  }
-  if (!n) return;
-  if (a === "left") A_.idx = Math.max(0, A_.idx - 1);
-  else if (a === "right") A_.idx = Math.min(n - 1, A_.idx + 1);
-  else if (a === "up") A_.idx = Math.max(0, A_.idx - cols);
-  else if (a === "down") A_.idx = Math.min(n - 1, A_.idx + cols);
-  else if (a === "a") {
-    const c = A_.list[A_.idx];
-    toast("Pobieram grafikę…");
-    const r = await api().art_choose(GO.id, A_.kind, c.url);
-    if (!r.ok) return toast(r.reason);
-    const g = S.games.find((x) => x.id === GO.id);
-    if (g) g[A_.kind] = r.url;
-    if (A_.kind === "logo" && g) g.art_logo = 1;
-    toast({ box: "Okładka zmieniona.", snap: "Zrzut zmieniony.", logo: "Logo gry zmienione." }[A_.kind]);
-    schedulePreview();
-    return goPage("main");
-  }
-  renderArtPicker();
 }
 
 /* ───────────── kolejność padów ───────────── */
@@ -923,7 +833,7 @@ async function fbInput(a) {
 
 
 /* ───────────── opcje systemu (przytrzymane A na logo) ───────────── */
-const SO = { es: "", d: null, page: "main", idx: 0, items: [], logos: null };
+const SO = { es: "", d: null, page: "main", idx: 0, items: [] };
 
 async function openSystemOptions() {
   if (S.platform === "android") return toast("Opcje gier i systemów są w EmuStart na komputerze z grami.");
@@ -950,12 +860,8 @@ function closeSo() {
 function soItems() {
   const d = SO.d;
   if (SO.page === "main") {
-    const items = [
-      { label: "Logo", value: d.logo_choice === "custom" ? "wybrane ręcznie" : d.logo_choice === "none" ? "bez logo (nazwa)" : d.logo ? "domyślne" : "brak", act: openLogoPicker },
-      { label: "Poświata logo", value: d.glow ? "tak" : "nie", act: async () => { await api().system_set(SO.es, { glow: !d.glow }); await reloadSo(); } },
-      { label: "Nazwa", value: d.display, act: () => oskOpen("Nazwa systemu", d.display, async (v) => { await api().system_set(SO.es, { name: v }); await reloadSo(); }) },
-    ];
-    if (d.display !== d.default_name) items.push({ label: "Przywróć nazwę", value: d.default_name, act: async () => { await api().system_set(SO.es, { name: "" }); await reloadSo(); } });
+    // logo i nazwa systemu — panel serwera (Konfiguracja → Systemy), takie same na wszystkich urządzeniach
+    const items = [];
     items.push({ label: "Emulator", value: d.emulator || "brak", act: () => d.options.length ? soPage("emus") : toast("Brak zainstalowanych emulatorów dla tego systemu.") });
     if (d.install.length) items.push({ label: "Pobierz emulator", value: d.install.map((s) => s.label).join(" + "), act: () => {
       closeSo();
@@ -976,11 +882,7 @@ function soPage(p) { SO.page = p; SO.idx = 0; renderSo(); }
 function renderSo() {
   const d = SO.d;
   $("soTitle").textContent = d.display;
-  $("soPage").textContent = { main: "Opcje systemu", emus: "Emulator systemu", logo: "Logo systemu" }[SO.page];
-  const isLogo = SO.page === "logo";
-  $("soItems").classList.toggle("hidden", isLogo);
-  $("soLogo").classList.toggle("hidden", !isLogo);
-  if (isLogo) return renderLogoPicker();
+  $("soPage").textContent = { main: "Opcje systemu", emus: "Emulator systemu" }[SO.page];
   SO.items = soItems();
   SO.idx = Math.min(SO.idx, SO.items.length - 1);
   $("soItems").innerHTML = SO.items.map((it, i) =>
@@ -989,66 +891,7 @@ function renderSo() {
   $("soItems").querySelector("li.sel")?.scrollIntoView({ block: "nearest" });
   setHints([["a", "Wybierz"], ["b", SO.page === "main" ? "Zamknij" : "Wstecz"]], $("soHints"));
 }
-async function openLogoPicker() {
-  SO.page = "logo";
-  SO.logos = { list: null, idx: 0 };
-  renderSo();
-  const list = await api().system_logo_candidates(SO.es);
-  if (SO.page !== "logo") return;
-  SO.logos.list = [{ id: "none", url: "", source: "bez logo", label: "pokaż nazwę" }, ...list];
-  const cur = SO.logos.list.findIndex((c) => c.url && SO.d.logo && SO.d.logo.split("?")[0].endsWith(c.url.split("/").pop()));
-  SO.logos.idx = cur > 0 ? cur : 1;
-  renderSo();
-}
-function renderLogoPicker() {
-  const L = SO.logos, grid = $("soLogoGrid");
-  $("soLogoInfo").textContent = L.list === null ? "Szukam logo…" : `${L.list.length - 1} propozycji`;
-  grid.innerHTML = (L.list || []).map((c, i) =>
-    `<figure class="${i === L.idx ? "sel" : ""}${c.id === "none" ? " none" : ""}" data-i="${i}">` +
-    (c.id === "none" ? `<div class="nologo">${esc(SO.d.display)}</div>`
-      : `<img src="${esc(c.url)}" alt="" referrerpolicy="no-referrer" data-i="${i}">`) +
-    `<figcaption>${esc(c.source)}<br><small>${esc(c.label)}</small></figcaption></figure>`).join("");
-  grid.querySelectorAll("figure").forEach((f) => f.addEventListener("click", () => { L.idx = +f.dataset.i; soInput("a"); }));
-  // logo, które się nie wczytało, usuwamy z listy (ukryty kafelek psuł nawigację:
-  // zerowa szerokość = nieskończona liczba kolumn, zaznaczenie na niewidocznym)
-  grid.querySelectorAll("img[data-i]").forEach((img) => img.addEventListener("error", () => {
-    const c = L.list[+img.dataset.i];
-    if (!c) return;
-    const cur = L.list[L.idx];
-    L.list = L.list.filter((x) => x !== c);
-    L.idx = Math.max(0, cur === c ? Math.min(L.idx, L.list.length - 1) : L.list.indexOf(cur));
-    renderLogoPicker();
-  }, { once: true }));
-  grid.querySelector("figure.sel")?.scrollIntoView({ block: "nearest" });
-  setHints([["a", "Ustaw"], ["b", "Wstecz"]], $("soHints"));
-}
-function gridCols(grid) {
-  const figs = [...grid.querySelectorAll("figure")].filter((f) => f.offsetWidth > 0);
-  if (figs.length < 2) return 1;
-  const top = figs[0].offsetTop;
-  const n = figs.findIndex((f) => f.offsetTop !== top);
-  return n > 0 ? n : figs.length;               // kafelki w pierwszym rzędzie
-}
 async function soInput(a) {
-  if (SO.page === "logo") {
-    const L = SO.logos, n = (L.list || []).length;
-    const cols = gridCols($("soLogoGrid"));
-    if (a === "b") return soPage("main");
-    if (!n) return;
-    if (a === "left") L.idx = Math.max(0, L.idx - 1);
-    else if (a === "right") L.idx = Math.min(n - 1, L.idx + 1);
-    else if (a === "up") L.idx = Math.max(0, L.idx - cols);
-    else if (a === "down") L.idx = Math.min(n - 1, L.idx + cols);
-    else if (a === "a") {
-      const c = L.list[L.idx];
-      const r = await api().system_logo_choose(SO.es, c.id);
-      if (!r.ok) return toast(r.reason || "Nie udało się ustawić logo.");
-      toast("Logo zmienione.");
-      $("carousel").innerHTML = "";            // karuzela narysuje się od nowa z nowym logo
-      return reloadSo("main");
-    }
-    return renderLogoPicker();
-  }
   const n = SO.items.length;
   if (a === "up") SO.idx = (SO.idx - 1 + n) % n;
   else if (a === "down") SO.idx = (SO.idx + 1) % n;

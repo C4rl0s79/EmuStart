@@ -287,12 +287,6 @@ def handle(handler) -> None:
             if not _games_ok(handler):
                 return _json(handler, {"error": "To konto nie pobiera gier z serwera."}, 403)
             return _find(handler)
-        if parts == ["media", "have"]:                 # grafiki gier, które serwer ma (artsync)
-            from emustart import artsync
-            q = urllib.parse.parse_qs(urllib.parse.urlsplit(handler.path).query)
-            have = artsync.server_have((q.get("es") or [""])[0])
-            return _json(handler, {"files": have} if have is not None else {"error": "nieznany system"},
-                         200 if have is not None else 404)
         if parts == ["savemgr", "catalog"]:
             return _savemgr_catalog(handler)
         if parts == ["profiles"]:
@@ -397,17 +391,8 @@ def handle_write(handler, method: str) -> None:
     _seen(handler)
     path = urllib.parse.unquote(urllib.parse.urlsplit(handler.path).path)
     parts = [p for p in path.split("/") if p][1:]
-    if method == "PUT" and parts in (["system"], ["media"]) and not _admin(handler):
-        n = int(handler.headers.get("Content-Length") or 0)
-        if n:
-            handler.rfile.read(min(n, 10 << 20))
-        return _json(handler, {"error": "Tylko urządzenie administratora."}, 403)
     if method == "PUT" and len(parts) == 2 and parts[0] == "profiles":
         return _profiles_put(handler, parts[1])
-    if method == "PUT" and parts == ["system"]:
-        return _system_put(handler)
-    if method == "PUT" and parts == ["media"]:
-        return _media_put(handler)
     if method == "PUT" and parts == ["savemgr", "copy"]:
         return _savemgr_copy(handler)
     if not parts or parts[0] != "nas":
@@ -435,61 +420,6 @@ def handle_write(handler, method: str) -> None:
             _json(handler, {"error": "błąd serwera (szczegóły w logu serwera)"}, 500)
         except OSError:
             pass
-
-
-def _media_put(handler) -> None:
-    """Grafika gry z EmuStart na Windows (artsync) — logo, okładka, zrzut."""
-    from emustart import artsync
-    n = int(handler.headers.get("Content-Length") or 0)
-    if n > artsync.MAX_FILE:
-        handler.close_connection = True
-        return _json(handler, {"error": "za duży plik"}, 413)
-    body = handler.rfile.read(n) if n else b""
-    q = urllib.parse.parse_qs(urllib.parse.urlsplit(handler.path).query)
-    code, msg = artsync.server_put((q.get("es") or [""])[0], (q.get("file") or [""])[0], body)
-    return _json(handler, {"ok": code == 200} if code == 200 else {"error": msg}, code)
-
-
-def _system_put(handler) -> None:
-    """Wygląd systemu z EmuStart na Windows: logo (plik w treści), poświata, nazwa —
-    serwer pokazuje je potem aplikacji na Androida tak jak na komputerze."""
-    from emustart import logos
-    n = int(handler.headers.get("Content-Length") or 0)
-    if n > 5 * 1024 * 1024:
-        handler.close_connection = True
-        return _json(handler, {"error": "za duże logo"}, 413)
-    body = handler.rfile.read(n) if n else b""
-    q = urllib.parse.parse_qs(urllib.parse.urlsplit(handler.path).query)
-    arg = lambda k: (q.get(k) or [""])[0]      # noqa: E731
-    es, logo, ext = arg("es"), arg("logo"), arg("ext").lower()
-    if not re.fullmatch(r"[a-z0-9_]{1,40}", es) or logo not in ("custom", "none", "default", "keep"):
-        return _json(handler, {"error": "zły system albo logo"}, 400)
-    if logo == "custom" and (ext not in ("svg", "png", "jpg", "webp") or not body):
-        return _json(handler, {"error": "zły plik logo"}, 400)
-    cfg = API._cfg
-    sc = cfg.setdefault("systems", {}).setdefault(es, {})
-    if logo == "custom":
-        logos._store_custom(es, body, ext)
-        sc["logo"] = "custom"
-    elif logo == "none":
-        sc["logo"] = "none"
-    elif logo == "default":
-        sc["logo"] = ""
-    if arg("glow") in ("0", "1"):
-        sc["logo_glow"] = arg("glow") == "1"
-    # emulator i rdzeń, których używa komputer — zalecane dla telefonów (stany zgodne)
-    if "emu" in q and arg("emu") in ("", "retroarch", "standalone"):
-        sc["emu_rec"] = arg("emu")
-        core = arg("core")
-        sc["core_rec"] = core if re.fullmatch(r"[a-z0-9_+.-]{0,40}", core) else ""
-    if "name" in q:
-        name = arg("name").strip()[:60]
-        if name:
-            sc["name"] = name
-        else:
-            sc.pop("name", None)
-    config.save(cfg)
-    return _json(handler, {"ok": True})
 
 
 def _nas(handler, method: str, parts: list) -> None:

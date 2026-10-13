@@ -22,7 +22,7 @@ import threading
 import time
 from pathlib import Path
 
-from emustart import (__version__, art, art_sources, bios, cache, catalog, ingame, installer, logos, sysinfo, metadata, pads, profiles, translations, uipad, config, emulators, launcher, library,
+from emustart import (__version__, art, bios, cache, catalog, ingame, installer, logos, sysinfo, metadata, pads, profiles, translations, uipad, config, emulators, launcher, library,
                       nasfs, netsrc, paths, systems, winutil)
 
 log = logging.getLogger("emustart.api")
@@ -51,8 +51,6 @@ class Api:
         # lokalne save'y i ustawienia profili → NAS/serwer (zaległe po grze bez połączenia,
         # pierwsze przejście na serwer); gra uruchomiona w tym czasie poczeka (post_busy)
         launcher.start_post(lambda: profiles.push_all(self._cfg), "zapisy profili")
-        from emustart import artsync
-        artsync.push_later(self._cfg)     # grafiki wybrane ręcznie w opcjach gry → serwer
         threading.Thread(target=self._profiles_bootstrap, daemon=True, name="profiles").start()
         from emustart import libsync
         if libsync.thin(self._cfg):            # biblioteka z serwera przy starcie (tylko zmienione systemy)
@@ -918,78 +916,26 @@ class Api:
         threading.Thread(target=run, daemon=True, name="meta").start()
         return {"ok": True}
 
-    def meta_save(self, game_id: int, edits: dict) -> dict:
-        metadata.set_edits(int(game_id), edits or {})
-        return {"ok": True}
-
-    def art_candidates(self, game_id: int, kind: str, query: str = "") -> list:
-        g = library.game(int(game_id))
-        if not g or kind not in ("box", "snap", "logo"):
-            return []
-        setname = Path(g["rel"]).stem if systems.info(g["es"])["kind"] == "arcade" else ""
-        return art_sources.candidates(self._cfg, g["es"], g["name"], kind, query or "", setname)
-
-    def art_choose(self, game_id: int, kind: str, url: str) -> dict:
-        g = library.game(int(game_id))
-        data = art_sources.fetch(url) if g else None
-        if not art_sources.is_image(data):
-            return {"ok": False, "reason": "Nie udało się pobrać tej grafiki."}
-        art.save(g["es"], g["name"], kind, data)
-        library.set_art(g["id"], kind, art.HAS)
-        from emustart import artsync
-        artsync.push_later(self._cfg, g["es"], g["name"], kind)   # wybór ręczny — także na serwerze
-        return {"ok": True, "url": art.media_url(g["es"], g["name"], kind)}   # z wersją pliku
-
-    def art_clear(self, game_id: int, kind: str) -> dict:
-        g = library.game(int(game_id))
-        if g:
-            art.media_path(g["es"], g["name"], kind).unlink(missing_ok=True)
-            library.set_art(g["id"], kind, art.MISSING)
-        return {"ok": True}
-
     # ── opcje systemu (przytrzymane A na logo) ──
     def system_options(self, es: str) -> dict:
         info = systems.info(es)
         sc = (self._cfg.get("systems") or {}).get(es) or {}
-        lg = logos.url_for(es, self._cfg)
         has_emu = bool(sc.get("exe") and Path(sc["exe"]).is_file())
-        return {"es": es, "display": sc.get("name") or info["display"],
-                "default_name": info["display"], "logo": lg["url"], "glow": lg["glow"],
-                "logo_choice": sc.get("logo", ""), "emulator": sc.get("label", "") if has_emu else "",
+        shown = next((s_["display"] for s_ in self.list_systems() if s_["es"] == es), info["display"])
+        return {"es": es, "display": shown, "emulator": sc.get("label", "") if has_emu else "",
                 "options": emulators.options_for(info, self._cfg.get("emu_root", "")),
                 "install": installer.plan_for(es, self._cfg.get("emu_root", "")) if not has_emu else []}
 
     def system_set(self, es: str, data: dict) -> dict:
+        """Na tym komputerze: emulator systemu i ukrycie systemu (logo i nazwa — panel serwera)."""
         sc = self._cfg.setdefault("systems", {}).setdefault(es, {})
-        if "name" in data:
-            name = str(data["name"] or "").strip()
-            if name and name != systems.info(es)["display"]:
-                sc["name"] = name
-            else:
-                sc.pop("name", None)
-        if "glow" in data:
-            sc["logo_glow"] = bool(data["glow"])
         if "enabled" in data:
             sc["enabled"] = bool(data["enabled"])
         if data.get("emulator"):
             o = data["emulator"]
             sc.update(label=o["label"], exe=o["exe"], args=o.get("args", ""), enabled=True)
         config.save(self._cfg)
-        if "glow" in data or "name" in data:
-            logos.push_later(self._cfg, [es])
         return {"ok": True}
-
-    def system_logo_candidates(self, es: str) -> list:
-        return logos.candidates(self._cfg, es)
-
-    def system_logo_choose(self, es: str, cid: str) -> dict:
-        ok = logos.choose(self._cfg, es, cid)
-        if ok:
-            sc = self._cfg["systems"][es]
-            sc.setdefault("logo_glow", False)
-            config.save(self._cfg)
-            logos.push_later(self._cfg, [es])
-        return {"ok": ok, **logos.url_for(es, self._cfg)} if ok else             {"ok": False, "reason": "Nie udało się pobrać tego logo."}
 
     # ── pobieranie emulatorów ──
     def install_missing(self) -> list:

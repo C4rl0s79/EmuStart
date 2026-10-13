@@ -47,6 +47,12 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   z NAS-a i „Graj teraz (z sieci)”, pomiar sieci, ustawienia „Tryb sieci”, „Próg LAN”, „Gry
   z serwera”, „Zapisy i profile przez serwer”, przenoszenie folderu profilu na NAS-ie,
   zgłaszanie folderów z grami z PC na serwer (foldery ustawia się w panelu serwera).
+- **Okładki, zrzuty, logo i opisy pojedynczych gier oraz logo, nazwy i zalecane emulatory
+  systemów ustawia się tylko w panelu serwera** — wszystkie urządzenia pokazują to samo.
+  Z PC zniknęły: wybór grafik i edycja opisu w opcjach gry (opis zostaje do podglądu),
+  logo, poświata i nazwa w opcjach systemu, wysyłanie grafik i wyglądu systemów z PC na
+  serwer (także zalecanego emulatora — teraz ustawia go panel). Serwer nie przyjmuje już
+  wyglądu ani grafik od urządzeń.
 - Serwer ma własny, mniejszy zestaw funkcji (emustart/srvapi.py) — nie uruchamia już
   obsługi padów, profili gracza i wysyłania zapisów, które są potrzebne tylko na PC.
 
@@ -62,6 +68,12 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   i opisów (wszystkie systemy albo jeden), z Wikipedią, zmniejszanie zapisanych grafik,
   baza LaunchBox i klucze źródeł (SteamGridDB, IGDB, TheGamesDB — zaszyfrowane na
   serwerze). Pobiera serwer; EmuStart na PC i telefony biorą grafiki i opisy od niego.
+- **Panel serwera → Grafiki i opisy → Gra**: wyszukanie gry, okładka, zrzut i logo
+  (propozycje z libretro, SteamGridDB, IGDB, TheGamesDB albo wyszukanie pod inną nazwą,
+  usunięcie), opis i dane gry (tytuł, producent, wydawca, rok, gatunek, gracze) z ręczną
+  poprawką, przywróceniem danych pobranych i pobraniem opisu z sieci.
+- **Panel serwera → Konfiguracja → Systemy**: logo (propozycje, bez logo), nazwa,
+  poświata, widoczność na urządzeniach, zalecany emulator i rdzeń RetroArcha.
 - **Panel serwera → konta: pliki i kopie zapasowe.** „Pliki i kopie” przy koncie pokazuje,
   co jest w profilu (zapisy, stany gry, ustawienia — liczba plików, rozmiar, ostatnia
   zmiana, ostatnio zmienione pliki). Kopia konta to jeden ZIP (profil + wpis konta z hasłem)

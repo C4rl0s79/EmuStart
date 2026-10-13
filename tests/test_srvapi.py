@@ -51,3 +51,53 @@ def test_pc_refresh_needs_server(tmp_path):
         time.sleep(0.02)
     assert not a._scan["result"]["ok"] and "zaloguj" in a._scan["result"]["reason"]
     assert library.systems_summary() == []
+
+
+def test_server_edits_game_art_meta_and_system_look(tmp_path, monkeypatch):
+    """Panel serwera: grafiki i opis jednej gry, logo/nazwa systemu — urządzenia biorą je
+    z serwera (wcześniej ustawiało się je na PC)."""
+    from emustart import art_sources, metadata, scanner
+    roms = tmp_path / "roms"
+    _write(roms / "snes" / "Super Mario World (USA).sfc")
+    _write(roms / "snes" / "Zelda 100% (USA).sfc")
+    scanner.scan_system("snes", roms / "snes")
+    s = srvapi.ServerApi(start_background=False)
+    assert [g["name"] for g in s.games_search("mario")] == ["Super Mario World (USA)"]
+    assert [g["name"] for g in s.games_search("100%")] == ["Zelda 100% (USA)"]   # % dosłownie
+    assert s.games_search("_") == []                                        # _ dosłownie, nie „dowolny znak”
+    gid = s.games_search("mario", "snes")[0]["id"]
+    png = b"\x89PNG\r\n\x1a\n" + b"0" * 100
+    monkeypatch.setattr(art_sources, "fetch", lambda url, **k: png)
+    assert s.art_choose(gid, "box", "https://x/box.png")["ok"]
+    e = s.game_edit(gid)
+    assert e["ok"] and e["box"].startswith("/media/snes/") and not e["snap"]
+    assert s.art_clear(gid, "box")["ok"] and not s.game_edit(gid)["box"]
+    assert not s.art_choose(gid, "zle", "https://x")["ok"]
+    assert s.meta_save(gid, {"title": "Mario", "description": "Opis", "hack": "x"})["ok"]
+    assert metadata.get(gid)["_edits"] == {"title": "Mario", "description": "Opis"}
+    assert s.system_set("snes", {"name": "Super Nintendo", "glow": True, "enabled": False})["ok"]
+    look = {x["es"]: x for x in s.systems_look()}["snes"]
+    assert look["display"] == "Super Nintendo" and look["glow"] and not look["enabled"]
+    assert s.system_set("snes", {"name": ""})["ok"]                          # pusta — domyślna nazwa
+    assert {x["es"]: x for x in s.systems_look()}["snes"]["display"] == look["default_name"]
+    assert not s.system_set("nieznany", {"name": "x"})["ok"]
+    assert s.system_logo_choose("snes", "none")["url"] == ""                  # bez logo
+
+
+def test_recommended_emulator_set_in_panel(tmp_path):
+    """Zalecany emulator i rdzeń systemu ustawia panel serwera (wcześniej wysyłał je PC)."""
+    from emustart import libsync, remote, scanner
+    _write(tmp_path / "roms" / "snes" / "A (USA).sfc")
+    scanner.scan_system("snes", tmp_path / "roms" / "snes")
+    s = srvapi.ServerApi(start_background=False)
+    assert s.system_set("snes", {"emu_rec": "retroarch", "core_rec": "bsnes"})["ok"]
+    assert not s.system_set("snes", {"emu_rec": "inny"})["ok"]
+    assert not s.system_set("snes", {"core_rec": "../x"})["ok"]
+    look = {x["es"]: x for x in s.systems_look()}["snes"]
+    assert look["emu_rec"] == "retroarch" and look["core_rec"] == "bsnes" and look["core_default"]
+    remote.API = s
+    try:
+        rec = {x["es"]: x for x in libsync.server_systems()}["snes"]
+        assert rec["emu_rec"] == "retroarch" and rec["core"] == "bsnes"
+    finally:
+        remote.API = None

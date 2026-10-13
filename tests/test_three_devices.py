@@ -297,61 +297,6 @@ def test_pc_logs_in_with_qr_link_and_logs_out(srv, monkeypatch):
     assert {d["id"]: d for d in devices.listing()}[did]["revoked"]
 
 
-def test_pc_pushes_missing_game_art_to_server(srv, tmp_path, monkeypatch):
-    from emustart import art, artsync, library
-    host, port, _nas = srv
-    pc_key, _, _ = _pair(srv, "Komputer", "pc")
-    monkeypatch.setattr(artsync, "SERVER_MEDIA", tmp_path / "serwer-media")
-    with library.db() as c:
-        for name in ("Gra (USA)", "Inna (Europe)"):
-            c.execute("INSERT INTO games(es, rel, name, title, tags, files, size, seen) "
-                      "VALUES('snes', ?, ?, ?, '', '[]', 0, 0)", (name + ".sfc", name, name))
-    png = b"\x89PNG\r\n\x1a\n" + b"x" * 50
-    pc = paths.MEDIA / "snes"
-    pc.mkdir(parents=True)
-    (pc / "Gra (USA).logo.png").write_bytes(png)
-    (pc / "Gra (USA).box.png").write_bytes(png)
-    (pc / "Nieznana (USA).logo.png").write_bytes(png)             # serwer nie ma takiej gry
-    srvd = tmp_path / "serwer-media" / "snes"
-    srvd.mkdir(parents=True)
-    (srvd / "Gra (USA).box.png").write_bytes(b"\x89PNG\r\n\x1a\nwlasna-serwera")
-    from _srv import tls_server
-    url, fp = tls_server(monkeypatch)
-    cfg = {"server_url": url, "server_fp": fp, "server_key": pc_key}
-    assert artsync.push_missing(cfg) == 1                           # tylko brakujące logo
-    assert (srvd / "Gra (USA).logo.png").read_bytes() == png
-    assert (srvd / "Gra (USA).box.png").read_bytes().endswith(b"wlasna-serwera")   # okładka serwera zostaje
-    gid = library.db().execute("SELECT id FROM games WHERE name='Gra (USA)'").fetchone()[0]
-    assert library.game(gid)["art_logo"] == art.HAS
-    assert artsync.push_missing(cfg) == 0                           # drugi raz nic
-    # telefon dostaje logo w liście gier (grafiki przez serwer)
-    assert artsync.server_put("snes", "../zle.logo.png", png)[0] == 400
-    assert artsync.server_put("snes", "Gra (USA).logo.png", b"nie png")[0] == 400
-    webp = b"RIFF\x10\x00\x00\x00WEBPVP8 " + b"x" * 20                # logo WebP zapisane jako .png
-    assert artsync.server_put("snes", "Gra (USA).box.png", webp)[0] == 200
-
-
-def test_pc_core_becomes_server_recommendation(srv, monkeypatch):
-    from emustart import logos
-    host, port, _nas = srv
-    pc_key, _, _ = _pair(srv, "Komputer", "pc")
-    monkeypatch.setattr(remote.API, "_cfg", {"server_token": MASTER})
-    monkeypatch.setattr("emustart.config.save", lambda c: None)
-    st, _ = _req(srv, "PUT", "/v1/system?es=snes&logo=keep&glow=0&emu=retroarch&core=bsnes", pc_key, body=b"")
-    assert st == 200
-    sc = remote.API._cfg["systems"]["snes"]
-    assert sc["emu_rec"] == "retroarch" and sc["core_rec"] == "bsnes"
-    st, _ = _req(srv, "PUT", "/v1/system?es=ps2&logo=keep&emu=standalone&core=", pc_key, body=b"")
-    assert remote.API._cfg["systems"]["ps2"]["emu_rec"] == "standalone"
-    # komputer: rodzina i rdzeń z ustawień systemu
-    cfg = {"systems": {"snes": {"exe": r"D:\emu\RetroArch\retroarch.exe",
-                                "args": r'-L "D:\emu\RetroArch\cores\bsnes_libretro.dll" -f'},
-                       "ps2": {"exe": r"D:\emu\PCSX2\pcsx2-qt.exe", "args": "-nogui"}}}
-    assert logos._system_emu(cfg, "snes") == ("retroarch", "bsnes")
-    assert logos._system_emu(cfg, "ps2") == ("standalone", "")
-    assert logos._system_emu(cfg, "nes") == ("", "")
-
-
 def test_game_list_in_pages_and_gzip(srv, monkeypatch):
     """Duży system (FBA): lista stronami z jednego liczenia, duże odpowiedzi gzip."""
     import gzip

@@ -550,6 +550,30 @@ def backup_settings(api, args: dict) -> dict:
     return {"ok": True, "auto": api._cfg.get("backup_auto") is not False, "keep": api._cfg["backup_keep"]}
 
 
+# ── jedna gra: grafiki i opis; wygląd systemów ──
+def _gid(args: dict) -> int:
+    try:
+        return int(args.get("id"))
+    except (TypeError, ValueError):
+        return 0
+
+
+GAME_ACTIONS = {
+    "games_search": lambda api, a: {"ok": True, "games": api.games_search(str(a.get("q", "")), str(a.get("es", "")))},
+    "game_edit": lambda api, a: api.game_edit(_gid(a)),
+    "game_meta_fetch": lambda api, a: api.meta_fetch(_gid(a), bool(a.get("full"))),
+    "game_meta_save": lambda api, a: api.meta_save(_gid(a), a.get("edits") if isinstance(a.get("edits"), dict) else {}),
+    "game_art_candidates": lambda api, a: {"ok": True, "list": api.art_candidates(_gid(a), str(a.get("kind", "")),
+                                                                                  str(a.get("q", "")))},
+    "game_art_choose": lambda api, a: api.art_choose(_gid(a), str(a.get("kind", "")), str(a.get("url", ""))),
+    "game_art_clear": lambda api, a: api.art_clear(_gid(a), str(a.get("kind", ""))),
+    "systems_look": lambda api, a: {"ok": True, "systems": api.systems_look()},
+    "system_set": lambda api, a: api.system_set(str(a.get("es", "")), {k: a[k] for k in ("name", "glow", "enabled",
+                                                                                         "emu_rec", "core_rec") if k in a}),
+    "system_logo_candidates": lambda api, a: {"ok": True, "list": api.system_logo_candidates(str(a.get("es", "")))},
+    "system_logo_choose": lambda api, a: api.system_logo_choose(str(a.get("es", "")), str(a.get("id", ""))),
+}
+ACTIONS_ARGS.update(GAME_ACTIONS)
 ACTIONS_ARGS.update({"config_set": config_set, "art_start": art_start, "art_keys_set": art_keys_set,
                      "account_files": account_files, "account_backup": account_backup,
                      "account_restore": account_restore, "backup_settings": backup_settings})
