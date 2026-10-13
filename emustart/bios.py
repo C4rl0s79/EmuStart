@@ -10,6 +10,7 @@ nadpisujemy.
 from __future__ import annotations
 
 import logging
+import time
 import re
 import shutil
 from pathlib import Path
@@ -39,6 +40,12 @@ def firmware(ra_root: Path, core: str) -> list:
     return out
 
 
+# BIOS-y, których serwer nie ma: rdzeń wymienia często kilkanaście opcjonalnych plików — bez
+# tego każde uruchomienie gry pytało serwer o każdy z nich, zanim cokolwiek się pokazało
+_absent: dict = {}
+MISS_TTL = 1800
+
+
 def sync(cfg: dict, ra_root: Path, core: str, extra: tuple = ()) -> list:
     """Pobiera z serwera EmuStart brakujące BIOS-y rdzenia (i pliki z `extra`) do folderu
     system RetroArcha (BIOS-y ustawia się w panelu serwera). Zwraca listę pobranych."""
@@ -47,13 +54,16 @@ def sync(cfg: dict, ra_root: Path, core: str, extra: tuple = ()) -> list:
         return []
     dst_root = installer.ra_system_dir(ra_root)
     copied = []
+    now = time.monotonic()
     for rel in list(firmware(ra_root, core)) + list(extra):
         dst = dst_root / rel
-        if dst.exists():
-            continue
+        if dst.exists() or now - _absent.get(rel, -MISS_TTL) < MISS_TTL:
+            continue                     # jest albo serwer niedawno go nie miał (bez pytania przy każdej grze)
         try:
             if libsync.bios_from_server(cfg, rel, dst):
                 copied.append(rel)
+            else:
+                _absent[rel] = now
         except OSError as ex:
             log.warning("BIOS %s: %s", rel, ex)
     if copied:

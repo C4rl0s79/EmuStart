@@ -609,13 +609,9 @@ async function togglePin() {
 let launchPoll, lastNotice = "";
 async function launch(state = "", takeover = false, configure = false) {
   const g = S.games[S.gameIdx];
-  if (g.vid === undefined) setVariant(g, await api().game_detail(g.id));   // A przed wczytaniem podglądu
-  const r = configure ? await api().configure_emulator(playId(g)) : await api().launch(playId(g), state, takeover);
-  if (r.need_install) return askInstallForGame(r.need_install);
-  if (r.profile_pin) { toast(r.reason, 5000); return openProfiles(true); }
-  if (!r.ok) return toast(r.reason);
-  if (r.android) return toast(`${r.label}: zmień ustawienia i wróć do EmuStart. Ustawienia telefonu są osobne od komputera.`, 6000);
-  if (r.warning) toast(r.warning, 7000);
+  if (S.modal === "launch") return;
+  // okno od razu po A — sprawdzenie konta, BIOS-y i lista plików z serwera trwają chwilę,
+  // a wcześniej przez ten czas nic się nie działo
   S.modal = "launch";
   $("launch").classList.remove("hidden");
   $("lSystem").textContent = "";
@@ -625,6 +621,18 @@ async function launch(state = "", takeover = false, configure = false) {
   $("lMsg").textContent = "";
   $("lMsg").className = "lmsg";
   $("lHints").innerHTML = "";
+  const hide = () => { S.modal = null; $("launch").classList.add("hidden"); };
+  let r;
+  try {
+    if (g.vid === undefined) setVariant(g, await api().game_detail(g.id));   // A przed wczytaniem podglądu
+    r = configure ? await api().configure_emulator(playId(g)) : await api().launch(playId(g), state, takeover);
+  } catch (e) { hide(); throw e; }
+  if (!r.ok || r.android) hide();
+  if (r.need_install) return askInstallForGame(r.need_install);
+  if (r.profile_pin) { toast(r.reason, 5000); return openProfiles(true); }
+  if (!r.ok) return toast(r.reason);
+  if (r.android) return toast(`${r.label}: zmień ustawienia i wróć do EmuStart. Ustawienia telefonu są osobne od komputera.`, 6000);
+  if (r.warning) toast(r.warning, 7000);
   clearInterval(launchPoll);
   launchPoll = setInterval(updateLaunch, 250);
 }
@@ -647,7 +655,7 @@ async function updateLaunch() {
     cancelled: "Pobieranie przerwane",
   }[st.phase] || "";
   $("lHead").textContent = head;
-  const showProg = p && (st.phase === "downloading" || (st.phase === "running" && st.copying));
+  const showProg = p && (st.phase === "downloading" || st.phase === "extracting" || (st.phase === "running" && st.copying));
   $("lProgress").classList.toggle("hidden", !showProg);
   if (showProg) {
     const pct = p.total ? Math.min(100, (p.done / p.total) * 100) : 100;
@@ -665,7 +673,7 @@ async function updateLaunch() {
   if (st.phase === "running") msg.textContent = !st.copying ? "Miłej gry!"
     : "Gra działa w trakcie pobierania — brakujące fragmenty dociągane na bieżąco.";
   else if (st.phase === "downloading" && st.mode === "remote") msg.textContent = "Następnym razem gra uruchomi się od razu z dysku lokalnego.";
-  else msg.textContent = st.message || "";
+  else msg.textContent = st.message && st.message !== head ? st.message : "";   // bez powtórzenia nagłówka
 
   const hints = [];
   if (st.phase === "downloading") {

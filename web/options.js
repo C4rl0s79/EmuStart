@@ -225,7 +225,7 @@ function goptItems() {
   return [];
 }
 /* ── menedżer zapisów: stany z komputera i telefonu, kopiowanie między nimi ── */
-const SM_PLAT = { windows: "Komputer", android: "Telefon" };
+const SM_PLAT = { windows: "Komputer", android: "Telefon", shared: "Wszystkie urządzenia" };
 async function openSaveManager() {
   GO.sm = null;
   goPage("saves");

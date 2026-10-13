@@ -552,9 +552,11 @@ class Api:
         if self._session and self._session.phase in ("preparing", "downloading",
                                                      "extracting", "running"):
             return {"ok": False, "reason": "Inna gra jest właśnie uruchamiana."}
+        t0 = time.monotonic()
         block = self._pin_block(self._profile)
         if block:
             return {**block, "profile_pin": True}
+        t_pin = time.monotonic() - t0
         g = library.game(int(game_id))
         if g:
             emu = self._effective_emu(g)
@@ -602,6 +604,9 @@ class Api:
                                          ui=self if self._window else None,
                                          start_state=state or "", takeover=bool(takeover))
         self._session.start()
+        pre = time.monotonic() - t0
+        if pre > 0.5:                        # przed oknem postępu — co tu trwa długo
+            log.info("przed startem sesji: %.1f s (konto profilu %.1f s)", pre, t_pin)
         return {"ok": True, "warning": warning}
 
     def configure_emulator(self, game_id: int) -> dict:

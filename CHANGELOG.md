@@ -177,6 +177,12 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   uruchamianie gier tylko z serwera, kilka urządzeń z jednym serwerem — bez SMB.
 
 ### Naprawione
+- Uruchamianie gry: okno „Przygotowuję…” pokazuje się od razu po A (wcześniej dopiero po
+  sprawdzeniu konta i pobraniu BIOS-ów — przez ten czas nic się nie działo); BIOS-y, których
+  serwer nie ma, nie są sprawdzane przy każdej grze (pamięć na 30 minut); w logu czas przed
+  startem sesji, gdy przekracza 0,5 s. Rozpakowywanie (np. paczek MSU-1) z paskiem postępu,
+  bez podwójnego „Rozpakowuję do pamięci…”.
+- Zapisy i stany: „undefined” zamiast „Wszystkie urządzenia” przy stanach wspólnych.
 - **Systemy rozpoznawane po każdej nazwie**: kod ES, ES-DE (`atarilynx`, `gc`, `genesis`,
   `wonderswan`), No-Intro / Redump, libretro i nazwy zwyczajowe (`Atari Lynx`, `PS1`, `Super
   Famicom`) — jedna tabela dla folderów z grami, motywów logo i paczki logo. Wcześniej m.in. folder

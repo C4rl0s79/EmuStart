@@ -308,10 +308,17 @@ class Session:
             members = [m for m in z.infolist() if not m.is_dir()]
             if not members:
                 raise LaunchError("Archiwum ZIP jest puste.")
-            for m in members:
+            # postęp w oknie (paczki MSU-1 mają setki MB ścieżek dźwiękowych)
+            self.prog = cache.Progress(sum(m.file_size for m in members), len(members))
+            for i, m in enumerate(members, 1):
+                self.prog.file_index = i
                 target = out_dir / Path(m.filename).name
                 with z.open(m) as src, winutil.open_temp_write(str(target)) as dst:
-                    shutil.copyfileobj(src, dst, 1024 * 1024)
+                    for buf in iter(lambda: src.read(1024 * 1024), b""):
+                        if getattr(self, "cancel", None) is not None and self.cancel.is_set():
+                            raise LaunchError("Przerwano.")
+                        dst.write(buf)
+                        self.prog.add(len(buf))
         files = [out_dir / Path(m.filename).name for m in members]
         pick = pick_rom(files, wanted)
         if not pick and len(files) > 1:
