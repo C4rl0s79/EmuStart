@@ -435,6 +435,7 @@ class Bridge(private val act: MainActivity) {
             loadGamesInBackground(es)
             return decorate(es, arr)
         }
+        var whole = false                            // cała lista przyszła od razu (≤ 100 gier)
         val head = try {
             val (total, top) = server.gamesPage(es, 0, 100)
             online = true
@@ -444,9 +445,9 @@ class Bridge(private val act: MainActivity) {
                 loadGamesInBackground(es)            // reszta listy w tle
             } else {
                 f.writeText(top.toString())         // mała lista — od razu cała
-                synchronized(gamesCache) { gamesCache[es] = gameUrls(top) }
+                whole = true
             }
-            top
+            gameUrls(top)
         } catch (e: Exception) {
             online = false
             gamesFailAt[es] = System.currentTimeMillis()
@@ -454,7 +455,8 @@ class Bridge(private val act: MainActivity) {
             loadGamesInBackground(es, delayMs = 15_000)
             JSONArray()
         }
-        return decorate(es, gameUrls(head))
+        if (whole) synchronized(gamesCache) { gamesCache[es] = head }
+        return decorate(es, head)
     }
 
     /** Cała lista gier porcjami po 1000 (każda z ponowieniem) → pamięć, plik i odświeżenie
@@ -1349,7 +1351,11 @@ class Bridge(private val act: MainActivity) {
     }
 
     // ── grafiki z serwera (przez /remote/ — ten sam „origin” co interfejs) ──
-    private fun remote(url: String): String = if (url.isBlank()) "" else "/remote$url"
+    /** Adres grafiki z serwera → adres w WebView (pobierany przez media()). Idempotentne:
+     *  ponowne wywołanie na już przerobionym adresie nic nie psuje (0.44.4: „/remote/remote/…”
+     *  — brak grafik w małych systemach, np. Sega CD, MSU-1). */
+    private fun remote(url: String): String =
+        if (url.isBlank() || url.startsWith("/remote/")) url else "/remote$url"
 
     fun media(uri: Uri): WebResourceResponse? {
         val rel = uri.encodedPath!!.removePrefix("/remote") + (uri.encodedQuery?.let { "?$it" } ?: "")
