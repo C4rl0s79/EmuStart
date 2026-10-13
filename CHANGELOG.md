@@ -101,6 +101,13 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   poprawką, przywróceniem danych pobranych i pobraniem opisu z sieci.
 - **Panel serwera → Konfiguracja → Systemy**: logo (propozycje, bez logo), nazwa,
   poświata, widoczność na urządzeniach, zalecany emulator i rdzeń RetroArcha.
+- **Klucz certyfikatu serwera zaszyfrowany na dysku** — `tls-key.pem` zaszyfrowany (AES-256)
+  losowym hasłem, a hasło chronione DPAPI tego komputera (`tls-key.pass`). Kopia folderu
+  serwera (udział sieciowy, kopia zapasowa, dysk) na innym komputerze nic nie daje. Klucz
+  serwera sprzed 0.45 szyfruje się sam przy starcie. **Przeniesienie serwera**: panel →
+  Konfiguracja → *Przygotuj przeniesienie* (hasło przeniesienia; plik `przeniesienie.emustart`
+  z kluczem certyfikatu i kluczami źródeł grafik), skopiowanie folderu, na nowym komputerze
+  panel prosi o hasło — certyfikat ten sam, urządzenia działają bez ponownego logowania.
 - **Grafiki gier w jednym pliku na system** (`media/<system>.media`, SQLite) zamiast osobnego
   pliku na każdą okładkę, zrzut i logo — na serwerze ok. 100 tys. plików mniej, serwer da się
   szybko skopiować i przenieść. Tak samo lokalna kopia na PC. Adresy grafik bez zmian. Stare

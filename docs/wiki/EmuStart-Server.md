@@ -37,6 +37,18 @@ gier są w jednym pliku na system (`server\media\<system>.media`) zamiast tysię
 plików — szybkie kopiowanie i kopie zapasowe. Stare pliki grafik serwer przenosi sam przy
 starcie (każdy usuwany dopiero po odczycie kontrolnym).
 
+### Przeniesienie serwera na inny komputer
+
+Klucz certyfikatu serwera jest zaszyfrowany i działa tylko na komputerze, na którym powstał
+(sama kopia folderu nic nie da — ochrona przed kopiami z udziału czy kopii zapasowych).
+1. Panel → Konfiguracja → **Przeniesienie serwera** → hasło przeniesienia (dwa razy) →
+   **Przygotuj przeniesienie**. W folderze serwera powstaje `przeniesienie.emustart`
+   (klucz certyfikatu i klucze źródeł grafik, zaszyfrowane tym hasłem).
+2. Zatrzymaj serwer i skopiuj cały folder programu na nowy komputer; tam `--install`.
+3. Panel na nowym komputerze pokazuje „Serwer przeniesiony” → podaj hasło przeniesienia →
+   **Odblokuj na tym komputerze**. Serwer uruchamia się ponownie z tym samym certyfikatem —
+   telefony i komputery działają dalej bez ponownego logowania.
+
 ### Przejście z EmuStart sprzed 0.45
 
 Do wersji 0.44 serwer był trybem zwykłego `EmuStart.exe` (`--server`). Aktualizacja z panelu

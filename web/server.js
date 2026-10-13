@@ -264,6 +264,27 @@ async function sysPick(es) {
 }
 $("bSysPickClose").addEventListener("click", () => { $("sysPick").hidden = true; });
 
+/* ── przeniesienie serwera (emustart/tls.py: export_move / import_move) ── */
+$("bMvPrep").addEventListener("click", async () => {
+  const pw = $("mvPw1").value;
+  if (pw !== $("mvPw2").value) return toast("Hasła się różnią.");
+  const why = pwPolicy(pw);
+  if (why) return toast(why);
+  const r = await admin("move_prepare", { password: pw }).catch(() => null);
+  toast(r?.ok ? "Przeniesienie przygotowane — skopiuj cały folder programu na nowy komputer i tam podaj to hasło."
+               : r?.reason || "Serwer nie odpowiada.", r?.ok);
+  $("mvPw1").value = $("mvPw2").value = "";
+  refresh();
+});
+$("bMvImp").addEventListener("click", async () => {
+  const r = await admin("move_import", { password: $("mvPw1").value }).catch(() => null);
+  $("mvPw1").value = "";
+  if (!r?.ok) return toast(r?.reason || "Serwer nie odpowiada.");
+  restarting = true;
+  toast("Klucz certyfikatu odblokowany na tym komputerze" + (r.art_keys ? ` (i ${r.art_keys} kluczy źródeł grafik)` : "") +
+        " — serwer uruchamia się ponownie.", true);
+});
+
 $("bKeys").addEventListener("click", async () => {
   const r = await admin("art_keys_set", { sgdb_key: $("kSgdb").value, igdb_client_id: $("kIgdbId").value,
                                           igdb_client_secret: $("kIgdbSecret").value, tgdb_key: $("kTgdb").value }).catch(() => null);
@@ -372,6 +393,17 @@ async function refresh() {
   ];
   $("info").innerHTML = rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("");
 
+  const tl = st.tls || {};
+  $("tlsAlert").hidden = tl.state !== "locked" || curTab !== "stan";
+  $("tlsInfo").innerHTML = tl.state === "locked"
+    ? `<span class="st bad">Klucz certyfikatu z innego komputera — podaj hasło przeniesienia${tl.move_ready ? "" : " (brak pliku przeniesienie.emustart w folderze serwera)"}.</span>`
+    : tl.state === "ok" ? `<span class="st ok">Klucz certyfikatu zaszyfrowany na tym komputerze.</span>` +
+      (tl.move_ready ? ' <span class="muted">· przeniesienie przygotowane (przeniesienie.emustart)</span>' : "")
+    : tl.state === "plain" ? '<span class="st bad">Klucz certyfikatu niezaszyfrowany (brak DPAPI).</span>'
+    : '<span class="muted">Brak certyfikatu.</span>';
+  $("bMvImp").hidden = tl.state !== "locked";
+  $("bMvPrep").hidden = tl.state === "locked";
+  $("mvPw2").hidden = tl.state === "locked";
   const sc = st.scan || {};
   // skan skończony (nowe foldery, scalenie platform) — lista systemów i stany folderów od nowa
   if (lastScanRunning && !sc.running && curTab === "konfig") { refreshSysLook(); refreshConfig(); }

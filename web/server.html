@@ -149,6 +149,11 @@
       <div class="row"><input id="kIgdbId" placeholder="IGDB — Client ID"><input id="kIgdbSecret" placeholder="IGDB — Client Secret"></div>
       <div class="row"><input id="kTgdb" placeholder="TheGamesDB — klucz API"><button id="bKeys" class="primary">Zapisz klucze</button></div></div>
   </section>
+  <section data-in="stan" id="tlsAlert" hidden style="border-color:var(--warn)">
+    <h2 style="color:var(--warn)">Serwer przeniesiony — port szyfrowany wyłączony</h2>
+    <div>Klucz certyfikatu pochodzi z innego komputera. Konfiguracja → <b>Przeniesienie serwera</b> → podaj
+      hasło przeniesienia. Do tego czasu telefony i komputery nie połączą się z serwerem.</div>
+  </section>
   <section data-in="stan">
     <h2>Akcje</h2>
     <div class="actions">
@@ -186,6 +191,20 @@
       <div class="muted" id="sysPickInfo"></div><div id="sysPickList" class="picks logos"></div>
       <div class="actions"><button id="bSysPickClose">Zamknij</button></div></div>
     <div id="sysMsg" style="min-height:1.4em"></div>
+  </section>
+  <section data-in="konfig">
+    <h2>Przeniesienie serwera</h2>
+    <div class="muted">Klucz certyfikatu serwera jest zaszyfrowany i działa tylko na tym komputerze — kopia
+      folderu serwera nigdzie indziej nic nie da. Żeby przenieść serwer: <b>Przygotuj przeniesienie</b>
+      (hasło przeniesienia), skopiuj cały folder programu na nowy komputer i tam podaj to hasło.
+      Certyfikat zostaje ten sam — telefony i komputery działają dalej bez ponownego logowania.</div>
+    <div id="tlsInfo" style="margin-top:8px"></div>
+    <div class="row actions" style="margin-top:8px">
+      <input id="mvPw1" type="password" autocomplete="new-password" placeholder="hasło przeniesienia">
+      <input id="mvPw2" type="password" autocomplete="new-password" placeholder="powtórz (przy przygotowaniu)">
+      <button id="bMvPrep">Przygotuj przeniesienie</button>
+      <button id="bMvImp" class="primary" hidden>Odblokuj na tym komputerze</button>
+    </div>
   </section>
   <section data-in="konfig">
     <h2>Folder profili (zapisy, stany, ustawienia graczy)</h2>

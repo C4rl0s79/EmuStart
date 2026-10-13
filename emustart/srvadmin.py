@@ -114,7 +114,50 @@ def status(api) -> dict:
         "clients": clients[:20], "transfers": transfers[:20], "sent_total": total,
         "scan": scan, "last_scan": _last_scan,
         "frozen": bool(getattr(sys, "frozen", False)),
+        "tls": _tls_state(),
     }
+
+
+def _tls_state() -> dict:
+    from emustart import tls
+    return {**tls.STATE, "move_ready": (paths.SERVER / tls.MOVE).is_file()}
+
+
+# ── przeniesienie serwera na inny komputer (klucz certyfikatu, klucze źródeł grafik) ──
+def move_prepare(api, args: dict) -> dict:
+    """Plik przeniesienia zaszyfrowany hasłem przeniesienia (folder serwera → nowy komputer)."""
+    from emustart import accounts, art_sources, tls
+    pw = str(args.get("password") or "")
+    why = accounts.policy(pw)
+    if why:
+        return {"ok": False, "reason": why}
+    keys = {k: v for k, v in art_sources.keys(api._cfg).items() if v}
+    try:
+        out = tls.export_move(paths.SERVER, pw, {"art_keys": keys})
+    except (OSError, ValueError) as ex:
+        return {"ok": False, "reason": str(ex)}
+    log.info("panel: przygotowano przeniesienie serwera (%s)", out.name)
+    return {"ok": True, "file": str(out)}
+
+
+def move_import(api, args: dict) -> dict:
+    """Nowy komputer: hasło przeniesienia → klucz certyfikatu i klucze źródeł grafik zaszyfrowane
+    tutaj; serwer uruchamia się ponownie (port szyfrowany z tym samym certyfikatem)."""
+    from emustart import art_sources, config, secure, tls
+    try:
+        extra = tls.import_move(paths.SERVER, str(args.get("password") or ""))
+    except ValueError as ex:
+        return {"ok": False, "reason": str(ex)}
+    keys = extra.get("art_keys") or {}
+    if keys:
+        cur = dict(api._cfg.get("art_keys") or {})
+        for name in art_sources.KEY_NAMES:
+            if keys.get(name):
+                cur[name] = secure.protect(keys[name])
+        api._cfg["art_keys"] = cur
+        config.save(api._cfg)
+    r = restart(api)
+    return {"ok": True, "restart": bool(r.get("ok")), "art_keys": len(keys)}
 
 
 def _addresses() -> list:
@@ -575,6 +618,7 @@ GAME_ACTIONS = {
     "system_merge": lambda api, a: api.system_merge(str(a.get("es", "")), str(a.get("into", ""))),
 }
 ACTIONS_ARGS.update(GAME_ACTIONS)
+ACTIONS_ARGS.update({"move_prepare": move_prepare, "move_import": move_import})
 ACTIONS_ARGS.update({"config_set": config_set, "art_start": art_start, "art_keys_set": art_keys_set,
                      "account_files": account_files, "account_backup": account_backup,
                      "account_restore": account_restore, "backup_settings": backup_settings})
