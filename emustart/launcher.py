@@ -502,6 +502,10 @@ class Session:
         except Exception:
             log.exception("RetroAchievements profilu")
         try:
+            adapter.first_run(self.cfg)               # bez kreatora pierwszego uruchomienia, z BIOS-em
+        except Exception:
+            log.exception("pierwsze uruchomienie emulatora")
+        try:
             from emustart import installer           # wymagane ustawienia z serwera (wygrywają z profilem)
             adapter.apply_policy(installer.policy(adapter.family))
         except Exception:

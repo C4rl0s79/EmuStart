@@ -204,6 +204,11 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   uruchamianie gier tylko z serwera, kilka urządzeń z jednym serwerem — bez SMB.
 
 ### Naprawione
+- **PCSX2 i DuckStation zainstalowane z serwera startowały z kreatorem pierwszego uruchomienia**
+  (i bez BIOS-u). Teraz przed grą: kreator i własne aktualizacje emulatora wyłączone
+  (aktualizuje serwer), BIOS z serwera w folderze emulatora (PCSX2: `pcsx2ios` z folderu
+  BIOS-ów serwera — serwer wypisuje BIOS-y z folderu, `GET /v1/bios?dir=`; DuckStation: BIOS-y
+  PS1). Przy okazji: zmiana pustej wartości w pliku ini (`BIOS = `) trafiała do następnej linii.
 - Skróty pada RetroArcha na PC: przycisk skrótów był ustawiony na Start (numer 6 w sterowniku
   XInput) zamiast Select / View (7) — Select + RB i Select + Y nie działały. Na telefonie bez zmian.
 - Menu w grze → *Włącz / wyłącz shader* działało na stałe zamiast do końca gry: RetroArch zapisywał

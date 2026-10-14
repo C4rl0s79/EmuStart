@@ -81,7 +81,7 @@ def ini_edit(path: Path, changes: dict) -> dict:
         if m:
             section = m.group(1)
             continue
-        m = re.match(r"^(\s*)([^=;#]+?)(\s*=\s*)(.*?)(\r?\n?)$", line)
+        m = re.match(r"^(\s*)([^=;#]+?)([ \t]*=[ \t]*)(.*?)(\r?\n?)$", line)
         if m and (section, m.group(2)) in changes:
             key = (section, m.group(2))
             new = changes[key]
@@ -130,7 +130,7 @@ def ini_set(path: Path, changes: dict) -> None:
             continue
         if section is not None and line.strip():
             last_in[section] = i
-        m = re.match(r"^(\s*)([^=;#]+?)(\s*=\s*)(.*?)(\r?\n?)$", line)
+        m = re.match(r"^(\s*)([^=;#]+?)([ \t]*=[ \t]*)(.*?)(\r?\n?)$", line)
         if m and (section, m.group(2)) in todo:
             new = todo.pop((section, m.group(2)))
             lines[i] = f"{m.group(1)}{m.group(2)}{m.group(3)}{new}{m.group(5) or chr(10)}"
@@ -159,7 +159,7 @@ def blank_secrets(text: str, rules: list) -> str:
         if m:
             cur = m.group(1)
         else:
-            m = re.match(r"^(\s*)([^=;#\[]+?)(\s*=\s*)(.*?)(\r?\n?)$", line)
+            m = re.match(r"^(\s*)([^=;#\[]+?)([ \t]*=[ \t]*)(.*?)(\r?\n?)$", line)
             if m and m.group(4) not in ("", '""') and any(
                     re.fullmatch(sr, cur or "") and re.fullmatch(kr, m.group(2)) for sr, kr in rules):
                 quote = '""' if m.group(4).startswith('"') else ""
@@ -272,6 +272,21 @@ class Adapter:
 
     def can_reset(self) -> bool:
         return False
+
+    def first_run(self, cfg: dict) -> None:
+        """Przed grą: emulator gotowy bez kreatora pierwszego uruchomienia (świeżo zainstalowany
+        z serwera) — BIOS-y z serwera, wyłączony kreator i własne aktualizacje (robi je serwer)."""
+
+    def _bios_from_server(self, cfg: dict, query: dict, dst: Path) -> list:
+        """BIOS-y z serwera ({"dir": …} / {"core": …}) do `dst` (bez podfolderów); nazwy plików."""
+        from emustart import libsync
+        out = []
+        for rel in libsync.bios_list(cfg, query):
+            name = rel.rsplit("/", 1)[-1]
+            target = dst / name
+            if target.is_file() or libsync.bios_from_server(cfg, rel, target):
+                out.append(name)
+        return out
 
     def reset_game(self) -> None:
         """Gra od początku bez zamykania emulatora."""
@@ -599,6 +614,18 @@ class DuckStation(Adapter):
     pause_key = "SPACE"
     state_glob = "*.sav"
 
+    def first_run(self, cfg: dict) -> None:
+        bios = self._bios_from_server(cfg, {"core": "swanstation"}, self.home / "bios")
+        ini = self._ini()
+        changes = {("Main", "SetupWizardIncomplete"): "false", ("AutoUpdater", "CheckAtStartup"): "false"}
+        if not ini.is_file():
+            # bez wersji ustawień DuckStation uznałby plik za stary i przywrócił domyślne (z kreatorem)
+            changes[("Main", "SettingsVersion")] = "3"
+            changes[("BIOS", "SearchDirectory")] = "bios"
+        ini_set(ini, changes)
+        if bios:
+            log.info("DuckStation: BIOS-y z serwera (%d), bez kreatora", len(bios))
+
     def policy_ini(self) -> Path:
         return self._ini()
 
@@ -676,6 +703,21 @@ class DuckStation(Adapter):
 class PCSX2(Adapter):
     family = "pcsx2"
     state_glob = "*.p2s"
+
+    def first_run(self, cfg: dict) -> None:
+        bios = self._bios_from_server(cfg, {"dir": "pcsx2/bios"}, self.home / "bios")
+        ini = self._ini()
+        changes = {("UI", "SetupWizardIncomplete"): "false", ("AutoUpdater", "CheckAtStartup"): "false"}
+        if not ini.is_file():
+            changes[("UI", "SettingsVersion")] = "1"       # inaczej PCSX2 przywróciłby domyślne
+            changes[("Folders", "Bios")] = "bios"
+        cur = ini_section(ini, "Filenames").get("BIOS", "") if ini.is_file() else ""
+        main = [b for b in bios if b.lower().endswith(".bin")]
+        if main and (not cur or not (self.home / "bios" / cur).is_file()):
+            changes[("Filenames", "BIOS")] = main[0]
+        ini_set(ini, changes)
+        if bios:
+            log.info("PCSX2: BIOS z serwera (%s), bez kreatora", ", ".join(main) or "—")
 
     def policy_ini(self) -> Path:
         return self._ini()

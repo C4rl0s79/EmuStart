@@ -336,3 +336,56 @@ def test_shader_toggle_from_emustart_menu_is_session_only(tmp_path, monkeypatch)
     ra.after_session()
     main = (home / "retroarch.cfg").read_text(encoding="utf-8")
     assert 'video_shader_enable = "true"' in main and 'video_vsync = "false"' in main
+
+
+def test_first_run_without_wizard_with_bios(tmp_path, monkeypatch):
+    """Świeżo zainstalowany PCSX2 / DuckStation: bez kreatora pierwszego uruchomienia i własnych
+    aktualizacji, BIOS z serwera do folderu emulatora."""
+    from emustart import ingame, libsync
+    server = {"pcsx2/bios/ps2-0230a-20080220.bin": b"PS2", "pcsx2/bios/ps2-0230a-20080220.nvm": b"N",
+              "scph5501.bin": b"PS1"}
+    monkeypatch.setattr(libsync, "bios_list", lambda cfg, q: [r for r in server if
+                                                             (r.startswith(q["dir"] + "/") if "dir" in q else "/" not in r)])
+
+    def get(cfg, rel, dst):
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        dst.write_bytes(server[rel])
+        return True
+    monkeypatch.setattr(libsync, "bios_from_server", get)
+    pc = tmp_path / "PCSX2"
+    pc.mkdir()
+    (pc / "portable.ini").write_text("", encoding="utf-8")
+    ingame.PCSX2(str(pc / "pcsx2-qt.exe")).first_run({})
+    ini = (pc / "inis" / "PCSX2.ini").read_text(encoding="utf-8")
+    assert "SetupWizardIncomplete = false" in ini and "SettingsVersion = 1" in ini
+    assert "BIOS = ps2-0230a-20080220.bin" in ini and "CheckAtStartup = false" in ini
+    assert (pc / "bios" / "ps2-0230a-20080220.bin").read_bytes() == b"PS2"
+    # plik po kreatorze (jak u gracza): kreator „niedokończony”, BIOS pusty
+    (pc / "inis" / "PCSX2.ini").write_text("[UI]\nSettingsVersion = 1\nSetupWizardIncomplete = true\n"
+                                            "[Filenames]\nBIOS = \n", encoding="utf-8")
+    ingame.PCSX2(str(pc / "pcsx2-qt.exe")).first_run({})
+    ini = (pc / "inis" / "PCSX2.ini").read_text(encoding="utf-8")
+    assert "SetupWizardIncomplete = false" in ini and "BIOS = ps2-0230a-20080220.bin" in ini
+
+    ds = tmp_path / "DuckStation"
+    ds.mkdir()
+    (ds / "portable.txt").write_text("", encoding="utf-8")
+    ingame.DuckStation(str(ds / "duckstation-qt-x64-ReleaseLTCG.exe")).first_run({})
+    s = (ds / "settings.ini").read_text(encoding="utf-8")
+    assert "SetupWizardIncomplete = false" in s and (ds / "bios" / "scph5501.bin").is_file()
+
+
+def test_server_lists_bios_folder(emu_server, tmp_path, monkeypatch):
+    import http.client
+    import json
+    bios = tmp_path / "bios"
+    (bios / "pcsx2" / "bios").mkdir(parents=True)
+    (bios / "pcsx2" / "bios" / "ps2-0230a-20080220.bin").write_bytes(b"PS2")
+    emu_server["bios_dir"] = str(bios)
+    host, port, _k = netsrc.endpoint({})
+    c = http.client.HTTPConnection(host, port, timeout=10)
+    c.request("GET", "/v1/bios?dir=pcsx2/bios", headers={"Authorization": "Bearer tok"})
+    assert json.loads(c.getresponse().read())["files"] == ["pcsx2/bios/ps2-0230a-20080220.bin"]
+    c = http.client.HTTPConnection(host, port, timeout=10)
+    c.request("GET", "/v1/bios?dir=../..", headers={"Authorization": "Bearer tok"})
+    assert c.getresponse().status == 400

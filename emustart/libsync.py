@@ -231,6 +231,19 @@ def bios_from_server(cfg: dict, rel: str, dst: Path) -> bool:
     return True
 
 
+def bios_list(cfg: dict, query: dict) -> list:
+    """BIOS-y, które serwer ma: {"core": rdzeń} albo {"dir": folder} → [ścieżki]."""
+    ep = netsrc.endpoint(cfg)
+    if not ep:
+        return []
+    try:
+        st, body, _rtt = netsrc._request(ep, "/v1/bios?" + urllib.parse.urlencode(query), 30)
+        return list(json.loads(body).get("files") or []) if st == 200 else []
+    except (OSError, ValueError) as ex:
+        log.info("BIOS-y z serwera: %s", ex)
+        return []
+
+
 def logo_for(es: str) -> dict | None:
     """Logo systemu z serwera ({url, glow}); własne logo (/media/_systems/…) pobiera się samo
     przy pierwszym wyświetleniu (fetch_media)."""

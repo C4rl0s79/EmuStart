@@ -919,6 +919,17 @@ def _bios_get(handler) -> None:
     Telefon dokłada je do RetroArcha przed grą, jak EmuStart na Windows (bios.sync)."""
     from emustart import bios
     q = urllib.parse.parse_qs(urllib.parse.urlsplit(handler.path).query)
+    folder = _bios_rel((q.get("dir") or [""])[0])
+    if folder:
+        # GET /v1/bios?dir=pcsx2/bios — pliki w folderze (emulatory samodzielne: PCSX2)
+        files: list = []
+        for d in bios_dirs(API._cfg):
+            try:
+                files += [f"{folder}/{f.name}" for f in sorted((d / folder).iterdir())
+                          if f.is_file() and _bios_rel(f.name) and f.stat().st_size <= 64 * 1024 * 1024]
+            except OSError:
+                continue
+        return _json(handler, {"files": list(dict.fromkeys(files))})
     core = (q.get("core") or [""])[0]
     if core:
         names = []
