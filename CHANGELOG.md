@@ -17,7 +17,7 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   RetroArchu na Androidzie; ocena „wyświetlania nad innymi aplikacjami” i usługi ułatwień
   dostępu dla pozostałych emulatorów na Androidzie.
 
-## [0.45.0] — w przygotowaniu
+## [0.45.0] — 2026-10-14
 
 ### Zmienione
 - **EmuStart i EmuStart Server to dwa osobne programy** — każdy z własnym exe, plikiem
