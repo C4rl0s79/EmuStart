@@ -122,6 +122,12 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
         private const val LOCK_BEAT_MS = 120_000L
         private const val LOCK_LEGACY = 900.0
 
+        /** Folder rdzenia RetroArcha (jak na serwerze) dla identyfikatora rdzenia („bsnes_libretro_android”). */
+        fun coreDirOf(core: String): String {
+            val c = core.removeSuffix("_libretro_android").removeSuffix("_libretro")
+            return CORE_DIR[c] ?: c
+        }
+
         /** Nazwy folderów rdzeni (RetroArch sortuje save'y wg nazwy rdzenia), gdy różnią się od identyfikatora. */
         private val CORE_DIR = mapOf(
             "mednafen_saturn" to "Beetle Saturn", "mednafen_psx_hw" to "Beetle PSX HW", "mednafen_psx" to "Beetle PSX",
@@ -513,6 +519,31 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
         own(profile, phone.values)
         if (n > 0) Log.i(tag, "zapisy z serwera: $n plików (${f.id}, $profile)")
         return ""
+    }
+
+    /** „Wczytaj zapis”: wybrany stan RetroArcha ze wspólnego folderu na serwerze (`rel` względem
+     *  profilu: states/shared/retroarch/<rdzeń>/<gra>.stateN) jako autozapis tej gry na telefonie —
+     *  RetroArch wczytuje go przy starcie (autowczytywanie jest zawsze włączone). Zwraca liczbę plików. */
+    fun placeAuto(profile: String, g: Game, rel: String): Int {
+        val f = byId("retroarch_states") ?: return 0
+        synchronized(lock) {
+            val inShared = rel.removePrefix("$SHARED_RA/")
+            val name = inShared.substringAfterLast('/')
+            val auto = name.replace(Regex("\\.state\\d*(\\.auto)?$", RegexOption.IGNORE_CASE), ".state.auto")
+            if (auto == name && !name.endsWith(".state.auto")) return 0
+            val dirs = phoneDirs(f, g)
+            val have = phoneFiles(f, g, dirs)[auto]
+            val autoRel = inShared.substringBeforeLast('/', "").let { if (it.isEmpty()) auto else "$it/$auto" }
+            val targets = if (have != null) listOf(have) else newTargets(f, g, dirs, autoRel)
+            var n = 0
+            for (t in targets) {
+                if (t.exists()) backupLocal(t, "przed-wczytaniem-stanu")
+                t.parentFile?.mkdirs()
+                if (server.nasGet("$profile/$rel", t)) n++
+            }
+            Log.i(tag, "stan do wczytania: $rel → ${targets.joinToString { it.absolutePath }}")
+            return n
+        }
     }
 
     /** Gdzie położyć zapis, którego w telefonie jeszcze nie ma. */

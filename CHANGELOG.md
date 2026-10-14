@@ -17,6 +17,21 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   RetroArchu na Androidzie; ocena „wyświetlania nad innymi aplikacjami” i usługi ułatwień
   dostępu dla pozostałych emulatorów na Androidzie.
 
+## [0.45.1] — 2026-10-14
+
+Zakres: „Wczytaj zapis” na telefonie (`web/options.js`, Android: `Bridge.kt`, `Saves.kt`),
+opis wspólnych stanów RetroArcha w katalogu serwera (`emustart/savemgr.py`), `ra_states` w
+`emustart/api.py`. Bez zmian: komputer (lista stanów jak w 0.45.0), lista gier, menu.
+
+### Poprawione
+- **Telefon: „Zapisy i stany” → „Stany RetroArcha (wszystkie urządzenia)” kończyło się
+  błędem** „Cannot read properties of null (reading 'states')” (od 0.45.0) — strona
+  „Wczytaj zapis” była tylko na komputerze. Teraz telefon też ją ma: pobiera z serwera
+  stany tej gry ze wszystkich urządzeń konta (wspólny folder, rdzeń wybrany na telefonie),
+  z urządzeniem, rodzajem zapisu i miniaturą; najnowszy jako „Kontynuuj”. Wybrany stan
+  telefon pobiera przed startem gry i podkłada jako autozapis RetroArcha (`.state.auto`),
+  który RetroArch wczytuje przy starcie — jak na komputerze.
+
 ## [0.45.0] — 2026-10-14
 
 ### Zmienione

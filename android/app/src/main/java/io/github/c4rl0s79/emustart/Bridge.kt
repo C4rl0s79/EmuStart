@@ -54,6 +54,7 @@ class Bridge(private val act: MainActivity) {
         var profile = ""
         var lockedBy = ""
         var emuId = ""
+        var startState = ""        // „Wczytaj zapis”: stan RetroArcha na serwerze (względem profilu)
     }
     @Volatile private var launch: Launch? = null
 
@@ -96,7 +97,8 @@ class Bridge(private val act: MainActivity) {
         "enroll_decide" -> server.postAuthed("/v1/enroll/decide", JSONObject().put("id", a.optString(0, ""))
             .put("allow", a.optBoolean(1)).put("games", a.optBoolean(2)))
         "rescan" -> { systemsCache = null; synchronized(gamesCache) { gamesCache.clear() }; JSONObject().put("ok", true) }
-        "launch" -> startLaunch(a.getInt(0), a.optBoolean(2, false))
+        "launch" -> startLaunch(a.getInt(0), a.optBoolean(2, false), a.optString(1, ""))
+        "ra_states" -> raStates(a.getInt(0))
         "launch_status" -> launchStatus()
         "launch_cancel" -> { launch?.downloader?.cancel?.set(true); null }
         "launch_dismiss" -> { val l = launch; if (l != null && l.phase in setOf("finished", "error", "cancelled")) launch = null; null }
@@ -970,7 +972,7 @@ class Bridge(private val act: MainActivity) {
     }
 
     // ── gra ──
-    private fun startLaunch(id: Int, takeover: Boolean = false): JSONObject {
+    private fun startLaunch(id: Int, takeover: Boolean = false, state: String = ""): JSONObject {
         val busy = launch?.phase.let { it == "preparing" || it == "downloading" }
         if (busy) return JSONObject().put("ok", false).put("reason", "Inna gra jest właśnie pobierana.")
         val g = try { server.game(id) } catch (e: Exception) {
@@ -987,6 +989,7 @@ class Bridge(private val act: MainActivity) {
         }
         pinBlock(prefs.profile)?.let { return it.put("profile_pin", true) }
         val l = Launch(g, s)
+        l.startState = if (state.startsWith("ra:")) state.removePrefix("ra:") else ""
         launch = l
         pool.execute { runLaunch(l, emu, takeover) }
         return JSONObject().put("ok", true)
@@ -1037,6 +1040,12 @@ class Bridge(private val act: MainActivity) {
                     val msg = saves.before(prefs.profile, emu, sg, takeover)
                     l.message = msg
                     if (msg.isNotEmpty()) Log.i(tag, msg)
+                    // „Wczytaj zapis”: wybrany stan (z dowolnego urządzenia) jako autozapis — RetroArch go wczyta
+                    if (l.startState.isNotEmpty() && Emulators.baseId(emu) == "retroarch") {
+                        l.message = "Wczytuję wybrany stan…"
+                        if (saves.placeAuto(prefs.profile, sg, l.startState) == 0)
+                            l.message = "Nie udało się pobrać wybranego stanu — gra wystartuje od najnowszego."
+                    }
                 } catch (e: Saves.Locked) {
                     l.phase = "error"; l.lockedBy = e.host
                     l.message = "Profil „${prefs.profile}” gra teraz na: ${e.host}. Jeśli tam już nie grasz, " +
@@ -1351,6 +1360,58 @@ class Bridge(private val act: MainActivity) {
     }
 
     /** Menedżer zapisów: stany tej gry z komputera i telefonu, wspólne zapisy w grze. */
+    /** „Wczytaj zapis” na telefonie: stany RetroArcha tej gry ze wszystkich urządzeń konta
+     *  (wspólny folder na serwerze, rdzeń wybrany na tym telefonie), najnowsze pierwsze, z miniaturami. */
+    private fun raStates(id: Int): JSONObject {
+        if (prefs.profile.isEmpty()) return JSONObject().put("ok", false)
+            .put("reason", "Wybierz profil gracza — stany należą do profilu.")
+        return try {
+            val g = server.game(id)
+            val s = sysByEs(g.optString("es")) ?: return JSONObject().put("ok", false).put("reason", "Nieznany system.")
+            val emu = chosenEmu(s)
+            if (Emulators.baseId(emu) != "retroarch")
+                return JSONObject().put("ok", true).put("states", JSONArray())
+                    .put("note", "Wspólne stany ma tylko RetroArch — ten system gra w innym emulatorze.")
+            val core = Emulators.retroCore(s.optString("plat"), Emulators.coreOf(emu).ifEmpty { s.optString("core") })
+            val coreDir = Saves.normCore(Saves.coreDirOf(core))
+            val file = g.optString("file")
+            val stems = listOf(File(file).nameWithoutExtension, g.optString("name")).filter { it.isNotEmpty() }
+            val cat = server.saveCatalog(mapOf("profile" to prefs.profile, "es" to g.optString("es"),
+                                               "name" to g.optString("name"), "stems" to stems.joinToString("|")))
+            val all = cat.optJSONArray("states") ?: JSONArray()
+            val out = JSONArray()
+            var thumbs = 0
+            val list = (0 until all.length()).map { all.getJSONObject(it) }
+                .filter { it.optString("kind") == "ra" && it.optString("platform") == "shared"
+                          && Saves.normCore(it.optString("core")) == coreDir }
+                .sortedWith(compareBy<JSONObject>({ it.optString("slot") != "auto" }, { -it.optDouble("mtime") }))
+            for (st in list) {
+                val auto = st.optString("slot") == "auto"
+                val who = st.optString("device").let { d ->
+                    if (d.isEmpty()) "" else (if (st.optString("device_platform") == "telefon") "telefon " else "") + d }
+                val kind = if (st.optString("state_kind") == "auto") "autozapis przy wyjściu" else ""
+                val o = JSONObject().put("path", "ra:" + st.optString("rel")).put("name", st.optString("name"))
+                    .put("time", st.optDouble("mtime"))
+                    .put("label", if (auto) "Kontynuuj — najnowszy stan" else "Stan #${st.optString("slot").toIntOrNull() ?: 0}")
+                    .put("continue", auto)
+                    .put("detail", listOf(who, kind).filter { it.isNotEmpty() }.joinToString(" · "))
+                val shot = st.optString("shot")
+                if (shot.isNotEmpty() && thumbs < 24) {
+                    try {
+                        server.nasRead("${prefs.profile}/$shot")?.takeIf { it.size < 600_000 }?.let {
+                            o.put("thumb", "data:image/png;base64," + android.util.Base64.encodeToString(it, android.util.Base64.NO_WRAP))
+                            thumbs++
+                        }
+                    } catch (e: Exception) { Log.w(tag, "miniatura stanu: $e") }
+                }
+                out.put(o)
+            }
+            JSONObject().put("ok", true).put("states", out)
+        } catch (e: Exception) {
+            JSONObject().put("ok", false).put("reason", explain(e))
+        }
+    }
+
     private fun saveManager(id: Int): JSONObject {
         if (prefs.profile.isEmpty()) return JSONObject().put("ok", false)
             .put("reason", "Wybierz profil gracza — zapisy i stany należą do profilu.")

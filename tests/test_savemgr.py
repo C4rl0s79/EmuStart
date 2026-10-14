@@ -214,3 +214,22 @@ def test_retroarch_learns_state_prefix():
     assert ra.prefix_of("Chrono_Trigger_(USA)_(MSU1).state1") == "Chrono_Trigger_(USA)_(MSU1).state"
     assert ra.prefix_of("Gra.state.auto") == "Gra.state"
     assert ra.prefix_of("Gra.state1.png") == ""
+
+
+def test_shared_ra_states_carry_device_from_index(tmp_path):
+    """Wspólne stany RetroArcha z opisem z indeksu serwera — lista „Wczytaj zapis” na telefonie."""
+    root = tmp_path / "nas"
+    shared = root / "Jezus" / "states" / "shared" / "retroarch" / "bsnes"
+    _w(shared / "Chrono Trigger (USA).state3")
+    _w(shared / "Chrono Trigger (USA).state3.png", b"PNG")
+    _w(shared / "Chrono Trigger (USA).state.auto")
+    (shared / ".states.json").write_text(json.dumps({
+        "Chrono Trigger (USA).state3": {"device": "PC-SALON", "platform": "komputer", "kind": "manual"},
+        "Chrono Trigger (USA).state.auto": {"device": "Pixel", "platform": "telefon", "kind": "auto"}}))
+    fs = nasfs.DirFs(root)
+    cat = savemgr.catalog(fs, "Jezus", "snes", "Chrono Trigger (USA)", ["Chrono Trigger (USA)"])
+    sh = {s["name"]: s for s in cat["states"] if s["platform"] == "shared"}
+    st3, auto = sh["Chrono Trigger (USA).state3"], sh["Chrono Trigger (USA).state.auto"]
+    assert (st3["core"], st3["slot"], st3["device"], st3["state_kind"]) == ("bsnes", "3", "PC-SALON", "manual")
+    assert st3["shot"].endswith("Chrono Trigger (USA).state3.png")
+    assert (auto["slot"], auto["device"], auto["device_platform"]) == ("auto", "Pixel", "telefon")

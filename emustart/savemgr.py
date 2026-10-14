@@ -156,9 +156,22 @@ def catalog(fs, nas: str, es: str, name: str, stems: list, serial: str = "",
                            "core": rel.split("/")[-2] if kind == "ra" and "/" in rel else ""})
         if kind == "ps2" and newest:
             latest_ver[(platform, emu)] = _version(fs, f"{nas}/{base}/{newest[0]}")
+    idx_cache: dict = {}
     for st in states:
         if st["kind"] == "ps2":
             st["version"] = _version(fs, f"{nas}/{st['rel']}")
+        elif st["platform"] == "shared" and st["core"]:
+            # opis stanu z indeksu serwera (emustart/rastates.py): urządzenie, rodzaj zapisu
+            folder = st["rel"].rsplit("/", 1)[0]
+            if folder not in idx_cache:
+                try:
+                    d = json.loads(fs.read(f"{nas}/{folder}/.states.json") or b"{}")
+                except (OSError, ValueError):
+                    d = {}
+                idx_cache[folder] = d if isinstance(d, dict) else {}
+            info = idx_cache[folder].get(st["name"]) or {}
+            st["device"], st["device_platform"] = info.get("device", ""), info.get("platform", "")
+            st["state_kind"] = info.get("kind", "")
         st["targets"] = _targets(st, latest_ver)
     states.sort(key=lambda s: -s["mtime"])
     return {"states": states, "saves": _saves(fs, nas, name, stems, plat),
