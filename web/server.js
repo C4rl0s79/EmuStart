@@ -1,5 +1,5 @@
 "use strict";
-/* Panel serwera EmuStart (server.html) — okno `EmuStart.exe --server-panel`.
+/* Panel serwera EmuStart (server.html) — okno `EmuStartServer.exe`.
    Woła POST /admin/<akcja> serwera na tym komputerze (emustart/srvadmin.py). */
 
 const $ = (id) => document.getElementById(id);
@@ -27,12 +27,403 @@ function ago(t) {
   const s = Date.now() / 1000 - t;
   return s < 5 ? "teraz" : s < 60 ? `${Math.floor(s)} s temu` : fmtDur(s) + " temu";
 }
-function msg(text, ok) {
-  $("msg").textContent = text || "";
-  $("msg").style.color = ok ? "var(--ok)" : "var(--warn)";
+/** Komunikat w dymku w rogu okna — widoczny bez względu na to, gdzie przewinięta jest strona. */
+let toastTimer = null;
+function toast(text, ok) {
+  const t = $("toast");
+  if (!text) return;
+  t.textContent = text;
+  t.className = "on" + (ok ? "" : " bad");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.className = ok ? "" : "bad"; }, ok ? 5000 : 10000);
+}
+function msg(text, ok) { toast(text, ok); }
+
+let restarting = false, lastStatus = null, curTab = "stan", sysScanWatch = false, lastScanRunning = false;
+
+/* ── zakładki ── */
+/** Sekcja zakładki pokazywana na żądanie: otwarta / zamknięta — showTab tego nie nadpisze. */
+function setShown(id, on) {
+  const s = $(id);
+  s.dataset.show = on ? "1" : "0";
+  s.hidden = !on || s.dataset.in !== curTab;
+}
+function showTab(t) {
+  document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("on", b.dataset.tab === t));
+  // sekcje pokazywane tylko na żądanie (data-show="0": zamknięte) zostają ukryte także po zmianie zakładki
+  document.querySelectorAll("main > section").forEach((s) => { s.hidden = s.dataset.in !== t || s.dataset.show === "0"; });
+  try { localStorage.setItem("tab", t); } catch (e) { /* bez pamięci zakładki */ }
+  if (t === "konfig") { refreshConfig(); refreshSysLook(); }
+  curTab = t;
+  clearInterval(artTimer);
+  if (t === "art") { refreshArt(); artTimer = setInterval(refreshArt, 1500); }
+  clearInterval(emuTimer);
+  if (t === "emu") { refreshEmu(); emuTimer = setInterval(refreshEmu, 1500); refreshPolicy(); }
 }
 
-let restarting = false, lastStatus = null;
+/* ── wymagane ustawienia emulatorów (emustart/emupolicy.py) ── */
+function renderPolicy(d) {
+  $("emuPolicy").innerHTML = d.families.map((f) =>
+    `<div class="field" style="margin-top:10px"><b>${esc(f.label)}</b>` +
+    `${f.default ? ' <span class="muted">(domyślne EmuStart)</span>' : ""}` +
+    `<textarea data-fam="${esc(f.family)}" rows="4" spellcheck="false" style="width:100%;font-family:monospace">${esc(f.text)}</textarea>` +
+    `<div class="actions"><button data-save="${esc(f.family)}" class="primary">Zapisz</button>` +
+    `<button data-reset="${esc(f.family)}"${f.default ? " disabled" : ""}>Przywróć domyślne</button></div></div>`).join("");
+  $("emuPolicy").querySelectorAll("[data-save],[data-reset]").forEach((b) => b.addEventListener("click", async () => {
+    const fam = b.dataset.save || b.dataset.reset;
+    const text = $("emuPolicy").querySelector(`textarea[data-fam="${fam}"]`).value;
+    const r = await admin("emu_policy_set", b.dataset.reset ? { family: fam, reset: true } : { family: fam, text }).catch(() => null);
+    msg(r?.ok ? "Zapisane — komputery nałożą je przed następną grą." : r?.reason || "Serwer nie odpowiada.", r?.ok);
+    if (r?.ok) renderPolicy(r);
+  }));
+}
+async function refreshPolicy() {
+  const d = await admin("emu_policy").catch(() => null);
+  if (d?.ok) renderPolicy(d);
+}
+
+/* ── emulatory: magazyn serwera (emustart/emustore.py) ── */
+let emuTimer = null;
+async function refreshEmu() {
+  const d = await admin("emu_status").catch(() => null);
+  if (!d?.ok) return;
+  const j = d.job;
+  $("emuChecked").textContent = d.checked ? `ostatnie sprawdzenie: ${ago(d.checked)}` : "jeszcze nie sprawdzano";
+  $("bEmuUpd").disabled = j.running;
+  $("emuJob").innerHTML = j.running
+    ? `Pobieram: <b>${esc(j.item || "…")}</b> (${j.step}/${j.steps})` + (j.total ? ` — ${fmtBytes(j.done)} z ${fmtBytes(j.total)}` : "")
+    : (j.log.length ? esc(j.log.slice(-6).join(" · ")) : "");
+  $("emuBarBox").hidden = !(j.running && j.total);
+  if (j.running && j.total) $("emuBar").style.width = `${Math.floor((100 * j.done) / j.total)}%`;
+  $("emuRows").innerHTML = d.items.length ? d.items.map((r) =>
+    `<tr><td>${esc(r.label)}</td><td class="muted">${esc(r.systems.join(", ") || "— (nieużywany)")}</td>` +
+    `<td>${esc(r.version || "—")}${r.previous ? `<div class="muted">poprzednia: ${esc(r.previous)}</div>` : ""}` +
+    `${r.error ? `<div style="color:var(--err)">${esc(r.error)}</div>` : ""}</td>` +
+    `<td class="n">${r.size ? fmtBytes(r.size) : ""}</td><td class="muted">${r.updated ? ago(r.updated) : ""}</td>` +
+    `<td class="n"><button data-emu="${esc(r.item)}" ${j.running ? "disabled" : ""}>Pobierz ponownie</button></td></tr>`).join("")
+    : `<tr><td colspan="6" class="muted">Biblioteka nie ma jeszcze systemów — najpierw foldery z grami (Konfiguracja).</td></tr>`;
+  $("emuRows").querySelectorAll("[data-emu]").forEach((b) => b.addEventListener("click", async () => {
+    const r = await admin("emu_update", { items: [b.dataset.emu], force: true }).catch(() => null);
+    msg(r?.ok ? "Pobieram ponownie…" : r?.reason || "Serwer nie odpowiada.", r?.ok);
+    refreshEmu();
+  }));
+  $("emuDir").textContent = `Magazyn: ${d.dir}`;
+}
+$("bEmuUpd").addEventListener("click", async () => {
+  const r = await admin("emu_update", {}).catch(() => null);
+  msg(r?.ok ? "Sprawdzam nowe wersje emulatorów…" : r?.reason || "Serwer nie odpowiada.", r?.ok);
+  refreshEmu();
+});
+
+/* ── grafiki i opisy (emustart/art.py — pobiera serwer) ── */
+let artTimer = null;
+const SRC = { libretro: "libretro (bez klucza)", sgdb: "SteamGridDB", igdb: "IGDB", tgdb: "TheGamesDB" };
+function artMsg(text, ok) { toast(text, ok); }
+let lbWasRunning = false;
+async function refreshArt() {
+  const d = await admin("art").catch(() => null);
+  if (!d?.ok) return;
+  if ($("ges").options.length <= 1)
+    $("ges").innerHTML = `<option value="">wszystkie systemy</option>` +
+      d.systems.map((s) => `<option value="${esc(s.es)}">${esc(s.display)}</option>`).join("");
+  const job = d.job, run = !!job?.running, up = d.lb_update;
+  if (lbWasRunning && up && !up.running) toast(up.error ? "Baza LaunchBox: " + up.error : "Baza LaunchBox gotowa.", !up.error);
+  lbWasRunning = !!up?.running;
+  document.querySelectorAll("[data-art]").forEach((b) => { b.disabled = run; });
+  $("bArtStop").hidden = !run;
+  $("artJob").hidden = !job && !(up && (up.running || up.error));
+  if (up && (up.running || up.error)) {
+    $("artLine").textContent = up.error ? "Baza LaunchBox: " + up.error : up.text;
+    $("artBar").style.width = up.total ? (100 * up.done / up.total).toFixed(0) + "%" : "5%";
+    $("artCur").textContent = "";
+  } else if (job) {
+    const m = job.mode || {};
+    $("artBar").style.width = job.total ? (100 * job.done / job.total).toFixed(1) + "%" : "100%";
+    $("artLine").textContent = job.error ? job.error : m.shrink
+      ? `${job.done} / ${job.total} plików · zmniejszono ${job.found.box} · odzyskano ${fmtBytes(job.saved)}`
+      : `${job.done} / ${job.total} gier` +
+        (m.art ? ` · nowe okładki ${job.found.box} · zrzuty ${job.found.snap}` + (job.found.logo ? ` · logo ${job.found.logo}` : "") : "") +
+        (m.meta ? ` · opisy ${(job.meta || {}).description || 0}` : "") +
+        (run ? (job.eta ? ` · zostało ${fmtDur(job.eta)}` : "") : job.cancelled ? " · zatrzymano" : " · gotowe");
+    $("artCur").textContent = run ? job.current || "" : "";
+  }
+  $("artSystems").innerHTML = d.systems.map((s) =>
+    `<tr><td>${esc(s.display)}</td><td class="n">${s.games}</td><td class="n">${s.box}</td><td class="n">${s.snap}</td>` +
+    `<td class="n">${s.desc}</td><td class="n"><button data-sys="${esc(s.es)}" ${run ? "disabled" : ""}>Pobierz</button></td></tr>`).join("");
+  $("artSystems").querySelectorAll("[data-sys]").forEach((b) => b.addEventListener("click", () => artStart("all", b.dataset.sys)));
+  $("artSources").innerHTML = Object.entries(SRC).map(([k, l]) =>
+    `${esc(l)}: <span class="${d.sources[k] ? "on" : "off"}">${d.sources[k] ? "aktywne" : "brak klucza"}</span>`).join(" · ");
+  const lb = d.launchbox || {};
+  $("lbInfo").textContent = lb.ready ? `Baza LaunchBox (opisy, logo, metadane offline): ${lb.games.toLocaleString("pl-PL")} gier, z ${lb.updated}.`
+                                     : "Baza LaunchBox (opisy, logo, metadane offline): nie pobrana (108 MB).";
+  $("bLb").textContent = lb.ready ? "Aktualizuj bazę LaunchBox" : "Pobierz bazę LaunchBox";
+  $("bLb").disabled = !!(up && up.running) || run;
+}
+async function artStart(mode, es) {
+  const r = await admin("art_start", { mode, es: es || "" }).catch(() => null);
+  artMsg(r?.ok ? "Pobieranie rozpoczęte." : r?.reason || "Serwer nie odpowiada.", !!r?.ok);
+  refreshArt();
+}
+document.querySelectorAll("[data-art]").forEach((b) => b.addEventListener("click", () => artStart(b.dataset.art)));
+$("bArtStop").addEventListener("click", async () => { await admin("art_cancel").catch(() => null); refreshArt(); });
+$("bLb").addEventListener("click", async () => {
+  const r = await admin("launchbox_update").catch(() => null);
+  artMsg(r?.ok ? "Pobieram bazę LaunchBox…" : r?.reason || "Serwer nie odpowiada.", !!r?.ok);
+  refreshArt();
+});
+/* ── jedna gra: grafiki i opis ── */
+const META = [["title", "Tytuł"], ["developer", "Producent"], ["publisher", "Wydawca"], ["year", "Rok premiery"],
+              ["genre", "Gatunek"], ["players", "Gracze"], ["description", "Opis"]];
+const KINDS = { box: "Okładka", snap: "Zrzut ekranu", logo: "Logo gry" };
+let gCur = null, gPickKind = "";
+function gMsg(text, ok) { toast(text, ok); }
+async function gSearch() {
+  const r = await admin("games_search", { q: $("gq").value, es: $("ges").value }).catch(() => null);
+  if (!r?.ok) return;
+  $("gResults").innerHTML = r.games.length ? r.games.map((g) =>
+    `<button data-g="${g.id}">${esc(g.name)} <span class="muted">· ${esc(g.system)}</span></button>`).join("")
+    : `<div class="muted">Nic nie znaleziono.</div>`;
+  $("gResults").querySelectorAll("[data-g]").forEach((b) => b.addEventListener("click", () => {
+    $("gResults").querySelectorAll("button").forEach((x) => x.classList.toggle("on", x === b));
+    gOpen(+b.dataset.g);
+  }));
+}
+$("bGq").addEventListener("click", gSearch);
+$("gq").addEventListener("keydown", (e) => { if (e.key === "Enter") gSearch(); });
+async function gOpen(id) {
+  const r = await admin("game_edit", { id }).catch(() => null);
+  if (!r?.ok) return gMsg(r?.reason || "Serwer nie odpowiada.");
+  gCur = r;
+  $("gEdit").hidden = false;
+  $("gPick").hidden = true;
+  $("gTitle").textContent = r.name;
+  $("gSub").textContent = `${r.system} · ${r.rel}`;
+  $("gArts").innerHTML = Object.entries(KINDS).map(([k, l]) =>
+    `<figure><div class="img">${r[k] ? `<img src="${esc(r[k])}" alt="">` : "brak"}</div>` +
+    `<figcaption class="actions" style="margin-top:4px">${esc(l)} <button data-pk="${k}">Zmień…</button>` +
+    `${r[k] ? ` <button class="danger" data-cl="${k}">Usuń</button>` : ""}</figcaption></figure>`).join("");
+  $("gArts").querySelectorAll("[data-pk]").forEach((b) => b.addEventListener("click", () => gPick(b.dataset.pk, "")));
+  $("gArts").querySelectorAll("[data-cl]").forEach((b) => b.addEventListener("click", async () => {
+    if (!confirm(`Usunąć: ${KINDS[b.dataset.cl]}?`)) return;
+    await admin("game_art_clear", { id: gCur.id, kind: b.dataset.cl }).catch(() => null);
+    gOpen(gCur.id);
+  }));
+  const m = r.meta || {}, ed = r.edits || {};
+  $("gMeta").innerHTML = META.map(([k, l]) => {
+    const v = k === "title" ? (m.title || r.title) : (m[k] || "");
+    const input = k === "description" ? `<textarea data-m="${k}">${esc(v)}</textarea>` : `<input data-m="${k}" value="${esc(v)}">`;
+    return `<label>${esc(l)}${ed[k] ? " ✎" : ""}</label>${input}`;
+  }).join("");
+  gMsg("");
+}
+async function gPick(kind, q) {
+  gPickKind = kind;
+  $("gPick").hidden = false;
+  $("gPickQ").value = q;
+  $("gPickInfo").textContent = `${KINDS[kind]}: szukam…`;
+  $("gPickList").innerHTML = "";
+  const r = await admin("game_art_candidates", { id: gCur.id, kind, q }).catch(() => null);
+  const list = r?.list || [];
+  $("gPickInfo").textContent = `${KINDS[kind]}: ${list.length ? list.length + " propozycji — kliknij, żeby wybrać" : "brak propozycji — spróbuj innej nazwy"}`;
+  $("gPickList").innerHTML = list.map((c, i) =>
+    `<button data-i="${i}" title="${esc(c.label || "")}"><img src="${esc(c.thumb || c.url)}" alt="" referrerpolicy="no-referrer">` +
+    `<span>${esc(c.source || "")}</span></button>`).join("");
+  $("gPickList").querySelectorAll("[data-i]").forEach((b) => b.addEventListener("click", async () => {
+    const c = list[+b.dataset.i];
+    gMsg("Pobieram grafikę…", true);
+    const res = await admin("game_art_choose", { id: gCur.id, kind, url: c.url }).catch(() => null);
+    if (!res?.ok) return gMsg(res?.reason || "Serwer nie odpowiada.");
+    await gOpen(gCur.id);
+    gMsg(`${KINDS[kind]} zapisana — urządzenia pokażą ją po odświeżeniu listy.`, true);
+  }));
+}
+$("bPickQ").addEventListener("click", () => gPick(gPickKind, $("gPickQ").value));
+$("bPickClose").addEventListener("click", () => { $("gPick").hidden = true; });
+$("bMetaSave").addEventListener("click", async () => {
+  const edits = {}, m = gCur.meta || {};
+  $("gMeta").querySelectorAll("[data-m]").forEach((el) => {
+    const k = el.dataset.m, auto = k === "title" ? (m.title || gCur.title) : (m[k] || "");
+    if (el.value.trim() && (el.value !== auto || (gCur.edits || {})[k])) edits[k] = el.value;
+  });
+  const r = await admin("game_meta_save", { id: gCur.id, edits: { ...(gCur.edits || {}), ...edits } }).catch(() => null);
+  gMsg(r?.ok ? "Opis zapisany." : r?.reason || "Serwer nie odpowiada.", r?.ok);
+  gOpen(gCur.id);
+});
+$("bMetaReset").addEventListener("click", async () => {
+  if (!confirm("Usunąć ręczne zmiany opisu tej gry?")) return;
+  await admin("game_meta_save", { id: gCur.id, edits: {} }).catch(() => null);
+  gOpen(gCur.id);
+});
+$("bMetaFetch").addEventListener("click", async () => {
+  const r = await admin("game_meta_fetch", { id: gCur.id, full: true }).catch(() => null);
+  gMsg(r?.ok ? "Pobieram opis (Wikipedia, IGDB, TheGamesDB)…" : r?.reason || "Serwer nie odpowiada.", r?.ok);
+  if (r?.ok) setTimeout(() => gOpen(gCur.id), 5000);
+});
+
+/* ── systemy: logo, nazwa, poświata (emustart/logos.py) ── */
+let sysPickEs = "";
+function sysMsg(text, ok) { toast(text, ok); }
+async function refreshSysLook() {
+  const r = await admin("systems_look").catch(() => null);
+  if (!r?.ok) return;
+  $("sysLook").innerHTML = r.systems.map((s) =>
+    `<tr><td>${s.logo ? `<img class="syslogo" src="${esc(s.logo)}" alt="" style="${s.glow ? "filter:drop-shadow(0 0 6px #fff8)" : ""}">` : '<span class="muted">bez logo</span>'}</td>` +
+    `<td><input data-name="${esc(s.es)}" value="${esc(s.display)}" placeholder="${esc(s.default_name)}" style="width:100%">` +
+    `<div class="sysdirs">${esc(s.es)} · ${(s.dirs || []).map(esc).join(" · ") || "brak folderu"}` +
+    `${(s.merged || []).length ? ` · scalone: ${s.merged.map((m) => `${esc(m)} <button data-split="${esc(m)}">Rozdziel</button>`).join(" ")}` : ""}</div></td>` +
+    `<td class="n">${s.games}</td>` +
+    `<td class="n"><label><input type="checkbox" data-glow="${esc(s.es)}" ${s.glow ? "checked" : ""}> poświata</label> ` +
+    `<label><input type="checkbox" data-en="${esc(s.es)}" ${s.enabled ? "checked" : ""}> widoczny</label> ` +
+    `<button data-logo="${esc(s.es)}">Logo…</button> <select data-merge="${esc(s.es)}"><option value="">scal z…</option>` +
+    r.systems.filter((o) => o.es !== s.es).map((o) => `<option value="${esc(o.es)}">${esc(o.display)} (${esc(o.es)})</option>`).join("") +
+    `</select></td></tr>` +
+    `<tr><td></td><td colspan="3" class="muted">zalecany emulator: <select data-emu="${esc(s.es)}">` +
+    `<option value="" ${s.emu_rec ? "" : "selected"}>domyślny urządzenia</option>` +
+    `<option value="retroarch" ${s.emu_rec === "retroarch" ? "selected" : ""}>RetroArch</option>` +
+    `<option value="standalone" ${s.emu_rec === "standalone" ? "selected" : ""}>osobny emulator</option></select> ` +
+    `rdzeń RetroArcha: <select data-core="${esc(s.es)}"><option value="">domyślny${s.core_default ? " (" + esc(s.core_default) + ")" : ""}</option>` +
+    (s.cores || []).map((c) => `<option ${c === s.core_rec ? "selected" : ""}>${esc(c)}</option>`).join("") +
+    `</select></td></tr>`).join("");
+  const set = async (es, data) => {
+    const res = await admin("system_set", { es, ...data }).catch(() => null);
+    sysMsg(res?.ok ? "Zapisano — urządzenia pokażą to po odświeżeniu biblioteki." : res?.reason || "Serwer nie odpowiada.", res?.ok);
+  };
+  const merge = async (es, into) => {
+    const res = await admin("system_merge", { es, into }).catch(() => null);
+    sysMsg(res?.ok ? (into ? `Scalono ${es} z ${into} — przeładowuję listę gier.` : `Rozdzielono ${es} — przeładowuję listę gier.`)
+                   : res?.reason || "Serwer nie odpowiada.", res?.ok);
+    sysScanWatch = true;
+  };
+  $("sysLook").querySelectorAll("[data-merge]").forEach((el) => el.addEventListener("change", () => {
+    if (!el.value) return;
+    if (!confirm(`Scalić platformę ${el.dataset.merge} z ${el.value}? Gry z obu folderów będą na jednej liście ` +
+                 "(te same gry raz). Można to cofnąć (Rozdziel).")) { el.value = ""; return; }
+    merge(el.dataset.merge, el.value);
+  }));
+  $("sysLook").querySelectorAll("[data-split]").forEach((b) => b.addEventListener("click", () => merge(b.dataset.split, "")));
+  $("sysLook").querySelectorAll("[data-name]").forEach((el) => el.addEventListener("change", () => set(el.dataset.name, { name: el.value })));
+  $("sysLook").querySelectorAll("[data-glow]").forEach((el) => el.addEventListener("change", async () => { await set(el.dataset.glow, { glow: el.checked }); refreshSysLook(); }));
+  $("sysLook").querySelectorAll("[data-en]").forEach((el) => el.addEventListener("change", () => set(el.dataset.en, { enabled: el.checked })));
+  $("sysLook").querySelectorAll("[data-emu]").forEach((el) => el.addEventListener("change", () => set(el.dataset.emu, { emu_rec: el.value })));
+  $("sysLook").querySelectorAll("[data-core]").forEach((el) => el.addEventListener("change", () => set(el.dataset.core, { core_rec: el.value })));
+  $("sysLook").querySelectorAll("[data-logo]").forEach((b) => b.addEventListener("click", () => sysPick(b.dataset.logo)));
+}
+async function sysPick(es) {
+  sysPickEs = es;
+  $("sysPick").hidden = false;
+  $("sysPickInfo").textContent = "Szukam logo…";
+  $("sysPickList").innerHTML = "";
+  const r = await admin("system_logo_candidates", { es }).catch(() => null);
+  const list = [...(r?.list || []), { id: "none", url: "", source: "bez logo (sama nazwa)" }];
+  $("sysPickInfo").textContent = `Logo systemu ${es} — ${list.length - 1} propozycji, kliknij, żeby wybrać (Esc — zamknij).`;
+  $("sysPickList").innerHTML = list.map((c, i) =>
+    `<button data-i="${i}">${c.url ? `<img src="${esc(c.url)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ""}<span>${esc(c.source || "")}${c.label ? " · " + esc(c.label) : ""}</span></button>`).join("");
+  $("sysPickList").querySelectorAll("[data-i]").forEach((b) => b.addEventListener("click", async () => {
+    const res = await admin("system_logo_choose", { es, id: list[+b.dataset.i].id }).catch(() => null);
+    sysMsg(res?.ok ? "Logo zapisane — urządzenia pokażą je po odświeżeniu biblioteki." : res?.reason || "Serwer nie odpowiada.", res?.ok);
+    $("sysPick").hidden = true;
+    refreshSysLook();
+  }));
+}
+$("bSysPickClose").addEventListener("click", () => { $("sysPick").hidden = true; });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("sysPick").hidden) $("sysPick").hidden = true; });
+document.addEventListener("mousedown", (e) => {          // kliknięcie obok okna — zamyka
+  const box = $("sysPick");
+  if (!box.hidden && !box.contains(e.target) && !e.target.closest("[data-logo]")) box.hidden = true;
+});
+
+/* ── przeniesienie serwera (emustart/tls.py: export_move / import_move) ── */
+$("bMvPrep").addEventListener("click", async () => {
+  const pw = $("mvPw1").value;
+  if (pw !== $("mvPw2").value) return toast("Hasła się różnią.");
+  const why = pwPolicy(pw);
+  if (why) return toast(why);
+  const r = await admin("move_prepare", { password: pw }).catch(() => null);
+  toast(r?.ok ? "Przeniesienie przygotowane — skopiuj cały folder programu na nowy komputer i tam podaj to hasło."
+               : r?.reason || "Serwer nie odpowiada.", r?.ok);
+  $("mvPw1").value = $("mvPw2").value = "";
+  refresh();
+});
+$("bMvImp").addEventListener("click", async () => {
+  const r = await admin("move_import", { password: $("mvPw1").value }).catch(() => null);
+  $("mvPw1").value = "";
+  if (!r?.ok) return toast(r?.reason || "Serwer nie odpowiada.");
+  restarting = true;
+  toast("Klucz certyfikatu odblokowany na tym komputerze" + (r.art_keys ? ` (i ${r.art_keys} kluczy źródeł grafik)` : "") +
+        " — serwer uruchamia się ponownie.", true);
+});
+
+$("bKeys").addEventListener("click", async () => {
+  const r = await admin("art_keys_set", { sgdb_key: $("kSgdb").value, igdb_client_id: $("kIgdbId").value,
+                                          igdb_client_secret: $("kIgdbSecret").value, tgdb_key: $("kTgdb").value }).catch(() => null);
+  artMsg(r?.ok ? "Klucze zapisane (zaszyfrowane na serwerze)." : r?.reason || "Serwer nie odpowiada.", !!r?.ok);
+  ["kSgdb", "kIgdbId", "kIgdbSecret", "kTgdb"].forEach((id) => { $(id).value = ""; });
+  refreshArt();
+});
+document.querySelectorAll("#tabs button").forEach((b) => b.addEventListener("click", () => showTab(b.dataset.tab)));
+
+/* ── konfiguracja: foldery (emustart/srvconfig.py) ── */
+let cfgFields = [];
+function cfgMsg(text, ok) { toast(text, ok); }
+const stHtml = (s) => `<span class="st ${s.ok ? "ok" : "bad"}">${esc(s.text)}</span>`;
+async function refreshConfig() {
+  const r = await admin("config").catch(() => null);
+  if (!r?.ok) return cfgMsg("Serwer nie odpowiada.");
+  cfgFields = r.fields;
+  renderConfig();
+}
+function renderConfig() {
+  $("cfgFields").innerHTML = cfgFields.map((f, i) => {
+    const pick = `<button data-pick="${i}">Wybierz…</button>`;
+    if (f.kind === "dirs") {
+      const rows = f.value.map((v, j) => `<div class="row"><input value="${esc(v)}" data-f="${i}" data-j="${j}">` +
+        `<button data-up="${i}:${j}" ${j ? "" : "disabled"} title="Wyżej">↑</button>` +
+        `<button class="danger" data-del="${i}:${j}" title="Usuń">✕</button></div>` +
+        `<div>${stHtml(f.status[j] || { ok: true, text: "" })}</div>`).join("");
+      return `<div class="field"><b>${esc(f.label)}</b><div class="muted">${esc(f.hint)}</div>${rows}` +
+        `<div class="row"><button data-add="${i}">Dodaj folder…</button><button class="primary" data-save="${i}">Zapisz</button></div></div>`;
+    }
+    return `<div class="field"><b>${esc(f.label)}</b><div class="muted">${esc(f.hint)}</div>` +
+      `<div class="row"><input value="${esc(f.value)}" data-f="${i}" placeholder="${f.optional ? "(puste)" : ""}">${pick}` +
+      `<button class="primary" data-save="${i}">Zapisz</button></div><div>${stHtml(f.status)}</div></div>`;
+  }).join("");
+  const box = $("cfgFields");
+  const values = (i) => [...box.querySelectorAll(`input[data-f="${i}"]`)].map((x) => x.value.trim());
+  box.querySelectorAll("[data-save]").forEach((b) => b.addEventListener("click", () => {
+    const i = +b.dataset.save, f = cfgFields[i];
+    saveField(f, f.kind === "dirs" ? values(i).filter(Boolean) : values(i)[0]);
+  }));
+  box.querySelectorAll("[data-pick],[data-add]").forEach((b) => b.addEventListener("click", async () => {
+    const i = +(b.dataset.pick ?? b.dataset.add), f = cfgFields[i];
+    const pick = window.pywebview?.api?.pick;
+    if (!pick) return cfgMsg("Wybór folderu działa w oknie panelu — wpisz ścieżkę.");
+    const r = await pick(f.kind === "file" ? "file" : "dir", f.kind === "dirs" ? "" : f.value).catch(() => null);
+    if (!r?.ok) return;
+    if (f.kind === "dirs") { f.value = [...values(i), r.path]; f.status.push({ ok: true, text: "nie zapisano" }); renderConfig(); }
+    else box.querySelector(`input[data-f="${i}"]`).value = r.path;
+  }));
+  box.querySelectorAll("[data-del]").forEach((b) => b.addEventListener("click", () => {
+    const [i, j] = b.dataset.del.split(":").map(Number);
+    cfgFields[i].value = values(i); cfgFields[i].value.splice(j, 1); cfgFields[i].status.splice(j, 1);
+    renderConfig();
+  }));
+  box.querySelectorAll("[data-up]").forEach((b) => b.addEventListener("click", () => {
+    const [i, j] = b.dataset.up.split(":").map(Number), f = cfgFields[i];
+    f.value = values(i);
+    [f.value[j - 1], f.value[j]] = [f.value[j], f.value[j - 1]];
+    [f.status[j - 1], f.status[j]] = [f.status[j], f.status[j - 1]];
+    renderConfig();
+  }));
+}
+async function saveField(f, value) {
+  if (f.key === "rom_roots" && !confirm("Zapisać foldery z grami? Serwer przeładuje listę gier.")) return;
+  cfgMsg("Sprawdzam…", true);
+  const r = await admin("config_set", { key: f.key, value }).catch(() => null);
+  if (!r?.ok) return cfgMsg(r?.reason || "Serwer nie odpowiada.");
+  cfgFields = r.fields;
+  renderConfig();
+  cfgMsg(`Zapisano: ${f.label}.` + (f.key === "rom_roots" ? " Przeładowuję listę gier (zakładka Stan)." : ""), true);
+}
 
 // zdanie o pobieraniu tylko wtedy, gdy któreś urządzenie naprawdę pobiera grę
 function busyNote() {
@@ -70,7 +461,22 @@ async function refresh() {
   ];
   $("info").innerHTML = rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("");
 
+  const tl = st.tls || {};
+  setShown("tlsAlert", tl.state === "locked");
+  $("tlsInfo").innerHTML = tl.state === "locked"
+    ? `<span class="st bad">Klucz certyfikatu z innego komputera — podaj hasło przeniesienia${tl.move_ready ? "" : " (brak pliku przeniesienie.emustart w folderze serwera)"}.</span>`
+    : tl.state === "ok" ? `<span class="st ok">Klucz certyfikatu zaszyfrowany na tym komputerze.</span>` +
+      (tl.move_ready ? ' <span class="muted">· przeniesienie przygotowane (przeniesienie.emustart)</span>' : "")
+    : tl.state === "plain" ? '<span class="st bad">Klucz certyfikatu niezaszyfrowany (brak DPAPI).</span>'
+    : '<span class="muted">Brak certyfikatu.</span>';
+  $("bMvImp").hidden = tl.state !== "locked";
+  $("bMvPrep").hidden = tl.state === "locked";
+  $("mvPw2").hidden = tl.state === "locked";
   const sc = st.scan || {};
+  // skan skończony (nowe foldery, scalenie platform) — lista systemów i stany folderów od nowa
+  if (lastScanRunning && !sc.running && curTab === "konfig") { refreshSysLook(); refreshConfig(); }
+  if (lastScanRunning && !sc.running && sysScanWatch) { sysScanWatch = false; toast("Lista gier przeładowana.", true); }
+  lastScanRunning = !!sc.running;
   $("bRescan").disabled = !!sc.running;
   $("scanBox").hidden = !sc.running && !sc.result;
   if (sc.running) {
@@ -151,7 +557,8 @@ async function updTick() {
   }
   if (st.phase !== "ready") return;
   updText("Podmieniam pliki i uruchamiam serwer ponownie — panel otworzy się sam po starcie nowej wersji (do kilku minut).");
-  const r = await admin("update_apply").catch(() => null);
+  const who = await (window.pywebview?.api?.whoami?.() ?? Promise.resolve("")).catch(() => "");
+  const r = await admin("update_apply", { panel_user: who || "" }).catch(() => null);
   if (!r?.ok) { $("bUpd").disabled = $("bUpdCheck").disabled = false; return updText(r?.reason || "Serwer nie odpowiada."); }
   restarting = true;
   // okno panelu to ten sam EmuStart.exe — zamyka się, żeby pliki dało się podmienić
@@ -227,9 +634,11 @@ async function refreshAccounts() {
     `<tr><td>${esc(a.name)}${a.admin ? ' <span class="muted">· administrator</span>' : ""}</td>` +
     `<td>${a.password ? `ustawione <span class="muted">${a.set ? ago(a.set) : ""}</span>` : "<b>brak</b>"}</td>` +
     `<td class="n">${a.devices}</td><td class="n"><button data-pw="${esc(a.name)}">${a.password ? "Nowe hasło" : "Ustaw hasło"}</button> ` +
-    `<button data-adm="${esc(a.name)}" data-on="${a.admin ? 1 : 0}">${a.admin ? "Odbierz admina" : "Administrator"}</button></td></tr>`).join("")
+    `<button data-adm="${esc(a.name)}" data-on="${a.admin ? 1 : 0}">${a.admin ? "Odbierz admina" : "Administrator"}</button> ` +
+    `<button data-files="${esc(a.name)}">Pliki i kopie</button></td></tr>`).join("")
     : `<tr><td colspan="4" class="muted">Brak kont.</td></tr>`;
   $("accounts").querySelectorAll("[data-pw]").forEach((b) => b.addEventListener("click", () => askAccountPassword(b.dataset.pw)));
+  $("accounts").querySelectorAll("[data-files]").forEach((b) => b.addEventListener("click", () => openAccount(b.dataset.files)));
   $("accounts").querySelectorAll("[data-adm]").forEach((b) => b.addEventListener("click", async () => {
     const make = b.dataset.on !== "1";
     if (!confirm(make ? `Konto „${b.dataset.adm}” administratorem? Wszystkie jego urządzenia zatwierdzą nowe konta i zobaczą wszystkie konta.`
@@ -257,6 +666,50 @@ function askAccountPassword(name) {
 refreshAccounts();
 setInterval(refreshAccounts, 30000);
 
+/* ── konto: pliki i kopie zapasowe (emustart/acctbackup.py) ── */
+let acctOpen = "";
+const fmtTime = (t) => t ? new Date(t * 1000).toLocaleString("pl-PL", { dateStyle: "short", timeStyle: "short" }) : "—";
+async function openAccount(name) {
+  acctOpen = name;
+  setShown("acctBox", true);
+  $("acctName").textContent = `„${name}”`;
+  $("acctParts").innerHTML = `<tr><td colspan="4" class="muted">Wczytuję…</td></tr>`;
+  const r = await admin("account_files", { name }).catch(() => null);
+  if (!r?.ok) { $("acctParts").innerHTML = `<tr><td colspan="4" class="muted">${esc(r?.reason || "Serwer nie odpowiada.")}</td></tr>`; return; }
+  $("acctParts").innerHTML = r.parts.length ? r.parts.map((p) =>
+    `<tr><td>${esc(p.name)}</td><td class="n">${p.files}</td><td class="n">${fmtBytes(p.size)}</td><td class="n">${fmtTime(p.changed)}</td></tr>`).join("")
+    : `<tr><td colspan="4" class="muted">Profil jest pusty.</td></tr>`;
+  $("acctRecent").innerHTML = r.recent.map((f) =>
+    `<tr><td>${esc(f.path)}</td><td class="n">${fmtBytes(f.size)}</td><td class="n">${fmtTime(f.changed)}</td></tr>`).join("");
+  $("acctBackups").innerHTML = r.backups.length ? r.backups.map((b) =>
+    `<tr><td>${esc(b.file)}<div class="muted">${fmtTime(b.time)}</div></td><td class="n">${fmtBytes(b.size)}</td>` +
+    `<td class="n"><button class="danger" data-restore="${esc(b.file)}">Przywróć</button></td></tr>`).join("")
+    : `<tr><td colspan="3" class="muted">Brak kopii.</td></tr>`;
+  $("acctBackups").querySelectorAll("[data-restore]").forEach((b) => b.addEventListener("click", async () => {
+    if (!confirm(`Przywrócić konto „${name}” z kopii ${b.dataset.restore}?\n\nNajpierw powstanie kopia obecnego stanu. ` +
+                 "Urządzenia tego konta nie powinny teraz grać.")) return;
+    const res = await admin("account_restore", { name, file: b.dataset.restore }).catch(() => null);
+    msg(res?.ok ? `Przywrócono ${res.files} plików konta „${name}” (kopia sprzed: ${res.before}).` : res?.reason || "Serwer nie odpowiada.", res?.ok);
+    openAccount(name);
+  }));
+  $("bakAuto").checked = !!r.auto;
+  $("bakKeep").value = r.keep;
+  $("acctBox").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+$("bAcctBackup").addEventListener("click", async () => {
+  if (!acctOpen) return;
+  $("bAcctBackup").disabled = true;
+  const r = await admin("account_backup", { name: acctOpen }).catch(() => null);
+  $("bAcctBackup").disabled = false;
+  msg(r?.ok ? `Kopia konta „${acctOpen}”: ${r.file} (${fmtBytes(r.size)}).` : r?.reason || "Serwer nie odpowiada.", r?.ok);
+  openAccount(acctOpen);
+});
+$("bAcctClose").addEventListener("click", () => { acctOpen = ""; setShown("acctBox", false); });
+$("bBakSave").addEventListener("click", async () => {
+  const r = await admin("backup_settings", { auto: $("bakAuto").checked, keep: $("bakKeep").value }).catch(() => null);
+  msg(r?.ok ? "Ustawienia kopii zapisane." : r?.reason || "Serwer nie odpowiada.", r?.ok);
+});
+
 let pairTimer = null;
 $("bPair").addEventListener("click", async () => {
   const r = await admin("login_code").catch(() => null);
@@ -271,7 +724,11 @@ $("bPair").addEventListener("click", async () => {
   const tick = () => {
     const left = Math.max(0, r.expires - Date.now() / 1000);
     $("pairLeft").textContent = left ? `jeszcze ${Math.ceil(left / 60)} min` : "— wygasł, wygeneruj nowy";
-    if (!left) { clearInterval(pairTimer); $("pairQr").innerHTML = ""; $("pairLink").value = ""; }
+    if (!left) {                     // wygasły kod nic nie da — znika cały, z linkiem i przyciskiem
+      clearInterval(pairTimer);
+      $("pairBox").hidden = true; $("pairQr").innerHTML = ""; $("pairLink").value = ""; $("pairCode").textContent = "";
+      msg("Kod logowania wygasł — „Dodaj urządzenie” wygeneruje nowy.");
+    }
     refreshDevices();
   };
   tick();
@@ -366,6 +823,9 @@ Każdy plik zostanie skopiowany i sprawdzony; ` +
   migrPoll = setInterval(migrTick, 700);
 });
 
+let startTab = "stan";
+try { startTab = localStorage.getItem("tab") || "stan"; } catch (e) { /* domyślna zakładka */ }
+showTab(document.querySelector(`#tabs button[data-tab="${startTab}"]`) ? startTab : "stan");
 refresh();
 refreshDevices();
 refreshPublic();

@@ -19,7 +19,7 @@ Zgodność:
   - RetroArch: stan należy do rdzenia — ten sam rdzeń (np. SwanStation, Snes9x, mGBA)
     na obu urządzeniach zwykle się wczyta; inny rdzeń — nie.
 
-Działa na folderze profili przez SmbFs (serwer: jego własny dysk; komputer bez
+Działa na folderze profili przez DirFs (serwer: jego własny dysk; komputer bez
 serwera: udział SMB). Komputer z serwerem EmuStart i telefon wołają serwer
 (/v1/savemgr/…), który robi to samo u siebie.
 """

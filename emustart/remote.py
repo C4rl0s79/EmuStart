@@ -1,4 +1,5 @@
-"""remote — API dla EmuStart na Androidzie (tryb serwera: `EmuStart.exe --server`).
+"""remote — API dla urządzeń (EmuStart na PC i Androidzie) w EmuStart Server
+(`EmuStartServer.exe --service`).
 
 Serwer działa na komputerze z grami (NAS) i udostępnia przez HTTP (Tailscale):
 
@@ -202,7 +203,7 @@ def create_account(name: str) -> None:
     from emustart import nasfs
     if NAS_ROOT is None:
         return
-    fs = nasfs.SmbFs(NAS_ROOT)
+    fs = nasfs.DirFs(NAS_ROOT)
     if not fs.exists(f"{name}/emustart.json"):
         fs.write(f"{name}/emustart.json", b"{}")
     log.info("nowe konto %s", name)
@@ -264,12 +265,15 @@ def handle(handler) -> None:
     parts = [p for p in path.split("/") if p][1:]           # bez „v1”
     try:
         if parts == ["info"]:
-            feats = ["find", "system", "bios", "media", "library"] + (["nas", "roots", "savemgr", "profiles"] if NAS_ROOT else [])
+            feats = ["find", "system", "bios", "media", "library", "emulators"] + (["nas", "savemgr", "profiles"] if NAS_ROOT else [])
             return _json(handler, {"name": socket.gethostname(), "version": __version__, "api": 1,
-                                   "features": feats, "nas_id": NAS_ID, "endpoints": endpoints(),
+                                   "features": feats + ["admin"], "nas_id": NAS_ID, "endpoints": endpoints(),
+                                   "admin": _admin(handler),
                                    "tls": {"port": TLS["port"], "fp": TLS["fp"]} if TLS else None})
         if parts and parts[0] == "nas":
             return _nas(handler, "GET", parts[1:])
+        if parts and parts[0] == "admin":
+            return _admin_route(handler, "GET", parts[1:])
         if parts == ["library"]:                       # biblioteka dla komputera bez folderów z grami
             if not _games_ok(handler):
                 return _json(handler, {"error": "To konto nie pobiera gier z serwera."}, 403)
@@ -277,7 +281,11 @@ def handle(handler) -> None:
             q = urllib.parse.parse_qs(urllib.parse.urlsplit(handler.path).query)
             es = (q.get("es") or [""])[0]
             if es:
-                return _json(handler, {"games": libsync.server_games(es)})
+                try:
+                    since = float((q.get("since") or ["0"])[0])
+                except ValueError:
+                    since = 0.0
+                return _json(handler, {"games": libsync.server_games(es, since)})
             return _json(handler, {"systems": libsync.server_systems()})
         if parts == ["sysinfo"]:                       # opis platformy (producent, lata, opis) dla telefonu
             q = urllib.parse.parse_qs(urllib.parse.urlsplit(handler.path).query)
@@ -286,20 +294,16 @@ def handle(handler) -> None:
             if not _games_ok(handler):
                 return _json(handler, {"error": "To konto nie pobiera gier z serwera."}, 403)
             return _find(handler)
-        if parts == ["media", "have"]:                 # grafiki gier, które serwer ma (artsync)
-            from emustart import artsync
-            q = urllib.parse.parse_qs(urllib.parse.urlsplit(handler.path).query)
-            have = artsync.server_have((q.get("es") or [""])[0])
-            return _json(handler, {"files": have} if have is not None else {"error": "nieznany system"},
-                         200 if have is not None else 404)
         if parts == ["savemgr", "catalog"]:
             return _savemgr_catalog(handler)
         if parts == ["profiles"]:
             return _profiles_get(handler)
         if parts == ["bios"]:
             return _bios_get(handler)
+        if parts and parts[0] == "emulators":
+            return _emulators_get(handler, parts[1:])
         if parts == ["systems"]:
-            from emustart import emulators, installer, systems
+            from emustart import emucatalog, emulators, systems
             out = []
             for s_ in API.list_systems():
                 d = {k: s_.get(k) for k in ("es", "display", "games", "logo", "logo_glow", "kind")}
@@ -307,7 +311,7 @@ def handle(handler) -> None:
                 d["plat"] = plat
                 sc = (API._cfg.get("systems") or {}).get(s_["es"]) or {}
                 # rdzeń RetroArcha (Android: *_libretro_android.so) — ten, którego używa komputer, gdy go zgłosił
-                d["core"] = sc.get("core_rec") or installer.CORES.get(plat, "")
+                d["core"] = sc.get("core_rec") or emucatalog.CORES.get(plat, "")
                 d["emu_rec"] = sc.get("emu_rec", "")
                 d["cores"] = emulators.cores_for(plat)         # wszystkie pasujące — wybór na telefonie
                 out.append(d)
@@ -327,6 +331,8 @@ def handle(handler) -> None:
             d = API.game_detail(int(parts[1]), use_variant=False)
             if not d:
                 return _json(handler, {"error": "nie ma takiej gry"}, 404)
+            if not d.get("meta_online") and hasattr(API, "meta_auto"):
+                API.meta_auto(int(parts[1]))           # opis z sieci w tle — przy następnym pytaniu jest
             from emustart import library
             g = library.game(int(parts[1]))
             # ścieżki z „/” — Android traktuje „\\” jako znak w nazwie pliku (EPERM)
@@ -359,24 +365,17 @@ def handle(handler) -> None:
 
 
 def find_nas_root(cfg: dict) -> Path | None:
-    r"""Folder profili na komputerze z serwerem: `profiles_nas` z ustawień, a gdy go tu
-    nie ma — `emustart\Profiles` w którymś folderze nadrzędnym folderów z grami
-    (klienci widzą go przez udział, np. Z:\emustart\Profiles = <udział>\emustart\Profiles)."""
-    own = cfg.get("profiles_nas") or ""
-    if own and Path(own).is_dir():
-        return Path(own)
+    r"""Folder profili (kont) serwera: `profiles_nas` z panelu, domyślnie <serwer>\profiles —
+    zakładany przy starcie. Bez niego serwer nie zna żadnego konta: nowe konto po zatwierdzeniu
+    nie miało folderu, a klient nie dostawał go na liście „Kto gra?”."""
     from emustart import paths
-    if (paths.SERVER / "profiles" / ".emustart-root").is_file():
-        return paths.SERVER / "profiles"          # 2.0: profile w katalogu serwera
-    for r in config.rom_roots(cfg):
-        for d in [Path(r), *Path(r).parents]:
-            cand = d / "emustart" / "Profiles"
-            try:
-                if cand.is_dir():
-                    return cand
-            except OSError:
-                continue
-    return None
+    own = Path(cfg.get("profiles_nas") or (paths.SERVER / "profiles"))
+    try:
+        own.mkdir(parents=True, exist_ok=True)
+        return own
+    except OSError as ex:                     # np. dysk z ustawień niepodłączony
+        log.error("folder profili %s: %s", own, ex)
+        return None
 
 
 def init_nas(cfg: dict) -> None:
@@ -386,7 +385,17 @@ def init_nas(cfg: dict) -> None:
     from emustart import nasfs
     NAS_ROOT = find_nas_root(cfg)
     NAS_ID = nasfs.root_id(NAS_ROOT, create=True) if NAS_ROOT else ""
-    log.info("folder profili serwera: %s", NAS_ROOT or "nie znaleziono (zapisy przez SMB)")
+    log.info("folder profili serwera: %s", NAS_ROOT or "niedostępny")
+    if NAS_ROOT is not None:
+        # konta zatwierdzone, gdy folderu profili nie było (albo po zmianie folderu) — bez
+        # swojego folderu nie ma ich na liście kont ani w „Kto gra?” na urządzeniach
+        from emustart import accounts, devices, enroll
+        have = {n.lower() for n in profile_names()}
+        known = devices.accounts_in_use() | {(accounts.record(n) or {}).get("name", n)
+                                             for n in accounts.names_with_password()}
+        for name in sorted(known):
+            if name.lower() not in have and enroll._safe_account(name) == name:
+                create_account(name)
 
 
 def handle_write(handler, method: str) -> None:
@@ -396,19 +405,10 @@ def handle_write(handler, method: str) -> None:
     _seen(handler)
     path = urllib.parse.unquote(urllib.parse.urlsplit(handler.path).path)
     parts = [p for p in path.split("/") if p][1:]
-    if method == "PUT" and parts in (["system"], ["roots"], ["media"]) and not _admin(handler):
-        n = int(handler.headers.get("Content-Length") or 0)
-        if n:
-            handler.rfile.read(min(n, 10 << 20))
-        return _json(handler, {"error": "Tylko urządzenie administratora."}, 403)
+    if parts and parts[0] == "admin":
+        return _admin_route(handler, method, parts[1:])
     if method == "PUT" and len(parts) == 2 and parts[0] == "profiles":
         return _profiles_put(handler, parts[1])
-    if method == "PUT" and parts == ["system"]:
-        return _system_put(handler)
-    if method == "PUT" and parts == ["roots"]:
-        return _roots_put(handler)
-    if method == "PUT" and parts == ["media"]:
-        return _media_put(handler)
     if method == "PUT" and parts == ["savemgr", "copy"]:
         return _savemgr_copy(handler)
     if not parts or parts[0] != "nas":
@@ -436,105 +436,6 @@ def handle_write(handler, method: str) -> None:
             _json(handler, {"error": "błąd serwera (szczegóły w logu serwera)"}, 500)
         except OSError:
             pass
-
-
-def _roots_put(handler) -> None:
-    """Foldery z grami z EmuStart na Windows (względem udziału na NAS-ie, np. „WHDLoad”):
-    brakujące w ustawieniach serwera dopisujemy i skanujemy — telefon widzi to samo co PC.
-    Udział = folder nad emustart\\Profiles (ten sam, który klienci mają np. jako Z:)."""
-    from emustart import nasfs
-    n = int(handler.headers.get("Content-Length") or 0)
-    if n > 65536:
-        handler.close_connection = True
-        return _json(handler, {"error": "za dużo danych"}, 413)
-    try:
-        rels = json.loads(handler.rfile.read(n) or b"{}").get("roots") or []
-    except ValueError:
-        return _json(handler, {"error": "zły JSON"}, 400)
-    if NAS_ROOT is None:
-        return _json(handler, {"error": "serwer nie zna swojego udziału (brak folderu profili)"}, 404)
-    share = NAS_ROOT.parent.parent
-    cfg = API._cfg
-    have = {os.path.normcase(os.path.normpath(r)) for r in config.rom_roots(cfg)}
-    added, missing = [], []
-    for rel in rels[:64]:
-        try:
-            r = nasfs.clean_rel(str(rel))
-        except ValueError:
-            continue
-        d = share / r if r else share
-        if not d.is_dir():
-            missing.append(r)
-            continue
-        key = os.path.normcase(os.path.normpath(str(d)))
-        if key not in have:
-            have.add(key)
-            added.append(str(d))
-    if added:
-        cfg["rom_roots"] = config.rom_roots(cfg) + added
-        cfg["rom_root"] = cfg["rom_roots"][0]
-        config.save(cfg)
-        log.info("foldery z grami od klienta: %s — skanowanie", ", ".join(added))
-        try:
-            API.rescan()
-        except Exception:
-            log.exception("skanowanie nowych folderów")
-    return _json(handler, {"ok": True, "added": added, "missing": missing})
-
-
-def _media_put(handler) -> None:
-    """Grafika gry z EmuStart na Windows (artsync) — logo, okładka, zrzut."""
-    from emustart import artsync
-    n = int(handler.headers.get("Content-Length") or 0)
-    if n > artsync.MAX_FILE:
-        handler.close_connection = True
-        return _json(handler, {"error": "za duży plik"}, 413)
-    body = handler.rfile.read(n) if n else b""
-    q = urllib.parse.parse_qs(urllib.parse.urlsplit(handler.path).query)
-    code, msg = artsync.server_put((q.get("es") or [""])[0], (q.get("file") or [""])[0], body)
-    return _json(handler, {"ok": code == 200} if code == 200 else {"error": msg}, code)
-
-
-def _system_put(handler) -> None:
-    """Wygląd systemu z EmuStart na Windows: logo (plik w treści), poświata, nazwa —
-    serwer pokazuje je potem aplikacji na Androida tak jak na komputerze."""
-    from emustart import logos
-    n = int(handler.headers.get("Content-Length") or 0)
-    if n > 5 * 1024 * 1024:
-        handler.close_connection = True
-        return _json(handler, {"error": "za duże logo"}, 413)
-    body = handler.rfile.read(n) if n else b""
-    q = urllib.parse.parse_qs(urllib.parse.urlsplit(handler.path).query)
-    arg = lambda k: (q.get(k) or [""])[0]      # noqa: E731
-    es, logo, ext = arg("es"), arg("logo"), arg("ext").lower()
-    if not re.fullmatch(r"[a-z0-9_]{1,40}", es) or logo not in ("custom", "none", "default", "keep"):
-        return _json(handler, {"error": "zły system albo logo"}, 400)
-    if logo == "custom" and (ext not in ("svg", "png", "jpg", "webp") or not body):
-        return _json(handler, {"error": "zły plik logo"}, 400)
-    cfg = API._cfg
-    sc = cfg.setdefault("systems", {}).setdefault(es, {})
-    if logo == "custom":
-        logos._store_custom(es, body, ext)
-        sc["logo"] = "custom"
-    elif logo == "none":
-        sc["logo"] = "none"
-    elif logo == "default":
-        sc["logo"] = ""
-    if arg("glow") in ("0", "1"):
-        sc["logo_glow"] = arg("glow") == "1"
-    # emulator i rdzeń, których używa komputer — zalecane dla telefonów (stany zgodne)
-    if "emu" in q and arg("emu") in ("", "retroarch", "standalone"):
-        sc["emu_rec"] = arg("emu")
-        core = arg("core")
-        sc["core_rec"] = core if re.fullmatch(r"[a-z0-9_+.-]{0,40}", core) else ""
-    if "name" in q:
-        name = arg("name").strip()[:60]
-        if name:
-            sc["name"] = name
-        else:
-            sc.pop("name", None)
-    config.save(cfg)
-    return _json(handler, {"ok": True})
 
 
 def _nas(handler, method: str, parts: list) -> None:
@@ -662,6 +563,68 @@ def _scope_ok(handler, profile: str) -> bool:
     return bool(profile) and accounts.token_ok(_secret(), profile, handler.headers.get("X-Profile-Token") or "")
 
 
+def _admin_route(handler, method: str, p: list) -> None:
+    """Grafiki i opisy gier, logo i nazwy systemów — z EmuStart na PC albo telefonie
+    administratora (te same funkcje co panel serwera). Zmiana podbija wersję systemu, więc
+    pozostałe urządzenia pobiorą ją przy najbliższej synchronizacji.
+
+        GET    admin/games/<id>/art?kind=&q=    propozycje grafik
+        PUT    admin/games/<id>/art?kind=&url=  wybór grafiki
+        DELETE admin/games/<id>/art?kind=       usunięcie grafiki
+        PUT    admin/games/<id>/meta            {"edits": {...}} ręczne poprawki opisu
+        PUT    admin/games/<id>/meta/fetch?full=1  opis z sieci (w tle)
+        GET    admin/systems/<es>/logos         propozycje logo systemu
+        PUT    admin/systems/<es>/logo?id=      wybór logo
+        PUT    admin/systems/<es>               {"name", "glow", "enabled", "emu_rec", "core_rec"}"""
+    n = int(handler.headers.get("Content-Length") or 0)
+    if n > (1 << 20):
+        handler.close_connection = True
+        return _json(handler, {"error": "za dużo danych"}, 413)
+    raw = handler.rfile.read(n) if n else b""
+    if not _admin(handler):
+        return _json(handler, {"error": "Tylko urządzenie administratora."}, 403)
+    if not hasattr(API, "art_choose"):
+        return _json(handler, {"error": "nieznany adres"}, 404)
+    q = {k: (v or [""])[0] for k, v in urllib.parse.parse_qs(urllib.parse.urlsplit(handler.path).query).items()}
+    try:
+        body = json.loads(raw or b"{}")
+    except ValueError:
+        return _json(handler, {"error": "zły JSON"}, 400)
+    if not isinstance(body, dict):
+        body = {}
+    out = None
+    if len(p) >= 3 and p[0] == "games" and p[1].isdigit():
+        gid = int(p[1])
+        if p[2:] == ["art"] and method == "GET":
+            out = {"ok": True, "list": API.art_candidates(gid, q.get("kind", ""), q.get("q", ""))}
+        elif p[2:] == ["art"] and method == "PUT":
+            out = API.art_choose(gid, q.get("kind", ""), q.get("url", ""))
+        elif p[2:] == ["art"] and method == "DELETE":
+            out = API.art_clear(gid, q.get("kind", ""))
+        elif p[2:] == ["meta"] and method == "PUT":
+            out = API.meta_save(gid, body.get("edits") if isinstance(body.get("edits"), dict) else {})
+        elif p[2:] == ["meta", "fetch"] and method == "PUT":
+            out = API.meta_fetch(gid, q.get("full") == "1")
+    elif len(p) >= 2 and p[0] == "systems":
+        es = p[1]
+        if p[2:] == ["logos"] and method == "GET":
+            out = {"ok": True, "list": API.system_logo_candidates(es)}
+        elif p[2:] == ["logo"] and method == "PUT":
+            out = API.system_logo_choose(es, q.get("id", ""))
+        elif not p[2:] and method == "PUT":
+            out = API.system_set(es, {k: body[k] for k in ("name", "glow", "enabled", "emu_rec", "core_rec") if k in body})
+    elif p == ["art_keys"] and method == "PUT":
+        # klucze źródeł grafik z komputera administratora (np. z PyLinks, odszyfrowane tam) —
+        # tylko połączeniem szyfrowanym (_v1_ok); serwer szyfruje je własnym kluczem
+        from emustart import srvadmin
+        out = srvadmin.art_keys_set(API, body)
+    if out is None:
+        return _json(handler, {"error": "nieznany adres"}, 404)
+    _games_cache.clear()
+    log.info("administrator %s: %s %s", _who(handler), method, "/".join(p))
+    return _json(handler, out)
+
+
 def _admin(handler) -> bool:
     from emustart import devices
     return devices.is_admin(getattr(handler, "device", ""))
@@ -730,7 +693,7 @@ def _profiles_put(handler, op: str) -> None:
     d = _body(handler)
     if NAS_ROOT is None:
         return _json(handler, {"error": "serwer nie ma folderu profili"}, 404)
-    fs = nasfs.SmbFs(NAS_ROOT)
+    fs = nasfs.DirFs(NAS_ROOT)
     wanted, pw = str(d.get("name") or "").strip(), str(d.get("password") or "")
     ip = public.client_ip(handler)
     existing = _find_account(wanted)
@@ -803,8 +766,8 @@ def _safe_profile_name(name: str) -> str:
 
 
 def _find(handler) -> None:
-    """Gra po (system, ścieżka względna) — EmuStart na Windows pobiera ją stąd zamiast
-    przez SMB. Odpowiedź: id i pliki (ścieżka, rozmiar); pobieranie jak dla Androida."""
+    """Gra po (system, ścieżka względna) — EmuStart na PC pobiera ją stąd. Odpowiedź: id, pliki
+    (ścieżka, rozmiar) i — arcade — zależności (gra nadrzędna, BIOS: obok gry, jak na telefonie)."""
     from emustart import library
     q = urllib.parse.parse_qs(urllib.parse.urlsplit(handler.path).query)
     es, rel = (q.get("es") or [""])[0], (q.get("rel") or [""])[0].replace("\\", "/")
@@ -814,7 +777,8 @@ def _find(handler) -> None:
     for r in rows:
         if r["rel"].replace("\\", "/") == rel:
             files = [{"path": f.replace("\\", "/"), "size": size} for f, size, _m in json.loads(r["files"])]
-            return _json(handler, {"id": r["id"], "files": files})
+            deps = [{"path": p.replace("\\", "/"), "size": size} for p, _f, size in _arcade_deps(library.game(r["id"]))]
+            return _json(handler, {"id": r["id"], "files": files, "deps": deps})
     return _json(handler, {"error": "nie ma takiej gry"}, 404)
 
 
@@ -857,7 +821,7 @@ def _savemgr_catalog(handler) -> None:
         return _json(handler, {"error": "konto wymaga hasła", "pin": True}, 403)
     stems, serial = _savemgr_game(a["es"], a["name"])
     stems += [s for s in a.get("stems", "").split("|") if s]
-    out = savemgr.catalog(nasfs.SmbFs(NAS_ROOT), prof, a["es"], a["name"], stems,
+    out = savemgr.catalog(nasfs.DirFs(NAS_ROOT), prof, a["es"], a["name"], stems,
                           a.get("serial") or serial, [p for p in a.get("learned", "").split("|") if p])
     return _json(handler, out)
 
@@ -881,7 +845,7 @@ def _savemgr_copy(handler) -> None:
         return _json(handler, {"error": "brak profile"}, 400)
     if not (_scope_ok(handler, prof) and _profile_ok(handler, prof)):
         return _json(handler, {"error": "konto wymaga hasła", "pin": True}, 403)
-    out = savemgr.copy(nasfs.SmbFs(NAS_ROOT), prof, src, a.get("platform", ""), a.get("emu", ""),
+    out = savemgr.copy(nasfs.DirFs(NAS_ROOT), prof, src, a.get("platform", ""), a.get("emu", ""),
                        a.get("es", ""), a.get("name", ""), a.get("device", ""))
     return _json(handler, out)
 
@@ -955,6 +919,17 @@ def _bios_get(handler) -> None:
     Telefon dokłada je do RetroArcha przed grą, jak EmuStart na Windows (bios.sync)."""
     from emustart import bios
     q = urllib.parse.parse_qs(urllib.parse.urlsplit(handler.path).query)
+    folder = _bios_rel((q.get("dir") or [""])[0])
+    if folder:
+        # GET /v1/bios?dir=pcsx2/bios — pliki w folderze (emulatory samodzielne: PCSX2)
+        files: list = []
+        for d in bios_dirs(API._cfg):
+            try:
+                files += [f"{folder}/{f.name}" for f in sorted((d / folder).iterdir())
+                          if f.is_file() and _bios_rel(f.name) and f.stat().st_size <= 64 * 1024 * 1024]
+            except OSError:
+                continue
+        return _json(handler, {"files": list(dict.fromkeys(files))})
     core = (q.get("core") or [""])[0]
     if core:
         names = []
@@ -975,6 +950,26 @@ def _bios_get(handler) -> None:
     handler.wfile.write(data)
 
 
+def _emulators_get(handler, parts: list) -> None:
+    """GET /v1/emulators — wersje emulatorów w magazynie serwera i co potrzebuje który system;
+    GET /v1/emulators/manifest?item=&version= — pliki wersji z rozmiarem i sumą SHA-256;
+    GET /v1/emulators/archive?item=&version= — cała wersja w jednym ZIP-ie (Range: wznawianie)."""
+    from emustart import emucatalog, emustore
+    if not parts:
+        return _json(handler, emustore.public_index(API._cfg))
+    q = urllib.parse.parse_qs(urllib.parse.urlsplit(handler.path).query)
+    item, version = (q.get("item") or [""])[0], (q.get("version") or [""])[0]
+    if parts == ["manifest"] and emucatalog.valid_item(item):
+        m = emustore.manifest(API._cfg, item, version)
+        if m:
+            return _json(handler, m)
+    if parts == ["archive"] and emucatalog.valid_item(item):
+        p = emustore.archive_path(API._cfg, item, version)
+        if p:
+            return _send_path(handler, p)
+    return _json(handler, {"error": "nie ma takiej wersji emulatora"}, 404)
+
+
 def _send_file(handler, gid: int, rel: str) -> None:
     from emustart import library
     g = library.game(gid)
@@ -990,6 +985,13 @@ def _send_file(handler, gid: int, rel: str) -> None:
         path = deps[rel]
     else:
         path = base / rel                       # „/” działa i na Windows
+    from emustart import srvadmin
+    ip = handler.client_address[0]
+    _send_path(handler, path, lambda n: srvadmin.sent(ip, gid, g.get("title") or rel, n))
+
+
+def _send_path(handler, path: Path, on_chunk=None) -> None:
+    """Plik z obsługą Range (wznawianie pobierania): gry, archiwa emulatorów."""
     try:
         size = path.stat().st_size
     except OSError:
@@ -1019,8 +1021,6 @@ def _send_file(handler, gid: int, rel: str) -> None:
     if partial:
         handler.send_header("Content-Range", f"bytes {start}-{end}/{size}")
     handler.end_headers()
-    from emustart import srvadmin
-    ip = handler.client_address[0]
     with open(path, "rb") as f:
         f.seek(start)
         left = length
@@ -1031,7 +1031,8 @@ def _send_file(handler, gid: int, rel: str) -> None:
                 break
             handler.wfile.write(buf)
             left -= len(buf)
-            srvadmin.sent(ip, gid, g.get("title") or rel, len(buf))
+            if on_chunk:
+                on_chunk(len(buf))
 
 
 FW_TLS = "EmuStart Server (szyfrowany)"
@@ -1069,9 +1070,16 @@ def install_autostart(exe: str, port: int) -> list:
     """Zadanie Harmonogramu (przy starcie systemu) i reguła zapory — uruchamiane
     przez użytkownika na komputerze z grami (wymaga uprawnień administratora)."""
     import subprocess
+    app = str(Path(exe).parent)
     cmds = [
+        # folder programu: zapis tylko SYSTEM (serwer) i administratorzy, zwykli użytkownicy —
+        # odczyt. Bez tego każdy zalogowany użytkownik mógł podmienić DLL w _internal, a serwer
+        # (konto SYSTEM) wykonałby ją przy starcie; także dane serwera (konta, profile, klucze).
+        # SID-y zamiast nazw grup (nazwy zależą od języka Windows).
+        ["icacls", app, "/inheritance:r", "/grant:r", "*S-1-5-18:(OI)(CI)F", "*S-1-5-32-544:(OI)(CI)F",
+         "*S-1-5-32-545:(OI)(CI)RX"],
         ["schtasks", "/Create", "/F", "/TN", "EmuStart Server", "/SC", "ONSTART", "/RU", "SYSTEM",
-         "/RL", "HIGHEST", "/TR", f'"{exe}" --server'],
+         "/RL", "HIGHEST", "/TR", f'"{exe}" --service'],
         # schtasks zakłada limit 72 h pracy zadania — serwer działa bez końca;
         # po awarii Harmonogram uruchamia go ponownie (3 razy co minutę)
         ["powershell", "-NoProfile", "-Command",
@@ -1082,7 +1090,7 @@ def install_autostart(exe: str, port: int) -> list:
         ["powershell", "-NoProfile", "-Command",
          "$s=(New-Object -ComObject WScript.Shell).CreateShortcut("
          "\"$env:ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\EmuStart Server.lnk\");"
-         f"$s.TargetPath='{exe}';$s.Arguments='--server-panel';$s.IconLocation='{exe},0';$s.Save()"],
+         f"$s.TargetPath='{exe}';$s.Arguments='--panel';$s.IconLocation='{exe},0';$s.Save()"],
         ["netsh", "advfirewall", "firewall", "add", "rule", "name=EmuStart Server", "dir=in",
          "action=allow", "protocol=TCP", f"localport={port}"],
         ["netsh", "advfirewall", "firewall", "add", "rule", f"name={FW_TLS}", "dir=in",

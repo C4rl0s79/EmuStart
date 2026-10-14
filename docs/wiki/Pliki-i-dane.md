@@ -4,21 +4,21 @@
 
 | Ścieżka | Zawartość |
 |---|---|
-| `config.json` | ustawienia komputera: foldery, emulator per system, wygląd, klucze API (zaszyfrowane) |
-| `data\library.sqlite` | biblioteka gier, historia gry, stan pamięci podręcznej, metadane |
-| `data\launchbox.db` | baza LaunchBox (po pobraniu) |
-| `data\media\<system>\` | okładki, zrzuty, logo (WebP) |
+| `config.json` | ustawienia komputera: serwer, emulator per system, wygląd |
+| `data\library.sqlite` | kopia biblioteki z serwera, opisy, historia gry, stan pamięci podręcznej |
+| `data\media\<system>.media` | kopia grafik z serwera — jeden plik na system (pobierane przy wyświetleniu) |
+| `data\media\_stany\` | obrazki stanów gry (z plików stanów emulatorów) |
 | `data\resume\<profil>\` | stany „wznowienia” |
 | `cache\<system>\` | lokalne kopie gier |
 | `profiles\<id>\` | save'y, kopie ustawień, `emustart.json`, `retroachievements.json` profilu |
 | `profiles\_machine\` | ostatnie ustawienia emulatorów tego komputera sprzed podmiany na profil |
 | `logs\emustart.log` | log (rotowany, 4 × 2 MB) |
 
-## Na NAS-ie
+## Na serwerze
 
-`Z:\emustart\Profiles\<profil>\` — patrz
-[Kilka komputerów, jeden NAS](Kilka-komputerów-jeden-NAS). Folder NAS-a zmienia
-ustawienie `profiles_nas` w `config.json`.
+Biblioteka, grafiki, opisy, konta i profile kont (zapisy) — w folderze `server\` obok
+`EmuStartServer.exe`, patrz [EmuStart Server](EmuStart-Server) i
+[Kilka urządzeń, jeden serwer](Kilka-komputerów-jeden-NAS).
 
 ## W emulatorach
 
@@ -34,5 +34,6 @@ usuwane po grze (po awarii — przy następnym starcie).
 
 ## Kopia zapasowa
 
-Wystarczy skopiować `config.json`, `data\library.sqlite` i `profiles\`. Grafiki
-i bazę LaunchBox da się pobrać ponownie; save'y i ustawienia profili są też na NAS-ie.
+Na komputerze z EmuStart wystarczy `config.json` — biblioteka, grafiki i zapisy są na
+serwerze. Serwer kopiuje konta sam (panel → Konta → Pliki i kopie); całość serwera to
+folder `server\`.

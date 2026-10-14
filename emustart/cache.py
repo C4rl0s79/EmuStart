@@ -118,7 +118,8 @@ def missing_bytes(cfg: dict, game: dict) -> int:
 def copy_game(cfg: dict, game: dict, rom_dir: Path, prog: Progress,
               cancel: threading.Event, extra: list | None = None, srcs: dict | None = None) -> None:
     """Kopiuje brakujące pliki gry (i `extra` = [(src, dst, size, mtime)]).
-    `srcs` = {rel: netsrc.RemoteFile} — te pliki z serwera EmuStart, reszta z NAS-a."""
+    `srcs` = {rel: netsrc.RemoteFile} — pliki z serwera EmuStart (wszystkie pliki gry);
+    bez `srcs` — z folderu `rom_dir` (testy, pliki lokalne)."""
     jobs = []
     for rel, size, mt in game["files"]:
         jobs.append(((srcs or {}).get(rel) or rom_dir / rel, _local_file(cfg, game, rel), size, mt))

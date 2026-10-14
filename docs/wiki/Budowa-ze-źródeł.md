@@ -28,9 +28,9 @@ w katalogu tymczasowym) — nie dotykają prawdziwych ustawień.
 ## Paczka
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File build.ps1           # dist\EmuStart-<wersja>-win64.zip
+powershell -ExecutionPolicy Bypass -File build.ps1           # dist\EmuStart-<wersja>-win64.zip i dist\EmuStart-Server-<wersja>-win64.zip
 powershell -ExecutionPolicy Bypass -File build.ps1 -Deploy   # + kopia do katalogu programu
-powershell -ExecutionPolicy Bypass -File build.ps1 -Deploy -Target E:\EmuStart
+powershell -ExecutionPolicy Bypass -File build.ps1 -Deploy -ServerTarget E:\EmuStart   # + EmuStart Server
 ```
 
 Repozytorium i zainstalowany program są w **osobnych katalogach**: `-Deploy` kopiuje program

@@ -15,7 +15,7 @@ Każdy profil ma **osobno**:
 - **Start → Zmień profil** — lista profili („Kto gra?”).
 - Na karcie profilu: **A** — graj jako, **Y** — zmień nazwę, **X** (dwa razy) —
   usuń (pliki save'ów zostają), **Start** — opcje profilu (RetroAchievements,
-  „Ustaw jako profil tego komputera”, zmiana folderu na NAS-ie).
+  „Ustaw jako profil tego komputera”).
 - Ustawienia → Profile:
   - **Profil tego komputera** — do niego trafiają save'y i konto RA zastane
     w emulatorach (np. po instalacji emulatora od nowa),
@@ -75,7 +75,29 @@ Tailscale.
 komputerze: **Start** na karcie profilu → **Ustaw PIN na tym urządzeniu** / **Zmień** /
 **Usuń**. Urządzenie pyta o niego przy wyborze profilu (raz na uruchomienie). Skrót PIN-u
 zostaje na urządzeniu — serwer go nie zna. Dawne PIN-y profili z serwera (0.27–0.39) nie są
-już sprawdzane. Bez serwera (sam SMB) kont z hasłem nie ma.
+już sprawdzane.
+
+**Stany RetroArcha — jak w Steam** (tylko dochodzą, nigdy się nie nadpisują):
+
+- każdy zapis stanu dostaje nowy numer (**Select + Y** na padzie albo menu RetroArcha),
+  także autozapis przy wyjściu z gry trafia do historii jako kolejny stan,
+- gdy dwa urządzenia zrobiły stan o tym samym numerze (np. gra bez serwera), drugi dostaje
+  następny wolny numer — nic nie ginie,
+- przed grą najnowszy stan z dowolnego urządzenia konta wczytuje się sam („Kontynuuj”);
+  start bez stanu: opcje gry → **Graj od początku**, w trakcie gry: A + Y → **Reset gry**,
+- opcje gry → **Wczytaj zapis**: wszystkie stany gry ze wszystkich urządzeń — miniatura,
+  „Stan #N”, urządzenie, data, autozapis; na górze „Kontynuuj — najnowszy stan”,
+- serwer trzyma 50 najnowszych stanów gry (dla każdego rdzenia).
+
+**Ustawienia emulatora** (opcje gry → **Ustawienia emulatora**) należą do profilu: przed grą
+kopia z profilu zastępuje plik emulatora, po grze zmiany wracają do profilu. Zmienia się je
+w emulatorze — w trakcie gry (RetroArch: **Start + Select** → menu, np. Opcje rdzenia →
+rozdzielczość) albo **Zmień w emulatorze (bez gry)**. Ręczna edycja pliku poza grą zostanie
+zastąpiona kopią z profilu. Gdy zmiana coś zepsuje (np. czarny ekran po zbyt wysokiej
+rozdzielczości): **Cofnij zmianę** — lista 10 ostatnich zmian (data, gra, pliki); wybrana
+przywraca ustawienia sprzed niej od następnej gry, a samo przywrócenie też da się cofnąć.
+**Shader ekranu** (ta sama strona): gry systemu bez shadera RetroArcha — gdy szukasz shadera
+pasującego do ustawień rdzenia, a obecny daje czarny ekran (też z menu w grze A + Y).
 
 **Menedżer zapisów** (opcje gry → **Zapisy i stany**, na komputerze i telefonie):
 stany tej gry z komputera i z telefonu oraz wspólne zapisy w grze. Stan z jednej platformy
@@ -90,23 +112,18 @@ można skopiować na drugą (pobierze się przy następnej grze). Zgodność:
 Zapisy w grze (save'y RetroArcha, karty pamięci PS1/PS2) są wspólne dla obu platform
 i synchronizują się same przy każdej grze — menedżer je tylko pokazuje.
 
-**Synchronizacja z NAS-em.** Przed grą nowsze pliki z NAS-a → lokalnie, po grze
-nowsze lokalne → NAS (`Z:\emustart\Profiles\<profil>\`). Nadpisywane wersje trafiają
-do kopii zapasowych. Szczegóły: [Kilka komputerów, jeden NAS](Kilka-komputerów-jeden-NAS).
+**Synchronizacja z serwerem.** Przed grą nowsze pliki z serwera → lokalnie, po grze
+nowsze lokalne → serwer (folder profilu konta na [EmuStart Server](EmuStart-Server)).
+Pliki są skompresowane, kopię nadpisywanej wersji robi serwer u siebie, kilka plików idzie
+naraz. Serwer niedostępny — zapisy czekają w kolejce; przy starcie EmuStart wysyła
+wszystkie lokalne zapisy, których serwer nie ma. Szczegóły:
+[Kilka urządzeń, jeden serwer](Kilka-komputerów-jeden-NAS). Całe konto (ZIP) kopiuje
+serwer raz dziennie — panel → Konta → Pliki i kopie.
 
 **Kopie zapasowe** nadpisywanych plików są w `<profil>\_backup\<data>-<urządzenie>\` (ostatnie 10).
 Pliki, które się kompresują (np. karty pamięci), są tam spakowane zstd jako `<plik>.zst` —
 rozpakujesz je np. 7-Zipem albo `zstd -d`. Stany gry zostają bez zmian (emulatory już je
 kompresują).
-
-**Przez serwer EmuStart.** Gdy w Ustawieniach jest [serwer EmuStart](Serwer-dla-Androida)
-(i włączone „Zapisy i profile przez serwer”), zapisy, ustawienia, blokada profilu
-i stany wznowienia idą przez serwer zamiast przez SMB: pliki są skompresowane
-(pusta karta pamięci PS2 8 MB → kilka KB), kopię zapasową nadpisywanej wersji robi
-serwer u siebie, kilka plików idzie naraz. To ten sam folder `Profiles` na NAS-ie —
-komputery przez SMB i przez serwer mogą działać równocześnie. Serwer niedostępny —
-przez SMB jak dotąd. Przy starcie EmuStart wysyła wszystkie lokalne zapisy, których
-nie ma na NAS-ie (np. z gry bez połączenia).
 
 **Blokada.** Ten sam profil nie gra naraz na dwóch urządzeniach (komputery, telefon) —
 drugie dostaje komunikat „Profil gra teraz na urządzeniu …”. Blokada to dzierżawa:
@@ -118,9 +135,5 @@ własną blokadę z poprzedniej, niedokończonej gry.
 
 ## Zmiana nazwy profilu
 
-Zmiana nazwy zmienia nazwę wyświetlaną. Folder na NAS-ie zmienia się razem z nią
-tylko wtedy, gdy profil jeszcze nic na NAS nie wysłał. Profil z danymi zachowuje
-stary folder (inne komputery go po nim rozpoznają) — w opcjach profilu (Start)
-pojawia się wtedy **„Folder na NAS: „stary” → zmień na „nowy””**: przenosi folder
-i zostawia w starym miejscu `moved.json`, dzięki któremu inne komputery same
-przepinają się na nowy.
+Zmiana nazwy zmienia nazwę wyświetlaną na tym urządzeniu; konto na serwerze zachowuje
+swoją nazwę (po niej rozpoznają je inne urządzenia).

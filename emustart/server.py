@@ -19,17 +19,6 @@ from emustart import paths
 
 ROUTES = {"/media/": paths.MEDIA, "/assets/": paths.ASSETS}
 
-# dodatkowe foldery tylko do odczytu (np. paczka logo, ikony RetroArcha) —
-# udostępniane jako /local/<n>/<ścieżka>, wyłącznie zarejestrowane
-LOCAL_ROOTS: list = []
-
-
-def local_url(root: Path, file: Path) -> str:
-    root = Path(root).resolve()
-    if root not in LOCAL_ROOTS:
-        LOCAL_ROOTS.append(root)
-    n = LOCAL_ROOTS.index(root)
-    return f"/local/{n}/" + urllib.parse.quote(str(Path(file).resolve().relative_to(root)).replace("\\", "/"))
 
 # tryb deweloperski (main.py --browser): UI w zwykłej przeglądarce woła API przez
 # POST /api/<metoda> zamiast mostu pywebview. Domyślnie wyłączony.
@@ -225,7 +214,7 @@ class _Handler(BaseHTTPRequestHandler):
             return remote.handle(self)
         if not _local_ui(self):
             from emustart import remote      # grafiki dla urządzeń (z tokenem, szyfrowanym połączeniem)
-            if not raw.startswith(("/media/", "/assets/", "/local/")):
+            if not raw.startswith(("/media/", "/assets/")):
                 return self.send_error(403)
             if not _v1_ok(self):
                 return
@@ -237,16 +226,46 @@ class _Handler(BaseHTTPRequestHandler):
             if path.startswith(prefix):
                 base, rel = root, path[len(prefix):]
                 break
-        if path.startswith("/local/"):
-            n, _, rel = path[len("/local/"):].partition("/")
-            if not n.isdigit() or int(n) >= len(LOCAL_ROOTS):
-                return self.send_error(404)
-            base = LOCAL_ROOTS[int(n)]
         target = (base / rel).resolve()
         try:
             target.relative_to(base.resolve())
         except ValueError:
             return self.send_error(403)
+        if path.startswith("/serwer/") and MEDIA_CFG:
+            from emustart import libsync           # podgląd z serwera (logo z paczki) — bez zapisu
+            got = libsync.fetch_preview(MEDIA_CFG(), path[len("/serwer"):])
+            if not got:
+                return self.send_error(404)
+            data, ctype = got
+            self.send_response(200)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "private, max-age=3600")   # ponowne otwarcie okna — z pamięci
+            self.end_headers()
+            self.wfile.write(data)
+            return
+        if base == ROUTES.get("/assets/") and rel.startswith("systems/") and rel.count("/") == 1:
+            from emustart import mediastore            # wbudowane logo platform (assets/systems.media)
+            data = mediastore.bundled_get(rel[len("systems/"):])
+            if data is None:
+                return self.send_error(404)
+            return self._send_bytes(data, "image/png")
+        if base == ROUTES.get("/media/"):
+            from emustart import mediastore
+            where = mediastore.file_name(rel)
+            if where:                                  # grafika gry — z pliku systemu (.media)
+                got = mediastore.get(*where)
+                if got is None and not target.is_file():
+                    cfg = MEDIA_CFG() if MEDIA_CFG else getattr(DEV_API, "_cfg", None)
+                    if cfg:
+                        from emustart import libsync   # PC: lokalna kopia z serwera
+                        libsync.fetch_media(cfg, rel, target)
+                        got = mediastore.get(*where)
+                if got is not None:
+                    return self._send_bytes(got[0], mimetypes.guess_type(where[1])[0] or "image/png")
+                if not target.is_file():
+                    return self.send_error(404)
+                # stary plik grafiki, jeszcze nieprzeniesiony do pliku systemu — jak dotąd
         if not target.is_file() and base == ROUTES.get("/media/"):
             cfg = MEDIA_CFG() if MEDIA_CFG else getattr(DEV_API, "_cfg", None)
             if cfg:
@@ -265,6 +284,19 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Referrer-Policy", "no-referrer")
         self.end_headers()
         self.wfile.write(data)
+
+
+def _send_bytes(self, data: bytes, ctype: str) -> None:
+    self.send_response(200)
+    self.send_header("Content-Type", ctype)
+    self.send_header("Content-Length", str(len(data)))
+    self.send_header("Cache-Control", "max-age=86400")
+    self.send_header("Referrer-Policy", "no-referrer")
+    self.end_headers()
+    self.wfile.write(data)
+
+
+_Handler._send_bytes = _send_bytes
 
 
 class _TLSServer(ThreadingHTTPServer):

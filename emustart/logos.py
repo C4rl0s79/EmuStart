@@ -1,56 +1,82 @@
 """logos — logo systemów do karuzeli.
 
 Kolejność:
-  1. wbudowane (assets/systems/<kod>.png, z PyLinks) — 40 systemów,
-  2. pobrane z motywu Carbon dla EmulationStation (RetroPie/es-theme-carbon,
-     <folder ES>/art/system.svg) — nazwy folderów ES pasują 1:1,
-  3. ikona systemu z RetroArcha (assets/xmb/systematic/png/<nazwa libretro>.png),
-     kopiowana lokalnie — bez sieci.
-Pobrane trafiają do data/media/_systems/. Brak logo zapamiętujemy (plik .none),
-żeby nie pytać sieci przy każdym starcie.
+  1. wybrane ręcznie (panel serwera albo urządzenie administratora),
+  2. wbudowane (assets/systems.media, z PyLinks) — 40 systemów,
+  3. pobrane w tle: motyw Carbon dla EmulationStation (<folder ES>/art/system.svg), a gdy go
+     nie ma — ikona systemu z motywu RetroArcha (libretro/retroarch-assets).
+Do ręcznego wyboru: motywy ES / ES-DE i RetroArcha z internetu (ES_THEMES, RA_THEMES) oraz
+paczka logo z folderu ustawionego w panelu serwera.
+Pobrane trafiają do media/_systems.media. Brak logo zapamiętujemy (wpis .none), żeby nie
+pytać sieci przy każdym starcie.
 """
 
 from __future__ import annotations
 
 import logging
 import re
-import shutil
 import threading
 from pathlib import Path
 
-from emustart import art_sources, paths, systems
+from emustart import art_sources, systems
 
 log = logging.getLogger("emustart.logos")
 
-CARBON = "https://raw.githubusercontent.com/RetroPie/es-theme-carbon/master/{es}/art/system.svg"
+GH = "https://raw.githubusercontent.com/"
+CARBON = GH + "RetroPie/es-theme-carbon/master/{es}/art/system.svg"
 _ALIAS = {"FBNEO": "ARCADE", "SUPERGRAFX": "PCENGINE", "SNESMSU1": "SNES"}
 _busy: set = set()
 _lock = threading.Lock()
 
 
-def _dir() -> Path:
-    return paths.MEDIA / "_systems"
+STORE = "_systems"                    # logo systemów: media/_systems.media (emustart/mediastore.py)
+
+
+def _has(f: str) -> bool:
+    from emustart import mediastore
+    return mediastore.exists(STORE, f)
+
+
+def _get(f: str) -> bytes | None:
+    from emustart import mediastore
+    got = mediastore.get(STORE, f)
+    return got[0] if got else None
+
+
+def _put(f: str, data: bytes) -> None:
+    from emustart import mediastore
+    mediastore.put(STORE, f, data)
+
+
+def drop(es: str) -> None:
+    """Wszystkie logo systemu `es` z magazynu (np. lokalna kopia po zmianie na serwerze)."""
+    from emustart import mediastore
+    for f in mediastore.files(STORE):
+        if f.split(".")[0] == es:
+            mediastore.delete(STORE, f)
 
 
 def bundled(plat: str) -> str:
+    from emustart import mediastore
     for key in (plat, _ALIAS.get(plat, "")):
-        if key and (paths.ASSETS / "systems" / f"{key}.png").is_file():
+        if key and f"{key}.png" in mediastore.bundled_names():
             return f"/assets/systems/{key}.png"
     return ""
 
 
 def downloaded(es: str) -> str:
     for ext in ("svg", "png"):
-        if (_dir() / f"{es}.{ext}").is_file():
+        if _has(f"{es}.{ext}"):
             return f"/media/_systems/{es}.{ext}"
     return ""
 
 
 def custom(es: str) -> str:
+    from emustart import mediastore
     for ext in ("svg", "png", "jpg", "webp"):
-        f = _dir() / f"{es}.custom.{ext}"
-        if f.is_file():
-            return f"/media/_systems/{es}.custom.{ext}?v={int(f.stat().st_mtime)}"
+        t = mediastore.mtime(STORE, f"{es}.custom.{ext}")
+        if t:
+            return f"/media/_systems/{es}.custom.{ext}?v={int(t)}"
     return ""
 
 
@@ -75,12 +101,40 @@ def url_for(es: str, cfg: dict | None = None) -> dict:
 
 # ── ręczny wybór logo ──
 
-ARTBOOK = ("https://raw.githubusercontent.com/anthonycaccese/art-book-next-es-de/main/"
-           "_inc/systems/logos/{es}.svg")
-PACK_DEFAULT = Path(r"D:\py\PyLinks\platform_logos")
+# motywy EmulationStation / ES-DE z logo systemów (nazwy folderów ES pasują 1:1) — pobiera
+# serwer, bez żadnych plików na dysku; propozycje sprawdzane naraz (puste ramki pomijane)
+ES_THEMES = (
+    ("Art Book Next", GH + "anthonycaccese/art-book-next-es-de/main/_inc/systems/logos/{es}.svg"),
+    ("Carbon", CARBON),
+    ("Alekfull NX", GH + "anthonycaccese/alekfull-nx-es-de/main/_inc/systems/logos/{es}.svg"),
+    ("Canvas", GH + "Siddy212/canvas-es-de/main/_inc/system-logo/{es}.svg"),
+    ("Simple", GH + "RetroPie/es-theme-simple/master/{es}/art/{es}.svg"),
+    ("Pixel", GH + "ehettervik/es-theme-pixel/master/{es}/logo.png"),
+    ("SNES Mini", GH + "ruckage/es-theme-snes-mini/master/art/logos/{es}.png"),
+)
+# gdy motyw nie ma własnego logo systemu — logo systemu „rodzica” (WHDLoad → Amiga, MSU-1 → SNES)
+ES_PARENT = {"amigawhddemos": "amiga", "amigawhdgames": "amiga", "SNESMSU1": "snes", "msx2": "msx",
+             "n64dd": "n64", "fbneo": "arcade", "xbox360": "x360"}
+
+
+def theme_names(es: str) -> list:
+    """Nazwy folderów do sprawdzenia w motywach ES / ES-DE: kod ES i inne nazwy w stylu ES
+    (systems.names: „atarilynx”, „gc”, „genesis”…), potem system „rodzica"."""
+    out = []
+    for e in [es] + ([ES_PARENT[es]] if es in ES_PARENT else []):
+        names_ = systems.names(e)
+        # + nazwa wyświetlana i libretro sklejone: „Atari Lynx” → atarilynx (styl ES-DE)
+        for n in names_ + [re.sub(r"[^a-z0-9]+", "", n.lower()) for n in names_[1:3]]:
+            v = n.lower()
+            if re.fullmatch(r"[a-z0-9-]+", v) and v not in out:
+                out.append(v)
+    return out
+
+
+# ikony systemów z motywów menu RetroArcha (repozytorium libretro/retroarch-assets)
+RA_ICON = GH + "libretro/retroarch-assets/master/xmb/{theme}/png/{name}.png"
+RA_THEMES = ("systematic", "monochrome", "flatui", "flatux", "retrosystem", "pixel", "dot-art", "daite", "automatic")
 PACK_LABELS = {"Light_Just_White": "białe", "Light_Color": "kolorowe", "Dark_Just_Black": "czarne"}
-RA_THEMES = ("systematic", "flatui", "flatux", "retrosystem", "pixel", "dot-art",
-             "monochrome", "daite", "automatic")
 _IMG = {".png", ".svg", ".jpg", ".jpeg", ".webp"}
 
 # nazwy platform w stylu LaunchBox (tak nazwane są pliki w paczkach logo)
@@ -104,23 +158,51 @@ def _clean(stem: str) -> str:
     return s.strip(" -_.,;'")
 
 
-def pack_dirs(cfg: dict) -> list:
-    """[(folder, etykieta)] paczek logo: ustawienie `logo_pack_dir` albo paczka PyLinks."""
-    root = Path(cfg.get("logo_pack_dir") or PACK_DEFAULT)
-    out = []
+PACK_STORE = "_logopack"      # paczka logo w jednym pliku: media/_logopack.media
+PACK_SEP = "~"                # nazwa w magazynie: <wariant>~<plik>, np. Light_Color~Sega Saturn-01.png
+
+
+def import_pack(folder: Path) -> int:
+    """Folder paczki logo (np. platform_logos z PyLinks: _variants/<wariant>/*.png albo same
+    obrazy) → magazyn _logopack — jeden plik zamiast tysięcy małych (kopiowanie serwera,
+    kopie zapasowe). Zastępuje poprzednią zawartość. Zwraca liczbę logo."""
+    from emustart import mediastore
+    root = Path(folder)
     if (root / "_variants").is_dir():
         root = root / "_variants"
-    if root.is_dir():
-        subs = [d for d in sorted(root.iterdir()) if d.is_dir() and not d.name.startswith("_")]
-        out += [(d, PACK_LABELS.get(d.name, d.name)) for d in subs]
-        if any(f.suffix.lower() in _IMG for f in root.iterdir() if f.is_file()):
-            out.append((root, "paczka"))
+    if not root.is_dir():
+        raise OSError(f"nie ma folderu {folder}")
+    dirs = [(d, d.name) for d in sorted(root.iterdir()) if d.is_dir() and not d.name.startswith("_")]
+    dirs.append((root, "paczka"))
+    names = set()
+
+    def items():
+        for d, variant in dirs:
+            for f in sorted(d.iterdir()):
+                if f.is_file() and f.suffix.lower() in _IMG and PACK_SEP not in f.name:
+                    names.add(f"{variant}{PACK_SEP}{f.name}")
+                    yield f"{variant}{PACK_SEP}{f.name}", f.read_bytes(), f.stat().st_mtime
+    n = mediastore.put_many(PACK_STORE, items())
+    for old in set(mediastore.files(PACK_STORE)) - names:
+        mediastore.delete(PACK_STORE, old)
+    log.info("paczka logo z %s: %d plików", folder, n)
+    return n
+
+
+def _pack_entries() -> list:
+    """[(nazwa w magazynie, etykieta wariantu, nazwa pliku)]."""
+    from emustart import mediastore
+    out = []
+    for name in mediastore.files(PACK_STORE):
+        variant, _, f = name.partition(PACK_SEP)
+        if f:
+            out.append((name, PACK_LABELS.get(variant, variant), f))
     return out
 
 
 def candidates(cfg: dict, es: str) -> list:
     """Propozycje logo: [{id, url, source, label}]. `id` przekazuje się do choose()."""
-    from emustart import art_sources, server
+    from emustart import art_sources
     info = systems.info(es)
     out = []
     b = bundled(info["plat"])
@@ -129,31 +211,32 @@ def candidates(cfg: dict, es: str) -> list:
     d = downloaded(es)
     if d:
         out.append({"id": "downloaded", "url": d, "source": "pobrane wcześniej", "label": es})
-    for tpl, src in ((ARTBOOK, "Art Book Next"), (CARBON, "Carbon")):
-        u = tpl.format(es=es)
-        if _exists(u):                       # pustych ramek (404) nie pokazujemy
-            out.append({"id": "url:" + u, "url": u, "source": src, "label": es})
-    targets = [t for t in {info["display"], info["libretro"].replace(" - ", " "),
-                           LB_NAMES.get(es, "")} if t]
+    import urllib.parse
+    from concurrent.futures import ThreadPoolExecutor
+    names = theme_names(es)
+    web = [(src, tpl.format(es=n), n) for src, tpl in ES_THEMES for n in names]
+    web += [(f"RetroArch ({t})", RA_ICON.format(theme=t, name=urllib.parse.quote(info["libretro"])),
+             info["libretro"]) for t in RA_THEMES if info["libretro"]]
+    with ThreadPoolExecutor(max_workers=12) as ex:    # pustych ramek (404) nie pokazujemy
+        found = list(ex.map(lambda w: _exists(w[1]), web))
+    seen = set()
+    for (src, u, label), ok in zip(web, found):
+        if ok and src not in seen:                    # z motywu pierwsza istniejąca nazwa
+            seen.add(src)
+            out.append({"id": "url:" + u, "url": u, "source": src, "label": label})
+    # paczka (nazwy jak LaunchBox: „Atari Lynx”, „Sony Playstation”) — po wszystkich pełnych nazwach
+    targets = [t for t in dict.fromkeys([n.replace(" - ", " ") for n in systems.names(es) if " " in n]
+                                        + [info["display"], LB_NAMES.get(es, "")]) if t]
     scored = []
-    for folder, label in pack_dirs(cfg):
-        for f in folder.iterdir():
-            if f.suffix.lower() not in _IMG:
-                continue
-            name = _clean(f.stem)
-            sc = max(art_sources.similarity(name, t) for t in targets)
-            if sc >= 0.72:
-                scored.append((sc, f, folder, label, name))
-    scored.sort(key=lambda x: (-x[0], x[3], x[1].name.lower()))
-    for sc, f, folder, label, name in scored[:60]:
-        out.append({"id": "file:" + str(f), "url": server.local_url(folder, f),
+    for key, label, f in _pack_entries():
+        name = _clean(Path(f).stem)
+        sc = max(art_sources.similarity(name, t) for t in targets)
+        if sc >= 0.72:
+            scored.append((sc, key, label, name))
+    scored.sort(key=lambda x: (-x[0], x[2], x[1].lower()))
+    for sc, key, label, name in scored[:60]:
+        out.append({"id": "pack:" + key, "url": f"/media/{PACK_STORE}/" + urllib.parse.quote(key),
                     "source": f"paczka ({label})", "label": name})
-    ra = Path(cfg.get("emu_root") or "") / "RetroArch" / "assets" / "xmb"
-    for theme in RA_THEMES:
-        f = ra / theme / "png" / f"{info['libretro']}.png"
-        if f.is_file():
-            out.append({"id": "file:" + str(f), "url": server.local_url(ra, f),
-                        "source": f"RetroArch ({theme})", "label": info["libretro"]})
     return out
 
 
@@ -175,24 +258,28 @@ def choose(cfg: dict, es: str, cid: str) -> bool:
         if cid == "downloaded":
             # pobrane wygrywa z wbudowanym tylko jako kopia ręcznie wybrana
             for ext in ("svg", "png"):
-                f = _dir() / f"{es}.{ext}"
-                if f.is_file():
-                    _store_custom(es, f.read_bytes(), ext)
+                data = _get(f"{es}.{ext}")
+                if data:
+                    _store_custom(es, data, ext)
                     sc["logo"] = "custom"
         return True
     if cid == "none":
         sc["logo"] = "none"
         return True
     if cid.startswith("url:"):
+        if not cid[4:].startswith(GH):        # tylko adresy z propozycji (motywy na GitHubie)
+            return False
         data = art_sources.fetch(cid[4:], timeout=20)
         if not data or (b"<svg" not in data[:3000] and not art_sources.is_image(data)):
             return False
         _store_custom(es, data, "svg" if b"<svg" in data[:3000] else "png")
-    elif cid.startswith("file:"):
-        f = Path(cid[5:])
-        if not f.is_file() or f.suffix.lower() not in _IMG:
+    elif cid.startswith("pack:"):
+        from emustart import mediastore
+        key = cid[5:]
+        got = mediastore.get(PACK_STORE, key) if Path(key).suffix.lower() in _IMG else None
+        if not got:
             return False
-        _store_custom(es, f.read_bytes(), f.suffix.lower().lstrip("."))
+        _store_custom(es, got[0], Path(key).suffix.lower().lstrip("."))
     else:
         return False
     sc["logo"] = "custom"
@@ -200,11 +287,11 @@ def choose(cfg: dict, es: str, cid: str) -> bool:
 
 
 def _store_custom(es: str, data: bytes, ext: str) -> None:
-    d = _dir()
-    d.mkdir(parents=True, exist_ok=True)
-    for old in d.glob(f"{es}.custom.*"):
-        old.unlink(missing_ok=True)
-    (d / f"{es}.custom.{ext}").write_bytes(data)
+    from emustart import mediastore
+    for old in mediastore.files(STORE):
+        if old.startswith(f"{es}.custom."):
+            mediastore.delete(STORE, old)
+    _put(f"{es}.custom.{ext}", data)
 
 
 def fetch_missing(cfg: dict, es_list) -> None:
@@ -213,7 +300,7 @@ def fetch_missing(cfg: dict, es_list) -> None:
     with _lock:
         for es in es_list:
             if es in _busy or bundled(systems.info(es)["plat"]) or downloaded(es) \
-                    or (_dir() / f"{es}.none").exists():
+                    or _has(f"{es}.none"):
                 continue
             _busy.add(es)
             todo.append(es)
@@ -222,112 +309,22 @@ def fetch_missing(cfg: dict, es_list) -> None:
 
 
 def _run(cfg: dict, todo: list) -> None:
-    d = _dir()
-    d.mkdir(parents=True, exist_ok=True)
     for es in todo:
         try:
             data = art_sources.fetch(CARBON.format(es=es), timeout=15)
             if data and b"<svg" in data[:2000]:
-                (d / f"{es}.svg").write_bytes(data)
+                _put(f"{es}.svg", data)
                 continue
-            ra = Path(cfg.get("emu_root") or "") / "RetroArch" / "assets" / "xmb" / "systematic" / "png"
-            icon = ra / f"{systems.info(es)['libretro']}.png"
-            if icon.is_file():
-                shutil.copy2(icon, d / f"{es}.png")
+            import urllib.parse
+            name = systems.info(es)["libretro"]
+            icon = art_sources.fetch(RA_ICON.format(theme="systematic", name=urllib.parse.quote(name)),
+                                     timeout=15) if name else None
+            if icon and art_sources.is_image(icon):
+                _put(f"{es}.png", icon)
             elif data is not None or art_sources.online():
-                (d / f"{es}.none").write_text("")       # sprawdzone — logo nie ma
+                _put(f"{es}.none", b"")                 # sprawdzone — logo nie ma
         except Exception:
             log.exception("logo %s", es)
         finally:
             with _lock:
                 _busy.discard(es)
-
-
-# ── wygląd systemów na serwerze EmuStart (dla aplikacji na Androida) ──
-
-_push_lock = threading.Lock()
-
-
-def _system_state(cfg: dict, es: str):
-    """(logo, plik, poświata, nazwa) systemu na tym komputerze; logo: custom/none/default/keep."""
-    sc = (cfg.get("systems") or {}).get(es) or {}
-    lg = url_for(es, cfg)
-    url = lg["url"].split("?")[0]
-    f = None
-    if sc.get("logo") == "none":
-        logo = "none"
-    elif url.startswith("/media/_systems/"):
-        f = _dir() / url.rsplit("/", 1)[1]
-        logo = "custom" if f.is_file() else "keep"
-    elif url.startswith("/assets/"):
-        logo = "default"
-    else:
-        logo = "keep"                         # nic tu nie ma — serwer zostaje przy swoim
-    name = sc.get("name", "")
-    return logo, f, bool(lg["glow"]), name
-
-
-def _system_emu(cfg: dict, es: str) -> tuple[str, str]:
-    """(rodzina, rdzeń) emulatora systemu na tym komputerze: retroarch + rdzeń albo standalone."""
-    from emustart import rastates
-    sc = (cfg.get("systems") or {}).get(es) or {}
-    exe = Path(sc.get("exe") or "").stem.lower()
-    if not exe:
-        return "", ""
-    if exe == "retroarch":
-        return "retroarch", rastates.core_id(sc.get("args") or "")
-    return "standalone", ""
-
-
-def push_to_server(cfg: dict, only: list | None = None) -> int:
-    """Logo, poświata i nazwa systemów z tego komputera → serwer EmuStart (tylko zmienione
-    od ostatniego wysłania). Aplikacja na Androida pokazuje to, co ma serwer."""
-    import hashlib
-    import http.client
-    import urllib.parse
-    from emustart import library, netsrc
-    ep = netsrc.endpoint(cfg)
-    if not ep:
-        return 0
-    info = netsrc.info(cfg)
-    if not info.get("ok") or "system" not in info.get("features", []):
-        return 0
-    with _push_lock:
-        es_list = only or sorted(set((cfg.get("systems") or {})) | {p.name.split(".")[0] for p in _dir().glob("*.*")})
-        n = 0
-        for es in es_list:
-            try:
-                logo, f, glow, name = _system_state(cfg, es)
-                fam, core = _system_emu(cfg, es)
-                data = f.read_bytes() if logo == "custom" and f else b""
-                sig = hashlib.sha1(f"{logo}|{int(glow)}|{name}|{fam}|{core}".encode() + data).hexdigest()
-                if library.meta_get(f"logo_pushed:{ep[0]}:{es}", "") == sig:
-                    continue
-                q = {"es": es, "logo": logo, "glow": "1" if glow else "0", "name": name}
-                if fam:                          # bez skonfigurowanego emulatora — zalecenie serwera zostaje
-                    q.update(emu=fam, core=core)
-                if logo == "custom":
-                    q["ext"] = f.suffix.lower().lstrip(".")
-                c = netsrc.conn(ep[0], ep[1], 20)
-                try:
-                    c.request("PUT", "/v1/system?" + urllib.parse.urlencode(q), body=data,
-                              headers=netsrc.auth_headers(ep[2]))
-                    r = c.getresponse()
-                    r.read()
-                finally:
-                    c.close()
-                if r.status == 200:
-                    library.meta_set(f"logo_pushed:{ep[0]}:{es}", sig)
-                    n += 1
-                else:
-                    log.warning("logo %s na serwer: %s", es, r.status)
-            except (OSError, http.client.HTTPException, ValueError) as ex:
-                log.info("logo %s na serwer: %s", es, ex)
-                break
-        if n:
-            log.info("wygląd %d systemów wysłany na serwer %s", n, ep[0])
-        return n
-
-
-def push_later(cfg: dict, only: list | None = None) -> None:
-    threading.Thread(target=lambda: push_to_server(cfg, only), daemon=True, name="logo-serwer").start()

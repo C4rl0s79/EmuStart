@@ -103,7 +103,7 @@ def _run_session(cfg, gid):
     return s
 
 
-def test_launch_extracts_zip_for_non_native_emulator(env):
+def test_launch_extracts_zip_for_non_native_emulator(env, server_files):
     cfg, roms, tmp = env
     z = roms / "gba" / "Hero (USA).zip"
     z.parent.mkdir(parents=True)
@@ -121,10 +121,9 @@ def test_launch_extracts_zip_for_non_native_emulator(env):
     assert not any(paths.RUN_TMP.iterdir())            # posprzątane
 
 
-@pytest.mark.parametrize("mode,expect_nas", [("lan", True), ("remote", False)])
-def test_launch_disc_network_modes(env, mode, expect_nas):
+def test_launch_disc_downloaded_from_server(env, server_files):
+    """Gra płytowa: pobranie z serwera do pamięci podręcznej i start z kopii lokalnej."""
     cfg, roms, tmp = env
-    cfg["network_mode"] = mode
     _write(roms / "psx" / "Big (USA) (Disc 1).chd", b"d" * 3_000_000)
     _write(roms / "psx" / "Big (USA) (Disc 2).chd", b"e" * 3_000_000)
     scanner.scan_system("psx", roms / "psx")
@@ -135,20 +134,20 @@ def test_launch_disc_network_modes(env, mode, expect_nas):
     assert s.phase == "finished", s.message
     got = Path(rec.read_text())
     assert got.name == "Big (USA) (Disc 1).chd"
-    assert (str(roms) in str(got)) == expect_nas
+    assert str(roms) not in str(got)                                 # z kopii lokalnej
     if s.copy_thread:
         s.copy_thread.join(10)
     assert cache.is_complete(cfg, library.game(1))
 
 
-def test_offline_without_cache_is_clear_error(env):
+def test_offline_without_cache_is_clear_error(env, server_files):
     cfg, roms, tmp = env
     _write(roms / "nes" / "X.zip")
     scanner.scan_system("nes", roms / "nes")
     _fake_emu(cfg, "nes", tmp / "rec.txt")
-    (roms / "nes" / "X.zip").unlink()                  # „NAS niedostępny”
+    (roms / "nes" / "X.zip").unlink()                  # serwer nie ma gry / nie odpowiada
     s = _run_session(cfg, 1)
-    assert s.phase == "error" and "NAS" in s.message
+    assert s.phase == "error" and "Serwer EmuStart" in s.message
 
 
 def test_build_command_placeholders():
@@ -219,16 +218,17 @@ def test_fbneo_names_and_versions_without_mame(env, tmp_path):
     for n in ("1941", "1941j", "neogeo"):
         _write(roms / "fbneo" / f"{n}.zip", b"zip")
     scanner.scan_system("fbneo", roms / "fbneo")                    # bez indeksu: nazwy setów
-    _write(art.media_path("fbneo", "1941", "box"), b"png")          # grafika pod nazwą setu
+    from emustart import mediastore
+    mediastore.put("fbneo", art.media_file("1941", "box"), b"png")   # grafika pod nazwą setu
     assert arcade.refresh_fbneo(force=True, url=dat.as_uri())["sets"] == 3
     assert arcade.refresh_fbneo()["cached"]                          # raz na 30 dni
     scanner.scan_system("fbneo", roms / "fbneo")
     # nowa nazwa gry — grafika przeniesiona za nią (0.44.4: grafiki znikały)
-    assert art.media_path("fbneo", "1941 - Counter Attack (World)", "box").is_file()
-    assert not (paths.MEDIA / "fbneo" / "1941.box.png").exists()
-    _write(art.media_path("fbneo", "1941j", "snap"), b"png")         # naprawa po fakcie
+    assert art.has("fbneo", "1941 - Counter Attack (World)", "box")
+    assert not art.has("fbneo", "1941", "box")
+    mediastore.put("fbneo", art.media_file("1941j", "snap"), b"png")   # naprawa po fakcie
     assert art.adopt_set_names("fbneo") == 1
-    assert art.media_path("fbneo", "1941 - Counter Attack (Japan)", "snap").is_file()
+    assert art.has("fbneo", "1941 - Counter Attack (Japan)", "snap")
     games = library.list_games("fbneo", library.default_profile(), True)
     assert [g["title"] for g in games] == ["1941 - Counter Attack"]  # bez wersji i BIOS-u
     assert arcade.dependencies("1941j") == ["1941"]                  # wersja potrzebuje rodzica

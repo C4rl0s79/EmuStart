@@ -112,19 +112,27 @@ class Server(private val prefs: Prefs) {
             doneSet += e.url
             synchronized(lock) { lock.notifyAll() }
         }.apply { isDaemon = true }.start()
-        val end = System.currentTimeMillis() + 3500
+        var end = System.currentTimeMillis() + 3500
+        var firstOk = 0L
         synchronized(lock) {
             while (true) {
                 val ok = cands.filter { res.containsKey(it.url) }
                 val waiting = cands.filter { it.url !in doneSet }
                 // dość, gdy odpowiedział adres, od którego żaden niesprawdzony nie byłby lepszy
                 if (waiting.isEmpty() || (ok.isNotEmpty() && ok.minOf { it.rank } <= waiting.minOf { it.rank })) break
+                if (ok.isNotEmpty()) {
+                    // jest działający adres — na lepszy (sieć lokalna) najwyżej 0,4 s: adresy sieci
+                    // lokalnej serwera z sieci komórkowej nigdy nie odpowiadają (było: 3,5 s czekania)
+                    if (firstOk == 0L) firstOk = System.currentTimeMillis()
+                    end = minOf(end, firstOk + 400)
+                }
                 val left = end - System.currentTimeMillis()
                 if (left <= 0) break
                 lock.wait(left)
             }
         }
         val ok = cands.filter { res.containsKey(it.url) }
+        alive = ok.map { it.url }.toSet()
         val pick = ok.minWithOrNull(compareBy<Ep>({ it.rank }, { res[it.url] ?: 0L }))?.url ?: cands.first().url
         if (pick != base) android.util.Log.i("EmuStart", "serwer: adres $pick" +
             cands.joinToString(prefix = " (", postfix = ")") { e -> "${e.url} " + (res[e.url]?.let { "$it ms" } ?: "brak") })
@@ -134,6 +142,9 @@ class Server(private val prefs: Prefs) {
         lastKind = cands.firstOrNull { it.url == pick }?.let { kindName(it) } ?: ""
         return pick
     }
+
+    /** Adresy, które odpowiedziały przy ostatnim sprawdzaniu — tylko przez nie logowanie. */
+    @Volatile private var alive: Set<String> = emptySet()
 
     /** Rodzaj wybranego adresu (sieć lokalna, Tailscale, port publiczny, tunel) — do ustawień. */
     @Volatile var lastKind = ""
@@ -179,11 +190,17 @@ class Server(private val prefs: Prefs) {
         if (tok.isNotEmpty() && System.currentTimeMillis() < tokExp - margin) return tok
         synchronized(loginLock) {           // jedno logowanie naraz — reszta bierze ten sam token
             if (tok.isNotEmpty() && System.currentTimeMillis() < tokExp - margin) return tok
-            val urls = (listOfNotNull(via) + listOf(base).filter { it.isNotEmpty() } + candidates().map { it.url }).distinct()
+            // tylko adresy, które odpowiedziały przy sprawdzaniu (martwy adres = 8 s czekania na
+            // połączenie; przy kilku martwych logowanie trwało minutę i dłużej)
+            val known = candidates().map { it.url }.filter { alive.isEmpty() || it in alive }
+            val urls = (listOfNotNull(via) + listOf(base).filter { it.isNotEmpty() } + known).distinct()
             for (u in urls) {
                 try {
                     val ch = postJson(u, "/v1/auth/challenge", JSONObject().put("device", prefs.deviceId), u in caUrls)
-                    if (!ch.optBoolean("ok")) { android.util.Log.w("EmuStart", "logowanie: ${ch.optString("reason")}"); continue }
+                    if (!ch.optBoolean("ok")) {
+                        // serwer odpowiedział „nie” — inne adresy prowadzą do tego samego serwera
+                        android.util.Log.w("EmuStart", "logowanie: ${ch.optString("reason")}"); break
+                    }
                     val nonce = ch.getString("nonce")
                     val sig = DeviceKey.sign(prefs.deviceKey, "emustart-auth|${prefs.deviceId}|$nonce".toByteArray())
                     val t = postJson(u, "/v1/auth/token", JSONObject().put("device", prefs.deviceId)
@@ -270,9 +287,42 @@ class Server(private val prefs: Prefs) {
         try { return c.inputStream.bufferedReader(Charsets.UTF_8).readText() } finally { c.disconnect() }
     }
 
+    /** To urządzenie administratora (zmienia grafiki, opisy i logo dla wszystkich urządzeń). */
+    @Volatile var admin = false
+
     fun info(): JSONObject {
         val viaTls = baseUrl().startsWith("https")
-        return JSONObject(text("/v1/info")).also { learn(it, trusted = viaTls) }
+        return JSONObject(text("/v1/info")).also { learn(it, trusted = viaTls); admin = it.optBoolean("admin") }
+    }
+
+    /** /v1/admin/… serwera (tylko urządzenie administratora): {ok, …} albo {ok: false, reason}. */
+    fun adminCall(method: String, path: String, body: JSONObject? = null): JSONObject {
+        for (attempt in 0..1) {
+            val c = conn("/v1/admin/$path")
+            try {
+                c.connectTimeout = 8000
+                c.readTimeout = 60000
+                c.requestMethod = method
+                c.setRequestProperty("Authorization", "Bearer " + bearer())
+                c.setRequestProperty("Content-Type", "application/json")
+                if (method == "PUT") {
+                    val b = (body ?: JSONObject()).toString().toByteArray()
+                    c.doOutput = true
+                    c.setFixedLengthStreamingMode(b.size)
+                    c.outputStream.use { it.write(b) }
+                }
+                val code = c.responseCode
+                val text = (if (code in 200..299) c.inputStream else c.errorStream)?.bufferedReader(Charsets.UTF_8)?.readText() ?: "{}"
+                if (code == 401 && attempt == 0) { dropToken(); continue }
+                if (code == 403) return JSONObject().put("ok", false).put("reason", "Zmieniać grafiki i opisy może tylko administrator.")
+                if (code !in 200..299) {
+                    val why = try { JSONObject(text).optString("error") } catch (e: Exception) { "" }
+                    return JSONObject().put("ok", false).put("reason", why.ifEmpty { "błąd serwera $code" })
+                }
+                return JSONObject(text)
+            } finally { c.disconnect() }
+        }
+        return JSONObject().put("ok", false).put("reason", "serwer nie przyjął klucza")
     }
     fun systems(): JSONArray = JSONArray(text("/v1/systems"))
     fun games(es: String): JSONArray = JSONArray(text("/v1/systems/" + enc(es) + "/games"))

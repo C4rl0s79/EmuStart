@@ -225,6 +225,11 @@ img { display: block; }
 .golist li { display: flex; justify-content: space-between; gap: 2em; }
 .golist .gv { color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 55%; }
 .golist li.sel .gv { color: rgba(255,255,255,.85); }
+/* obrazek stanu gry (zapis z emulatora) */
+.golist li.withthumb { align-items: center; justify-content: flex-start; gap: 1em; }
+.golist li.withthumb .gv { margin-left: auto; }
+.golist .gothumb { width: 8em; aspect-ratio: 4 / 3; object-fit: cover; border-radius: .3em; flex: none;
+                   background: rgba(255,255,255,.06); }
 .artgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 1em;
   max-height: 60vh; overflow: hidden auto; padding: .3em; }
 .artgrid.snapgrid { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
@@ -264,7 +269,9 @@ img.glow { filter: drop-shadow(0 0 1px rgba(255,255,255,.9)) drop-shadow(0 0 6px
 
 /* ── wybór logo systemu ── */
 .logogrid { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
-.logogrid img { aspect-ratio: 16 / 9; background: #0b0d12; padding: 10px; }
+/* szachownica w średnich szarościach: widać na niej i czarne, i białe logo (warianty paczek) */
+.logogrid img { aspect-ratio: 16 / 9; padding: 10px;
+  background: repeating-conic-gradient(#3b414d 0% 25%, #30353f 0% 50%) 50% / 18px 18px; }
 .logogrid figure.none img { visibility: hidden; }
 .logogrid figure.none figcaption { position: relative; top: -3.5em; text-align: center; color: var(--text); }
 .logogrid figure.broken { display: none; }

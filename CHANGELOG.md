@@ -17,6 +17,258 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   RetroArchu na Androidzie; ocena „wyświetlania nad innymi aplikacjami” i usługi ułatwień
   dostępu dla pozostałych emulatorów na Androidzie.
 
+## [0.45.0] — w przygotowaniu
+
+### Zmienione
+- **EmuStart i EmuStart Server to dwa osobne programy** — każdy z własnym exe, plikiem
+  wydania, podpisem i aktualizacją:
+  - `EmuStart-<wersja>-win64.zip` — **EmuStart** na PC (`EmuStart.exe`: granie z padem);
+  - `EmuStart-Server-<wersja>-win64.zip` — **EmuStart Server** (`EmuStartServer.exe`):
+    bez parametrów otwiera panel serwera (i uruchamia serwer, gdy nie działa);
+    `--service` — serwer bez okna (zadanie Harmonogramu), `--install` — autostart, zapora
+    i skrót (jako administrator), `--login-link` — link logowania do schowka.
+  - Aktualizacja serwera przechodzi na nowy program sama: pobiera plik serwera, usuwa
+    z folderu serwera dawny `EmuStart.exe` i przestawia zadanie Harmonogramu na
+    `EmuStartServer.exe --service`. Dane serwera (folder `server`) zostają.
+  - `EmuStart.exe` nie ma już trybu serwera (`--server`, `--server-panel`,
+    `--install-server`, `--server-key`).
+
+- **EmuStart na PC bierze bibliotekę tylko z serwera** — bez własnych folderów z grami,
+  skanowania, pobierania grafik i opisów całej biblioteki, bazy LaunchBox i plików DAT
+  arcade (to robi serwer, panel → Grafiki i opisy). Z PC zniknęły: ekran „Grafiki
+  i metadane”, foldery z grami i BIOS-ami w ustawieniach, „Skanuj kolekcję” (zostaje
+  „Odśwież bibliotekę z serwera”), w opcjach systemu „Grafiki: pobierz brakujące”
+  i „Skanuj ponownie”. Bez serwera grają gry już pobrane na komputer. Okładkę, zrzut,
+  logo i opis jednej gry nadal można wybrać w opcjach gry — trafiają na serwer.
+- **EmuStart na PC działa tylko przez serwer — bez SMB.** Gry pobiera z serwera (także
+  przypięte — wcześniej przypinanie kopiowało wyłącznie przez SMB, więc na PC bez udziału nie
+  działało), zapisy, stany, ustawienia i konta — przez serwer, BIOS-y — z serwera. Serwer
+  niedostępny: grają gry już pobrane, a zapisy czekają w kolejce. Usunięte: start gry prosto
+  z NAS-a i „Graj teraz (z sieci)”, pomiar sieci, ustawienia „Tryb sieci”, „Próg LAN”, „Gry
+  z serwera”, „Zapisy i profile przez serwer”, przenoszenie folderu profilu na NAS-ie,
+  zgłaszanie folderów z grami z PC na serwer (foldery ustawia się w panelu serwera).
+- **Okładki, zrzuty, logo i opisy pojedynczych gier oraz logo, nazwy i zalecane emulatory
+  systemów ustawia się tylko w panelu serwera** — wszystkie urządzenia pokazują to samo.
+  Z PC zniknęły: wybór grafik i edycja opisu w opcjach gry (opis zostaje do podglądu),
+  logo, poświata i nazwa w opcjach systemu, wysyłanie grafik i wyglądu systemów z PC na
+  serwer (także zalecanego emulatora — teraz ustawia go panel). Serwer nie przyjmuje już
+  wyglądu ani grafik od urządzeń.
+- Serwer ma własny, mniejszy zestaw funkcji (emustart/srvapi.py) — nie uruchamia już
+  obsługi padów, profili gracza i wysyłania zapisów, które są potrzebne tylko na PC.
+
+### Poprawione
+- **Skan: system, który zniknął (usunięty folder, scalony), zostawiał swoje gry w bazie** —
+  teraz znika razem z nimi.
+- **Wersje gier arcade (FBA) na PC bez gry nadrzędnej i BIOS-u** — PC szukał ich tylko
+  w swoich folderach z grami, więc emulator zgłaszał brak plików. Teraz serwer podaje je
+  razem z grą, a PC pobiera je obok gry (także przy przypinaniu), jak telefon.
+
+- **Serwer jest źródłem prawdy dla grafik, opisów i logo — urządzenia trzymają lokalną
+  kopię** (szybki interfejs) i odświeżają ją same: każda zmiana grafiki albo opisu na
+  serwerze podbija wersję systemu; PC co 5 minut (i przy starcie) pobiera zmienione systemy,
+  zapisuje opisy z serwera, a zmienione grafiki i logo systemów pobiera od nowa przy
+  wyświetleniu. Lista na ekranie odświeża się sama. Telefon ma grafiki z wersją w adresie.
+  Wcześniej PC pobierał system tylko po ponownym skanie na serwerze, a raz pobraną grafikę
+  trzymał na zawsze.
+- **Administrator zmienia grafiki, opisy i logo także z PC i telefonu** — opcje gry: okładka,
+  zrzut, logo gry, poprawki opisu, „Pobierz opis z sieci”; opcje systemu (przytrzymane A na
+  logo, teraz także na telefonie): logo, poświata, nazwa. Zapis idzie na serwer (źródło prawdy),
+  a pozostałe urządzenia dostają zmianę przy najbliższej synchronizacji. Zwykłe konto widzi
+  opis tylko do odczytu. Serwer: `/v1/admin/…` tylko dla urządzenia administratora.
+- **Obrazek stanu gry przy wyborze zapisu** (opcje gry → Wczytaj zapis): zrzut, który
+  zapisał emulator — RetroArch (obrazek obok stanu; EmuStart włącza go przy starcie gry),
+  PCSX2 (zrzut w pliku .p2s), DuckStation (zrzut w nagłówku stanu, gdy nieskompresowany).
+- **Opisy gier szuka serwer** — gdy urządzenie ogląda grę bez opisu, serwer pobiera go w tle
+  (PC wcześniej szukał sam).
+- **Android: RetroArch zamyka się po zamknięciu gry** („Quit on Close Content: CLI”) — wcześniej
+  zostawał w tle z menu. Stany gry RetroArcha mają obrazek (podgląd stanu).
+
+### Dodane
+- **Reset gry** w menu w grze (A + Y, RetroArch) i **Graj od początku** w opcjach gry — start bez
+  wczytywania stanu (autozapis / „Kontynuuj” / wznowienie), np. gdy wczytany stan nie pasuje do
+  zmienionych ustawień rdzenia albo shadera.
+- **Shader ekranu bez szukania w menu RetroArcha** (czarny ekran, gdy shader nie pasuje np. do
+  skali rozdzielczości rdzenia): menu w grze (A + Y) → *Włącz / wyłącz shader* (do końca gry)
+  albo *Bez shadera w tym systemie* (na stałe); opcje gry → *Ustawienia emulatora* → *Shader
+  ekranu* przywraca. Wyłączenie działa tylko na czas gry — własne ustawienia shadera RetroArcha
+  zostają nietknięte.
+- **Historia ustawień emulatora — cofnięcie zepsutej zmiany**: opcje gry → *Ustawienia
+  emulatora* → *Cofnij zmianę* (10 ostatnich zmian: data, gra, pliki). Ustawienia profilu nadal
+  zastępują plik emulatora przed grą, ale zmiana, po której np. ekran jest czarny (za wysoka
+  skala rozdzielczości), da się cofnąć bez edycji plików na serwerze; samo przywrócenie też
+  trafia do historii.
+- **Stany RetroArcha jak w Steam** (koncepcja 2.0, §5.5) — tylko dochodzą, nigdy się nie
+  nadpisują: numer stanu zajęty na serwerze inną zawartością (dwa urządzenia, gra bez serwera)
+  → następny wolny numer (komputer i telefon); autozapis przy wyjściu trafia też do historii
+  jako kolejny stan, także gdy inne urządzenie zapisało w międzyczasie (wcześniej szedł do kopii
+  zapasowej); przed grą najnowszy stan z dowolnego urządzenia wczytuje się sam („Kontynuuj”);
+  opis każdego stanu (urządzenie, czas, autozapis / ręczny) w `.states.json` na serwerze;
+  serwer trzyma 50 najnowszych stanów gry.
+- **Jeden widok stanów**: opcje gry → *Wczytaj zapis* pokazuje stany ze wszystkich urządzeń
+  konta (pobierane przy otwarciu) z miniaturą, numerem, urządzeniem i datą, na górze
+  „Kontynuuj — najnowszy stan”; *Zapisy i stany* nie powtarza już stanów RetroArcha (zostają
+  tam stany PS2 z kopiowaniem między komputerem a telefonem i zapisy w grze).
+- **Panel serwera: zakładki** (Stan, Konfiguracja, Grafiki i opisy, Urządzenia i konta, Emulatory, Aktualizacja).
+- **Emulatory z serwera.** EmuStart Server trzyma emulatory i rdzenie RetroArcha potrzebne
+  systemom biblioteki (zalecany emulator i rdzeń z panelu): raz dziennie i przyciskiem w nowej
+  zakładce **Emulatory** pobiera nowe wydania (GitHub, Dolphin, Eden, Citron, buildbot
+  libretro — jak skrypt emu_updater), zapisuje je z sumami SHA-256 i zostawia też poprzednią
+  wersję. EmuStart na PC bierze emulatory **tylko z serwera**: po wybraniu folderu emulatorów,
+  przy starcie i co 5 minut sam doinstalowuje brakujące i aktualizuje starsze (także zastane
+  w folderze, np. z RetroBata) — pobiera archiwum wersji (skompresowane, robione raz na
+  serwerze) jednym wznawianym strumieniem i rozpakowuje tylko brakujące i zmienione pliki; konfiguracji i
+  zapisów nie rusza, działającego emulatora nie podmienia (później). Pasek „⬇ emulatory”
+  pokazuje postęp. Komputer nie pobiera już emulatorów z internetu.
+- **Wszystkie rdzenie RetroArcha na serwerze** (około 245 z buildbota): komputer dostaje dla
+  każdego systemu biblioteki zalecany rdzeń i wszystkie pasujące — rozpoznane po plikach `.info`
+  RetroArcha (np. snes9x, bsnes, bsnes-jg dla SNES) — i wybiera je w Ustawieniach; panel ma je
+  na liście zalecanego rdzenia. Brakujące pozycje (nowy system w bibliotece) serwer dociąga co
+  godzinę, nie raz na dobę. W magazynie zostaje samo archiwum wersji (bez rozpakowanych plików).
+- **Wymagane ustawienia emulatorów z serwera** (panel → Emulatory): dla RetroArcha, DuckStation,
+  PCSX2 i Dolphina lista wartości, które każdy komputer nakłada tuż przed grą (po ustawieniach
+  profilu — wygrywają). Domyślnie: wyjście z gry bez okna z pytaniem, w RetroArchu pauza
+  w tle, obrazki stanów i zamknięcie gry = wyjście z RetroArcha; zmiana i powrót do domyślnych
+  w panelu.
+- **RetroArch domyślnie (PC i telefon)**: każdy zapis stanu z nowym numerem
+  (`savestate_auto_index`), Start + Select — menu RetroArcha, Select — przycisk skrótów,
+  Select + RB — przyspieszenie (wł./wył.), Select + Y — zapis stanu. Na PC sterownik pada XInput.
+- **Więcej propozycji logo systemów** (np. Dreamcast 43 → 57, PS1 77): motywy EmulationStation /
+  ES-DE (Art Book Next, Carbon, Alekfull NX, Canvas, Simple, Pixel, SNES Mini) i ikony z 9 motywów
+  RetroArcha — prosto z internetu, sprawdzane naraz — oraz paczka logo (np. `platform_logos`
+  z PyLinks) w **jednym pliku** magazynu serwera (`media\_logopack.media`, 4315 logo zamiast
+  tylu plików): wczytywana z folderu ustawionego w panelu (Konfiguracja → Foldery) albo
+  skopiowana gotowa. Wcześniej paczka i motywy RetroArcha były plikami na komputerze
+  deweloperskim, których serwer nie ma. Wybór logo przyjmuje tylko propozycje.
+- **Klucze źródeł grafik z pliku**: `art_keys.json` w folderze `server` serwera — przy starcie
+  serwer zapisuje je zaszyfrowane i usuwa plik.
+- **Klucze źródeł grafik z PyLinks na serwer**: EmuStart na komputerze administratora →
+  Ustawienia → *Wyślij klucze źródeł grafik z PyLinks na serwer* (PyLinks szyfruje klucze
+  kluczem tego komputera, więc serwer nie mógł ich odczytać sam).
+- **Panel serwera → Konfiguracja → Foldery**: foldery z grami (kilka, z kolejnością), BIOS-y,
+  emulatory, profile graczy, kopie kont i MAME. Wybór folderu w oknie panelu; serwer
+  sprawdza każdy folder tak, jak sam go widzi (konto systemowe), i pokazuje, co tam jest
+  (liczba systemów, plików BIOS-ów, czy jest RetroArch). Dysk sieciowy wybrany literą
+  (np. `Z:`) zamieniany jest na ścieżkę sieciową, której serwer używa. Nowe foldery z grami
+  — lista gier przeładowuje się sama.
+- **Panel serwera → Grafiki i opisy**: pobieranie brakujących okładek, zrzutów, logo
+  i opisów (wszystkie systemy albo jeden), z Wikipedią, zmniejszanie zapisanych grafik,
+  baza LaunchBox i klucze źródeł (SteamGridDB, IGDB, TheGamesDB — zaszyfrowane na
+  serwerze). Pobiera serwer; EmuStart na PC i telefony biorą grafiki i opisy od niego.
+- **Panel serwera → Grafiki i opisy → Gra**: wyszukanie gry, okładka, zrzut i logo
+  (propozycje z libretro, SteamGridDB, IGDB, TheGamesDB albo wyszukanie pod inną nazwą,
+  usunięcie), opis i dane gry (tytuł, producent, wydawca, rok, gatunek, gracze) z ręczną
+  poprawką, przywróceniem danych pobranych i pobraniem opisu z sieci.
+- **Panel serwera → Konfiguracja → Systemy**: logo (propozycje, bez logo), nazwa,
+  poświata, widoczność na urządzeniach, zalecany emulator i rdzeń RetroArcha.
+- **Folder programu serwera tylko do odczytu dla zwykłych użytkowników** (`--install`):
+  zapis — tylko konto SYSTEM (serwer) i administratorzy. Wcześniej folder dziedziczył z dysku
+  „Użytkownicy uwierzytelnieni: modyfikacja” — każdy zalogowany użytkownik mógł podmienić DLL
+  w `_internal`, a serwer wykonałby ją przy starcie z najwyższymi uprawnieniami; mógł też
+  czytać i zmieniać dane serwera (konta, profile). Panel i link logowania (konto użytkownika)
+  piszą logi w `%LOCALAPPDATA%\EmuStart Server\logs`.
+- **`_internal` ma 64 pliki zamiast 316** (szybsze kopiowanie i aktualizacja): wbudowane logo
+  platform w jednym pliku (`assets/systems.media` zamiast 40 PNG), bez ~96 bibliotek zgodności
+  .NET (Windows ma je wbudowane — okno działa z samym `Python.Runtime.dll`), bez źródeł `.py`
+  pakietów (ich kod jest już w exe), części pywebview na Androida, metadanych pakietów
+  (`*.dist-info`), `setuptools` i zbędnej ikony.
+- **Klucz certyfikatu serwera zaszyfrowany na dysku** — `tls-key.pem` zaszyfrowany (AES-256)
+  losowym hasłem, a hasło chronione DPAPI tego komputera (`tls-key.pass`). Kopia folderu
+  serwera (udział sieciowy, kopia zapasowa, dysk) na innym komputerze nic nie daje. Klucz
+  serwera sprzed 0.45 szyfruje się sam przy starcie. **Przeniesienie serwera**: panel →
+  Konfiguracja → *Przygotuj przeniesienie* (hasło przeniesienia; plik `przeniesienie.emustart`
+  z kluczem certyfikatu i kluczami źródeł grafik), skopiowanie folderu, na nowym komputerze
+  panel prosi o hasło — certyfikat ten sam, urządzenia działają bez ponownego logowania.
+- **Grafiki gier w jednym pliku na system** (`media/<system>.media`, SQLite) zamiast osobnego
+  pliku na każdą okładkę, zrzut i logo — na serwerze ok. 100 tys. plików mniej, serwer da się
+  szybko skopiować i przenieść. Tak samo lokalna kopia na PC. Adresy grafik bez zmian. Stare
+  pliki przenoszą się same przy starcie (w tle; każdy plik usuwany dopiero po odczycie
+  kontrolnym z bazy, do tego czasu jest serwowany jak dotąd). Logo systemów też w jednym pliku
+  (`media/_systems.media`), obrazki stanów gry na PC — `media/_stany.media`.
+- **Scalanie platform** (panel → Konfiguracja → Systemy → *scal z…*): np. dwa foldery
+  Xbox 360 (`x360` i `xbox360`) — gry z obu na jednej liście, ta sama gra raz (pierwszeństwo:
+  kolejność folderów z grami); *Rozdziel* cofa. Przy każdym systemie widać jego folder(y).
+- Panel: komunikaty w dymku w rogu okna (zapis widać bez przewijania); lista systemów
+  odświeża się po zapisie i po skanie; LaunchBox — „gotowa” po pobraniu zamiast wiszącego
+  „Pobieram…”.
+- EmuStart: okno oczekiwania na zatwierdzenie pokazuje, na którym serwerze czeka prośba.
+- **Panel serwera → konta: pliki i kopie zapasowe.** „Pliki i kopie” przy koncie pokazuje,
+  co jest w profilu (zapisy, stany gry, ustawienia — liczba plików, rozmiar, ostatnia
+  zmiana, ostatnio zmienione pliki). Kopia konta to jeden ZIP (profil + wpis konta z hasłem)
+  w folderze kopii; **kopie automatyczne raz dziennie**, gdy konto się zmieniło, zostaje
+  14 najnowszych (do zmiany). **Przywrócenie** zaczyna się od kopii obecnego stanu, a pliki,
+  których w kopii nie ma, zostają.
+
+### Dokumentacja
+- Wiki: nowa strona **EmuStart Server** (instalacja, panel, foldery, grafiki i opisy, konta
+  i kopie, logowanie, adresy, API); instalacja dwóch programów; grafiki i opisy z serwera,
+  uruchamianie gier tylko z serwera, kilka urządzeń z jednym serwerem — bez SMB.
+
+### Naprawione
+- **PCSX2 i DuckStation zainstalowane z serwera startowały z kreatorem pierwszego uruchomienia**
+  (i bez BIOS-u). Teraz przed grą: kreator i własne aktualizacje emulatora wyłączone
+  (aktualizuje serwer), BIOS z serwera w folderze emulatora (PCSX2: `pcsx2ios` z folderu
+  BIOS-ów serwera — serwer wypisuje BIOS-y z folderu, `GET /v1/bios?dir=`; DuckStation: BIOS-y
+  PS1). Przy okazji: zmiana pustej wartości w pliku ini (`BIOS = `) trafiała do następnej linii.
+- Skróty pada RetroArcha na PC: przycisk skrótów był ustawiony na Start (numer 6 w sterowniku
+  XInput) zamiast Select / View (7) — Select + RB i Select + Y nie działały. Na telefonie bez zmian.
+- Menu w grze → *Włącz / wyłącz shader* działało na stałe zamiast do końca gry: RetroArch zapisywał
+  zmianę przy wyjściu, a EmuStart przenosił ją do `retroarch.cfg` i profilu. Teraz zostaje tylko
+  w tej grze; inne zmiany z menu RetroArcha zapisują się jak dotąd.
+- **Wolne łączenie z serwerem (PC i telefon)**:
+  - wybór adresu czekał, aż adresy sieci lokalnej serwera — z innej sieci nigdy nieosiągalne —
+    przekroczą czas (PC 2,5 s, telefon 3,5 s przy każdym sprawdzeniu); teraz po pierwszym
+    działającym adresie najwyżej 0,4 s na lepszy (PC zmierzone: 2,5 → 0,6 s),
+  - logowanie po nieudanej próbie szło przez **wszystkie** adresy, czekając 8–10 s na każdy martwy
+    (na telefonie minuta i dłużej — stąd gra na starym zapisie i konflikt); teraz tylko przez
+    adresy, które odpowiedziały, a jednoznaczna odmowa serwera kończy próby,
+  - lista gier systemu skompresowana (np. SNES 5 MB → 0,86 MB),
+  - **tylko zmienione gry**: serwer pobierający grafiki podbijał wersję całego systemu, więc PC
+    co 5 minut ściągał od nowa wszystkie listy (62 systemy, 45 tys. gier — kilkadziesiąt
+    sekund); teraz zmiana grafiki lub opisu gry wysyła tylko tę grę, pełna lista — po skanie.
+- Uruchamianie gry: okno „Przygotowuję…” pokazuje się od razu po A (wcześniej dopiero po
+  sprawdzeniu konta i pobraniu BIOS-ów — przez ten czas nic się nie działo); BIOS-y, których
+  serwer nie ma, nie są sprawdzane przy każdej grze (pamięć na 30 minut); w logu czas przed
+  startem sesji, gdy przekracza 0,5 s. Rozpakowywanie (np. paczek MSU-1) z paskiem postępu,
+  bez podwójnego „Rozpakowuję do pamięci…”.
+- Zapisy i stany: „undefined” zamiast „Wszystkie urządzenia” przy stanach wspólnych.
+- **Systemy rozpoznawane po każdej nazwie**: kod ES, ES-DE (`atarilynx`, `gc`, `genesis`,
+  `wonderswan`), No-Intro / Redump, libretro i nazwy zwyczajowe (`Atari Lynx`, `PS1`, `Super
+  Famicom`) — jedna tabela dla folderów z grami, motywów logo i paczki logo. Wcześniej m.in. folder
+  `atarilynx` nie był rozpoznawany, a dla 28 systemów żaden motyw nie dawał logo (np. Lynx 0 → 6).
+- Panel serwera: wybór logo systemu w oknie nad listą (Esc / kliknięcie obok zamyka) zamiast na
+  dole długiej listy systemów; podaje liczbę propozycji.
+- Lista gier na PC: okładka i zrzut miały stałą wysokość z edytora wyglądu, choć pod krótkim
+  opisem zostawało dużo pustego miejsca. Teraz rosną w wolne miejsce (do granicy szerokości
+  panelu), a opis zostaje cały.
+- Serwer, który nie zna komputera (np. inny serwer pod tym samym adresem) albo ma inny
+  certyfikat: EmuStart w kółko pytał wszystkie adresy, czekając po 10 s na każdy niedostępny,
+  a pasek bez końca pokazywał „Serwer: łączę…”. Teraz pierwsza jednoznaczna odpowiedź kończy
+  próby, pasek od razu mówi, co zrobić (Ustawienia → Zaloguj), a kolejna próba jest po 2 minutach.
+- Pobieranie emulatorów: okno „Pobierz brakujące emulatory” i wyrównanie w tle pisały naraz do
+  tych samych plików (WinError 32, „emulator działa”, znikające pliki) — teraz jedna
+  instalacja naraz. Zamiast składania ZIP-a z tysięcy plików przy każdym pobraniu serwer
+  trzyma gotowe archiwum wersji.
+- Okno wyboru logo: podgląd, który się nie wczytał, przebudowywał całą siatkę — przeglądarka
+  pobierała wtedy od nowa wszystkie obrazki (powolne ładowanie, puste kafelki). Teraz znika
+  tylko ten kafelek; podglądy z serwera zostają w pamięci okna na godzinę. Ciemne logo na
+  szachownicy w szarościach zamiast na czarnym tle (wcześniej warianty „czarne” były niewidoczne).
+- **Nowe konto nie pojawiało się na komputerze ani w panelu** („Kto gra?” pokazywał tylko
+  „Inny użytkownik”, panel — „Brak kont”): świeży serwer bez ustawionego folderu profili
+  szukał jeszcze folderu z czasów SMB i nie miał żadnego. Teraz zakłada `profiles` we
+  własnym katalogu (albo w folderze z panelu), a konta zatwierdzone wcześniej bez folderu
+  dostają go przy starcie. EmuStart na PC zawsze pokazuje konto, którym jest zalogowany —
+  także gdy serwer chwilowo nie poda listy kont.
+- Ekran „Kto gra?” / „Profile” sprawdza konta na serwerze co 15 s, póki jest otwarty —
+  nowo zatwierdzone konto (albo konto po powrocie serwera) pojawia się samo, a nie dopiero
+  po ponownym wejściu na ekran.
+- Panel serwera: pusta sekcja „Konto — pliki i kopie” (i ostrzeżenie o kluczu TLS) nie
+  pokazuje się już sama po przejściu na zakładkę — tylko po „Pliki i kopie”. Wygasły kod
+  „Dodaj urządzenie” znika razem z pustym linkiem i przyciskiem „Kopiuj link”.
+- Ustawienia na PC: wybór folderu (np. z emulatorami), wpisanie ścieżki i zmiana emulatora
+  systemu kończyły się „Błąd interfejsu: saveSetting is not defined” — przy podziale na serwer
+  i klienta wypadły funkcje, których Ustawienia nadal używają. Test sprawdza teraz, że
+  interfejs nie woła funkcji ani metod programu, których nie ma.
+
 ## [0.44.8] — 2026-10-13
 
 ### Zmienione

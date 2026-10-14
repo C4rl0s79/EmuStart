@@ -16,14 +16,12 @@ BRIDGE = ROOT / "android" / "app" / "src" / "main" / "java" / "io" / "github" / 
 # tylko w EmuStart na komputerze — na telefonie niedostępne z menu (Android buduje własne
 # menu i ustawienia) albo zablokowane w interfejsie; Bridge odpowiada komunikatem „na komputerze”
 WINDOWS_ONLY = {
-    # grafiki i metadane: robi je serwer
-    "art_cancel", "art_candidates", "art_choose", "art_clear", "art_overview", "art_start",
-    "import_pylinks_keys", "launchbox_status", "launchbox_update", "meta_save",
-    # emulatory na komputerze, skanowanie folderów
-    "autodetect", "emulator_options", "scan_status", "set_game_emulator",
+    # emulatory na komputerze, odświeżenie biblioteki z serwera
+    "autodetect", "scan_status", "set_game_emulator", "emulator_options", "emu_sync_status", "art_keys_push",
+    "emu_settings_history", "emu_settings_restore", "set_shader_off",
     # opcje gier i systemów (openGameOptions / openSystemOptions zablokowane na Androidzie)
-    "game_options", "system_logo_candidates", "system_logo_choose", "system_options",
-    "system_rescan", "system_set",
+    "game_options",
+
     # menu w grze i pady Windows (XInput), RetroAchievements w emulatorach na komputerze
     "ingame_action", "pads_set", "pads_state", "ui_pad_poll",
     "ra_hardcore", "ra_import", "ra_login", "ra_logout", "ra_status",
@@ -67,8 +65,8 @@ def test_windows_only_list_is_current():
 
 
 def test_server_lists_every_core_for_platform():
-    from emustart import emulators, installer
+    from emustart import emucatalog, emulators
     assert emulators.cores_for("SNES")[:2] == ["snes9x", "bsnes"]       # domyślny pierwszy
-    for plat, default in installer.CORES.items():
+    for plat, default in emucatalog.CORES.items():
         cores = emulators.cores_for(plat)
         assert cores[0] == default and len(cores) == len(set(cores))

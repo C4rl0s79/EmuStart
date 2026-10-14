@@ -260,6 +260,7 @@ def collect_systems(cfg: dict) -> tuple:
     (np. zrzuty archiwalne „(Flux)”) są pomijane, chyba że włączono je ręcznie
     w ustawieniach — wtedy są osobnym systemem o nazwie folderu."""
     syscfg = cfg.get("systems") or {}
+    merge = {k: v for k, v in (cfg.get("system_merge") or {}).items() if k != v}
     found, unknown = {}, []
     for root in config.rom_roots(cfg):
         try:
@@ -288,6 +289,7 @@ def collect_systems(cfg: dict) -> tuple:
                 if (syscfg.get(d.name) or {}).get("enabled") is not True:
                     continue
                 es = d.name
+            es = merge.get(es, es)          # platforma scalona z inną (panel serwera)
             found.setdefault(es, []).append(d)
     return found, unknown
 
@@ -314,9 +316,15 @@ def scan_all(cfg: dict, progress=None) -> dict:
         # część folderów niedostępna — nie usuwamy ich systemów z biblioteki
         return {"ok": True, "systems": len(targets), "games": total,
                 "offline": [r for r in roots if r not in online]}
-    with library.db() as c:   # systemy usunięte z NAS-a albo wyłączone
+    with library.db() as c:   # systemy usunięte, wyłączone albo scalone z innym — razem z grami
         keep = [es for es, _d in targets]
         marks = ",".join("?" * len(keep)) or "''"
+        gone = [r["id"] for r in c.execute(f"SELECT id FROM games WHERE es NOT IN ({marks})", keep)]
+        for j in range(0, len(gone), 500):
+            chunk = gone[j:j + 500]
+            m2 = ",".join("?" * len(chunk))
+            c.execute(f"DELETE FROM cache WHERE game_id IN ({m2})", chunk)
+            c.execute(f"DELETE FROM games WHERE id IN ({m2})", chunk)
         c.execute(f"DELETE FROM systems WHERE es NOT IN ({marks})", keep)
     if progress:
         progress("Gotowe", len(targets), len(targets))

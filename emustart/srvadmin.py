@@ -1,6 +1,6 @@
-"""srvadmin — panel serwera EmuStart (`EmuStart.exe --server-panel`).
+"""srvadmin — panel serwera EmuStart (`EmuStartServer.exe`, osobny proces z oknem).
 
-Serwer (`--server`) zwykle działa jako zadanie Harmonogramu na koncie SYSTEM,
+Serwer (`EmuStartServer.exe --service`) zwykle działa jako zadanie Harmonogramu na koncie SYSTEM,
 bez okna. Panel to osobny proces z małym oknem (pywebview), które otwiera
 stronę `server.html` z działającego serwera i woła jego API administracyjne:
 
@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -114,7 +115,50 @@ def status(api) -> dict:
         "clients": clients[:20], "transfers": transfers[:20], "sent_total": total,
         "scan": scan, "last_scan": _last_scan,
         "frozen": bool(getattr(sys, "frozen", False)),
+        "tls": _tls_state(),
     }
+
+
+def _tls_state() -> dict:
+    from emustart import tls
+    return {**tls.STATE, "move_ready": (paths.SERVER / tls.MOVE).is_file()}
+
+
+# ── przeniesienie serwera na inny komputer (klucz certyfikatu, klucze źródeł grafik) ──
+def move_prepare(api, args: dict) -> dict:
+    """Plik przeniesienia zaszyfrowany hasłem przeniesienia (folder serwera → nowy komputer)."""
+    from emustart import accounts, art_sources, tls
+    pw = str(args.get("password") or "")
+    why = accounts.policy(pw)
+    if why:
+        return {"ok": False, "reason": why}
+    keys = {k: v for k, v in art_sources.keys(api._cfg).items() if v}
+    try:
+        out = tls.export_move(paths.SERVER, pw, {"art_keys": keys})
+    except (OSError, ValueError) as ex:
+        return {"ok": False, "reason": str(ex)}
+    log.info("panel: przygotowano przeniesienie serwera (%s)", out.name)
+    return {"ok": True, "file": str(out)}
+
+
+def move_import(api, args: dict) -> dict:
+    """Nowy komputer: hasło przeniesienia → klucz certyfikatu i klucze źródeł grafik zaszyfrowane
+    tutaj; serwer uruchamia się ponownie (port szyfrowany z tym samym certyfikatem)."""
+    from emustart import art_sources, config, secure, tls
+    try:
+        extra = tls.import_move(paths.SERVER, str(args.get("password") or ""))
+    except ValueError as ex:
+        return {"ok": False, "reason": str(ex)}
+    keys = extra.get("art_keys") or {}
+    if keys:
+        cur = dict(api._cfg.get("art_keys") or {})
+        for name in art_sources.KEY_NAMES:
+            if keys.get(name):
+                cur[name] = secure.protect(keys[name])
+        api._cfg["art_keys"] = cur
+        config.save(api._cfg)
+    r = restart(api)
+    return {"ok": True, "restart": bool(r.get("ok")), "art_keys": len(keys)}
 
 
 def _addresses() -> list:
@@ -220,11 +264,21 @@ def update_status(_api) -> dict:
     return {"ok": True, **job.status()} if job else {"ok": True, "phase": "idle"}
 
 
-def update_apply(_api) -> dict:
-    """Skrypt podmiany startuje, ten proces kończy się po chwili (odpowiedź musi dojść)."""
+def update_apply(_api, args: dict | None = None) -> dict:
+    """Skrypt podmiany startuje, ten proces kończy się po chwili (odpowiedź musi dojść).
+    `panel_user` — konto Windows okna panelu: skrypt otworzy panel ponownie w jego sesji
+    (zapisuje serwer — folder programu jest dla panelu tylko do odczytu)."""
+    from emustart import updater
     job = _update["job"]
     if not job:
         return {"ok": False, "reason": "Brak pobranej aktualizacji."}
+    who = str((args or {}).get("panel_user") or "")
+    if re.fullmatch(r"[\w .$-]{1,64}(\\[\w .$-]{1,64})?", who):
+        try:
+            updater.update_dir().mkdir(parents=True, exist_ok=True)
+            (updater.update_dir() / "panel-user.txt").write_text(who, encoding="utf-8")
+        except OSError as ex:
+            log.warning("panel: %s", ex)
     r = job.apply(sys.argv[1:])
     if not r.get("ok"):
         return r
@@ -459,7 +513,208 @@ ACTIONS_ARGS = {"device_revoke": device_revoke, "device_rename": device_rename, 
                 "profiles_migrate": profiles_migrate, 
                 "public_set": public_set, "tunnel_set": tunnel_set,
                 "enroll_decide": enroll_decide, "device_games": device_games, "account_admin": account_admin}
-ACTIONS.update({"public_status": public_status, "devices": devices_list, "login_code": login_code, "profiles_migrate_status": profiles_migrate_status,
+def config_get(api) -> dict:
+    from emustart import srvconfig
+    return srvconfig.get(api._cfg)
+
+
+def config_set(api, args: dict) -> dict:
+    from emustart import srvconfig
+    return srvconfig.set_value(api, str(args.get("key", "")), args.get("value"))
+
+
+# ── grafiki i opisy (pobiera serwer; urządzenia biorą je od niego) ──
+def art_overview(api) -> dict:
+    return {"ok": True, **api.art_overview()}
+
+
+def art_start(api, args: dict) -> dict:
+    mode = str(args.get("mode") or "all")
+    if mode not in ("art", "meta", "meta_wiki", "all", "shrink"):
+        return {"ok": False, "reason": "Nieznany rodzaj pobierania."}
+    return api.art_start(str(args.get("es") or ""), mode)
+
+
+def art_cancel(api) -> dict:
+    api.art_cancel()
+    return {"ok": True}
+
+
+def launchbox_update(api) -> dict:
+    return api.launchbox_update()
+
+
+def art_keys_set(api, args: dict) -> dict:
+    """Klucze źródeł grafik (SteamGridDB, IGDB, TheGamesDB) — zaszyfrowane na serwerze;
+    puste pole zostawia zapisany klucz, „-” go usuwa."""
+    from emustart import art_sources, config, secure
+    keys = dict(api._cfg.get("art_keys") or {})
+    for name in art_sources.KEY_NAMES:
+        v = str(args.get(name) or "").strip()
+        if v == "-":
+            keys.pop(name, None)
+        elif v:
+            keys[name] = secure.protect(v)
+    keys["source"] = "panel serwera"
+    api._cfg["art_keys"] = keys
+    config.save(api._cfg)
+    return {"ok": True, "sources": art_sources.Sources(api._cfg).enabled()}
+
+
+KEYS_FILE = "art_keys.json"
+
+
+def import_keys_file(api) -> int:
+    """Przy starcie serwera: klucze źródeł grafik z pliku <serwer>/art_keys.json
+    ({"sgdb_key", "igdb_client_id", "igdb_client_secret", "tgdb_key"} jawnie) — zapisane
+    zaszyfrowane jak z panelu, plik usuwany. Zwraca liczbę kluczy."""
+    import json as _json
+    f = paths.SERVER / KEYS_FILE
+    if not f.is_file():
+        return 0
+    try:
+        data = _json.loads(f.read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError) as ex:
+        log.warning("klucze grafik z %s: %s", f, ex)
+        return 0
+    from emustart import art_sources
+    got = {k: str(data.get(k) or "").strip() for k in art_sources.KEY_NAMES} if isinstance(data, dict) else {}
+    got = {k: v for k, v in got.items() if v}
+    if got:
+        art_keys_set(api, got)
+    try:
+        f.unlink()                       # jawne klucze nie zostają na dysku
+    except OSError as ex:
+        log.warning("nie mogę usunąć %s: %s", f, ex)
+    log.info("klucze źródeł grafik z pliku %s: %s", KEYS_FILE, ", ".join(sorted(got)) or "brak")
+    return len(got)
+
+
+# ── konta: pliki i kopie zapasowe (emustart/acctbackup.py) ──
+def _acct(fn):
+    def run(api, args: dict) -> dict:
+        try:
+            return fn(api, args)
+        except ValueError as ex:
+            return {"ok": False, "reason": str(ex)}
+    return run
+
+
+@_acct
+def account_files(api, args: dict) -> dict:
+    from emustart import acctbackup
+    name = str(args.get("name", ""))
+    return {**acctbackup.browse(name), "backups": acctbackup.backups(api._cfg, name),
+            "auto": api._cfg.get("backup_auto") is not False, "keep": int(api._cfg.get("backup_keep") or 14)}
+
+
+@_acct
+def account_backup(api, args: dict) -> dict:
+    from emustart import acctbackup
+    return acctbackup.backup(api._cfg, str(args.get("name", "")))
+
+
+@_acct
+def account_restore(api, args: dict) -> dict:
+    from emustart import acctbackup
+    return acctbackup.restore(api._cfg, str(args.get("name", "")), str(args.get("file", "")))
+
+
+def backup_settings(api, args: dict) -> dict:
+    from emustart import config
+    if "auto" in args:
+        api._cfg["backup_auto"] = bool(args["auto"])
+    if "keep" in args:
+        try:
+            api._cfg["backup_keep"] = max(1, min(365, int(args["keep"])))
+        except (TypeError, ValueError):
+            return {"ok": False, "reason": "Podaj liczbę kopii (1–365)."}
+    config.save(api._cfg)
+    return {"ok": True, "auto": api._cfg.get("backup_auto") is not False, "keep": api._cfg["backup_keep"]}
+
+
+# ── jedna gra: grafiki i opis; wygląd systemów ──
+def _gid(args: dict) -> int:
+    try:
+        return int(args.get("id"))
+    except (TypeError, ValueError):
+        return 0
+
+
+GAME_ACTIONS = {
+    "games_search": lambda api, a: {"ok": True, "games": api.games_search(str(a.get("q", "")), str(a.get("es", "")))},
+    "game_edit": lambda api, a: api.game_edit(_gid(a)),
+    "game_meta_fetch": lambda api, a: api.meta_fetch(_gid(a), bool(a.get("full"))),
+    "game_meta_save": lambda api, a: api.meta_save(_gid(a), a.get("edits") if isinstance(a.get("edits"), dict) else {}),
+    "game_art_candidates": lambda api, a: {"ok": True, "list": api.art_candidates(_gid(a), str(a.get("kind", "")),
+                                                                                  str(a.get("q", "")))},
+    "game_art_choose": lambda api, a: api.art_choose(_gid(a), str(a.get("kind", "")), str(a.get("url", ""))),
+    "game_art_clear": lambda api, a: api.art_clear(_gid(a), str(a.get("kind", ""))),
+    "systems_look": lambda api, a: {"ok": True, "systems": api.systems_look()},
+    "system_set": lambda api, a: api.system_set(str(a.get("es", "")), {k: a[k] for k in ("name", "glow", "enabled",
+                                                                                         "emu_rec", "core_rec") if k in a}),
+    "system_logo_candidates": lambda api, a: {"ok": True, "list": api.system_logo_candidates(str(a.get("es", "")))},
+    "system_logo_choose": lambda api, a: api.system_logo_choose(str(a.get("es", "")), str(a.get("id", ""))),
+    "system_merge": lambda api, a: api.system_merge(str(a.get("es", "")), str(a.get("into", ""))),
+}
+ACTIONS_ARGS.update(GAME_ACTIONS)
+ACTIONS_ARGS.update({"move_prepare": move_prepare, "move_import": move_import, "update_apply": update_apply})
+ACTIONS.pop("update_apply", None)
+ACTIONS_ARGS.update({"config_set": config_set, "art_start": art_start, "art_keys_set": art_keys_set,
+                     "account_files": account_files, "account_backup": account_backup,
+                     "account_restore": account_restore, "backup_settings": backup_settings})
+ACTIONS.update({"art": art_overview, "art_cancel": art_cancel, "launchbox_update": launchbox_update})
+
+
+# ── emulatory: magazyn serwera (emustart/emustore.py) ──
+def emu_status(api) -> dict:
+    from emustart import emustore
+    return emustore.status(api._cfg)
+
+
+def emu_update(api, args: dict) -> dict:
+    """Panel: sprawdź i pobierz nowe wersje teraz (wszystkie albo wybrane, `force` — ponownie)."""
+    from emustart import emucatalog, emustore
+    items = args.get("items")
+    if items is not None:
+        items = [str(i) for i in items if emucatalog.valid_item(str(i))]
+    return emustore.start_update(api._cfg, items, bool(args.get("force")))
+
+
+def emu_policy_get(api) -> dict:
+    """Panel: wymagane ustawienia emulatorów (emustart/emupolicy.py) — tekst do edycji."""
+    from emustart import emupolicy
+    eff = emupolicy.effective(api._cfg)
+    own = api._cfg.get("emu_policy") or {}
+    return {"ok": True, "families": [{"family": f, "label": label, "text": emupolicy.format_values(eff[f]),
+                                      "default": f not in own} for f, label in emupolicy.FAMILIES.items()]}
+
+
+def emu_policy_set(api, args: dict) -> dict:
+    """Panel: zapis wymaganych ustawień jednej rodziny; `reset` — wartości domyślne EmuStart."""
+    from emustart import config, emupolicy
+    fam = str(args.get("family", ""))
+    if fam not in emupolicy.FAMILIES:
+        return {"ok": False, "reason": "Nieznany emulator."}
+    pol = dict(api._cfg.get("emu_policy") or {})
+    if args.get("reset"):
+        pol.pop(fam, None)
+    else:
+        values, why = emupolicy.parse(fam, str(args.get("text", "")))
+        if why:
+            return {"ok": False, "reason": why}
+        pol[fam] = values
+    api._cfg["emu_policy"] = pol
+    config.save(api._cfg)
+    log.info("panel: wymagane ustawienia %s: %s", fam, "domyślne" if args.get("reset") else pol[fam])
+    return {"ok": True, **emu_policy_get(api)}
+
+
+ACTIONS["emu_status"] = emu_status
+ACTIONS_ARGS["emu_update"] = emu_update
+ACTIONS["emu_policy"] = emu_policy_get
+ACTIONS_ARGS["emu_policy_set"] = emu_policy_set
+ACTIONS.update({"config": config_get, "public_status": public_status, "devices": devices_list, "login_code": login_code, "profiles_migrate_status": profiles_migrate_status,
                 "accounts": accounts_list})
 
 
@@ -482,10 +737,10 @@ def start_server(port: int) -> bool:
                            creationflags=subprocess.CREATE_NO_WINDOW)
         if r.returncode == 0 and _wait(port, 15):
             return True
-        subprocess.Popen(_self_cmd() + ["--server"], close_fds=True, cwd=str(paths.APP),
+        subprocess.Popen(_self_cmd() + ["--service"], close_fds=True, cwd=str(paths.APP),
                          creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW)
     else:
-        subprocess.Popen(_self_cmd() + ["--server"], close_fds=True, cwd=str(paths.APP),
+        subprocess.Popen(_self_cmd() + ["--service"], close_fds=True, cwd=str(paths.APP),
                          start_new_session=True)
     return _wait(port, 30)
 

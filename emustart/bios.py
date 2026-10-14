@@ -10,6 +10,7 @@ nadpisujemy.
 from __future__ import annotations
 
 import logging
+import time
 import re
 import shutil
 from pathlib import Path
@@ -39,35 +40,34 @@ def firmware(ra_root: Path, core: str) -> list:
     return out
 
 
+# BIOS-y, których serwer nie ma: rdzeń wymienia często kilkanaście opcjonalnych plików — bez
+# tego każde uruchomienie gry pytało serwer o każdy z nich, zanim cokolwiek się pokazało
+_absent: dict = {}
+MISS_TTL = 1800
+
+
 def sync(cfg: dict, ra_root: Path, core: str, extra: tuple = ()) -> list:
-    """Kopiuje brakujące BIOS-y rdzenia (i pliki z `extra`) z folderu BIOS-ów do
-    folderu system RetroArcha; czego tam nie ma — z serwera EmuStart (komputer bez
-    własnego folderu BIOS-ów). Zwraca listę skopiowanych."""
+    """Pobiera z serwera EmuStart brakujące BIOS-y rdzenia (i pliki z `extra`) do folderu
+    system RetroArcha (BIOS-y ustawia się w panelu serwera). Zwraca listę pobranych."""
     from emustart import installer, libsync
-    have_dir = bool(cfg.get("bios_dir"))
-    from_server = bool(cfg.get("server_url") and cfg.get("server_key"))
-    if not core or not (have_dir or from_server):
+    if not core or not (cfg.get("server_url") and cfg.get("server_key")):
         return []
-    src_root = Path(cfg.get("bios_dir") or "")
     dst_root = installer.ra_system_dir(ra_root)
     copied = []
+    now = time.monotonic()
     for rel in list(firmware(ra_root, core)) + list(extra):
         dst = dst_root / rel
-        if dst.exists():
-            continue
-        src = src_root / rel
+        if dst.exists() or now - _absent.get(rel, -MISS_TTL) < MISS_TTL:
+            continue                     # jest albo serwer niedawno go nie miał (bez pytania przy każdej grze)
         try:
-            if not have_dir or not src.is_file():
-                if from_server and libsync.bios_from_server(cfg, rel, dst):
-                    copied.append(rel)
-                continue
-            dst.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(src, dst)
-            copied.append(rel)
+            if libsync.bios_from_server(cfg, rel, dst):
+                copied.append(rel)
+            else:
+                _absent[rel] = now
         except OSError as ex:
             log.warning("BIOS %s: %s", rel, ex)
     if copied:
-        log.info("BIOS-y dla %s skopiowane z %s: %s", core, src_root, ", ".join(copied))
+        log.info("BIOS-y dla %s z serwera: %s", core, ", ".join(copied))
     return copied
 
 
@@ -83,8 +83,6 @@ def whdload_kickstarts(cfg: dict, ra_root: Path, saves_dir: Path) -> list:
     from emustart import installer
     target = saves_dir / "PUAE" / "WHDLoad" / "Devs" / "Kickstarts"
     sources = [installer.ra_system_dir(ra_root)]
-    if cfg.get("bios_dir"):
-        sources.append(Path(cfg["bios_dir"]))
     copied = []
     for name in WHDLOAD_KICKSTARTS:
         dst = target / name

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <title>EmuStart Server</title>
 <style>
   :root {
@@ -38,6 +38,47 @@
   .bar > div { height: 100%; width: 0; background: var(--accent); transition: width .3s; }
   #msg { min-height: 1.4em; color: var(--warn); }
   code { background: #0f131c; padding: 2px 6px; border-radius: 4px; user-select: all; }
+  nav { display: flex; gap: 4px; padding: 0 18px; border-bottom: 1px solid var(--line); }
+  nav button { background: none; border: 0; border-bottom: 2px solid transparent; border-radius: 0; padding: 10px 12px; color: var(--dim); }
+  nav button:hover { background: none; color: var(--text); }
+  nav button.on { color: var(--text); border-bottom-color: var(--accent); }
+  .field { padding: 10px 0; border-top: 1px solid var(--line); }
+  .field:first-of-type { border-top: 0; }
+  .field .row { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
+  .field input { flex: 1; min-width: 0; }
+  input { font: inherit; color: var(--text); background: #0f131c; border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; }
+  .st { font-size: 12px; } .st.ok { color: var(--ok); } .st.bad { color: var(--warn); }
+  select, textarea { font: inherit; color: var(--text); background: #0f131c; border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; }
+  .gres { display: grid; gap: 2px; margin-top: 8px; max-height: 260px; overflow: auto; }
+  .gres button { text-align: left; background: none; border: 0; border-radius: 6px; padding: 5px 8px; }
+  .gres button:hover, .gres button.on { background: #222a3d; }
+  .arts { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 10px; }
+  .arts figure { margin: 0; width: 170px; }
+  .arts .img { height: 140px; background: #0f131c; border: 1px solid var(--line); border-radius: 8px; display: flex;
+               align-items: center; justify-content: center; overflow: hidden; color: var(--dim); }
+  .arts img { max-width: 100%; max-height: 100%; }
+  .picks { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; max-height: 360px; overflow: auto; }
+  .picks button { padding: 4px; width: 132px; height: 132px; display: flex; flex-direction: column; align-items: center;
+                  justify-content: center; gap: 2px; font-size: 11px; color: var(--dim); }
+  .picks img { max-width: 120px; max-height: 100px; }
+  .picks.logos button { width: 180px; height: 90px; } .picks.logos img { max-width: 170px; max-height: 60px; }
+  /* wybór logo systemu: okno nad listą (nie na dole długiej listy systemów) */
+  #sysPick:not([hidden]) { position: fixed; inset: 5vh 6vw; z-index: 100; margin: 0; padding: 16px 18px;
+    display: flex; flex-direction: column; gap: 8px; background: var(--bg2); border: 1px solid var(--line);
+    border-radius: 12px; box-shadow: 0 0 0 100vmax rgba(0,0,0,.65), 0 20px 60px rgba(0,0,0,.6); }
+  #sysPick .picks { flex: 1; max-height: none; align-content: flex-start; }
+  #sysPickInfo { font-size: 16px; color: var(--text); }
+  /* logo na średniej szachownicy — widać i czarne, i białe warianty */
+  .picks.logos button { background: repeating-conic-gradient(#3b414d 0% 25%, #30353f 0% 50%) 50% / 18px 18px; }
+  .meta { display: grid; grid-template-columns: max-content 1fr; gap: 6px 10px; margin-top: 12px; align-items: start; }
+  .meta textarea { min-height: 120px; resize: vertical; }
+  .syslogo { width: 120px; height: 40px; object-fit: contain; }
+  .sysdirs { font-size: 11px; color: var(--dim); overflow-wrap: anywhere; margin-top: 2px; }
+  #toast { position: fixed; right: 18px; bottom: 18px; max-width: 520px; background: #222a3d; border: 1px solid var(--line);
+           border-left: 4px solid var(--ok); border-radius: 8px; padding: 10px 14px; box-shadow: 0 6px 24px #0008;
+           opacity: 0; transform: translateY(8px); transition: opacity .2s, transform .2s; pointer-events: none; z-index: 10; }
+  #toast.on { opacity: 1; transform: none; }
+  #toast.bad { border-left-color: var(--warn); }
 </style>
 </head>
 <body>
@@ -48,8 +89,81 @@
   <span class="grow"></span>
   <span id="ver" class="muted"></span>
 </header>
+<nav id="tabs">
+  <button data-tab="stan" class="on">Stan</button>
+  <button data-tab="konfig">Konfiguracja</button>
+  <button data-tab="art">Grafiki i opisy</button>
+  <button data-tab="urz">Urządzenia i konta</button>
+  <button data-tab="emu">Emulatory</button>
+  <button data-tab="akt">Aktualizacja</button>
+</nav>
 <main>
-  <section>
+  <section data-in="konfig">
+    <h2>Foldery</h2>
+    <div class="muted">Serwer sprawdza każdy folder tak, jak sam go widzi. Dysk sieciowy wybrany literą
+      (np. Z:) zamieniany jest na ścieżkę sieciową — serwer działa na koncie systemowym, które liter
+      dysków sieciowych nie zna.</div>
+    <div id="cfgFields"></div>
+    <div id="cfgMsg" style="min-height:1.4em"></div>
+  </section>
+  <section data-in="art">
+    <h2>Pobieranie</h2>
+    <div class="muted">Serwer pobiera okładki, zrzuty, logo i opisy gier — EmuStart na PC i telefonach
+      bierze je od niego.</div>
+    <div class="actions" style="margin-top:8px">
+      <button class="primary" data-art="all">Brakujące grafiki i opisy</button>
+      <button data-art="art">Tylko grafiki</button>
+      <button data-art="meta">Tylko opisy</button>
+      <button data-art="meta_wiki">Opisy + Wikipedia (wolniej)</button>
+      <button data-art="shrink">Zmniejsz zapisane grafiki</button>
+      <button id="bArtStop" class="danger" hidden>Zatrzymaj</button>
+    </div>
+    <div id="artJob" hidden>
+      <div id="artLine" class="muted" style="margin-top:8px"></div>
+      <div class="bar"><div id="artBar"></div></div>
+      <div id="artCur" class="muted" style="margin-top:4px;font-size:12px"></div>
+    </div>
+    <div id="artMsg" style="min-height:1.4em"></div>
+  </section>
+  <section data-in="art">
+    <h2>Gra — grafiki i opis</h2>
+    <div class="row actions"><input id="gq" placeholder="Szukaj gry (fragment nazwy)" style="flex:1;min-width:200px">
+      <select id="ges"><option value="">wszystkie systemy</option></select><button id="bGq">Szukaj</button></div>
+    <div id="gResults" class="gres"></div>
+    <div id="gEdit" hidden>
+      <h3 id="gTitle" style="margin:12px 0 4px"></h3><div id="gSub" class="muted"></div>
+      <div class="arts" id="gArts"></div>
+      <div id="gPick" hidden>
+        <div class="row actions"><input id="gPickQ" placeholder="Szukaj grafiki — inna nazwa" style="flex:1"><button id="bPickQ">Szukaj</button>
+          <button id="bPickClose">Zamknij</button></div>
+        <div id="gPickInfo" class="muted"></div><div id="gPickList" class="picks"></div></div>
+      <div id="gMeta" class="meta"></div>
+      <div class="actions" style="margin-top:8px"><button id="bMetaSave" class="primary">Zapisz opis</button>
+        <button id="bMetaReset">Przywróć dane pobrane</button><button id="bMetaFetch">Pobierz opis z sieci</button></div>
+      <div id="gMsg" style="min-height:1.4em"></div>
+    </div>
+  </section>
+  <section data-in="art">
+    <h2>Systemy</h2>
+    <table><thead><tr><th>System</th><th class="n">Gry</th><th class="n">Okładki</th><th class="n">Zrzuty</th><th class="n">Opisy</th><th></th></tr></thead>
+      <tbody id="artSystems"></tbody></table>
+  </section>
+  <section data-in="art">
+    <h2>Źródła</h2>
+    <div id="artSources" class="muted"></div>
+    <div id="lbInfo" class="muted" style="margin-top:8px"></div>
+    <div class="actions" style="margin-top:6px"><button id="bLb">Pobierz bazę LaunchBox</button></div>
+    <div class="muted" style="margin-top:10px">Klucze (opcjonalnie — więcej grafik). Puste pole zostawia zapisany klucz, „-” go usuwa.</div>
+    <div class="field"><div class="row"><input id="kSgdb" placeholder="SteamGridDB — klucz API"></div>
+      <div class="row"><input id="kIgdbId" placeholder="IGDB — Client ID"><input id="kIgdbSecret" placeholder="IGDB — Client Secret"></div>
+      <div class="row"><input id="kTgdb" placeholder="TheGamesDB — klucz API"><button id="bKeys" class="primary">Zapisz klucze</button></div></div>
+  </section>
+  <section data-in="stan" id="tlsAlert" data-show="0" hidden style="border-color:var(--warn)">
+    <h2 style="color:var(--warn)">Serwer przeniesiony — port szyfrowany wyłączony</h2>
+    <div>Klucz certyfikatu pochodzi z innego komputera. Konfiguracja → <b>Przeniesienie serwera</b> → podaj
+      hasło przeniesienia. Do tego czasu telefony i komputery nie połączą się z serwerem.</div>
+  </section>
+  <section data-in="stan">
     <h2>Akcje</h2>
     <div class="actions">
       <button id="bRescan" class="primary">Przeładuj listę gier</button>
@@ -62,7 +176,30 @@
     </div>
     <div id="msg"></div>
   </section>
-  <section>
+  <section data-in="emu">
+    <h2>Emulatory</h2>
+    <div class="muted">Serwer pobiera z internetu emulatory potrzebne systemom biblioteki (zalecany emulator
+      i rdzeń — Konfiguracja → Systemy) i rozdaje je komputerom: po wybraniu folderu emulatorów EmuStart na PC
+      sam doinstaluje brakujące i zaktualizuje starsze (konfiguracja i zapisy zostają). Nowe wersje — raz dziennie
+      albo przyciskiem.</div>
+    <div class="actions" style="margin-top:8px">
+      <button id="bEmuUpd" class="primary">Sprawdź i pobierz teraz</button>
+      <span id="emuChecked" class="muted"></span></div>
+    <div id="emuJob" class="muted" style="margin-top:6px"></div>
+    <div id="emuBarBox" class="bar" hidden><div id="emuBar"></div></div>
+    <table style="margin-top:8px"><thead><tr><th>Emulator</th><th>Systemy</th><th>Wersja na serwerze</th>
+      <th class="n">Rozmiar</th><th>Pobrano</th><th></th></tr></thead><tbody id="emuRows"></tbody></table>
+    <div class="muted" id="emuDir" style="margin-top:6px"></div>
+  </section>
+  <section data-in="emu">
+    <h2>Wymagane ustawienia emulatorów</h2>
+    <div class="muted">Komputery nakładają je tuż przed każdą grą — wygrywają z ustawieniami profilu i
+      zmianami w samym emulatorze. Jedna wartość w wierszu: RetroArch <code>klucz = wartość</code>
+      (jak w retroarch.cfg), pozostałe <code>Sekcja|Klucz = wartość</code> (jak w pliku ini emulatora).
+      Wiersz od <code>#</code> — komentarz.</div>
+    <div id="emuPolicy"></div>
+  </section>
+  <section data-in="akt">
     <h2>Aktualizacja</h2>
     <div class="actions">
       <button id="bUpdCheck">Sprawdź aktualizacje</button>
@@ -72,18 +209,43 @@
     <div id="updBarBox" class="bar" hidden><div id="updBar"></div></div>
     <pre id="updNotes" class="muted" hidden style="white-space:pre-wrap;max-height:160px;overflow:auto;margin:8px 0 0"></pre>
   </section>
-  <section>
+  <section data-in="stan">
     <h2>Serwer</h2>
     <dl id="info"></dl>
   </section>
-  <section>
+  <section data-in="konfig">
+    <h2>Systemy — logo i nazwy</h2>
+    <div class="muted">Tak systemy wyglądają na wszystkich urządzeniach (PC i telefony). Wyłączony system
+      znika z list na urządzeniach. Zalecany emulator i rdzeń RetroArcha — urządzenie bez własnego wyboru
+      używa tego.</div>
+    <table style="margin-top:8px"><tbody id="sysLook"></tbody></table>
+    <div id="sysPick" hidden style="margin-top:8px">
+      <div class="muted" id="sysPickInfo"></div><div id="sysPickList" class="picks logos"></div>
+      <div class="actions"><button id="bSysPickClose">Zamknij</button></div></div>
+    <div id="sysMsg" style="min-height:1.4em"></div>
+  </section>
+  <section data-in="konfig">
+    <h2>Przeniesienie serwera</h2>
+    <div class="muted">Klucz certyfikatu serwera jest zaszyfrowany i działa tylko na tym komputerze — kopia
+      folderu serwera nigdzie indziej nic nie da. Żeby przenieść serwer: <b>Przygotuj przeniesienie</b>
+      (hasło przeniesienia), skopiuj cały folder programu na nowy komputer i tam podaj to hasło.
+      Certyfikat zostaje ten sam — telefony i komputery działają dalej bez ponownego logowania.</div>
+    <div id="tlsInfo" style="margin-top:8px"></div>
+    <div class="row actions" style="margin-top:8px">
+      <input id="mvPw1" type="password" autocomplete="new-password" placeholder="hasło przeniesienia">
+      <input id="mvPw2" type="password" autocomplete="new-password" placeholder="powtórz (przy przygotowaniu)">
+      <button id="bMvPrep">Przygotuj przeniesienie</button>
+      <button id="bMvImp" class="primary" hidden>Odblokuj na tym komputerze</button>
+    </div>
+  </section>
+  <section data-in="konfig">
     <h2>Folder profili (zapisy, stany, ustawienia graczy)</h2>
     <div id="profRoot" class="muted"></div>
     <div class="actions" style="margin-top:8px"><button id="bMigrate">Przenieś profile do katalogu serwera</button></div>
     <div id="migrText" class="muted" style="margin-top:8px"></div>
     <div id="migrBarBox" class="bar" hidden><div id="migrBar"></div></div>
   </section>
-  <section>
+  <section data-in="konfig">
     <h2>Dostęp z internetu</h2>
     <div class="muted">Port publiczny (szyfrowany) otwierany na routerze przez UPnP — urządzenia poza domem
       i bez Tailscale pobierają gry prosto z serwera. Tylko dla sparowanych urządzeń (klucz).</div>
@@ -97,7 +259,7 @@
       <button id="bTunnel">Zapisz adres tunelu</button></div>
     <div id="tunInfo" class="muted" style="margin-top:6px"></div>
   </section>
-  <section>
+  <section data-in="urz">
     <h2>Urządzenia</h2>
     <div class="actions"><button id="bPair" class="primary">Dodaj urządzenie</button></div>
     <div id="pairBox" hidden style="margin-top:10px">
@@ -122,7 +284,7 @@
     <table style="margin-top:10px"><thead><tr><th>Urządzenie</th><th>Rodzaj</th><th>Konto</th><th>Wersja</th><th class="n">Ostatnio</th><th></th></tr></thead>
       <tbody id="devices"></tbody></table>
   </section>
-  <section>
+  <section data-in="urz">
     <h2>Konta</h2>
     <div class="muted">Hasło konta (co najmniej 10 znaków, wielka litera, cyfra i znak specjalny) potwierdza
       użytkownika przy dołączaniu nowego urządzenia i gdy gra na cudzym urządzeniu. Serwer trzyma tylko
@@ -140,17 +302,35 @@
       </form>
     </dialog>
   </section>
-  <section>
+  <section data-in="urz" id="acctBox" data-show="0" hidden>
+    <h2>Konto <span id="acctName"></span> — pliki i kopie</h2>
+    <table><thead><tr><th>Folder</th><th class="n">Pliki</th><th class="n">Rozmiar</th><th class="n">Ostatnia zmiana</th></tr></thead>
+      <tbody id="acctParts"></tbody></table>
+    <details style="margin-top:8px"><summary class="muted">Ostatnio zmienione pliki</summary>
+      <table><tbody id="acctRecent"></tbody></table></details>
+    <div class="actions" style="margin-top:10px"><button id="bAcctBackup" class="primary">Zrób kopię teraz</button>
+      <button id="bAcctClose">Zamknij</button></div>
+    <table style="margin-top:10px"><thead><tr><th>Kopia</th><th class="n">Rozmiar</th><th></th></tr></thead>
+      <tbody id="acctBackups"></tbody></table>
+    <div class="row actions" style="margin-top:10px;align-items:center">
+      <label><input type="checkbox" id="bakAuto"> kopie automatyczne (raz dziennie, gdy konto się zmieniło)</label>
+      <span class="muted">zostaw</span><input id="bakKeep" type="number" min="1" max="365" style="width:70px"><span class="muted">najnowszych</span>
+      <button id="bBakSave">Zapisz</button></div>
+    <div class="muted" style="margin-top:6px">Folder kopii: Konfiguracja → Folder kopii kont. Przywrócenie najpierw robi
+      kopię obecnego stanu; pliki, których w kopii nie ma, zostają.</div>
+  </section>
+  <section data-in="stan">
     <h2>Pobierane gry</h2>
     <table><thead><tr><th>Gra</th><th>Urządzenie</th><th class="n">Wysłano</th><th class="n">Ostatnio</th></tr></thead>
       <tbody id="transfers"></tbody></table>
   </section>
-  <section>
+  <section data-in="stan">
     <h2>Połączenia od startu serwera</h2>
     <table><thead><tr><th>Urządzenie</th><th class="n">Zapytania</th><th class="n">Wysłano</th><th class="n">Ostatnio</th></tr></thead>
       <tbody id="clients"></tbody></table>
   </section>
 </main>
+<div id="toast"></div>
 <script src="server.js"></script>
 </body>
 </html>

@@ -29,13 +29,24 @@ def _digest(p) -> str:
 def pytest_sessionstart(session):
     for k, p in _REAL.items():
         _BEFORE[k] = _digest(p)
+    # poza testem (wątki w tle, które otwierają bazę już po teście) — też folder tymczasowy,
+    # nigdy prawdziwe dane programu
+    import tempfile
+    from pathlib import Path
+    base = Path(tempfile.mkdtemp(prefix="emustart-sesja-"))
+    for name, rel in {"APP": "", "DATA": "data", "MEDIA": "data/media", "DB_PATH": "data/library.sqlite",
+                      "CONFIG_PATH": "config.json", "LOGS": "logs", "DEFAULT_CACHE": "cache",
+                      "RUN_TMP": "run", "SERVER": "server"}.items():
+        setattr(paths, name, base / rel if rel else base)
 
 
 def pytest_sessionfinish(session, exitstatus):
     changed = [str(p) for k, p in _REAL.items() if _digest(p) != _BEFORE.get(k)]
     if changed:
         session.exitstatus = 1
-        print("\n\nBŁĄD: testy zmieniły prawdziwe pliki EmuStart: " + ", ".join(changed))
+        # bez polskich znaków w konsoli CI (cp1252) — inaczej sam komunikat kończył się błędem
+        msg = "\n\nBŁĄD: testy zmieniły prawdziwe pliki EmuStart: " + ", ".join(changed)
+        print(msg.encode("ascii", "backslashreplace").decode("ascii"))
 
 
 @pytest.fixture(autouse=True)
@@ -78,3 +89,15 @@ def _isolated_app(tmp_path_factory, monkeypatch):
     library._local.con = None
     yield
     library._local.con = None
+
+
+@pytest.fixture()
+def server_files(monkeypatch):
+    """EmuStart na PC pobiera gry tylko z serwera — w testach uruchamiania pliki „z serwera”
+    to pliki z folderu gry w teście (bez prawdziwego serwera)."""
+    from emustart import library, netsrc
+
+    def fake(cfg, g):
+        d = library.game_dir(g)
+        return {rel: d / rel for rel, _size, _mt in g["files"] if (d / rel).is_file()}
+    monkeypatch.setattr(netsrc, "sources", fake)

@@ -14,7 +14,6 @@ import heapq
 import io
 import itertools
 import logging
-import os
 import shutil
 import threading
 import time
@@ -22,7 +21,7 @@ import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from emustart import art_sources, library, paths, systems
+from emustart import art_sources, library, mediastore, paths, systems
 
 log = logging.getLogger("emustart.art")
 
@@ -30,8 +29,26 @@ KINDS = {"box": "Named_Boxarts", "snap": "Named_Snaps"}
 HAS, MISSING = 1, 2
 
 
-def media_path(es: str, name: str, kind: str) -> Path:
-    return paths.MEDIA / es / f"{systems.thumb_name(name)}.{kind}.png"
+def media_file(name: str, kind: str) -> str:
+    """Nazwa grafiki w pliku systemu (i w adresie /media/<system>/<nazwa>)."""
+    return f"{systems.thumb_name(name)}.{kind}.png"
+
+
+def has(es: str, name: str, kind: str) -> bool:
+    return mediastore.exists(es, media_file(name, kind))
+
+
+def read(es: str, name: str, kind: str) -> bytes | None:
+    got = mediastore.get(es, media_file(name, kind))
+    return got[0] if got else None
+
+
+def delete(es: str, name: str, kind: str) -> bool:
+    return mediastore.delete(es, media_file(name, kind))
+
+
+def mtime(es: str, name: str, kind: str) -> float:
+    return mediastore.mtime(es, media_file(name, kind))
 
 
 def rename(es: str, old: str, new: str) -> int:
@@ -42,13 +59,10 @@ def rename(es: str, old: str, new: str) -> int:
         return 0
     n = 0
     for kind in ("box", "snap", "logo"):
-        src, dst = media_path(es, old, kind), media_path(es, new, kind)
-        try:
-            if src.is_file() and not dst.exists():
-                os.replace(src, dst)
-                n += 1
-        except OSError as ex:
-            log.warning("grafika %s → %s: %s", src.name, dst.name, ex)
+        if mediastore.rename(es, media_file(old, kind), media_file(new, kind)):
+            n += 1
+    if n:
+        library.bump_rev(es)
     return n
 
 
@@ -67,11 +81,8 @@ def adopt_set_names(es: str) -> int:
 def media_url(es: str, name: str, kind: str) -> str:
     """Adres grafiki z wersją (czas modyfikacji pliku): po ręcznej zmianie okładki
     adres jest nowy, więc przeglądarka nie pokaże starej z pamięci podręcznej."""
-    rel = f"{es}/{systems.thumb_name(name)}.{kind}.png"
-    try:
-        v = int(os.stat(paths.MEDIA / rel).st_mtime)
-    except OSError:
-        v = 0
+    rel = f"{es}/{media_file(name, kind)}"
+    v = int(mediastore.mtime(es, media_file(name, kind)))
     return "/media/" + urllib.parse.quote(rel) + (f"?v={v}" if v else "")
 
 
@@ -117,33 +128,7 @@ def shrink(kind: str, data: bytes) -> bytes:
 
 def save(es: str, name: str, kind: str, data: bytes) -> None:
     check_space()
-    data = shrink(kind, data)
-    out = media_path(es, name, kind)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    # dwa wątki mogą pobierać tę samą grafikę — każdy pisze do własnego pliku
-    # tymczasowego, a przegrany wyścig nie jest błędem
-    tmp = out.with_name(f"{out.name}.{threading.get_ident()}.tmp")
-    try:
-        tmp.write_bytes(data)
-        tmp.replace(out)
-    except PermissionError:
-        tmp.unlink(missing_ok=True)
-    except OSError:
-        tmp.unlink(missing_ok=True)       # nie zostawiamy pustych .tmp
-        raise
-
-
-def cleanup_tmp() -> int:
-    """Pozostałości po przerwanych zapisach (np. pełny dysk)."""
-    n = 0
-    if paths.MEDIA.is_dir():
-        for f in paths.MEDIA.glob("*/*.tmp"):
-            try:
-                f.unlink()
-                n += 1
-            except OSError:
-                pass
-    return n
+    mediastore.put(es, media_file(name, kind), shrink(kind, data))
 
 
 def _download(es: str, name: str, kind: str) -> int | None:
@@ -229,7 +214,7 @@ class Fetcher:
         for kind, state in (("box", r["art_box"]), ("snap", r["art_snap"])):
             if state:
                 continue
-            if media_path(r["es"], r["name"], kind).exists():
+            if has(r["es"], r["name"], kind):
                 library.set_art(gid, kind, HAS)
                 continue
             res = _download(r["es"], r["name"], kind)
@@ -240,7 +225,7 @@ class Fetcher:
 
     def _fetch_logo(self, gid: int, r) -> None:
         from emustart import launchbox
-        if media_path(r["es"], r["name"], "logo").exists():
+        if has(r["es"], r["name"], "logo"):
             library.set_art(gid, "logo", HAS)
             return
         if not launchbox.ready():
@@ -347,27 +332,27 @@ class Job:
     def _run_shrink(self) -> None:
         """Zmniejsza już zapisane grafiki (WebP, rozmiar ekranowy)."""
         try:
-            cleanup_tmp()
-            files = [f for f in paths.MEDIA.glob("*/*.png")] if paths.MEDIA.is_dir() else []
+            files = [(es, f) for es in mediastore.systems_with_media() for f in mediastore.files(es)]
             self.total = len(files)
 
-            def one(f: Path) -> None:
+            def one(item) -> None:
+                es, f = item
                 if self.cancel.is_set():
                     return
-                self.current = f"{f.parent.name}/{f.name}"
+                self.current = f"{es}/{f}"
                 try:
-                    data = f.read_bytes()
-                    kind = f.name.rsplit(".", 2)[-2] if f.name.count(".") >= 2 else ""
-                    small = shrink(kind, data)
-                    if len(small) < len(data):
-                        tmp = f.with_name(f.name + ".shrink.tmp")
-                        tmp.write_bytes(small)
-                        os.replace(tmp, f)
-                        with self._lock:
-                            self.saved += len(data) - len(small)
-                            self.found["box"] += 1
-                except OSError as ex:
-                    log.warning("zmniejszanie %s: %s", f, ex)
+                    got = mediastore.get(es, f)
+                    if got:
+                        data, when = got
+                        kind = f.rsplit(".", 2)[-2] if f.count(".") >= 2 else ""
+                        small = shrink(kind, data)
+                        if len(small) < len(data):
+                            mediastore.put(es, f, small, when)
+                            with self._lock:
+                                self.saved += len(data) - len(small)
+                                self.found["box"] += 1
+                except Exception as ex:
+                    log.warning("zmniejszanie %s/%s: %s", es, f, ex)
                 with self._lock:
                     self.done += 1
 
@@ -403,7 +388,7 @@ class Job:
         for kind in self.kinds:
             if g[f"art_{kind}"] == HAS:
                 continue
-            if media_path(g["es"], g["name"], kind).exists():
+            if has(g["es"], g["name"], kind):
                 library.set_art(g["id"], kind, HAS)
                 continue
             need.add(kind)
@@ -430,10 +415,7 @@ class Job:
 def reset_system(es: str) -> int:
     """Usuwa pobrane grafiki i automatyczne metadane systemu (ręczne poprawki
     zostają) — np. dema WHDLoad, którym wcześniej przypisano grafiki gier po nazwie."""
-    import shutil as _sh
-    d = paths.MEDIA / es
-    n = sum(1 for _ in d.glob("*")) if d.is_dir() else 0
-    _sh.rmtree(d, ignore_errors=True)
+    n = mediastore.drop_system(es)
     con = library.db()
     with con:
         con.execute("UPDATE games SET art_box=0, art_snap=0, art_logo=0 WHERE es=?", (es,))

@@ -120,7 +120,7 @@ def _tpm_ok() -> bool:
 
 
 # ── DPAPI (ctypes) ─────────────────────────────────────────────────────────
-def _dpapi(func_name: str, data: bytes):
+def _dpapi(func_name: str, data: bytes, flags: int = 0):
     try:
         import ctypes, ctypes.wintypes as wt
 
@@ -130,7 +130,7 @@ def _dpapi(func_name: str, data: bytes):
                                          ctypes.POINTER(ctypes.c_char)))
         bo = BLOB()
         fn = getattr(ctypes.windll.crypt32, func_name)
-        if not fn(ctypes.byref(bi), None, None, None, None, 0, ctypes.byref(bo)):
+        if not fn(ctypes.byref(bi), None, None, None, None, flags, ctypes.byref(bo)):
             return None
         try:
             return ctypes.string_at(bo.pbData, bo.cbData)
@@ -138,6 +138,23 @@ def _dpapi(func_name: str, data: bytes):
             ctypes.windll.kernel32.LocalFree(bo.pbData)
     except Exception:
         return None
+
+
+CRYPTPROTECT_UI_FORBIDDEN, CRYPTPROTECT_LOCAL_MACHINE = 0x1, 0x4
+
+
+def protect_machine(data: bytes) -> bytes | None:
+    """DPAPI w zakresie komputera: odszyfruje każdy proces na tym Windows (np. serwer na koncie
+    SYSTEM i panel użytkownika), na innym komputerze — nikt. None poza Windows / przy błędzie."""
+    if os.name != "nt":
+        return None
+    return _dpapi("CryptProtectData", data, CRYPTPROTECT_LOCAL_MACHINE | CRYPTPROTECT_UI_FORBIDDEN)
+
+
+def unprotect_machine(blob: bytes) -> bytes | None:
+    if os.name != "nt":
+        return None
+    return _dpapi("CryptUnprotectData", blob, CRYPTPROTECT_UI_FORBIDDEN)
 
 
 def _dpapi_ok() -> bool:

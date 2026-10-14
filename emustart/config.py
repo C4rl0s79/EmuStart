@@ -18,18 +18,21 @@ DEFAULTS: dict = {
     "rom_root": "",                 # stary klucz (jeden folder) — patrz rom_roots()
     "rom_roots": [],                # foldery z grami, kolejność = pierwszeństwo przy duplikatach
     "emu_root": "",
-    "profiles_nas": "",             # folder profili przez SMB ("" = brak; z serwerem — przez serwer)
+    "profiles_nas": "",             # serwer: folder profili graczy ("" → <serwer>\profiles)
     "cache_dir": "",                # "" → <program>\cache
     "cache_recent": 10,             # ile ostatnio uruchomionych gier trzymać
-    "network_mode": "auto",         # auto | lan | remote
-    "lan_threshold_mbps": 200,      # powyżej: LAN (gra płytowa wprost z NAS)
     "small_game_mb": 64,            # mniejsze gry zawsze najpierw do cache
     "fullscreen": True,
     "hide_arcade_clones": True,
     "video_previews": False,
     "mame_exe": "",                 # "" → wykryj w emu_root
+    "bios_dir": "",                 # BIOS-y (serwer: dla urządzeń; PC: kopiowane do RetroArcha)
+    "backup_dir": "",               # serwer: kopie kont ("" → <serwer>\backup)
+    "backup_auto": True,            # serwer: kopia konta raz dziennie, gdy się zmieniło
+    "backup_keep": 14,              # serwer: tyle najnowszych kopii każdego konta
     "art_keys": {},                 # sgdb_key, igdb_client_id/secret, tgdb_key (z PyLinks)
     "systems": {},                  # es_name → {enabled, exe, args, label, extract}
+    "system_merge": {},             # serwer: platforma → platforma, z którą jest scalona
 }
 
 _lock = threading.Lock()

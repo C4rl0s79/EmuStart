@@ -78,6 +78,10 @@ CREATE TABLE IF NOT EXISTS game_meta (
     online  INTEGER NOT NULL DEFAULT 0,   -- 1 = pobrano już opisy z sieci
     updated REAL NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS game_chg (     -- serwer: ostatnia zmiana grafiki / opisu gry
+    game_id INTEGER PRIMARY KEY,
+    t       REAL NOT NULL
+);
 CREATE TABLE IF NOT EXISTS game_emu (     -- emulator wybrany dla jednej gry
     game_id INTEGER PRIMARY KEY,
     label   TEXT NOT NULL,
@@ -146,7 +150,8 @@ def db() -> sqlite3.Connection:
             ("src", "TEXT NOT NULL DEFAULT ''"),          # kilka folderów z grami
             ("art_logo", "INTEGER NOT NULL DEFAULT 0"),   # logo gry (Clear Logo) — od 0.9.0
             ("trans", "TEXT NOT NULL DEFAULT ''"),        # tłumaczenia jako wersje gier — od 0.30.0
-            ("tbase", "TEXT NOT NULL DEFAULT ''")])
+            ("tbase", "TEXT NOT NULL DEFAULT ''"),
+            ("art_m", "TEXT NOT NULL DEFAULT ''")])         # PC: czasy grafik na serwerze (JSON)
         with _migrate_lock:
             con.execute("BEGIN IMMEDIATE")
             if not con.execute("SELECT 1 FROM profiles").fetchone():
@@ -164,6 +169,39 @@ def meta_get(key: str, default: str = "") -> str:
 def meta_set(key: str, value: str) -> None:
     with db() as c:
         c.execute("INSERT OR REPLACE INTO meta(key,value) VALUES(?,?)", (key, value))
+
+
+def bump_rev(es: str, full: bool = True) -> None:
+    """Zmiana grafiki albo opisu w systemie (serwer): urządzenia pobiorą ten system od nowa —
+    całą listę (full) albo tylko gry zmienione od ich ostatniej synchronizacji (game_chg)."""
+    if es:
+        now = repr(time.time())
+        meta_set(f"rev:{es}", now)
+        if full:
+            meta_set(f"full:{es}", now)
+
+
+def bump_rev_game(game_id: int) -> None:
+    """Zmiana jednej gry: urządzenia pobiorą tylko ją (nie cały system)."""
+    r = db().execute("SELECT es FROM games WHERE id=?", (game_id,)).fetchone()
+    if r:
+        with db() as c:
+            c.execute("INSERT OR REPLACE INTO game_chg(game_id, t) VALUES(?,?)", (game_id, time.time()))
+        bump_rev(r["es"], full=False)
+
+
+def rev(es: str) -> float:
+    try:
+        return float(meta_get(f"rev:{es}", "0") or 0)
+    except ValueError:
+        return 0.0
+
+
+def full_rev(es: str) -> float:
+    try:
+        return float(meta_get(f"full:{es}", "0") or 0)
+    except ValueError:
+        return 0.0
 
 
 # ── gry ──
@@ -298,6 +336,7 @@ def set_art(game_id: int, kind: str, state: int) -> None:
     col = {"box": "art_box", "snap": "art_snap", "logo": "art_logo"}[kind]
     with db() as c:
         c.execute(f"UPDATE games SET {col}=? WHERE id=?", (state, game_id))
+    bump_rev_game(game_id)
 
 
 # ── historia gry ──

@@ -50,7 +50,7 @@ def _server_lib(monkeypatch, scanned):
          "core": "bsnes" if es == "snes" else "", "logo": "/media/_systems/snes.custom.png" if es == "snes" else "",
          "logo_glow": False}
         for es, g in SERVER_GAMES.items() if es in scanned])
-    monkeypatch.setattr(libsync, "server_games", lambda es: SERVER_GAMES.get(es, []))
+    monkeypatch.setattr(libsync, "server_games", lambda es, since=0: SERVER_GAMES.get(es, []))
 
 
 def test_library_comes_from_server_without_scanning(srv, monkeypatch, tmp_path):
@@ -76,10 +76,12 @@ def test_library_comes_from_server_without_scanning(srv, monkeypatch, tmp_path):
 
 
 def test_media_fetched_from_server_on_demand(srv, monkeypatch, tmp_path):
+    from emustart import mediastore
     cfg, media = srv
     target = tmp_path / "lokalne" / "snes" / "Gra (USA).box.png"
-    assert libsync.fetch_media(cfg, "snes/Gra (USA).box.png", target)
-    assert target.read_bytes().endswith(b"okladka")
+    assert libsync.fetch_media(cfg, "snes/Gra (USA).box.png", target)    # stary plik serwera (przed przeniesieniem)
+    assert mediastore.get("snes", "Gra (USA).box.png")[0].endswith(b"okladka")   # lokalna kopia: plik systemu
+    assert not target.exists()
     assert not libsync.fetch_media(cfg, "snes/Nie ma.box.png", tmp_path / "x.png")      # brak — bez błędu
 
 
@@ -123,3 +125,32 @@ def test_bios_comes_from_server_when_no_local_folder(srv, monkeypatch, tmp_path)
     assert copied == ["scph5501.bin"]
     assert (installer.ra_system_dir(ra) / "scph5501.bin").read_bytes() == b"bios-ps1"
     assert bios.sync(cfg, ra, "swanstation") == []                       # już jest — bez ponownego pobierania
+
+
+def test_server_changes_reach_pc_cache(srv, monkeypatch):
+    """Serwer jest źródłem prawdy dla grafik i opisów; PC trzyma lokalną kopię (szybki
+    interfejs) i po zmianie na serwerze podmienia ją: opis z serwera, zmieniona grafika
+    pobierze się od nowa, nowe logo systemu też."""
+    from emustart import art, metadata
+    cfg, media = srv
+    game = dict(SERVER_GAMES["snes"][0], art_m={"box": 100},
+                meta={"data": {"description": "Stary opis", "genre": "Platform"}, "edits": {}})
+    monkeypatch.setitem(SERVER_GAMES, "snes", [game])
+    _server_lib(monkeypatch, {"snes": 100.0})
+    assert libsync.sync(cfg)["ok"]
+    gid = library.db().execute("SELECT id FROM games WHERE rel='Gra (USA).sfc'").fetchone()["id"]
+    assert metadata.get(gid)["description"] == "Stary opis"
+    from emustart import mediastore
+    mediastore.put("snes", art.media_file("Gra (USA)", "box"), b"stara okladka")   # lokalna kopia
+    mediastore.put("_systems", "snes.custom.png", b"stare logo")
+    # admin zmienia okładkę i opis na serwerze — wersja systemu rośnie
+    game.update(art_m={"box": 200}, meta={"data": {"description": "Stary opis"}, "edits": {"description": "Nowy opis"}})
+    _server_lib(monkeypatch, {"snes": 200.0})
+    monkeypatch.setattr(libsync, "server_systems", lambda: [
+        {"es": "snes", "display": "SNES", "games": 1, "scanned": 200.0, "emu_rec": "", "core": "",
+         "logo": "/media/_systems/snes.custom.png?v=2", "logo_glow": False}])
+    assert libsync.sync(cfg)["changed"] == 1
+    assert metadata.get(gid)["description"] == "Nowy opis"
+    assert not art.has("snes", "Gra (USA)", "box")           # pobierze się nowa przy wyświetleniu
+    assert libsync.sync(cfg)["changed"] == 0                  # bez zmian — nic
+    assert not mediastore.exists("_systems", "snes.custom.png")   # nowe logo systemu — też od nowa

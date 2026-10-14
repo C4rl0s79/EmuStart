@@ -12,18 +12,28 @@ z serwera nowsze stany tej gry i tego rdzenia i kładzie je tam, gdzie jego Retr
 szuka; po grze zmienione wysyła z powrotem. Stany różnych rdzeni się nie wczytują —
 dlatego wszystko jest w folderach rdzeni.
 
-Autozapis (`.state.auto`) jest wspólny: gdy jest, RetroArch wczytuje go przy starcie gry
-(`present` → `info["autoload"]`). Po grze stan trafia na serwer tylko wtedy, gdy sesja
-wystartowała z wersji, która nadal jest na serwerze. Jeśli nie (wersja z serwera się nie
-pobrała, sesja ruszyła bez serwera albo inne urządzenie zapisało w międzyczasie), stan
-z tej sesji idzie do kopii jako konflikt i nie nadpisuje wspólnego.
+Stany jak w Steam (koncepcja 2.0, §5.5) — tylko dochodzą, nigdy się nie nadpisują:
+- stany numerowane (`.state`, `.stateN`; RetroArch z `savestate_auto_index` nadaje kolejne
+  numery) są niezmienne — gdy numer na serwerze zajmuje inna zawartość (dwa urządzenia zrobiły
+  `.state13`), stan z tego urządzenia dostaje pierwszy wolny numer;
+- autozapis przy wyjściu z gry trafia też do historii jako kolejny numerowany stan;
+- `.state.auto` na serwerze to „Kontynuuj”: najnowszy stan, który RetroArch wczyta sam przy
+  starcie. Przed grą urządzenie podkłada w jego miejsce najnowszy stan z dowolnego urządzenia;
+- `.states.json` w folderze rdzenia: urządzenie, czas i rodzaj (autozapis / ręczny) każdego
+  stanu — do opisów w EmuStart; na serwerze zostaje KEEP najnowszych stanów gry.
+
+Wskaźnik „Kontynuuj” po grze trafia na serwer tylko wtedy, gdy sesja wystartowała z wersji,
+która nadal jest na serwerze. Jeśli nie (inne urządzenie zapisało w międzyczasie, sesja bez
+serwera), stan z tej sesji i tak jest w historii — nic nie ginie.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import os
 import re
+import shutil
 import socket
 import time
 from pathlib import Path
@@ -35,8 +45,11 @@ log = logging.getLogger("emustart.rastates")
 SHARED = "states/shared/retroarch"
 LEGACY_PHONE = "states/android/retroarch"        # telefon przed 0.31.1
 LAYOUTS = ".layouts.json"
+INDEX = ".states.json"          # {plik: {device, platform, time, kind}} w folderze rdzenia
+KEEP = 50                       # stanów jednej gry (jeden rdzeń) na serwerze
 CONFLICTS: list = []            # (profil, gra) z konfliktem w ostatniej sesji → komunikat przy następnej
 _STATE = re.compile(r"^(?P<stem>.+?)\.state(\d*)(\.auto)?(\.png)?$", re.I)
+_NUMBERED = re.compile(r"^(?P<stem>.+?)\.state(?P<n>\d*)$", re.I)
 _CORE_ARG = re.compile(r'-L\s+"?([^"]*?)([\w.+-]+?)_libretro\.(?:dll|so|dylib)"?', re.I)
 
 
@@ -139,6 +152,43 @@ def _candidates(fs, nas: str, cname: str, stem: str, base_out: dict | None = Non
     return list(out.values())
 
 
+def _number(name: str) -> int | None:
+    """Numer stanu („.state” = 0, „.state13” = 13); None — autozapis, obrazek albo inny plik."""
+    m = _NUMBERED.match(name)
+    return int(m.group("n") or 0) if m else None
+
+
+def _index(fs, nas: str, folder: str) -> dict:
+    try:
+        d = json.loads(fs.read(f"{nas}/{SHARED}/{folder}/{INDEX}") or b"{}")
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_index(fs, nas: str, folder: str, idx: dict) -> None:
+    try:
+        fs.write(f"{nas}/{SHARED}/{folder}/{INDEX}", json.dumps(idx, ensure_ascii=False, indent=1).encode("utf-8"))
+    except OSError as ex:
+        log.info("opis stanów: %s", ex)
+
+
+def _entry(kind: str) -> dict:
+    return {"device": socket.gethostname(), "platform": "komputer", "time": time.time(), "kind": kind}
+
+
+def describe(cfg: dict, prof: dict, adapter, core: str) -> dict:
+    """{plik stanu: {device, platform, time, kind}} — opisy stanów tego rdzenia z serwera."""
+    if not prof or not core:
+        return {}
+    fs = nasfs.backend(cfg)
+    try:
+        files = fs.scan(f"{prof['nas_name']}/{SHARED}")
+    except OSError:
+        return {}
+    return _index(fs, prof["nas_name"], _shared_folder(files, core_name(adapter.home, core)))
+
+
 def _is_auto(name: str) -> bool:
     m = _STATE.match(name)
     return bool(m and m.group(3))
@@ -187,6 +237,23 @@ def present(cfg: dict, prof: dict, adapter, core: str, content: Path, info: dict
         except OSError as ex:
             info["stale"].add(name)
             log.warning("stan %s: %s", name, ex)
+    # „Kontynuuj”: najnowszy stan (z dowolnego urządzenia) w miejscu autozapisu — RetroArch
+    # wczyta go sam przy starcie; numerowany zostaje na swoim miejscu w historii
+    nums = [(mtime, name) for _rel, name, mtime in cands
+            if _number(name) is not None and name not in info["stale"]]
+    if nums:
+        t, newest = max(nums)
+        src = dst_dir / newest
+        auto = dst_dir / (_NUMBERED.match(newest).group("stem") + ".state.auto")
+        try:
+            if src.is_file() and (not auto.is_file() or auto.stat().st_mtime < t - 2):
+                import shutil
+                shutil.copyfile(src, auto)
+                os.utime(auto, (t, t))
+                if src.with_name(src.name + ".png").is_file():
+                    shutil.copyfile(src.with_name(src.name + ".png"), auto.with_name(auto.name + ".png"))
+        except OSError as ex:
+            log.warning("najnowszy stan jako autozapis: %s", ex)
     # autozapis tej gry na miejscu i aktualny → RetroArch wczyta go przy starcie
     autos = [f.name for f in dst_dir.glob("*.state.auto")
              if norm(_STATE.match(f.name).group("stem")) == stem] if dst_dir.is_dir() else []
@@ -213,8 +280,8 @@ def _take_conflict(nas: str, stem: str) -> str:
     hit = [c for c in CONFLICTS if c == (nas, stem)]
     for c in hit:
         CONFLICTS.remove(c)
-    return ("Ostatnio stan z tego komputera nie nadpisał nowszego z innego urządzenia — "
-            "leży w kopii zapasowej (konflikt).") if hit else ""
+    return ("Ostatnio stan z tego komputera nie zastąpił nowszego z innego urządzenia jako "
+            "„Kontynuuj” — jest w historii stanów (Wczytaj zapis).") if hit else ""
 
 
 def _other_cores(fs, nas: str, cname: str, stem: str) -> set:
@@ -235,10 +302,8 @@ def _other_cores(fs, nas: str, cname: str, stem: str) -> set:
 
 def publish(cfg: dict, prof: dict, adapter, core: str, content: Path, since: float,
             info: dict | None = None) -> int:
-    """Po grze: stany tej gry zmienione w tej sesji → wspólne miejsce na serwerze.
-
-    `info` z `present` (None = sesja bez stanów z serwera). Stan z tej sesji nie nadpisuje
-    wersji z serwera innej niż ta ze startu gry — idzie do kopii jako konflikt."""
+    """Po grze: nowe stany tej gry → serwer jako nowe, niezmienne wpisy historii. Zwraca ich
+    liczbę. `info` z `present` (None = sesja bez stanów z serwera)."""
     if not prof or not core:
         return 0
     fs = nasfs.backend(cfg)
@@ -251,39 +316,93 @@ def publish(cfg: dict, prof: dict, adapter, core: str, content: Path, since: flo
     except OSError:
         files = {}
     folder = _shared_folder(files, cname)
+    idx = _index(fs, nas, folder)
+    mine = [f for f in sorted(src_dir.glob("*")) if src_dir.is_dir()]
+    mine = [f for f in mine if f.is_file() and _STATE.match(f.name) and not f.name.lower().endswith(".png")
+            and norm(_STATE.match(f.name).group("stem")) == stem]
+    taken = {_number(rel.rsplit("/", 1)[-1]) for rel in files if rel.startswith(folder + "/")
+             and _STATE.match(rel.rsplit("/", 1)[-1])
+             and norm(_STATE.match(rel.rsplit("/", 1)[-1]).group("stem")) == stem} | {_number(f.name) for f in mine}
+    taken.discard(None)
+
+    def next_name(orig_stem: str) -> str:
+        n = max(taken | {0}) + 1
+        taken.add(n)
+        return f"{orig_stem}.state{n}"
+
+    def upload(f: Path, name: str, kind: str, overwrite: str = "") -> bool:
+        try:
+            fs.put_file(f, f"{nas}/{SHARED}/{folder}/{name}", backup=overwrite)
+            png = f.with_name(f.name + ".png")
+            if png.is_file():
+                fs.put_file(png, f"{nas}/{SHARED}/{folder}/{name}.png")
+            if kind:
+                idx[name] = _entry(kind)
+            return True
+        except OSError as ex:
+            log.warning("stan %s na serwer: %s", name, ex)
+            return False
+
     stamp = f"{time.strftime('%Y%m%d-%H%M%S')}-{socket.gethostname()}"
     n = 0
-    for f in sorted(src_dir.glob("*")) if src_dir.is_dir() else []:
-        m = _STATE.match(f.name)
-        if not f.is_file() or not m or norm(m.group("stem")) != stem:
-            continue
-        rel = f"{folder}/{f.name}"
+    for f in mine:
         st = f.stat()
-        have = files.get(rel)
+        orig_stem = _STATE.match(f.name).group("stem")
+        have = files.get(f"{folder}/{f.name}")
         if have and have[0] == st.st_size and abs(have[1] - st.st_mtime) <= 2:
             continue                               # na serwerze już ten
         if st.st_mtime < since - 2 and have and have[1] >= st.st_mtime:
             continue                               # nie z tej sesji, a na serwerze nowszy
-        if have and _conflict(info, f.name, have):
-            try:
-                fs.put_file(f, f"{nas}/_backup/{stamp}/konflikt/{SHARED}/{rel}")
-                log.warning("stan %s: na serwerze inna wersja niż na starcie gry — z tej sesji "
-                            "do kopii (konflikt), wspólny bez zmian", f.name)
+        if _is_auto(f.name):
+            if st.st_mtime >= since - 2:
+                # autozapis z tej sesji → także nowy stan w historii (tutaj i na serwerze)
+                hist = f.with_name(next_name(orig_stem))
+                shutil.copyfile(f, hist)
+                os.utime(hist, (st.st_atime, st.st_mtime))
+                if f.with_name(f.name + ".png").is_file():
+                    shutil.copyfile(f.with_name(f.name + ".png"), hist.with_name(hist.name + ".png"))
+                n += upload(hist, hist.name, "auto")
+            if have and _conflict(info, f.name, have):
+                log.warning("stan %s: na serwerze inny „Kontynuuj” niż na starcie gry — ten z tej sesji "
+                            "tylko w historii", f.name)
                 if (nas, stem) not in CONFLICTS:
                     CONFLICTS.append((nas, stem))
-            except OSError as ex:
-                log.warning("stan %s do kopii: %s", f.name, ex)
+                continue
+            upload(f, f.name, "", f"{nas}/_backup/{stamp}/{SHARED}/{folder}/{f.name}" if have else "")
             continue
-        try:
-            fs.put_file(f, f"{nas}/{SHARED}/{rel}",
-                        backup=f"{nas}/_backup/{stamp}/{SHARED}/{rel}" if have else "")
-            if not f.name.lower().endswith(".png"):
-                n += 1
-        except OSError as ex:
-            log.warning("stan %s na serwer: %s", f.name, ex)
+        name = f.name
+        if have:
+            # numer zajęty na serwerze inną zawartością — stany się nie nadpisują: następny wolny
+            name = next_name(orig_stem)
+            new = f.with_name(name)
+            f.rename(new)
+            if f.with_name(f.name + ".png").is_file():
+                f.with_name(f.name + ".png").rename(new.with_name(name + ".png"))
+            f = new
+            log.info("stan %s: numer zajęty na serwerze — zapisany jako %s", have and f.name, name)
+        n += upload(f, name, "manual")
     if n:
-        log.info("stany na serwer (%s): %d", cname, n)
+        _prune(fs, nas, folder, stem, idx)
+        _save_index(fs, nas, folder, idx)
+        log.info("stany na serwer (%s): %d nowych w historii", cname, n)
     return n
+
+
+def _prune(fs, nas: str, folder: str, stem: str, idx: dict) -> None:
+    """Na serwerze zostaje KEEP najnowszych stanów gry (starsze z obrazkami i opisami znikają)."""
+    try:
+        files = fs.scan(f"{nas}/{SHARED}/{folder}")
+    except OSError:
+        return
+    nums = [(idx.get(name, {}).get("time") or mtime, name) for name, (_size, mtime) in files.items()
+            if "/" not in name and _number(name) is not None and norm(_NUMBERED.match(name).group("stem")) == stem]
+    for _t, name in sorted(nums, reverse=True)[KEEP:]:
+        for rel in (name, name + ".png"):
+            try:
+                fs.unlink(f"{nas}/{SHARED}/{folder}/{rel}")
+            except OSError:
+                pass
+        idx.pop(name, None)
 
 
 def _conflict(info: dict | None, name: str, have: tuple) -> bool:

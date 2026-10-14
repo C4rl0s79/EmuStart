@@ -1,28 +1,29 @@
 # EmuStart — wiki
 
-EmuStart to frontend do gier na emulatorach dla Windows, sterowany padem, w stylu
-EmulationStation. Powstał pod kolekcję ROM-ów na NAS-ie: biblioteka, okładki i opisy
-są na dysku lokalnym, gry na serwerze, a ostatnio grane kopiują się do lokalnej
-pamięci podręcznej. Działa tak samo w domu (LAN) i zdalnie (np. Tailscale), także
-na kilku komputerach korzystających z jednego NAS-a.
+EmuStart to frontend do gier na emulatorach sterowany padem, w stylu EmulationStation —
+dla Windows i Androida. Kolekcję gier, grafiki, opisy, konta i zapisy graczy trzyma
+**[EmuStart Server](EmuStart-Server)** na komputerze z grami; **EmuStart** na PC
+i aplikacja na telefonie biorą wszystko od niego, trzymają lokalną kopię i pobierają gry
+na urządzenie. Działa tak samo w domu i zdalnie (Tailscale, port publiczny, tunel).
 
 ## Od czego zacząć
 
-1. [Instalacja i pierwsze uruchomienie](Instalacja-i-pierwsze-uruchomienie)
-2. [Foldery z grami i systemy](Foldery-z-grami-i-systemy)
-3. [Emulatory](Emulatory)
-4. [Sterowanie](Sterowanie)
+1. [EmuStart Server](EmuStart-Server) — na komputerze z grami
+2. [Instalacja i pierwsze uruchomienie](Instalacja-i-pierwsze-uruchomienie) (EmuStart na PC)
+3. [Foldery z grami i systemy](Foldery-z-grami-i-systemy)
+4. [Emulatory](Emulatory)
+5. [Sterowanie](Sterowanie)
 
 ## Granie
 
-- [Uruchamianie gier: NAS i pamięć podręczna](Uruchamianie-gier-NAS-i-pamięć-podręczna)
+- [Uruchamianie gier i pamięć podręczna](Uruchamianie-gier-NAS-i-pamięć-podręczna)
 - [Menu w grze](Menu-w-grze)
 - [Pady i ich kolejność](Pady)
 
-## Profile i kilka komputerów
+## Profile i kilka urządzeń
 
 - [Profile graczy](Profile-graczy) — save'y, ustawienia, wznawianie
-- [Kilka komputerów, jeden NAS](Kilka-komputerów-jeden-NAS)
+- [Kilka urządzeń, jeden serwer](Kilka-komputerów-jeden-NAS)
 - [RetroAchievements](RetroAchievements)
 
 ## Wygląd i biblioteka
@@ -37,7 +38,6 @@ na kilku komputerach korzystających z jednego NAS-a.
 - [Bezpieczeństwo i prywatność](Bezpieczeństwo-i-prywatność)
 - [Rozwiązywanie problemów](Rozwiązywanie-problemów)
 - [Aplikacja na Androida](Aplikacja-na-Androida)
-- [Serwer dla Androida](Serwer-dla-Androida)
 - [Budowa ze źródeł](Budowa-ze-źródeł)
 
 Zmiany w kolejnych wersjach: [CHANGELOG.md](https://github.com/C4rl0s79/EmuStart/blob/main/CHANGELOG.md).

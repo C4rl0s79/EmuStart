@@ -42,7 +42,7 @@ def _nas(tmp_path):
     _w(g / "save/pcsx2/sstates/SLUS-99999 (FFFF0000).01.p2s", _p2s(V))
     _w(g / "states/android/armsx2/SLUS-20431 (ABCD1234).03.p2s", _p2s(V - 1))
     _w(g / "save/pcsx2/memcards/Mcd001.ps2", b"c" * 100)
-    return nasfs.SmbFs(nas)
+    return nasfs.DirFs(nas)
 
 
 def test_p2s_version(tmp_path):

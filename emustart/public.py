@@ -31,8 +31,8 @@ BAN_WINDOW = 600
 BAN_TIME = 1800
 MAX_CONN_IP = 32
 FW_NAME = "EmuStart Server (internet)"
-# API i grafiki (okładki, logo systemów: własne w /media/, wbudowane w /assets/, z paczki w /local/)
-ALLOWED = ("/v1/", "/media/", "/assets/", "/local/")
+# API i grafiki (okładki, logo systemów i paczka logo w /media/, wbudowane w /assets/)
+ALLOWED = ("/v1/", "/media/", "/assets/")
 OPEN_PATHS = ("/v1/enroll/request", "/v1/enroll/poll", "/v1/auth/challenge", "/v1/auth/token")
 
 STATE: dict = {"enabled": False, "port": 0, "router": "", "ext_ip": "", "mapped": False, "lease": 0,

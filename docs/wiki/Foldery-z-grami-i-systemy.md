@@ -1,29 +1,38 @@
 # Foldery z grami i systemy
 
+Foldery z grami ustawia się na **[EmuStart Server](EmuStart-Server)**: panel →
+Konfiguracja → **Foldery**. Serwer skanuje je i podaje bibliotekę wszystkim urządzeniom.
+
 ## Kilka folderów
 
-W Ustawieniach można podać kilka folderów z grami, np.:
+Można podać kilka folderów z grami, np.:
 
 ```
-Z:\ROMS\REDUMP
-Z:\ROMS\No-Intro
-Z:\ROMS\ROMS
+\\NAS\ROMS\REDUMP
+\\NAS\ROMS\No-Intro
+\\NAS\ROMS\ROMS
 ```
 
 Gry z tego samego systemu z różnych folderów łączą się w jedną listę. Gdy ta sama
-gra jest w kilku folderach, pokazuje się raz — z folderu wyżej na liście
-(◀ ▶ na folderze zmienia kolejność, Y usuwa).
+gra jest w kilku folderach, pokazuje się raz — z folderu wyżej na liście (↑ w panelu
+zmienia kolejność, ✕ usuwa). Serwer działa na koncie systemowym, które nie widzi dysków
+sieciowych podłączonych literą — folder wybrany w panelu na takim dysku zamienia się na
+ścieżkę sieciową (`\\NAS\ROMS\…`).
 
 ## Rozpoznawanie systemów
 
 Podfoldery rozpoznawane są po nazwach:
 
-- **EmulationStation**: `psx`, `snes`, `megadrive`, `ps2`…
+- **EmulationStation / ES-DE**: `psx`, `snes`, `megadrive`, `atarilynx`, `gc`, `genesis`, `wonderswan`…
 - **No-Intro / Redump**: `Sony - PlayStation`, `Nintendo - Super Nintendo Entertainment System`…
-- **libretro**: nazwy z bazy RetroArcha.
+- **libretro**: nazwy z bazy RetroArcha (`Atari - Lynx`),
+- **zwyczajowe**: `Atari Lynx`, `PlayStation`, `PS1`, `Super Famicom`, `Sega Genesis`, `Commodore 64`…
 
-Folder, którego EmuStart nie rozpoznał, widać w Ustawieniach (sekcja Systemy) jako
-„nierozpoznany folder — wyłączony”.
+Wielkość liter, spacje, myślniki i dopiski w nawiasach kwadratowych (`[zstd-19-128k]`) nie mają
+znaczenia: `Atari - Lynx`, `Atari Lynx` i `atarilynx` to ten sam system. Tych samych nazw
+używają propozycje logo systemów (motywy ES-DE, paczka logo).
+
+Panel pokazuje przy każdym folderze, ile systemów rozpoznał.
 
 ## Formaty
 
@@ -62,7 +71,7 @@ grze EmuStart proponuje jej pobranie (z GitHuba projektu capsimg) do folderu
 `system` RetroArcha.
 
 **WHDLoad (.lha)** — dwa osobne systemy: **Amiga WHDLoad — gry** i **Amiga WHDLoad —
-dema**. Dodaj w Ustawieniach folder nadrzędny (np. `Z:\WHDLoad`) — jego podfoldery
+dema**. Dodaj w panelu serwera folder nadrzędny (np. `\\NAS\ROMS\WHDLoad`) — jego podfoldery
 `Games` i `Demos` zostaną rozpoznane (także nazwy `WHDLoad Games`,
 `Commodore Amiga - WHDLoad - Games` itp.). Nazwy paczek zamieniane są na tytuły:
 `WhereInTheWorldIsCarmenSandiego_v0.1_NTSC_2479.lha` → „Where In The World Is Carmen
@@ -109,10 +118,11 @@ kolekcję porządkuje RomHelper. Emulator wybrany dla oryginału (opcje gry → 
 obowiązuje też tłumaczenia.
 
 Pliki w kolekcji mogą mieć te same nazwy co oryginały — język bierze się wtedy z nazwy
-kolekcji. Po dodaniu kolekcji odśwież bibliotekę (menu Start → Skanuj kolekcję ponownie);
-telefon widzi tłumaczenia po skanie na komputerze z serwerem.
+kolekcji. Po dodaniu kolekcji: panel serwera → Stan → **Przeładuj listę gier**; urządzenia
+dostaną tłumaczenia przy najbliższej synchronizacji.
 
 ## Ukrycie systemu
 
-Przytrzymane A na logo systemu → **Ukryj system**, albo w Ustawieniach → Systemy
-(A włącza/wyłącza). System bez widocznych gier znika z karuzeli sam.
+Na tym urządzeniu: przytrzymane A na logo systemu → **Ukryj system**, albo w Ustawieniach
+→ Systemy (A włącza/wyłącza). Na wszystkich urządzeniach: panel serwera → Konfiguracja →
+Systemy → *widoczny*. System bez widocznych gier znika z karuzeli sam.

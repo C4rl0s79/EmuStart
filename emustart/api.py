@@ -1,7 +1,11 @@
-"""api — metody wywoływane z UI (pywebview js_api).
+"""api — EmuStart na PC: metody wywoływane z UI (pywebview js_api).
 
-Wszystkie zwracają zwykłe dicty/listy (JSON). Długie operacje (skan, start gry,
-pobieranie przypiętych) działają w wątkach; UI odpytuje ich stan.
+Biblioteka gier, grafiki i opisy pochodzą z EmuStart Server (kopia biblioteki —
+emustart/libsync.py); tu: granie, profile, emulatory, pady, logowanie do serwera.
+Skan folderów, pobieranie grafik i opisów robi serwer (emustart/srvapi.py).
+
+Wszystkie zwracają zwykłe dicty/listy (JSON). Długie operacje (odświeżenie biblioteki,
+start gry, pobieranie przypiętych) działają w wątkach; UI odpytuje ich stan.
 """
 
 from __future__ import annotations
@@ -16,36 +20,15 @@ import socket
 import sys
 import threading
 import time
+import urllib.parse
 from pathlib import Path
 
-from emustart import (__version__, art, bios, art_sources, cache, ingame, installer, launchbox, logos, sysinfo, metadata, pads, profiles, translations, uipad, config, emulators, launcher, library,
-                      nasfs, netsrc, paths, scanner, systems, winutil)
+from emustart import (__version__, art, bios, cache, catalog, ingame, installer, logos, sysinfo, metadata, pads, profiles, translations, uipad, config, emulators, launcher, library,
+                      nasfs, netsrc, paths, rastates, systems, winutil)
 
 log = logging.getLogger("emustart.api")
+KEEP_LIST = 60                     # stanów na liście „Wczytaj zapis”
 PIN_RETRY = 300                 # s — wznowienie pobierania przypiętej gry najwyżej tak często
-
-_REGIONS = {"USA": "USA", "Europe": "Europa", "Japan": "Japonia", "World": "Świat",
-            "Germany": "Niemcy", "France": "Francja", "Spain": "Hiszpania", "Italy": "Włochy",
-            "UK": "Wielka Brytania", "Australia": "Australia", "Korea": "Korea", "Brazil": "Brazylia",
-            "Canada": "Kanada", "Asia": "Azja", "China": "Chiny", "Taiwan": "Tajwan",
-            "Netherlands": "Holandia", "Sweden": "Szwecja", "Poland": "Polska"}
-
-
-def _regions(tags: str) -> list:
-    """'(USA, Europe) (Rev 1)' → ['USA', 'Europa'] (tylko znane nazwy regionów)."""
-    out = []
-    for group in re.findall(r"\(([^)]*)\)", tags or ""):
-        parts = [p.strip() for p in group.split(",")]
-        if parts and all(p in _REGIONS for p in parts):
-            out += [_REGIONS[p] for p in parts]
-    return out
-
-
-def _players(v) -> int:
-    """'2', '1-4', '4' → największa liczba graczy (0 = brak danych)."""
-    nums = [int(n) for n in re.findall(r"\d+", str(v or ""))]
-    return max(nums) if nums else 0
-
 
 class Api:
     def __init__(self):
@@ -70,17 +53,13 @@ class Api:
         # lokalne save'y i ustawienia profili → NAS/serwer (zaległe po grze bez połączenia,
         # pierwsze przejście na serwer); gra uruchomiona w tym czasie poczeka (post_busy)
         launcher.start_post(lambda: profiles.push_all(self._cfg), "zapisy profili")
-        if not __import__("emustart.libsync", fromlist=["thin"]).thin(self._cfg):
-            logos.push_later(self._cfg)   # wygląd systemów → serwer (Android pokazuje to samo)
-        from emustart import artsync
-        artsync.push_later(self._cfg)     # logo / okładki / zrzuty gier, których serwer nie ma
-        threading.Thread(target=lambda: netsrc.push_roots(self._cfg), daemon=True,
-                         name="foldery-serwer").start()   # foldery z grami → serwer
         threading.Thread(target=self._profiles_bootstrap, daemon=True, name="profiles").start()
+        from emustart import mediastore
+        mediastore.migrate_later()                # lokalna kopia grafik: jeden plik na system
         from emustart import libsync
-        if libsync.thin(self._cfg):            # biblioteka z serwera przy starcie (tylko zmienione systemy)
-            threading.Thread(target=self._thin_sync, daemon=True, name="biblioteka-serwera").start()
-        threading.Thread(target=self._arcade_meta, daemon=True, name="arcade-meta").start()
+        self._lib_version = 0                  # rośnie, gdy biblioteka z serwera się zmieniła (UI przerysowuje)
+        if libsync.thin(self._cfg):            # biblioteka z serwera przy starcie i co 5 minut (zmienione systemy)
+            threading.Thread(target=self._thin_loop, daemon=True, name="biblioteka-serwera").start()
         threading.Thread(target=self._platforms_meta, daemon=True, name="platforms").start()
         # Menu w grze: stan czyta UI (ingame_poll), Python niczego nie wywołuje
         # w oknie. evaluate_js przy grze na pełnym ekranie potrafiło czekać 20 s
@@ -134,54 +113,9 @@ class Api:
         v = self._cfg.get("pad_backend", "python")
         return v if v in ("python", "browser", "none") else "python"
 
-    def _arcade_meta(self) -> None:
-        """Nazwy, rodzice wersji, rok/producent/gracze/gatunek setów arcade — raz, w tle.
-        Z MAME, gdy jest; bez niego (serwer z samym FinalBurn Neo) — z pliku DAT FinalBurn
-        Neo. Po nowym indeksie systemy arcade są skanowane od nowa (nazwy, łączenie wersji)."""
-        from emustart import arcade
-        try:
-            arc = [s["es"] for s in library.systems_summary() if systems.info(s["es"])["kind"] == "arcade"]
-            if arcade.find_mame(self._cfg):
-                if arcade.needs_refresh():
-                    r = arcade.refresh(self._cfg)
-                    log.info("arcade: %s", r)
-                    if r.get("ok") and not r.get("cached"):
-                        self._rescan_systems(arc)
-            elif arc:
-                r = arcade.refresh_fbneo()
-                log.info("arcade (bez MAME): %s", r)
-                if r.get("ok") and not r.get("cached"):
-                    self._rescan_systems(arc)
-            from emustart import art, remote
-            for es in arc:                  # grafiki pod nazwą setu → pod pełną nazwą (0.44.4)
-                n = art.adopt_set_names(es)
-                if n:
-                    log.info("grafiki %s: %d pod nowe nazwy gier", es, n)
-                    remote._games_cache.clear()
-        except Exception:
-            log.exception("arcade meta")
-
-    def _rescan_systems(self, names: list) -> None:
-        """Ponowny skan wskazanych systemów (np. po nowym indeksie arcade) — w tym wątku."""
-        if not names:
-            return
-        found, _u = scanner.collect_systems(self._cfg)
-        for es in names:
-            if found.get(es):
-                try:
-                    scanner.scan_system(es, found[es])
-                    log.info("ponowny skan %s (nazwy i wersje arcade)", es)
-                except Exception:
-                    log.exception("skan %s", es)
-        from emustart import remote
-        remote._games_cache.clear()
-
     def _platforms_meta(self) -> None:
-        """Dane platform LaunchBoksa (Platforms.xml, ~75 KB) — dla baz zbudowanych
-        przed 0.10, które ich nie mają; potem opisy platform dla karuzeli."""
+        """Opisy platform dla karuzeli."""
         try:
-            if launchbox.ready() and launchbox.platform("psx") is None:
-                log.info("platformy LaunchBox: %s", launchbox.fetch_platforms())
             sysinfo.ensure([s["es"] for s in library.systems_summary()])
         except Exception:
             log.exception("platformy")
@@ -394,7 +328,8 @@ class Api:
             return {"ok": False, "checking": True, "name": "", "account": self._cfg.get("server_account", ""),
                     "key_rejected": False}
         return {"ok": bool(i.get("ok")), "name": i.get("name", ""), "account": self._cfg.get("server_account", ""),
-                "key_rejected": bool(i.get("key_rejected"))}
+                "key_rejected": bool(i.get("key_rejected")) or bool(netsrc.rejected()),
+                "reason": netsrc.rejected() or i.get("reason", "")}
 
     # ── stan ogólny ──
     def get_state(self) -> dict:
@@ -405,15 +340,13 @@ class Api:
                 profiles.align_account_name(cfg)
             except Exception:
                 log.exception("nazwa profilu konta")
-        rom_ok = any(Path(r).is_dir() for r in config.rom_roots(cfg))
         return {
             "version": __version__,
             "configured": config.is_configured(cfg),
-            "rom_roots": config.rom_roots(cfg), "rom_online": rom_ok,
             "server": self._server_state(),
-            "thin": __import__("emustart.libsync", fromlist=["thin"]).thin(cfg),
+            "lib_version": getattr(self, "_lib_version", 0),
+            "admin": self._is_admin() if self._cfg.get("server_key") else False,
             "account": profiles.account_of_device(cfg),
-            "network_mode": cfg.get("network_mode", "auto"),
             "systems": self.list_systems(),
             "scan": dict(self._scan),
             "cache": cache.usage(cfg),
@@ -439,61 +372,28 @@ class Api:
             return {"pending": True}
         return {k: v for k, v in d.items() if not k.startswith("_") and k != "lb_notes"}
 
-    HIDE_KEYS = {"hide_beta": "beta", "hide_demo": "demo", "hide_pirate": "pirate",
-                 "hide_unl": "unl", "hide_program": "program"}
-
-    def _hide_groups(self) -> list:
-        return [g for k, g in self.HIDE_KEYS.items() if self._cfg.get(k)]
+    HIDE_KEYS = catalog.HIDE_KEYS
 
     def list_systems(self) -> list:
+        """Systemy z biblioteki serwera; logo systemu takie jak na serwerze."""
         from emustart import libsync
-        out = []
         summary = library.systems_summary()
-        thin = libsync.thin(self._cfg)
-        if not thin:
-            logos.fetch_missing(self._cfg, [s["es"] for s in summary])
-        groups = self._hide_groups()
-        clones = [s["es"] for s in summary if systems.info(s["es"])["kind"] == "arcade"] \
-            if self._cfg.get("hide_arcade_clones", True) else []
-        counts = library.visible_counts(groups, clones) if groups or clones else None
+        counts = catalog.visible_counts(self._cfg, summary)
+        out = []
         for s in summary:
             if counts is not None:
                 s["games"] = counts.get(s["es"], 0)
-            info = systems.info(s["es"])
             emu = (self._cfg.get("systems") or {}).get(s["es"]) or {}
             if not emu.get("enabled", True) or not s["games"]:
                 continue
-            lg = logos.url_for(s["es"], self._cfg)
-            if thin:                              # logo systemu takie jak na serwerze (własne → z serwera)
-                lg = libsync.logo_for(s["es"]) or lg
+            lg = libsync.logo_for(s["es"]) or logos.url_for(s["es"], self._cfg)
             out.append({"es": s["es"], "display": emu.get("name") or s["display"], "games": s["games"],
                         "cached": s["cached"], "logo": lg["url"], "logo_glow": lg["glow"],
-                        "emulator": emu.get("label", ""), "kind": info["kind"]})
+                        "emulator": emu.get("label", ""), "kind": systems.info(s["es"])["kind"]})
         return out
 
     def list_games(self, es: str) -> list:
-        hide = self._cfg.get("hide_arcade_clones", True) and systems.info(es)["kind"] == "arcade"
-        rows = library.list_games(es, self._profile, hide)
-        groups = self._hide_groups()
-        if groups:
-            rows = [r for r in rows if not library.is_hidden(r["name"], groups)]
-        try:
-            metadata.prepare_system(self._cfg, es)     # dane do filtrów (rdb, offline)
-        except Exception:
-            log.exception("metadane systemu %s", es)
-        fields = metadata.system_fields(es)
-        for r in rows:
-            f = fields.get(r["id"], {})
-            if f.get("title"):
-                r["title"] = f["title"]
-            r["genre"], r["year"] = f.get("genre", ""), str(f.get("year", ""))[:4]
-            r["players"] = _players(f.get("players", ""))
-            r["developer"], r["publisher"] = f.get("developer", ""), f.get("publisher", "")
-            r["regions"] = _regions(r["tags"])
-            r["logo"] = art.media_url(es, r["name"], "logo") if r["art_logo"] == art.HAS else ""
-            r["box"] = art.media_url(es, r["name"], "box") if r["art_box"] == art.HAS else ""
-            r["snap"] = art.media_url(es, r["name"], "snap") if r["art_snap"] == art.HAS else ""
-        return rows
+        return catalog.list_games(self._cfg, es, self._profile)
 
     def request_art(self, game_ids: list, logo: bool = False) -> None:
         if logo and game_ids:
@@ -570,29 +470,7 @@ class Api:
 
     # ── tłumaczenia: wersje gry (emustart/translations.py) ──
     def _variants(self, g: dict) -> list:
-        """Wersje schowane pod grą: tłumaczenia albo — arcade — inne wersje setu (klony
-        rodzica, np. japońska, wcześniejsza rewizja): [{id, rel, label, lang}]."""
-        if systems.info(g["es"])["kind"] == "arcade" and not g.get("parent"):
-            name = Path(g["rel"]).stem
-            rows = library.db().execute(
-                "SELECT id, rel, name FROM games WHERE es=? AND parent=? AND hidden=0 ORDER BY name COLLATE NOCASE",
-                (g["es"], name)).fetchall()
-            return [{"id": r["id"], "rel": r["rel"].replace("\\", "/"), "lang": "",
-                     "label": f"{r['name']} · {Path(r['rel']).stem}", "name": r["name"]} for r in rows]
-        if g.get("trans") or not g.get("tbase"):
-            return []
-        rows = library.db().execute(
-            "SELECT id, rel, name, trans FROM games WHERE es=? AND tbase=? AND trans!='' ORDER BY name",
-            (g["es"], g["tbase"])).fetchall()
-        out = [{"id": r["id"], "rel": r["rel"].replace("\\", "/"), "lang": r["trans"],
-                "label": translations.label(r["name"], r["trans"]), "name": r["name"]} for r in rows]
-        # kilka wersji o tej samej etykiecie (pliki bez tagu [T-…]) — dopisek z nazwy pliku
-        labels = [v["label"] for v in out]
-        for v in out:
-            if labels.count(v["label"]) > 1:
-                extra = scanner.split_title(v["name"])[1]
-                v["label"] = f"{v['label']} · {extra or Path(v['rel']).stem}"
-        return out
+        return catalog.variants(g)
 
     @staticmethod
     def _variant_key(g: dict) -> str:
@@ -623,7 +501,6 @@ class Api:
         return {"ok": True, "variant": v["id"] if v else 0, "label": v["label"] if v else "Oryginał"}
 
     def game_detail(self, game_id: int, use_variant: bool = True) -> dict:
-        """use_variant=False — serwer dla telefonu: wersję wybiera profil na telefonie."""
         g = library.game(int(game_id))
         if not g:
             return {}
@@ -638,10 +515,7 @@ class Api:
             "SELECT * FROM play WHERE game_id=? AND profile_id=?",
             (pg["id"], self._profile)).fetchone()
         cached = self._sync_cached(pg, row)
-        meta = metadata.ensure_local(self._cfg, g)
-        meta = {k: v for k, v in meta.items() if not k.startswith("_")}
-        if meta.get("genre"):
-            meta["genre"] = metadata.norm_genres(meta["genre"])
+        meta = catalog.game_meta(self._cfg, g)
         return {"id": g["id"], "title": meta.get("title") or g["title"], "tags": g["tags"],
                 "name": g["name"], "meta": meta,
                 "meta_online": bool(metadata.get(g["id"]).get("_online")),
@@ -679,9 +553,11 @@ class Api:
         if self._session and self._session.phase in ("preparing", "downloading",
                                                      "extracting", "running"):
             return {"ok": False, "reason": "Inna gra jest właśnie uruchamiana."}
+        t0 = time.monotonic()
         block = self._pin_block(self._profile)
         if block:
             return {**block, "profile_pin": True}
+        t_pin = time.monotonic() - t0
         g = library.game(int(game_id))
         if g:
             emu = self._effective_emu(g)
@@ -729,6 +605,9 @@ class Api:
                                          ui=self if self._window else None,
                                          start_state=state or "", takeover=bool(takeover))
         self._session.start()
+        pre = time.monotonic() - t0
+        if pre > 0.5:                        # przed oknem postępu — co tu trwa długo
+            log.info("przed startem sesji: %.1f s (konto profilu %.1f s)", pre, t_pin)
         return {"ok": True, "warning": warning}
 
     def configure_emulator(self, game_id: int) -> dict:
@@ -755,10 +634,6 @@ class Api:
     def launch_cancel(self) -> None:
         if self._session:
             self._session.abort()
-
-    def launch_play_now(self) -> None:
-        if self._session:
-            self._session.request_play_now()
 
     def launch_dismiss(self) -> None:
         s = self._session
@@ -896,9 +771,11 @@ class Api:
 
         def run():
             try:
-                if not (rom_dir / g["rel"]).exists():
-                    return    # offline — dociągniemy przy następnym uruchomieniu gry
-                cache.copy_game(self._cfg, g, rom_dir, prog, cancel)
+                srcs, deps = netsrc.find(self._cfg, g)
+                if len(srcs) != len(g["files"]):
+                    return    # serwer niedostępny — dociągniemy przy następnym uruchomieniu gry
+                extra = [(src, cache.root(self._cfg) / g["es"] / rel, size, 0) for rel, src, size in deps]
+                cache.copy_game(self._cfg, g, rom_dir, prog, cancel, extra, srcs=srcs)
             except cache.Cancelled:
                 pass
             except Exception:
@@ -953,9 +830,20 @@ class Api:
         emu = self._effective_emu(g)
         opts = emulators.options_for(systems.info(g["es"]), self._cfg.get("emu_root", ""))
         states = []
+        desc: dict = {}
         if emu["exe"]:
             ad = ingame.adapter_for(emu["exe"])
             meta = metadata.ensure_local(self._cfg, g)
+            prof = profiles.get(self._profile)
+            core = rastates.core_id(emu.get("args", ""))
+            if ad.family == "retroarch" and prof and core and profiles.nas_online(self._cfg):
+                # stany ze wszystkich urządzeń konta (koncepcja 2.0 §5.5) — tu, z miniaturami,
+                # zanim gracz wybierze; najnowszy czeka jako „Kontynuuj”
+                try:
+                    rastates.present(self._cfg, prof, ad, core, cache.local_path(self._cfg, g), {})
+                    desc = rastates.describe(self._cfg, prof, ad, core)
+                except Exception:
+                    log.exception("stany z serwera do listy")
             learned = [r["prefix"] for r in library.db().execute(
                 "SELECT prefix FROM states WHERE game_id=? AND family=?", (g["id"], ad.family))]
             states = ingame.list_states(ad, g, meta, learned)
@@ -964,14 +852,73 @@ class Api:
             if res and res["path"] and Path(res["path"]).is_file() and res["family"] == ad.family:
                 states.insert(0, {"path": res["path"], "name": "Quicksave EmuStart",
                                   "time": res["created"], "resume": True})
+        states = states[:KEEP_LIST]
+        for st in states:                     # obrazek stanu (jeśli emulator go zapisał)
+            th = ingame.state_thumb(Path(st["path"]))
+            if th:
+                st["thumb"] = "/media/_stany/" + th
+            self._state_label(st, desc)
+        states.sort(key=lambda x: (not x.get("resume"), not x.get("continue"), -x["time"]))
+        sc = (self._cfg.get("systems") or {}).get(g["es"]) or {}
         return {"id": g["id"], "title": g["title"], "emulator": emu, "options": opts,
-                "states": states[:30]}
+                "states": states, "es": g["es"], "system": systems.info(g["es"])["display"],
+                "retroarch": bool(emu["exe"]) and ingame.adapter_for(emu["exe"]).family == "retroarch",
+                "shader_off": bool(sc.get("shader_off"))}
+
+    @staticmethod
+    def _state_label(st: dict, desc: dict) -> None:
+        """Opis stanu na liście: „Kontynuuj”, „Stan #13”, urządzenie i rodzaj (z serwera)."""
+        name = Path(st["path"]).name if st.get("path") else st.get("name", "")
+        d = desc.get(name) or {}
+        m = re.match(r"^.+?\.state(\d*)(\.auto)?$", name, re.I)
+        if st.get("resume") or not m:
+            return
+        if m.group(2):
+            st["continue"] = True
+            st["label"] = "Kontynuuj — najnowszy stan"
+        else:
+            st["label"] = f"Stan #{int(m.group(1) or 0)}"
+        who = d.get("device") or ""
+        if who:
+            who = ("telefon " if d.get("platform") == "telefon" else "") + who
+        kind = {"auto": "autozapis przy wyjściu", "manual": ""}.get(d.get("kind", ""), "")
+        st["detail"] = " · ".join(x for x in (who, kind) if x)
+
+    def set_shader_off(self, es: str, off: bool) -> dict:
+        """RetroArch w tym systemie bez shadera (czarny ekran przy niezgodnym shaderze)."""
+        if es not in systems.SYSTEMS and not library.db().execute("SELECT 1 FROM systems WHERE es=?", (es,)).fetchone():
+            return {"ok": False}
+        sc = self._cfg.setdefault("systems", {}).setdefault(es, {})
+        if off:
+            sc["shader_off"] = True
+        else:
+            sc.pop("shader_off", None)
+        config.save(self._cfg)
+        return {"ok": True, "off": bool(off)}
+
+    # ── historia ustawień emulatora (opcje gry → Ustawienia emulatora) ──
+    def _emu_family(self, game_id: int) -> str:
+        g = library.game(int(game_id))
+        emu = self._effective_emu(g) if g else {}
+        return ingame.adapter_for(emu["exe"]).family if emu.get("exe") else ""
+
+    def emu_settings_history(self, game_id: int) -> dict:
+        fam = self._emu_family(game_id)
+        if not fam:
+            return {"ok": False, "reason": "Ta gra nie ma jeszcze emulatora."}
+        return {"ok": True, "family": fam, "list": profiles.settings_history(self._profile, fam)}
+
+    def emu_settings_restore(self, game_id: int, hid: str) -> dict:
+        fam = self._emu_family(game_id)
+        if not fam:
+            return {"ok": False, "reason": "Ta gra nie ma jeszcze emulatora."}
+        return profiles.settings_restore(self._cfg, self._profile, fam, str(hid))
 
     # ── menedżer zapisów (opcje gry → Zapisy i stany) ──
     def _savemgr_ctx(self, g: dict):
         prof = profiles.get(self._profile) or {}
         if not prof.get("nas_name") or not profiles.nas_online(self._cfg):
-            return None, None, "Menedżer zapisów działa z profilem na NAS-ie / serwerze — NAS niedostępny."
+            return None, None, "Menedżer zapisów działa przez serwer EmuStart — serwer jest niedostępny."
         return nasfs.backend(self._cfg), prof["nas_name"], ""
 
     def save_manager(self, game_id: int) -> dict:
@@ -987,19 +934,17 @@ class Api:
         serial = ingame._serial(meta)
         stems = [Path(g["rel"]).stem, g["name"]]
         if g["rel"].lower().endswith(".zip"):
-            # RetroArch nazywa stan od ROM-u w środku ZIP-a — z kopii lokalnej, inaczej z NAS-a
+            # RetroArch nazywa stan od ROM-u w środku ZIP-a — z kopii lokalnej (gra pobrana)
             local = cache.local_path(self._cfg, g)
-            stems += savemgr.zip_stems(local if local.is_file() else library.game_dir(g) / g["rel"])
+            if local.is_file():
+                stems += savemgr.zip_stems(local)
         learned = [r["prefix"] for r in library.db().execute(
             "SELECT prefix FROM states WHERE game_id=?", (g["id"],))]
         stems += [p[:-len(".state")] for p in learned if p.endswith(".state")]
         try:
-            if isinstance(fs, nasfs.RemoteFs):
-                out = fs.savemgr_catalog({"profile": nas, "es": g["es"], "name": g["name"],
-                                          "stems": "|".join(stems), "serial": serial,
-                                          "learned": "|".join(learned)})
-            else:
-                out = savemgr.catalog(fs, nas, g["es"], g["name"], stems, serial, learned)
+            out = fs.savemgr_catalog({"profile": nas, "es": g["es"], "name": g["name"],
+                                      "stems": "|".join(stems), "serial": serial,
+                                      "learned": "|".join(learned)})
         except OSError as ex:
             return {"ok": False, "reason": f"Nie udało się odczytać zapisów: {ex}"}
         out["ok"] = True
@@ -1008,7 +953,6 @@ class Api:
 
     def save_copy(self, game_id: int, rel: str, platform: str, emu: str) -> dict:
         """Kopia stanu na drugą platformę; na ten komputer — od razu do folderu emulatora."""
-        from emustart import savemgr
         g = library.game(int(game_id))
         if not g:
             return {"ok": False, "reason": "Nie ma takiej gry."}
@@ -1016,11 +960,8 @@ class Api:
         if not fs:
             return {"ok": False, "reason": why}
         try:
-            if isinstance(fs, nasfs.RemoteFs):
-                out = fs.savemgr_copy({"profile": nas, "src": rel, "platform": platform, "emu": emu,
-                                       "es": g["es"], "name": g["name"], "device": socket.gethostname()})
-            else:
-                out = savemgr.copy(fs, nas, rel, platform, emu, g["es"], g["name"], socket.gethostname())
+            out = fs.savemgr_copy({"profile": nas, "src": rel, "platform": platform, "emu": emu,
+                                   "es": g["es"], "name": g["name"], "device": socket.gethostname()})
         except OSError as ex:
             return {"ok": False, "reason": f"Nie udało się skopiować: {ex}"}
         if out.get("ok") and platform == "windows":
@@ -1045,111 +986,201 @@ class Api:
         return {"ok": True}
 
     def meta_fetch(self, game_id: int, full: bool = False) -> dict:
-        """Opisy z sieci w tle; UI odpytuje game_detail. `full` = także TheGamesDB
-        (limit miesięczny — tylko na wyraźne żądanie z opcji gry)."""
+        """Opis gry z serwera (serwer pobiera go z sieci, gdy go nie ma) → lokalna kopia.
+        UI odpytuje game_detail."""
         g = library.game(int(game_id))
         if not g:
             return {"ok": False}
 
         def run():
+            import json as _json
+            from emustart import libsync
             try:
-                metadata.fetch_online(self._cfg, g, tgdb=bool(full))
-            except Exception:
-                log.exception("metadane %s", g["name"])
+                files, _deps = netsrc.find(self._cfg, g)
+                sid = next(iter(files.values())).gid if files else 0
+                if not sid:
+                    return
+                d = libsync._get(self._cfg, f"/v1/games/{sid}", 15)
+                if d.get("meta_online") and d.get("meta"):
+                    with library.db() as c:
+                        c.execute("INSERT OR REPLACE INTO game_meta(game_id, data, edits, online, updated) "
+                                  "VALUES(?,?,?,?,?)", (g["id"], _json.dumps(d["meta"], ensure_ascii=False),
+                                                         "{}", 1, time.time()))
+            except Exception as ex:
+                log.info("opis %s z serwera: %s", g["name"], ex)
         threading.Thread(target=run, daemon=True, name="meta").start()
         return {"ok": True}
 
-    def meta_save(self, game_id: int, edits: dict) -> dict:
-        metadata.set_edits(int(game_id), edits or {})
-        return {"ok": True}
+    # ── administrator: grafiki, opisy i wygląd systemów przez serwer (serwer = źródło prawdy) ──
+    def _is_admin(self) -> bool:
+        i = netsrc.info_nowait(self._cfg) or {}
+        return bool(i.get("admin"))
+
+    def art_keys_push(self) -> dict:
+        """Administrator: klucze źródeł grafik (SteamGridDB, IGDB, TheGamesDB) z PyLinks na tym
+        komputerze → serwer. PyLinks szyfruje je kluczem tego komputera, więc odszyfrować je
+        da się tylko tutaj; na serwer idą połączeniem szyfrowanym, serwer szyfruje je swoim."""
+        from emustart import art_sources, secure
+        if not self._is_admin():
+            return {"ok": False, "reason": "Tylko na urządzeniu administratora."}
+        found = art_sources.import_pylinks_keys()
+        if not found:
+            return {"ok": False, "reason": "Nie znaleziono config.json PyLinksWeb ("
+                    + ", ".join(art_sources.PYLINKS_CONFIGS) + ")."}
+        plain = {k: secure.unprotect(found.get(k, "")) for k in art_sources.KEY_NAMES}
+        plain = {k: v for k, v in plain.items() if v}
+        if not plain:
+            return {"ok": False, "reason": "W PyLinks nie ma kluczy (albo nie da się ich odszyfrować na tym koncie)."}
+        r = self._admin_call("PUT", "art_keys", plain)
+        if r.get("ok"):
+            log.info("klucze źródeł grafik wysłane na serwer: %s", ", ".join(sorted(plain)))
+            r["sent"] = sorted(plain)
+        return r
+
+    def _admin_call(self, method: str, path: str, body: dict | None = None) -> dict:
+        """Zapytanie do /v1/admin/… serwera. Po zmianie — biblioteka z serwera w tle (wersja
+        systemu na serwerze wzrosła), żeby ten komputer od razu pokazał nową grafikę / opis."""
+        import http.client
+        import json as _json
+        ep = netsrc.endpoint(self._cfg)
+        if not ep:
+            return {"ok": False, "reason": "Zaloguj się do serwera EmuStart."}
+        data = _json.dumps(body).encode("utf-8") if body is not None else None
+        for attempt in (0, 1):
+            c = netsrc.conn(ep[0], ep[1], 60)
+            try:
+                c.request(method, "/v1/admin/" + path, body=data,
+                          headers={**netsrc.auth_headers(ep[2]), "Content-Type": "application/json"})
+                r = c.getresponse()
+                raw = r.read()
+            except (OSError, http.client.HTTPException) as ex:
+                return {"ok": False, "reason": f"Serwer niedostępny: {ex}"}
+            finally:
+                c.close()
+            if r.status == 401 and attempt == 0 and ep[2].startswith(netsrc.DEV):
+                netsrc.drop_token()
+                continue
+            break
+        try:
+            out = _json.loads(raw or b"{}")
+        except ValueError:
+            out = {}
+        if r.status == 403:
+            return {"ok": False, "reason": "Zmieniać grafiki i opisy może tylko administrator."}
+        if r.status != 200:
+            return {"ok": False, "reason": out.get("error") or f"Serwer: błąd {r.status}"}
+        if method != "GET":
+            threading.Thread(target=self._thin_sync, daemon=True, name="biblioteka-po-zmianie").start()
+        return out if isinstance(out, (dict, list)) else {"ok": False}
+
+    def _sid(self, game_id: int) -> int:
+        """Identyfikator gry na serwerze (lokalna kopia biblioteki ma własne)."""
+        g = library.game(int(game_id))
+        if not g:
+            return 0
+        files, _deps = netsrc.find(self._cfg, g)
+        return next(iter(files.values())).gid if files else 0
+
+    @staticmethod
+    def _via_server(url: str) -> str:
+        """Podgląd z serwera (logo z paczki, grafika serwera) przez lokalny serwer interfejsu."""
+        return "/serwer" + url if url.startswith("/") and not url.startswith("/assets/") else url
 
     def art_candidates(self, game_id: int, kind: str, query: str = "") -> list:
-        g = library.game(int(game_id))
-        if not g or kind not in ("box", "snap", "logo"):
+        sid = self._sid(game_id)
+        if not sid:
             return []
-        setname = Path(g["rel"]).stem if systems.info(g["es"])["kind"] == "arcade" else ""
-        return art_sources.candidates(self._cfg, g["es"], g["name"], kind, query or "", setname)
+        r = self._admin_call("GET", f"games/{sid}/art?" + urllib.parse.urlencode({"kind": kind, "q": query or ""}))
+        return [dict(c, url=c.get("url", ""), thumb=self._via_server(c.get("thumb") or c.get("url", "")))
+                for c in (r.get("list") or [])] if r.get("ok") else []
+
+    def _drop_local_art(self, game_id: int, kind: str, state: int | None = None) -> None:
+        """Lokalna kopia grafiki po zmianie na serwerze — usunięta, pobierze się nowa."""
+        g = library.game(int(game_id))
+        if g and kind in ("box", "snap", "logo"):
+            art.delete(g["es"], g["name"], kind)
+            if state is not None:
+                with library.db() as c:
+                    c.execute(f"UPDATE games SET art_{kind}=? WHERE id=?", (state, g["id"]))
 
     def art_choose(self, game_id: int, kind: str, url: str) -> dict:
-        g = library.game(int(game_id))
-        data = art_sources.fetch(url) if g else None
-        if not art_sources.is_image(data):
-            return {"ok": False, "reason": "Nie udało się pobrać tej grafiki."}
-        art.save(g["es"], g["name"], kind, data)
-        library.set_art(g["id"], kind, art.HAS)
-        from emustart import artsync
-        artsync.push_later(self._cfg, g["es"], g["name"], kind)   # wybór ręczny — także na serwerze
-        return {"ok": True, "url": art.media_url(g["es"], g["name"], kind)}   # z wersją pliku
+        sid = self._sid(game_id)
+        if not sid:
+            return {"ok": False, "reason": "Serwer nie ma tej gry albo nie odpowiada."}
+        r = self._admin_call("PUT", f"games/{sid}/art?" + urllib.parse.urlencode({"kind": kind, "url": url}))
+        if r.get("ok"):
+            self._drop_local_art(game_id, kind, art.HAS)
+            g = library.game(int(game_id))
+            r["url"] = art.media_url(g["es"], g["name"], kind) + f"&t={int(time.time())}" if g else ""
+        return r
 
     def art_clear(self, game_id: int, kind: str) -> dict:
-        g = library.game(int(game_id))
-        if g:
-            art.media_path(g["es"], g["name"], kind).unlink(missing_ok=True)
-            library.set_art(g["id"], kind, art.MISSING)
-        return {"ok": True}
+        sid = self._sid(game_id)
+        if not sid:
+            return {"ok": False, "reason": "Serwer nie ma tej gry albo nie odpowiada."}
+        r = self._admin_call("DELETE", f"games/{sid}/art?" + urllib.parse.urlencode({"kind": kind}))
+        if r.get("ok"):
+            self._drop_local_art(game_id, kind, art.MISSING)
+        return r
+
+    def meta_save(self, game_id: int, edits: dict) -> dict:
+        sid = self._sid(game_id)
+        if not sid:
+            return {"ok": False, "reason": "Serwer nie ma tej gry albo nie odpowiada."}
+        r = self._admin_call("PUT", f"games/{sid}/meta", {"edits": edits or {}})
+        if r.get("ok"):
+            metadata._store(int(game_id), edits=dict(edits or {}))      # od razu na ekranie
+        return r
+
+    def meta_fetch_full(self, game_id: int) -> dict:
+        sid = self._sid(game_id)
+        if not sid:
+            return {"ok": False, "reason": "Serwer nie ma tej gry albo nie odpowiada."}
+        return self._admin_call("PUT", f"games/{sid}/meta/fetch?full=1")
+
+    def system_logo_candidates(self, es: str) -> list:
+        r = self._admin_call("GET", f"systems/{urllib.parse.quote(es)}/logos")
+        return [dict(c, url=self._via_server(c.get("url", ""))) for c in (r.get("list") or [])] if r.get("ok") else []
+
+    def system_logo_choose(self, es: str, cid: str) -> dict:
+        r = self._admin_call("PUT", f"systems/{urllib.parse.quote(es)}/logo?" + urllib.parse.urlencode({"id": cid}))
+        if r.get("ok"):
+            logos.drop(es)                                            # stara kopia logo — pobierze się nowe
+        return r
 
     # ── opcje systemu (przytrzymane A na logo) ──
     def system_options(self, es: str) -> dict:
         info = systems.info(es)
         sc = (self._cfg.get("systems") or {}).get(es) or {}
-        lg = logos.url_for(es, self._cfg)
         has_emu = bool(sc.get("exe") and Path(sc["exe"]).is_file())
-        return {"es": es, "display": sc.get("name") or info["display"],
-                "default_name": info["display"], "logo": lg["url"], "glow": lg["glow"],
-                "logo_choice": sc.get("logo", ""), "emulator": sc.get("label", "") if has_emu else "",
+        shown = next((s_ for s_ in self.list_systems() if s_["es"] == es), None) or {}
+        return {"es": es, "display": shown.get("display") or info["display"], "default_name": info["display"],
+                "logo": shown.get("logo", ""), "glow": bool(shown.get("logo_glow")), "admin": self._is_admin(),
+                "emulator": sc.get("label", "") if has_emu else "",
                 "options": emulators.options_for(info, self._cfg.get("emu_root", "")),
                 "install": installer.plan_for(es, self._cfg.get("emu_root", "")) if not has_emu else []}
 
     def system_set(self, es: str, data: dict) -> dict:
+        """Na tym komputerze: emulator systemu i ukrycie systemu. Nazwa i poświata logo —
+        na serwerze (administrator), dla wszystkich urządzeń."""
+        shared = {k: data[k] for k in ("name", "glow") if k in data}
+        if shared:
+            r = self._admin_call("PUT", f"systems/{urllib.parse.quote(es)}", shared)
+            if not r.get("ok"):
+                return r
         sc = self._cfg.setdefault("systems", {}).setdefault(es, {})
-        if "name" in data:
-            name = str(data["name"] or "").strip()
-            if name and name != systems.info(es)["display"]:
-                sc["name"] = name
-            else:
-                sc.pop("name", None)
-        if "glow" in data:
-            sc["logo_glow"] = bool(data["glow"])
         if "enabled" in data:
             sc["enabled"] = bool(data["enabled"])
         if data.get("emulator"):
             o = data["emulator"]
             sc.update(label=o["label"], exe=o["exe"], args=o.get("args", ""), enabled=True)
         config.save(self._cfg)
-        if "glow" in data or "name" in data:
-            logos.push_later(self._cfg, [es])
-        return {"ok": True}
-
-    def system_logo_candidates(self, es: str) -> list:
-        return logos.candidates(self._cfg, es)
-
-    def system_logo_choose(self, es: str, cid: str) -> dict:
-        ok = logos.choose(self._cfg, es, cid)
-        if ok:
-            sc = self._cfg["systems"][es]
-            sc.setdefault("logo_glow", False)
-            config.save(self._cfg)
-            logos.push_later(self._cfg, [es])
-        return {"ok": ok, **logos.url_for(es, self._cfg)} if ok else             {"ok": False, "reason": "Nie udało się pobrać tego logo."}
-
-    def system_rescan(self, es: str) -> dict:
-        """Ponowny skan jednego systemu (w tle)."""
-        found, _u = scanner.collect_systems(self._cfg)
-        dirs = found.get(es)
-        if not dirs:
-            return {"ok": False, "reason": "Folder systemu jest niedostępny."}
-
-        def run():
-            try:
-                scanner.scan_system(es, dirs)
-            except Exception:
-                log.exception("skan %s", es)
-        threading.Thread(target=run, daemon=True, name="scan-one").start()
         return {"ok": True}
 
     # ── pobieranie emulatorów ──
     def install_missing(self) -> list:
-        """Systemy w bibliotece bez emulatora i co dla nich pobrać."""
+        """Systemy w bibliotece bez emulatora i co dla nich pobrać (z serwera)."""
+        installer.refresh_index(self._cfg)
         out = []
         for s in library.systems_summary():
             sc = (self._cfg.get("systems") or {}).get(s["es"]) or {}
@@ -1185,6 +1216,40 @@ class Api:
         if job:
             job.cancel.set()
 
+    def _emu_sync(self) -> None:
+        """Emulatory jak na serwerze: brakujące dla systemów biblioteki — instalacja, starsze —
+        aktualizacja (działający emulator — przy następnej okazji). W tle, bez pytania."""
+        if not self._cfg.get("emu_root"):
+            return
+        for j in (getattr(self, "_install_job", None), getattr(self, "_emu_job", None)):
+            if j and not j.finished:
+                return
+        installer.refresh_index(self._cfg)
+        hidden = {es for es, sc in (self._cfg.get("systems") or {}).items() if sc.get("enabled") is False}
+        items = installer.sync_items(self._cfg, [s["es"] for s in library.systems_summary() if s["es"] not in hidden])
+        if not items:
+            return
+
+        def done(job):
+            config.save(self._cfg)
+            if job.installed:
+                log.info("emulatory z serwera: %s", ", ".join(job.installed))
+            if job.postponed:
+                log.info("emulatory: później (działają): %s", ", ".join(job.postponed))
+        self._emu_job = installer.Job(self._cfg, items, on_done=done, quiet_busy=True)
+        self._emu_job.start()
+
+    def _emu_sync_quiet(self) -> None:
+        try:
+            self._emu_sync()
+        except Exception:
+            log.exception("emulatory z serwera")
+
+    def emu_sync_status(self) -> dict | None:
+        """Pobieranie emulatorów z serwera w tle — do paska u góry ekranu."""
+        job = getattr(self, "_emu_job", None)
+        return job.status() if job else None
+
     # ── pady ──
     def pads_state(self, battery: bool = False) -> dict:
         from emustart import xinput
@@ -1207,7 +1272,6 @@ class Api:
         profiles.align_account_name(self._cfg)
         lst = profiles.visible(self._cfg, profiles.all_profiles())
         for p in lst:
-            p["nas_wanted"] = profiles.nas_wanted(p)
             p["pin"] = profiles.pin_state(self._cfg, p["id"])
         # token konta i skrót PIN-u zostają w programie, nie w UI
         return {"profiles": [self._public_profile(p) for p in lst], "current": self._profile}
@@ -1303,10 +1367,6 @@ class Api:
         out["has_pin"] = bool(p.get("pin_hash"))
         return out
 
-    def profile_nas_rename(self, pid: int) -> dict:
-        reason = profiles.nas_rename(self._cfg, int(pid))
-        return {"ok": not reason, "reason": reason, "nas_name": (profiles.get(int(pid)) or {}).get("nas_name", "")}
-
     def profile_select(self, pid: int) -> dict:
         if not profiles.get(int(pid)):
             return {"ok": False}
@@ -1346,90 +1406,33 @@ class Api:
         return {"ok": True}
 
     # ── narzędzie „Grafiki” ──
-    def art_overview(self) -> dict:
-        rows = library.db().execute("""
-            SELECT es, COUNT(*) n, SUM(art_box=1) box, SUM(art_snap=1) snap,
-                   SUM(art_box=0 OR art_snap=0) unchecked
-            FROM games WHERE hidden=0 GROUP BY es""").fetchall()
-        names = {s["es"]: s["display"] for s in library.systems_summary()}
-        systems_ = sorted(({"es": r["es"], "display": names.get(r["es"], r["es"]),
-                            "games": r["n"], "box": r["box"] or 0, "snap": r["snap"] or 0,
-                            "unchecked": r["unchecked"] or 0} for r in rows),
-                          key=lambda x: x["display"].lower())
-        keys = self._cfg.get("art_keys") or {}
-        desc = dict(library.db().execute("""
-            SELECT g.es, SUM(m.data LIKE '%"description"%' OR m.data LIKE '%"wiki"%')
-            FROM games g LEFT JOIN game_meta m ON m.game_id=g.id WHERE g.hidden=0 GROUP BY g.es""").fetchall())
-        logo_n = dict(library.db().execute(
-            "SELECT es, SUM(art_logo=1) FROM games WHERE hidden=0 GROUP BY es").fetchall())
-        for s_ in systems_:
-            s_["desc"] = desc.get(s_["es"]) or 0
-            s_["logo"] = logo_n.get(s_["es"]) or 0
-        upd = getattr(self, "_lb_update", None)
-        return {"systems": systems_, "sources": art_sources.Sources(self._cfg).enabled(),
-                "launchbox": launchbox.status(), "games_logo": bool(self._cfg.get("games_logo")),
-                "lb_update": upd.status() if upd else None,
-                "keys_from": keys.get("source", ""),
-                "job": self._art_job.status() if getattr(self, "_art_job", None) else None}
-
-    def art_start(self, es: str = "", mode: str = "art") -> dict:
-        """mode: art | meta | meta_wiki | all (grafiki + metadane) | shrink (zmniejsz zapisane)."""
-        job = getattr(self, "_art_job", None)
-        if job and not job.finished:
-            return {"ok": False, "reason": "Pobieranie już trwa."}
-        if mode != "shrink":
-            try:
-                art.check_space()
-            except art.DiskFull as ex:
-                return {"ok": False, "reason": str(ex)}
-        self._art_job = art.Job(self._cfg, es or None, art=mode in ("art", "all"),
-                                meta=mode in ("meta", "meta_wiki", "all"), wiki=mode == "meta_wiki",
-                                shrink=mode == "shrink")
-        self._art_job.start()
-        return {"ok": True}
-
-    def art_status(self) -> dict | None:
-        job = getattr(self, "_art_job", None)
-        return job.status() if job else None
-
-    def art_cancel(self) -> None:
-        job = getattr(self, "_art_job", None)
-        if job:
-            job.cancel.set()
-
-    def launchbox_update(self) -> dict:
-        upd = getattr(self, "_lb_update", None)
-        if upd and not upd.finished:
-            return {"ok": False, "reason": "Pobieranie bazy LaunchBox już trwa."}
-        self._lb_update = launchbox.Updater()
-        self._lb_update.start()
-        return {"ok": True}
-
-    def launchbox_status(self) -> dict:
-        upd = getattr(self, "_lb_update", None)
-        return {"db": launchbox.status(), "update": upd.status() if upd else None}
-
-    def import_pylinks_keys(self) -> dict:
-        keys = art_sources.import_pylinks_keys()
-        if not keys:
-            return {"ok": False, "reason": "Nie znaleziono config.json PyLinksWeb."}
-        self._cfg["art_keys"] = keys
-        config.save(self._cfg)
-        return {"ok": True, "sources": art_sources.Sources(self._cfg).enabled(),
-                "from": keys["source"]}
-
-    # ── skan ──
     def _thin_sync(self, force: bool = False) -> dict:
         """Biblioteka z serwera; po pierwszej — emulatory dla nowych systemów (zalecane przez serwer)."""
         from emustart import libsync
         r = libsync.sync(self._cfg, force=force)
         if r.get("ok") and self._cfg.get("emu_root"):
             self.autodetect()
+        if r.get("changed"):
+            self._lib_version += 1
         return r
 
+    def _thin_loop(self) -> None:
+        """Przy starcie i co 5 minut: zmiany z serwera (grafiki, opisy, logo, nowe gry — także
+        ustawione przez administratora na innym urządzeniu). W trakcie gry — bez sieci."""
+        while True:
+            if not (self._session and self._session.phase in ("preparing", "downloading", "extracting", "running")):
+                try:
+                    self._thin_sync()
+                except Exception:
+                    log.exception("biblioteka z serwera")
+                try:
+                    self._emu_sync()
+                except Exception:
+                    log.exception("emulatory z serwera")
+            time.sleep(300)
+
     def rescan(self) -> dict:
-        from emustart import remote
-        remote._games_cache.clear()                  # listy gier dla urządzeń — od nowa
+        """Odświeżenie biblioteki z serwera (Start → Odśwież bibliotekę z serwera)."""
         if self._scan["running"]:
             return {"ok": False}
         self._scan.update(running=True, text="Start…", done=0, total=0, result=None)
@@ -1440,12 +1443,12 @@ class Api:
 
         def run():
             try:
-                if libsync.thin(self._cfg):          # bez folderów z grami — biblioteka z serwera, nie skan
-                    self._scan["result"] = libsync.sync(self._cfg, prog, force=True)
-                    if self._scan["result"].get("ok") and self._cfg.get("emu_root"):
-                        self.autodetect()
+                if not libsync.thin(self._cfg):
+                    self._scan["result"] = {"ok": False, "reason": "Najpierw zaloguj się do serwera EmuStart."}
                     return
-                self._scan["result"] = scanner.scan_all(self._cfg, prog)
+                self._scan["result"] = libsync.sync(self._cfg, prog, force=True)
+                if self._scan["result"].get("ok") and self._cfg.get("emu_root"):
+                    self.autodetect()
             except Exception as ex:
                 log.exception("scan")
                 self._scan["result"] = {"ok": False, "reason": str(ex)}
@@ -1460,27 +1463,17 @@ class Api:
     # ── ustawienia ──
     def get_settings(self) -> dict:
         cfg = self._cfg
-        found, unknown = scanner.collect_systems(cfg)
         rows = []
-        for es in sorted(found, key=lambda e: systems.info(e)["display"].lower()):
-            info = systems.info(es)
+        for s_ in sorted(library.systems_summary(), key=lambda x: x["display"].lower()):
+            es = s_["es"]
             sc = (cfg.get("systems") or {}).get(es) or {}
-            known = es in systems.SYSTEMS
-            rows.append({"es": es, "display": info["display"], "known": known,
-                         "enabled": sc.get("enabled", True if known else False),
-                         "folders": len(found[es]),
+            rows.append({"es": es, "display": s_["display"], "known": es in systems.SYSTEMS,
+                         "enabled": sc.get("enabled", True), "folders": 1,
                          "label": sc.get("label", ""), "exe": sc.get("exe", ""),
                          "args": sc.get("args", "")})
-        for d in unknown:
-            if d.name in found:
-                continue
-            rows.append({"es": d.name, "display": d.name, "known": False, "enabled": False,
-                         "folders": 1, "label": "", "exe": "", "args": ""})
-        return {"rom_roots": config.rom_roots(cfg), "emu_root": cfg.get("emu_root", ""),
+        return {"emu_root": cfg.get("emu_root", ""),
                 "cache_dir": str(config.cache_dir(cfg)),
                 "cache_recent": cfg.get("cache_recent", 10),
-                "network_mode": cfg.get("network_mode", "auto"),
-                "lan_threshold_mbps": cfg.get("lan_threshold_mbps", 200),
                 "fullscreen": cfg.get("fullscreen", True),
                 "hide_arcade_clones": cfg.get("hide_arcade_clones", True),
                 "games_logo": cfg.get("games_logo", False),
@@ -1489,16 +1482,14 @@ class Api:
                 "stream_play": cfg.get("stream_play", True),
                 "stream_min_seconds": cfg.get("stream_min_seconds", 0),
                 "winfsp": self._winfsp,
-                "bios_dir": cfg.get("bios_dir", ""),
                 "server_url": cfg.get("server_url", ""),
                 "server_key": cfg.get("server_key", ""),
                 "server_keykind": {"tpm": "TPM", "dpapi": "DPAPI", "plik": "plik"}.get(cfg.get("server_keykind", ""), ""),
                 "server_account": cfg.get("server_account", ""),
+                "is_admin": self._is_admin(),
                 "server_via": netsrc.current_kind(cfg),
                 "enroll": ({k: cfg["enroll_pending"].get(k) for k in ("url", "code", "account", "mode")}
                            if cfg.get("enroll_pending") else None),
-                "server_games": cfg.get("server_games", True),
-                "server_profiles": cfg.get("server_profiles", True),
                 **{k: bool(cfg.get(k)) for k in self.HIDE_KEYS},
                 "ask_profile": profiles.ask_at_start(),
                 "machine_profile": profiles.machine_owner(),
@@ -1661,35 +1652,25 @@ class Api:
                                                                   "games": bool(games)})
 
     def emulator_options(self, es: str) -> list:
+        """Emulatory systemu znalezione na tym komputerze (wybór w Ustawieniach)."""
         return emulators.options_for(systems.info(es), self._cfg.get("emu_root", ""))
 
     def save_settings(self, data: dict) -> dict:
         cfg = self._cfg
-        for k in ("emu_root", "network_mode"):
-            if k in data:
-                cfg[k] = str(data[k]).strip()
-        if "rom_roots" in data:
-            cfg["rom_roots"] = [str(r).strip() for r in data["rom_roots"] if str(r).strip()]
-            cfg["rom_root"] = cfg["rom_roots"][0] if cfg["rom_roots"] else ""
-            threading.Thread(target=lambda: netsrc.push_roots(cfg), daemon=True,
-                             name="foldery-serwer").start()
+        if "emu_root" in data:
+            new_root = str(data["emu_root"]).strip()
+            if new_root != cfg.get("emu_root"):
+                # nowy folder emulatorów: brakujące i starsze emulatory z serwera (w tle)
+                threading.Timer(1.0, self._emu_sync_quiet).start()
+            cfg["emu_root"] = new_root
         if "cache_dir" in data:
             cd = str(data["cache_dir"]).strip()
             cfg["cache_dir"] = "" if Path(cd) == paths.DEFAULT_CACHE else cd
-        for k in ("cache_recent", "lan_threshold_mbps"):
-            if k in data:
-                try:
-                    cfg[k] = max(1, int(data[k]))
-                except (TypeError, ValueError):
-                    pass
-        if "bios_dir" in data:
-            cfg["bios_dir"] = str(data["bios_dir"]).strip()
-        for k in ("server_games", "server_profiles"):
-            if k in data:
-                cfg[k] = bool(data[k])
-        if "server_profiles" in data:
-            nasfs.reset()
-            netsrc._info.clear()
+        if "cache_recent" in data:
+            try:
+                cfg["cache_recent"] = max(1, int(data["cache_recent"]))
+            except (TypeError, ValueError):
+                pass
         if data.get("pad_backend") in ("python", "browser", "none"):
             cfg["pad_backend"] = data["pad_backend"]
         for k in ("fullscreen", "hide_arcade_clones", "games_logo", *self.HIDE_KEYS):
@@ -1730,18 +1711,11 @@ class Api:
         return {"ok": True}
 
     def autodetect(self) -> dict:
-        """Domyślny emulator dla każdego folderu, który jeszcze go nie ma."""
-        from emustart import libsync
+        """Domyślny emulator dla każdego systemu biblioteki, który jeszcze go nie ma."""
         cfg = self._cfg
-        if libsync.thin(cfg):                     # systemy z biblioteki serwera
-            found_sys = {r["es"]: [] for r in library.systems_summary()}
-            if not found_sys:
-                return {"ok": False, "reason": "Biblioteka z serwera jest pusta — odśwież ją (Start → Odśwież z serwera)."}
-        else:
-            found_sys, _unknown = scanner.collect_systems(cfg)
+        found_sys = {r["es"]: [] for r in library.systems_summary()}     # systemy z biblioteki serwera
         if not found_sys:
-            return {"ok": False, "reason": "Brak dostępnych folderów z grami: "
-                    + ", ".join(config.rom_roots(cfg))}
+            return {"ok": False, "reason": "Biblioteka z serwera jest pusta — odśwież ją (Start → Odśwież bibliotekę z serwera)."}
         cfg.setdefault("systems", {})
         emulators.forget_scan()
         found = 0
@@ -1824,8 +1798,7 @@ class Api:
         """Przerywa zadania w tle przed wyjściem z programu (grafiki, pobieranie
         emulatorów, kopiowanie do cache). Część z nich (pula wątków grafik)
         zatrzymywałaby zamknięcie procesu aż do końca pracy — nawet godzinami."""
-        for job in (getattr(self, "_art_job", None), getattr(self, "_install_job", None),
-                    getattr(self, "_lb_update", None)):
+        for job in (getattr(self, "_install_job", None),):
             if job:
                 job.cancel.set()
         for j in self._pin_jobs.values():

@@ -115,7 +115,7 @@ function removeItem() {
       if (!r || !r.ok) { toast(r?.reason || "Nie udało się usunąć."); return renderGopt(); }
       const gg = S.games.find((x) => x.id === GO.id);
       if (gg) { gg.pinned = 0; gg.cached = 0; }
-      toast(`Usunięto ${where}${r.freed ? ` (${fmtBytes(r.freed)})` : ""}. Gra zostaje na ${S.platform === "android" ? "serwerze" : "NAS-ie"}.`);
+      toast(`Usunięto ${where}${r.freed ? ` (${fmtBytes(r.freed)})` : ""}. Gra zostaje na serwerze.`);
       closeGopt();
       refreshState();
       schedulePreview();
@@ -128,6 +128,25 @@ function variantItem() {
   return [{ label: "Wersja", value: det.variant ? det.variant_label : `oryginał · ${det.variants.length} ${plural(det.variants.length, "inna wersja", "inne wersje", "innych wersji")}`,
     act: () => goPage("variants") }];
 }
+/** Administrator: grafiki i opis gry — zapis na serwerze, widoczny na wszystkich urządzeniach. */
+function adminItems() {
+  if (!S.state?.admin) return [];
+  const g = S.games[S.gameIdx] || {};
+  return [
+    { label: "Okładka", value: (g.box ? "jest" : "brak") + " · na serwerze", act: () => openArtPicker("box") },
+    { label: "Zrzut ekranu", value: g.snap ? "jest" : "brak", act: () => openArtPicker("snap") },
+    { label: "Logo gry (tytuł jako grafika)", value: g.logo ? "jest" : "brak", act: () => openArtPicker("logo") },
+    { label: "Pobierz opis z sieci", value: "Wikipedia, IGDB, TheGamesDB — na serwerze", act: async () => {
+      const r = await api().meta_fetch_full(GO.id);
+      toast(r && r.ok ? "Serwer pobiera opis — pojawi się za chwilę." : (r?.reason || "Nie udało się."));
+      setTimeout(refreshGoDetail, 6000); } },
+  ];
+}
+async function refreshGoDetail() {
+  GO.detail = await api().game_detail(GO.id);
+  if (S.modal === "gopt") renderGopt();
+  schedulePreview();
+}
 function goptItems() {
   const d = GO.data, det = GO.detail, g = S.games[S.gameIdx] || {};
   if (GO.page === "main" && S.platform === "android") return [
@@ -135,24 +154,23 @@ function goptItems() {
     ...variantItem(),
     { label: "Zapisy i stany", value: "z komputera i telefonu", act: openSaveManager },
     { label: "Ustawienia emulatora", value: "tylko na tym telefonie", act: () => { closeGopt(); launch("", false, true); } },
+    { label: "Metadane i opis", value: [det.meta?.developer, det.meta?.year].filter(Boolean).join(" · "), act: () => goPage("meta") },
+    ...adminItems(),
     { label: g.pinned ? "Odepnij (pozwól usunąć z telefonu)" : "Przypnij (trzymaj w telefonie)", act: async () => { await togglePin(); closeGopt(); } },
     ...removeItem(),
   ];
   if (GO.page === "main") return [
     { label: "Graj", act: () => { closeGopt(); launch(); } },
+    { label: "Graj od początku", value: "bez wczytania stanu", act: () => { closeGopt(); launch("__od_poczatku__"); } },
     ...variantItem(),
     { label: "Emulator", value: d.emulator.label + (d.emulator.own ? "  (tylko ta gra)" : ""), act: () => goPage("emus") },
     { label: "Ustawienia emulatora", value: "obraz, dźwięk, sterowanie — w Twoim profilu",
-      act: () => { closeGopt(); launch("", false, true); } },
+      act: openEmuSettings },
     { label: "Wczytaj zapis", value: d.states.length ? `${d.states.length} ${plural(d.states.length, "zapis", "zapisy", "zapisów")}` : "brak zapisów",
       act: () => d.states.length ? goPage("states") : toast("Ten emulator nie ma zapisów tej gry.") },
     { label: "Zapisy i stany", value: "z komputera i telefonu", act: openSaveManager },
     { label: "Metadane i opis", value: [det.meta.developer, det.meta.year].filter(Boolean).join(" · "), act: () => goPage("meta") },
-    { label: "Okładka", value: g.box ? "jest" : "brak", act: () => openArtPicker("box") },
-    { label: "Zrzut ekranu", value: g.snap ? "jest" : "brak", act: () => openArtPicker("snap") },
-    { label: "Logo gry (tytuł jako grafika)", value: g.logo ? "jest" : "brak", act: () => openArtPicker("logo") },
-    { label: "Pobierz opis z sieci", value: "Wikipedia, IGDB, TheGamesDB", act: async () => {
-      await api().meta_fetch(GO.id, true); toast("Pobieram opis…"); setTimeout(refreshGoDetail, 4000); } },
+    ...adminItems(),
     { label: g.pinned ? "Odepnij (pozwól usunąć z dysku)" : "Przypnij (trzymaj na dysku)", act: async () => { await togglePin(); closeGopt(); } },
     ...removeItem(),
   ];
@@ -182,31 +200,76 @@ function goptItems() {
       act: async () => { await api().set_game_emulator(GO.id, o); await reloadGo("main"); toast(`Ta gra: ${o.label}`); },
     }))];
   }
+  // stany ze wszystkich urządzeń (koncepcja 2.0 §5.5): „Kontynuuj”, „Stan #N”, urządzenie, data
   if (GO.page === "states") return d.states.map((st) => ({
-    label: st.resume ? "★ " + st.name : st.name, value: fmtDate(st.time),
+    label: st.resume ? "★ " + st.name : (st.continue ? "▶ " : "") + (st.label || st.name),
+    value: fmtDate(st.time) + (st.detail ? " · " + st.detail : ""), thumb: st.thumb || "",
     act: () => { closeGopt(); launch(st.path); },
   }));
   if (GO.page === "saves") return saveManagerItems();
+  if (GO.page === "emuset") return emuSettingsItems();
   if (GO.page === "stateAct") return stateActItems();
   if (GO.page === "meta") {
-    const m = det.meta, ed = det.meta_edits || {};
+    // podgląd; administrator poprawia — zapis na serwerze (wszystkie urządzenia)
+    const m = det.meta || {}, ed = det.meta_edits || {}, admin = !!S.state?.admin;
     const items = META_FIELDS.map(([k, label]) => ({
       label: label + (ed[k] ? "  ✎" : ""), value: k === "title" ? (m.title || det.title) : (m[k] || "—"),
-      act: () => oskOpen(label, k === "title" ? (m.title || det.title) : (m[k] || ""), async (val) => {
-        const edits = { ...(det.meta_edits || {}), [k]: val };
-        await api().meta_save(GO.id, edits);
-        await refreshGoDetail();
-        if (k === "title") { const gg = S.games.find((x) => x.id === GO.id); if (gg) gg.title = val || gg.title; }
-      }, k === "description"),
+      act: () => !admin ? (k === "description" && m.description ? toast(m.description, 12000) : null)
+        : oskOpen(label, k === "title" ? (m.title || det.title) : (m[k] || ""), async (val) => {
+          const r = await api().meta_save(GO.id, { ...(det.meta_edits || {}), [k]: val });
+          if (!r || !r.ok) return toast(r?.reason || "Nie udało się zapisać.");
+          await refreshGoDetail();
+          if (k === "title") { const gg = S.games.find((x) => x.id === GO.id); if (gg) gg.title = val || gg.title; }
+        }, k === "description"),
     }));
-    if (Object.keys(ed).length) items.push({ label: "Przywróć dane pobrane", value: "usuń ręczne zmiany",
+    if (admin && Object.keys(ed).length) items.push({ label: "Przywróć dane pobrane", value: "usuń ręczne zmiany",
       act: async () => { await api().meta_save(GO.id, {}); await refreshGoDetail(); } });
     return items;
   }
   return [];
 }
+/* ── ustawienia emulatora: zmiana w emulatorze i historia zmian (cofnięcie zepsutych) ── */
+async function openEmuSettings() {
+  GO.emuHist = null;
+  goPage("emuset");
+  const r = await api().emu_settings_history(GO.id);
+  if (GO.page !== "emuset") return;
+  GO.emuHist = r?.ok ? r.list : [];
+  renderGopt();
+}
+function emuSettingsItems() {
+  const items = [{ label: "Zmień w emulatorze (bez gry)", value: "zapisze się w Twoim profilu",
+                   act: () => { closeGopt(); launch("", false, true); } },
+                 { label: "Albo w trakcie gry: Start + Select → menu RetroArcha", value: "zmiana zapisze się po grze", act: () => {} }];
+  const d = GO.data;
+  if (d?.retroarch) items.push({
+    label: "Shader ekranu", value: d.shader_off ? `wyłączony (${d.system})` : `jak w RetroArchu (${d.system})`,
+    act: async () => {
+      const r = await api().set_shader_off(d.es, !d.shader_off);
+      if (r?.ok) { d.shader_off = r.off; renderGopt(); toast(r.off ? `${d.system}: gry bez shadera.` : `${d.system}: shader jak w ustawieniach RetroArcha.`); }
+    },
+  });
+  if (!GO.emuHist) items.push({ label: "Wczytuję historię zmian…", value: "", act: () => {} });
+  else if (!GO.emuHist.length) items.push({ label: "Historia zmian jest pusta", value: "", act: () => {} });
+  else {
+    items.push({ label: "— Cofnij zmianę (ustawienia sprzed niej) —", value: "", act: () => {} });
+    for (const h of GO.emuHist) items.push({
+      label: `${fmtDate(h.time)} · ${h.label || "zmiana"}`,
+      value: h.files.map((f) => f.split("/").pop()).slice(0, 3).join(", ") + (h.files.length > 3 ? ` +${h.files.length - 3}` : ""),
+      act: async () => {
+        if (GO.confirmRestore !== h.id) { GO.confirmRestore = h.id; return toast("A jeszcze raz — przywróć ustawienia sprzed tej zmiany.", 4000); }
+        GO.confirmRestore = null;
+        const r = await api().emu_settings_restore(GO.id, h.id);
+        toast(r?.ok ? `Przywrócono ustawienia (${r.files} ${plural(r.files, "plik", "pliki", "plików")}) — działają od następnej gry.` : r?.reason || "Nie udało się.", 6000);
+        if (r?.ok) openEmuSettings();
+      },
+    });
+  }
+  return items;
+}
+
 /* ── menedżer zapisów: stany z komputera i telefonu, kopiowanie między nimi ── */
-const SM_PLAT = { windows: "Komputer", android: "Telefon" };
+const SM_PLAT = { windows: "Komputer", android: "Telefon", shared: "Wszystkie urządzenia" };
 async function openSaveManager() {
   GO.sm = null;
   goPage("saves");
@@ -229,8 +292,13 @@ function saveManagerItems() {
   const r = GO.sm;
   if (!r) return [{ label: "Wczytuję zapisy z serwera…", value: "", act: () => {} }];
   const items = [];
-  if (!r.states.length) items.push({ label: "Brak stanów tej gry", value: "na komputerze i telefonie", act: () => {} });
-  for (const st of r.states) {
+  // stany RetroArcha są wspólne dla urządzeń — jeden widok w „Wczytaj zapis” (z miniaturami)
+  const ra = r.states.filter((st) => st.kind === "ra");
+  const states = r.states.filter((st) => st.kind !== "ra");
+  if (ra.length) items.push({ label: "Stany RetroArcha (wszystkie urządzenia)", value: "→ Wczytaj zapis",
+                              act: () => goPage("states") });
+  if (!states.length && !ra.length) items.push({ label: "Brak stanów tej gry", value: "na komputerze i telefonie", act: () => {} });
+  for (const st of states) {
     const here = st.platform === r.here;
     const t = st.targets.map((x) => `${smMark(x)} ${SM_PLAT[x.platform]}`).join(" ");
     items.push({
@@ -292,17 +360,12 @@ function stateActItems() {
   return items;
 }
 
-async function refreshGoDetail() {
-  GO.detail = await api().game_detail(GO.id);
-  if (S.modal === "gopt") renderGopt();
-  schedulePreview();
-}
 async function reloadGo(page) { GO.data = await api().game_options(GO.pid); goPage(page); }
 function goPage(page) { GO.page = page; GO.idx = 0; renderGopt(); }
 
 function renderGopt() {
   const titles = { main: "Opcje gry", variants: "Wersja gry", emus: "Emulator dla tej gry", states: "Wczytaj zapis", meta: "Metadane",
-                   saves: "Zapisy i stany", stateAct: "Stan gry",
+                   saves: "Zapisy i stany", stateAct: "Stan gry", emuset: "Ustawienia emulatora",
                    art: { snap: "Zrzut ekranu", logo: "Logo gry", box: "Okładka" }[GO.art?.kind] || "Okładka" };
   $("goTitle").textContent = GO.detail?.title || "";
   $("goPage").textContent = titles[GO.page];
@@ -313,7 +376,9 @@ function renderGopt() {
   GO.items = goptItems();
   GO.idx = Math.min(GO.idx, GO.items.length - 1);
   $("goItems").innerHTML = GO.items.map((it, i) =>
-    `<li class="${i === GO.idx ? "sel" : ""}" data-i="${i}"><span>${esc(it.label)}</span><span class="gv">${esc(it.value || "")}</span></li>`).join("");
+    `<li class="${i === GO.idx ? "sel" : ""}${it.thumb ? " withthumb" : ""}" data-i="${i}">` +
+    (it.thumb ? `<img class="gothumb" src="${esc(it.thumb)}" alt="">` : "") +
+    `<span>${esc(it.label)}</span><span class="gv">${esc(it.value || "")}</span></li>`).join("");
   $("goItems").querySelectorAll("li").forEach((li) => li.addEventListener("click", () => { GO.idx = +li.dataset.i; goptInput("a"); }));
   $("goItems").querySelector("li.sel")?.scrollIntoView({ block: "nearest" });
   setHints([["a", "Wybierz"], ["b", GO.page === "main" ? "Zamknij" : "Wstecz"]], $("goHints"));
@@ -491,6 +556,22 @@ async function openProfiles(startup = false) {
   PR.idx = Math.max(0, PR.list.findIndex((p) => p.id === r.current));
   show("profiles");
 }
+/** Ekran profili otwarty: konta z serwera mogły się zmienić (nowe zatwierdzone, serwer wrócił)
+ *  — lista na nowo, gdy różni się od pokazanej (bez tego dopiero po ponownym wejściu). */
+let profilesCheckedAt = 0;
+async function profilesRecheck() {
+  if (S.screen !== "profiles" || S.modal || Date.now() - profilesCheckedAt < 15000) return;
+  profilesCheckedAt = Date.now();
+  const r = await api().profiles_list().catch(() => null);
+  if (!r || S.screen !== "profiles" || S.modal) return;
+  const key = (l) => l.map((p) => `${p.id}:${p.name}:${p.pin}`).join("|");
+  if (key(r.profiles) === key(PR.list) && r.current === PR.current) return;
+  const onAdd = PR.idx >= PR.list.length, sel = PR.list[PR.idx]?.id;    // zaznaczenie zostaje
+  PR.list = r.profiles; PR.current = r.current;
+  const i = PR.list.findIndex((p) => p.id === (sel ?? r.current));
+  PR.idx = onAdd ? PR.list.length : i >= 0 ? i : 0;
+  renderProfiles();
+}
 function renderProfiles() {
   const setup = PR.startup === "setup";
   const here = S.platform === "android" ? "tym telefonie" : "tym komputerze";
@@ -500,7 +581,7 @@ function renderProfiles() {
     ? (S.platform === "android"
       ? "Wybierz swój profil (te same co w EmuStart na komputerze) albo utwórz nowy. Zapisy gier będą wspólne " +
         "z komputerem; zapisy zastane w emulatorach telefonu trafią do tego profilu."
-      : "Wybierz swój profil (profile z NAS są już na liście) albo utwórz nowy. Do niego trafią save'y i konto " +
+      : "Wybierz swój profil (konta z serwera są już na liście) albo utwórz nowy. Do niego trafią save'y i konto " +
         "RetroAchievements zastane w emulatorach na tym komputerze. Później zmienisz to w Ustawieniach → Profile.") : "";
   const cards = PR.list.map((p, i) =>
     `<div class="pcard${i === PR.idx ? " sel" : ""}${p.id === PR.current ? " cur" : ""}" data-i="${i}">` +
@@ -552,7 +633,7 @@ async function profilesInput(a) {
         toast(`Utworzono profil: ${r.profile.name}.` + (pw ? " Zapamiętaj hasło — będzie potrzebne na innych urządzeniach." : ""), 6000);
         openProfiles(PR.startup);
       };
-      // z serwerem: konto z hasłem (emustart/accounts.py); bez serwera — profil lokalny / NAS
+      // konto z hasłem na serwerze (emustart/accounts.py); serwer niedostępny — profil lokalny
       if (!S.state?.server) return create("");
       setTimeout(() => askPassword(`Hasło nowego konta „${name.trim()}”`, create, true), 50);
     });
@@ -696,13 +777,6 @@ async function profileMenu(p) {
     if (f.user !== st.user) items.push([`Użyj konta ${f.user} z ${RA_FAM[f.family] || f.family}`, async () => {
       const r = await api().ra_import(p.id, f.family);
       toast(r.ok ? `Profil „${p.name}” używa konta ${r.user}.` : r.reason);
-    }]);
-  }
-  if (p.nas_wanted && p.nas_name !== p.nas_wanted) {
-    items.push([`Folder na NAS: „${p.nas_name}” → zmień na „${p.nas_wanted}”`, async () => {
-      const r = await api().profile_nas_rename(p.id);
-      toast(r.ok ? `Folder profilu na NAS: ${r.nas_name}. Inne komputery przełączą się same.` : r.reason, 5000);
-      if (r.ok) openProfiles(PR.startup);
     }]);
   }
   items.push(["Ustaw jako profil tego komputera", async () => {
@@ -933,7 +1007,7 @@ async function fbInput(a) {
 const SO = { es: "", d: null, page: "main", idx: 0, items: [], logos: null };
 
 async function openSystemOptions() {
-  if (S.platform === "android") return toast("Opcje gier i systemów są w EmuStart na komputerze z grami.");
+  if (S.platform === "android" && !S.state?.admin) return toast("Logo i nazwę systemu zmienia administrator.");
   const s = S.systems[S.sysIdx];
   if (!s) return;
   SO.es = s.es;
@@ -957,25 +1031,20 @@ function closeSo() {
 function soItems() {
   const d = SO.d;
   if (SO.page === "main") {
-    const items = [
-      { label: "Logo", value: d.logo_choice === "custom" ? "wybrane ręcznie" : d.logo_choice === "none" ? "bez logo (nazwa)" : d.logo ? "domyślne" : "brak", act: openLogoPicker },
-      { label: "Poświata logo", value: d.glow ? "tak" : "nie", act: async () => { await api().system_set(SO.es, { glow: !d.glow }); await reloadSo(); } },
-      { label: "Nazwa", value: d.display, act: () => oskOpen("Nazwa systemu", d.display, async (v) => { await api().system_set(SO.es, { name: v }); await reloadSo(); }) },
+    // logo i nazwa systemu — na serwerze (administrator), takie same na wszystkich urządzeniach
+    const items = !d.admin ? [] : [
+      { label: "Logo", value: d.logo ? "zmień (dla wszystkich urządzeń)" : "brak — wybierz", act: openLogoPicker },
+      { label: "Poświata logo", value: d.glow ? "tak" : "nie", act: async () => { const r = await api().system_set(SO.es, { glow: !d.glow }); if (r && !r.ok) toast(r.reason); await reloadSo(); } },
+      { label: "Nazwa", value: d.display, act: () => oskOpen("Nazwa systemu", d.display, async (v) => { const r = await api().system_set(SO.es, { name: v }); if (r && !r.ok) toast(r.reason); await reloadSo(); }) },
     ];
-    if (d.display !== d.default_name) items.push({ label: "Przywróć nazwę", value: d.default_name, act: async () => { await api().system_set(SO.es, { name: "" }); await reloadSo(); } });
+    if (d.admin && d.display !== d.default_name) items.push({ label: "Przywróć nazwę", value: d.default_name, act: async () => { await api().system_set(SO.es, { name: "" }); await reloadSo(); } });
+    if (S.platform === "android") return items;
     items.push({ label: "Emulator", value: d.emulator || "brak", act: () => d.options.length ? soPage("emus") : toast("Brak zainstalowanych emulatorów dla tego systemu.") });
     if (d.install.length) items.push({ label: "Pobierz emulator", value: d.install.map((s) => s.label).join(" + "), act: () => {
       closeSo();
       INST.mode = "confirm"; INST.es = [SO.es]; INST.after = null;
       instOpen(`Pobierz emulator: ${d.display}`, stepList(d.install), [["a", "Pobierz"], ["b", "Anuluj"]]);
     } });
-    items.push({ label: "Grafiki: pobierz brakujące", value: "okładki i zrzuty tego systemu", act: async () => {
-      const r = await api().art_start(SO.es); closeSo();
-      if (!r.ok) toast(r.reason.includes("trwa") ? "Pobieranie już trwa — pokazuję postęp." : r.reason);
-      if (r.ok || r.reason.includes("trwa")) openArt(); } });
-    items.push({ label: "Skanuj ponownie", value: "tylko ten system", act: async () => {
-      const r = await api().system_rescan(SO.es); toast(r.ok ? "Skanuję… lista odświeży się za chwilę." : r.reason);
-      setTimeout(async () => { await refreshState(); if (S.screen === "systems" && !S.modal) renderSystems(); }, 4000); } });
     items.push({ label: "Ukryj system", value: "przywrócisz w Ustawieniach", act: async () => {
       await api().system_set(SO.es, { enabled: false }); closeSo(); await refreshState(); show("systems"); toast(`Ukryto: ${d.display}`); } });
     return items;
@@ -1020,18 +1089,25 @@ function renderLogoPicker() {
   grid.innerHTML = (L.list || []).map((c, i) =>
     `<figure class="${i === L.idx ? "sel" : ""}${c.id === "none" ? " none" : ""}" data-i="${i}">` +
     (c.id === "none" ? `<div class="nologo">${esc(SO.d.display)}</div>`
-      : `<img src="${esc(c.url)}" alt="" referrerpolicy="no-referrer" data-i="${i}">`) +
+      : `<img src="${esc(c.url)}" alt="" referrerpolicy="no-referrer" loading="lazy" decoding="async" data-i="${i}">`) +
     `<figcaption>${esc(c.source)}<br><small>${esc(c.label)}</small></figcaption></figure>`).join("");
   grid.querySelectorAll("figure").forEach((f) => f.addEventListener("click", () => { L.idx = +f.dataset.i; soInput("a"); }));
   // logo, które się nie wczytało, usuwamy z listy (ukryty kafelek psuł nawigację:
-  // zerowa szerokość = nieskończona liczba kolumn, zaznaczenie na niewidocznym)
+  // zerowa szerokość = nieskończona liczba kolumn, zaznaczenie na niewidocznym) — tylko ten
+  // kafelek: przebudowa całej siatki pobierała od nowa wszystkie obrazki przy każdym błędzie
   grid.querySelectorAll("img[data-i]").forEach((img) => img.addEventListener("error", () => {
     const c = L.list[+img.dataset.i];
     if (!c) return;
     const cur = L.list[L.idx];
     L.list = L.list.filter((x) => x !== c);
     L.idx = Math.max(0, cur === c ? Math.min(L.idx, L.list.length - 1) : L.list.indexOf(cur));
-    renderLogoPicker();
+    img.closest("figure").remove();
+    grid.querySelectorAll("figure").forEach((f, i) => {
+      f.dataset.i = i;
+      f.classList.toggle("sel", i === L.idx);
+      const im = f.querySelector("img[data-i]");
+      if (im) im.dataset.i = i;
+    });
   }, { once: true }));
   grid.querySelector("figure.sel")?.scrollIntoView({ block: "nearest" });
   setHints([["a", "Ustaw"], ["b", "Wstecz"]], $("soHints"));

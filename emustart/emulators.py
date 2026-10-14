@@ -72,10 +72,10 @@ CORE_PLATS: dict = {
 }
 
 def cores_for(plat: str) -> list:
-    """Rdzenie RetroArcha dla platformy: najpierw domyślny (installer.CORES), potem
+    """Rdzenie RetroArcha dla platformy: najpierw domyślny (emucatalog.CORES), potem
     pozostałe pasujące (CORE_PLATS) — do wyboru w aplikacji na Androida."""
-    from emustart import installer
-    out = [installer.CORES[plat]] if plat in installer.CORES else []
+    from emustart import emucatalog
+    out = [emucatalog.CORES[plat]] if plat in emucatalog.CORES else []
     for core, plats in CORE_PLATS.items():
         if plat in plats.split() and core not in out:
             out.append(core)

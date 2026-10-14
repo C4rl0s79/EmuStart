@@ -11,7 +11,7 @@ from emustart import config, emulators, nasfs, paths, profiles
 def test_new_install_has_no_paths():
     cfg = config.load()                                  # brak config.json
     assert config.rom_roots(cfg) == [] and cfg["emu_root"] == "" and cfg["profiles_nas"] == ""
-    assert not nasfs.SmbFs(profiles.nas_root(cfg)).online()
+    assert not nasfs.backend(cfg).online()                       # bez serwera — offline
     assert emulators._scan_root(__import__("pathlib").Path(cfg["emu_root"])) == ([], {})
 
 
@@ -28,7 +28,7 @@ def test_existing_config_keeps_old_defaults():
 def test_moved_profiles_folder_is_never_used(tmp_path):
     old = tmp_path / "Profiles"
     (old / "Jezus").mkdir(parents=True)
-    fs = nasfs.SmbFs(old)
+    fs = nasfs.DirFs(old)
     assert fs.online()
     (old / nasfs.MOVED_MARK).write_text("{}")
     assert not fs.online()

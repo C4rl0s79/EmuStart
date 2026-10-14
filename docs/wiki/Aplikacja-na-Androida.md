@@ -2,13 +2,13 @@
 
 EmuStart na Androida ma ten sam interfejs co na Windows (karuzela systemów, lista gier,
 podgląd, edytor wyglądu) i obsługę padem (np. GameSir). Gry, opisy i grafiki bierze
-z [serwera EmuStart](Serwer-dla-Androida) na komputerze z grami — telefon nic nie
+z [EmuStart Server](EmuStart-Server) na komputerze z grami — telefon nic nie
 skanuje. Gra pobiera się do telefonu (kilka strumieni naraz, wznawianie) i uruchamia
 w emulatorze zainstalowanym w telefonie.
 
 ## Instalacja
 
-1. Na komputerze z grami uruchom [serwer EmuStart](Serwer-dla-Androida).
+1. Na komputerze z grami uruchom [EmuStart Server](EmuStart-Server).
 2. Pobierz `EmuStart-<wersja>-android.apk` z
    [Releases](https://github.com/C4rl0s79/EmuStart/releases) i zainstaluj (zgoda na
    instalację z nieznanych źródeł).
@@ -16,7 +16,7 @@ w emulatorze zainstalowanym w telefonie.
    do `/storage/emulated/0/EmuStart/games`, skąd czytają je emulatory.
 4. Ustawienia → **Zaloguj (kod QR)** (panel serwera → Dodaj urządzenie) albo **Zaloguj (adres
    serwera)** (np. `emustart.emucloud.org`) → konto i hasło — patrz
-   [Logowanie urządzeń](Serwer-dla-Androida#logowanie-urządzeń-043).
+   [Logowanie urządzeń](EmuStart-Server#logowanie-urządzeń).
 5. Wybierz emulator dla systemów (←/→ w Ustawieniach → Emulatory).
 
 Telefon łączy się z serwerem tylko szyfrowanie — w domu po sieci lokalnej, poza domem przez

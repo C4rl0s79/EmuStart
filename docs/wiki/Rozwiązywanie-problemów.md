@@ -36,14 +36,15 @@ emulowanym dysku WHDLoad. Od 0.17.1 EmuStart kopiuje Kickstarty do
 `saves\PUAE\WHDLoad\Devs\Kickstarts` przed startem gry — wystarczy, że są w folderze
 `system` RetroArcha albo w folderze BIOS-ów.
 
-## Profile i NAS
+## Profile i serwer
 
-**Komunikat o konflikcie save'ów** — ten sam save zmienił się na dwóch komputerach
-(gra bez NAS-a). Została nowsza wersja; starsza jest w
-`Z:\emustart\Profiles\<profil>\_backup\…\konflikt` (albo w `profiles\<id>\_backup`).
+**Komunikat o konflikcie save'ów** — ten sam save zmienił się na dwóch urządzeniach
+(gra bez połączenia z serwerem). Została nowsza wersja; starsza jest w
+`server\profiles\<konto>\_backup\…\konflikt` (albo w `profiles\<id>\_backup` na urządzeniu).
 
-**Folder profilu na NAS-ie ma inną nazwę niż profil** — profil przemianowany po
-pierwszej synchronizacji. Opcje profilu (Start) → „Folder na NAS: … → zmień na …”.
+**Zmiana grafiki / opisu nie widać na drugim urządzeniu** — PC sprawdza serwer przy starcie
+i co 5 minut (albo menu Start → Odśwież bibliotekę z serwera); telefon — przy otwarciu
+systemu.
 
 ## RetroAchievements
 

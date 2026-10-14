@@ -81,7 +81,7 @@ def ini_edit(path: Path, changes: dict) -> dict:
         if m:
             section = m.group(1)
             continue
-        m = re.match(r"^(\s*)([^=;#]+?)(\s*=\s*)(.*?)(\r?\n?)$", line)
+        m = re.match(r"^(\s*)([^=;#]+?)([ \t]*=[ \t]*)(.*?)(\r?\n?)$", line)
         if m and (section, m.group(2)) in changes:
             key = (section, m.group(2))
             new = changes[key]
@@ -130,7 +130,7 @@ def ini_set(path: Path, changes: dict) -> None:
             continue
         if section is not None and line.strip():
             last_in[section] = i
-        m = re.match(r"^(\s*)([^=;#]+?)(\s*=\s*)(.*?)(\r?\n?)$", line)
+        m = re.match(r"^(\s*)([^=;#]+?)([ \t]*=[ \t]*)(.*?)(\r?\n?)$", line)
         if m and (section, m.group(2)) in todo:
             new = todo.pop((section, m.group(2)))
             lines[i] = f"{m.group(1)}{m.group(2)}{m.group(3)}{new}{m.group(5) or chr(10)}"
@@ -159,7 +159,7 @@ def blank_secrets(text: str, rules: list) -> str:
         if m:
             cur = m.group(1)
         else:
-            m = re.match(r"^(\s*)([^=;#\[]+?)(\s*=\s*)(.*?)(\r?\n?)$", line)
+            m = re.match(r"^(\s*)([^=;#\[]+?)([ \t]*=[ \t]*)(.*?)(\r?\n?)$", line)
             if m and m.group(4) not in ("", '""') and any(
                     re.fullmatch(sr, cur or "") and re.fullmatch(kr, m.group(2)) for sr, kr in rules):
                 quote = '""' if m.group(4).startswith('"') else ""
@@ -264,10 +264,52 @@ class Adapter:
     family = ""
     pause_key = ""            # pusty = emulator pauzuje się sam po utracie fokusu
     state_glob = ""
+    policy: dict = {}         # wymagane ustawienia z serwera (apply_policy; tylko podmieniane, nie zmieniane)
+    shader_off = False        # RetroArch: gra bez shadera (ustawienie systemu w EmuStart)
+
+    def toggle_shader(self) -> None:
+        """Shader ekranu włącz / wyłącz w trakcie gry (tylko RetroArch)."""
+
+    def can_reset(self) -> bool:
+        return False
+
+    def first_run(self, cfg: dict) -> None:
+        """Przed grą: emulator gotowy bez kreatora pierwszego uruchomienia (świeżo zainstalowany
+        z serwera) — BIOS-y z serwera, wyłączony kreator i własne aktualizacje (robi je serwer)."""
+
+    def _bios_from_server(self, cfg: dict, query: dict, dst: Path) -> list:
+        """BIOS-y z serwera ({"dir": …} / {"core": …}) do `dst` (bez podfolderów); nazwy plików."""
+        from emustart import libsync
+        out = []
+        for rel in libsync.bios_list(cfg, query):
+            name = rel.rsplit("/", 1)[-1]
+            target = dst / name
+            if target.is_file() or libsync.bios_from_server(cfg, rel, target):
+                out.append(name)
+        return out
+
+    def reset_game(self) -> None:
+        """Gra od początku bez zamykania emulatora."""
 
     def __init__(self, exe: str):
         self.exe = Path(exe)
         self.home = self.exe.parent
+        self.policy: dict = {}
+
+    def policy_ini(self) -> Path | None:
+        """Plik ini, do którego trafiają wymagane ustawienia z serwera (emustart/emupolicy.py)."""
+        return None
+
+    def apply_policy(self, values: dict) -> None:
+        """Wymagane ustawienia z serwera — tuż przed grą, po ustawieniach profilu (wygrywają).
+        Pliku, którego jeszcze nie ma (emulator nigdy nie uruchomiony), nie zakładamy —
+        pierwsze uruchomienie emulatora tworzy go sam, z kreatorem."""
+        from emustart import emupolicy
+        self.policy = dict(values or {})
+        p = self.policy_ini()
+        changes = emupolicy.ini_changes(self.policy)
+        if p and changes and p.is_file():
+            ini_set(p, changes)
 
     # możliwości
     def can_states(self) -> bool:
@@ -403,20 +445,37 @@ class RetroArch(Adapter):
     def save_state(self) -> None:
         self._cmd("SAVE_STATE")
 
+    def toggle_shader(self) -> None:
+        self._cmd("SHADER_TOGGLE")
+        self._shader_toggled = True        # tylko do końca gry — po grze nie trafia do retroarch.cfg
+
+    def can_reset(self) -> bool:
+        return True
+
+    def reset_game(self) -> None:
+        self._cmd("RESET")
+
     def load_state(self) -> None:
         self._cmd("LOAD_STATE")
 
     def state_dirs(self) -> list:
         return [self._cfg_dir("savestate_directory", "states")]
 
+    def apply_policy(self, values: dict) -> None:
+        self.policy = {k: v for k, v in (values or {}).items() if "|" not in k}
+
     def launch_args(self, run_dir: Path, resume: bool, pad_order: list | None = None) -> list:
         run_dir.mkdir(parents=True, exist_ok=True)
         cfg = run_dir / "emustart_ra.cfg"
-        lines = [
+        # najpierw wymagane ustawienia z serwera — niżej ustawienia sesji EmuStart (wygrywają);
+        # „bez shadera” tylko na czas gry: własne ustawienia shadera RetroArcha zostają
+        lines = [f'{k} = "{v}"' for k, v in self.policy.items()] + \
+            (['video_shader_enable = "false"'] if self.shader_off else []) + [
             'network_cmd_enable = "true"',
             f'network_cmd_port = "{RA_PORT}"',
             'savestate_auto_save = "true"',
             f'savestate_auto_load = "{"true" if resume else "false"}"',
+            'savestate_thumbnail_enable = "true"',      # obrazek stanu (podgląd w EmuStart)
             # save'y zawsze w podpiętym folderze — także gdy retroarch.cfg każe
             # trzymać je obok gry (gra bywa w RAM-ie albo w pamięci podręcznej)
             f'savefile_directory = "{self._cfg_dir("savefile_directory", "saves")}"',
@@ -492,7 +551,8 @@ class RetroArch(Adapter):
         start, sess, appended = st
         before, after = _cfg_map(start), _cfg_map(sess)
         changes = {(None, k): v for k, v in after.items()
-                   if k not in appended and not self._SESSION_KEYS.fullmatch(k) and before.get(k) != v}
+                   if k not in appended and not self._SESSION_KEYS.fullmatch(k) and before.get(k) != v
+                   and not (k == "video_shader_enable" and getattr(self, "_shader_toggled", False))}
         if changes:
             ini_set(self.home / "retroarch.cfg", changes)
             log.info("RetroArch: %d ustawień zmienionych w trakcie sesji → retroarch.cfg (%s)",
@@ -553,6 +613,21 @@ class DuckStation(Adapter):
     family = "duckstation"
     pause_key = "SPACE"
     state_glob = "*.sav"
+
+    def first_run(self, cfg: dict) -> None:
+        bios = self._bios_from_server(cfg, {"core": "swanstation"}, self.home / "bios")
+        ini = self._ini()
+        changes = {("Main", "SetupWizardIncomplete"): "false", ("AutoUpdater", "CheckAtStartup"): "false"}
+        if not ini.is_file():
+            # bez wersji ustawień DuckStation uznałby plik za stary i przywrócił domyślne (z kreatorem)
+            changes[("Main", "SettingsVersion")] = "3"
+            changes[("BIOS", "SearchDirectory")] = "bios"
+        ini_set(ini, changes)
+        if bios:
+            log.info("DuckStation: BIOS-y z serwera (%d), bez kreatora", len(bios))
+
+    def policy_ini(self) -> Path:
+        return self._ini()
 
     def _ini(self) -> Path:
         portable = (self.home / "portable.txt").exists() or (self.home / "settings.ini").exists()
@@ -629,6 +704,24 @@ class PCSX2(Adapter):
     family = "pcsx2"
     state_glob = "*.p2s"
 
+    def first_run(self, cfg: dict) -> None:
+        bios = self._bios_from_server(cfg, {"dir": "pcsx2/bios"}, self.home / "bios")
+        ini = self._ini()
+        changes = {("UI", "SetupWizardIncomplete"): "false", ("AutoUpdater", "CheckAtStartup"): "false"}
+        if not ini.is_file():
+            changes[("UI", "SettingsVersion")] = "1"       # inaczej PCSX2 przywróciłby domyślne
+            changes[("Folders", "Bios")] = "bios"
+        cur = ini_section(ini, "Filenames").get("BIOS", "") if ini.is_file() else ""
+        main = [b for b in bios if b.lower().endswith(".bin")]
+        if main and (not cur or not (self.home / "bios" / cur).is_file()):
+            changes[("Filenames", "BIOS")] = main[0]
+        ini_set(ini, changes)
+        if bios:
+            log.info("PCSX2: BIOS z serwera (%s), bez kreatora", ", ".join(main) or "—")
+
+    def policy_ini(self) -> Path:
+        return self._ini()
+
     def _ini(self) -> Path:
         if (self.home / "portable.ini").exists() or (self.home / "portable.txt").exists():
             return self.home / "inis" / "PCSX2.ini"
@@ -702,6 +795,9 @@ class PCSX2(Adapter):
 class Dolphin(Adapter):
     family = "dolphin"
     state_glob = "*.s[0-9][0-9]"
+
+    def policy_ini(self) -> Path:
+        return self._user() / "Config" / "Dolphin.ini"
 
     def _user(self) -> Path:
         if (self.home / "portable.txt").exists():
@@ -829,6 +925,73 @@ def list_states(adapter: Adapter, game: dict, meta: dict, learned: list) -> list
                 out.append({"path": str(f), "name": f.name, "time": f.stat().st_mtime})
     out.sort(key=lambda x: x["time"], reverse=True)
     return out
+
+
+def state_thumb(state: Path) -> str | None:
+    """Obrazek stanu gry zapisany przez emulator → plik PNG w pamięci grafik (podgląd przy
+    wyborze zapisu). RetroArch: `<stan>.png` obok (savestate_thumbnail_enable); PCSX2: zrzut
+    w archiwum .p2s; DuckStation: zrzut w nagłówku .sav (nieskompresowany). None = brak."""
+    import hashlib
+    from emustart import mediastore
+    try:
+        st = state.stat()
+    except OSError:
+        return None
+    name = hashlib.sha1(f"{state}|{st.st_mtime_ns}".encode("utf-8", "replace")).hexdigest()[:20] + ".png"
+    if mediastore.exists("_stany", name):
+        return name
+    data = _state_png(state)
+    if not data:
+        return None
+    try:
+        mediastore.put("_stany", name, data)
+    except Exception:
+        return None
+    return name
+
+
+def _state_png(state: Path) -> bytes | None:
+    side = state.with_name(state.name + ".png")
+    if side.is_file():                                     # RetroArch
+        try:
+            return side.read_bytes()
+        except OSError:
+            return None
+    suf = state.suffix.lower()
+    if suf == ".p2s":                                      # PCSX2: archiwum z zrzutem ekranu
+        import zipfile
+        try:
+            with zipfile.ZipFile(state) as z:
+                name = next((n for n in z.namelist() if n.lower() == "screenshot.png"), None)
+                return z.read(name) if name else None
+        except (OSError, zipfile.BadZipFile, KeyError):
+            return None
+    if suf == ".sav":                                      # DuckStation: RGBA w nagłówku
+        return _duckstation_png(state)
+    return None
+
+
+def _duckstation_png(state: Path) -> bytes | None:
+    import io
+    import struct
+    try:
+        with open(state, "rb") as f:
+            head = f.read(200)
+            if len(head) < 200 or head[:4] != b"DUCS":
+                return None
+            w, h, size, off = struct.unpack_from("<4I", head, 184)
+            if not (0 < w <= 4096 and 0 < h <= 4096 and size == w * h * 4):
+                return None                                 # inny format (np. skompresowany zrzut)
+            f.seek(off)
+            raw = f.read(size)
+        if len(raw) != size:
+            return None
+        from PIL import Image
+        buf = io.BytesIO()
+        Image.frombytes("RGBA", (w, h), raw).save(buf, "PNG")
+        return buf.getvalue()
+    except Exception:
+        return None
 
 
 def glob_escape(s: str) -> str:

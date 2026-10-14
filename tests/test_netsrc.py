@@ -44,7 +44,6 @@ def test_info_and_wrong_key(srv):
     assert i["ok"] and "find" in i["features"] and i["rtt"] < 1
     bad = {**cfg, "server_key": "zly"}
     assert netsrc.info(bad, fresh=True) == {"ok": False, "reason": "zły klucz serwera", "key_rejected": True}
-    assert netsrc.sources({**cfg, "server_games": False}, {"es": "psx"}) == {}
     assert netsrc.info({}, fresh=True)["ok"] is False
 
 
@@ -165,9 +164,9 @@ def test_remote_rejects_paths_outside_profiles(env, monkeypatch):
     assert not (tmp / "x").exists()
 
 
-def test_with_server_profiles_never_go_through_smb(env, monkeypatch):
-    """2.0: z ustawionym serwerem zapisy tylko przez serwer — także gdy przez SMB widać inny
-    folder albo serwer chwilowo nie odpowiada (wtedy tryb offline, nie SMB)."""
+def test_profiles_only_through_server(env, monkeypatch):
+    """Zapisy i konta tylko przez serwer; serwer nie odpowiada albo PC nie jest zalogowany —
+    tryb offline (zapisy czekają w kolejce)."""
     from emustart import nasfs
     cfg, tmp = _nas_server(env, monkeypatch, nas_name="inny")
     (tmp / "inny").mkdir()
@@ -177,7 +176,10 @@ def test_with_server_profiles_never_go_through_smb(env, monkeypatch):
     netsrc._info.clear(); nasfs.reset()
     fs = nasfs.backend(off)
     assert isinstance(fs, nasfs.RemoteFs) and not fs.online()
-    assert isinstance(nasfs.backend({"profiles_nas": str(tmp / "inny")}), nasfs.SmbFs)   # bez serwera
+    fs = nasfs.backend({"profiles_nas": str(tmp / "inny")})           # bez zalogowania
+    assert fs is nasfs.OFFLINE and not fs.online()
+    with pytest.raises(OSError):
+        fs.write("Jezus/save/x.srm", b"zapis")
 
 def test_push_all_sends_existing_local_saves(env, monkeypatch):
     from emustart import profiles
@@ -190,29 +192,6 @@ def test_push_all_sends_existing_local_saves(env, monkeypatch):
     assert (nas / "save" / "duckstation" / "memcards" / "a.mcd").read_bytes() == b"A" * 5000
     assert (nas / "settings" / "windows" / "duckstation" / "settings.ini").is_file()
     assert profiles.push_all(cfg) == 0                             # drugi raz nic do wysłania
-
-
-def test_system_look_pushed_to_server(srv, monkeypatch, tmp_path):
-    from emustart import logos
-    cfg, _roms, _tmp = srv
-    server_cfg = {"server_token": KEY, "systems": {}}
-    monkeypatch.setattr(remote.API, "_cfg", server_cfg)
-    monkeypatch.setattr(remote.config, "save", lambda c: None)
-    mine, theirs = tmp_path / "pc", tmp_path / "serwer"
-    mine.mkdir(); theirs.mkdir()
-    (mine / "lynx.custom.png").write_bytes(b"\x89PNG lynx")
-    cfg["systems"] = {"lynx": {"logo": "custom", "logo_glow": True, "name": "Atari Lynx"},
-                      "nes": {"logo": "none"}}
-    monkeypatch.setattr(logos, "_dir", lambda: mine)
-    sent = []
-    monkeypatch.setattr(logos, "_store_custom", lambda es, data, ext: sent.append((es, data, ext)))
-    assert logos.push_to_server(cfg) == 2
-    assert sent == [("lynx", b"\x89PNG lynx", "png")]
-    assert server_cfg["systems"]["lynx"] == {"logo": "custom", "logo_glow": True, "name": "Atari Lynx"}
-    assert server_cfg["systems"]["nes"]["logo"] == "none"
-    assert logos.push_to_server(cfg) == 0                         # bez zmian — nic nie idzie
-    cfg["systems"]["lynx"]["logo_glow"] = False
-    assert logos.push_to_server(cfg, ["lynx"]) == 1 and server_cfg["systems"]["lynx"]["logo_glow"] is False
 
 
 def test_server_status_never_waits_for_the_network(srv, monkeypatch):
@@ -230,3 +209,52 @@ def test_server_status_never_waits_for_the_network(srv, monkeypatch):
             break
         _t.sleep(0.1)
     assert netsrc.info_nowait(cfg)["ok"]
+
+
+def test_arcade_version_gets_parent_from_server(srv):
+    """Wersja gry FBA na PC: gra nadrzędna (i BIOS) z serwera, obok gry w pamięci podręcznej —
+    wcześniej PC szukał ich tylko w swoich folderach, więc emulator zgłaszał brak plików."""
+    from emustart import arcade
+    cfg, roms, tmp = srv
+    dat = tmp / "fbneo.dat"
+    dat.write_text('<?xml version="1.0"?><datafile>'
+                   '<game name="1941"><description>1941 (World)</description></game>'
+                   '<game name="1941j" cloneof="1941" romof="1941"><description>1941 (Japan)</description></game>'
+                   '</datafile>', encoding="utf-8")
+    assert arcade.refresh_fbneo(force=True, url=dat.as_uri())["ok"]
+    _write(roms / "fbneo" / "1941.zip", b"RODZIC")
+    _write(roms / "fbneo" / "1941j.zip", b"WERSJA")
+    scanner.scan_system("fbneo", roms / "fbneo")
+    g = library.game(library.db().execute("SELECT id FROM games WHERE rel='1941j.zip'").fetchone()["id"])
+    files, deps = netsrc.find(cfg, g)
+    assert set(files) == {"1941j.zip"} and [(r, n) for r, _s, n in deps] == [("1941.zip", 6)]
+    dst = tmp / "cache" / "fbneo" / "1941.zip"
+    p = partial.Partial(deps[0][1], dst, 6, 0)
+    p.run(streams=1)
+    assert dst.read_bytes() == b"RODZIC"
+
+
+def test_login_stops_at_definite_rejection(monkeypatch):
+    """Serwer nie zna urządzenia (albo ma inny certyfikat): koniec prób od razu, bez czekania
+    na martwe adresy, i bez kolejnej rundy przez REJECT_TTL — pasek nie wisi na „łączę”."""
+    from emustart import netsrc
+    asked = []
+
+    def login(did, sp):
+        asked.append(sp)
+        if sp[1] == "martwy":
+            raise TimeoutError("timed out")
+        raise netsrc.Rejected("nieznane urządzenie")
+    monkeypatch.setattr(netsrc, "_login", login)
+    monkeypatch.setattr(netsrc, "_hint", [])
+    monkeypatch.setattr(netsrc, "_cfg_ref", [{}])
+    monkeypatch.setattr(netsrc, "candidates", lambda cfg: [("https", "martwy", 1), ("https", "tunel", 443),
+                                                          ("https", "inny", 8741)])
+    monkeypatch.setitem(netsrc._signer, "d1", ("n", "tpm"))
+    netsrc.drop_token()
+    assert netsrc.session_token("d1") == ""
+    assert [a[1] for a in asked] == ["martwy", "tunel"]                    # „inny” już niepytany
+    assert "zaloguj się ponownie" in netsrc.rejected()
+    assert netsrc.session_token("d1") == "" and len(asked) == 2            # bez kolejnej rundy
+    netsrc.drop_token()
+    assert netsrc.rejected() == ""

@@ -23,14 +23,12 @@ import time
 import zipfile
 from pathlib import Path
 
-from emustart import (arcade, bios, cache, emulators, hotkey, ingame, library, pads,
+from emustart import (bios, cache, emulators, hotkey, ingame, library, pads,
                       paths, profiles, systems, winutil)
 
 log = logging.getLogger("emustart.launcher")
+FRESH = "__od_poczatku__"         # start_state: gra od początku, bez wczytywania stanu
 
-PROBE_SECONDS = 1.5
-PROBE_BYTES = 24 * 1024 * 1024
-_PROBE: dict = {}                  # ostatni pomiar sieci {t, mode, mbps}
 
 
 class LaunchError(Exception):
@@ -68,7 +66,6 @@ class Session:
         self.source = ""                # serwer | serwer + NAS | NAS
         self.prog: cache.Progress | None = None
         self.cancel = threading.Event()
-        self.play_now = threading.Event()
         self.copy_thread: threading.Thread | None = None
         self.copy_error = ""
         self.proc: subprocess.Popen | None = None
@@ -90,9 +87,7 @@ class Session:
         out = {"phase": self.phase, "message": self.message, "mode": self.mode, "source": self.source,
                "title": self.game.get("title", ""), "tags": self.game.get("tags", ""),
                "system": info["display"], "game_id": self.game_id, "locked_by": self.locked_by,
-               "notice": getattr(self, "notice", ""),
-               "can_play_now": self.phase == "downloading" and not self.game.get("is_dir")
-               and info["kind"] in ("disc", "mixed")}
+               "notice": getattr(self, "notice", "")}
         if self.prog:
             out["progress"] = self.prog.snapshot()
         out["copying"] = bool(self.copy_thread and self.copy_thread.is_alive())
@@ -100,9 +95,6 @@ class Session:
 
     def abort(self) -> None:
         self.cancel.set()
-
-    def request_play_now(self) -> None:
-        self.play_now.set()
 
     # ── przebieg ──
     def _run(self) -> None:
@@ -149,21 +141,13 @@ class Session:
         cache_dir = cache.root(self.cfg) / es
 
         extra = []
+        self._found = None
         if info["kind"] == "arcade":
-            # rodzic/BIOS najpierw obok gry, potem w innych folderach tego systemu
-            search = [rom_dir] + [d for d in library.system_dirs(es) if d != rom_dir]
-            for dep in arcade.dependencies(Path(g["rel"]).stem):
-                st = None
-                for d in search:
-                    src = d / f"{dep}.zip"
-                    try:
-                        st = src.stat()
-                        break
-                    except OSError:
-                        continue
-                if st is None:
-                    continue
-                extra.append((src, cache_dir / f"{dep}.zip", st.st_size, st.st_mtime))
+            # gra nadrzędna i BIOS (np. neogeo.zip) z serwera — obok gry w pamięci podręcznej;
+            # bez serwera gra startuje z tego, co już jest pobrane
+            from emustart import netsrc
+            self._found = netsrc.find(self.cfg, g)
+            extra = [(src, cache_dir / rel, size, 0) for rel, src, size in self._found[1]]
 
         cache.touch(g["id"])
         if cache.is_complete(self.cfg, g) and all(
@@ -176,19 +160,14 @@ class Session:
         self._play(g, exe, emu.get("args", ""), rom)
 
     def _fetch(self, g: dict, info: dict, rom_dir: Path, extra: list) -> Path:
-        """Kopiuje grę do cache; zwraca katalog, z którego uruchamiamy."""
+        """Pobiera grę z serwera EmuStart do pamięci podręcznej; zwraca katalog, z którego
+        uruchamiamy (długie pobieranie gry płytowej — dysk strumieniowy, gra od razu)."""
         from emustart import netsrc
-        # pliki z serwera EmuStart (szybciej przez daleki Tailscale), reszta przez SMB
-        self.srcs = netsrc.sources(self.cfg, g)
-        server_all = len(self.srcs) == len(g["files"])
-        self.source = "serwer" if server_all else ("serwer + NAS" if self.srcs else "NAS")
-        # sprawdzenie NAS-a przez SMB potrafi wisieć, gdy NAS jest niedostępny — przy grze
-        # w całości z serwera pytamy o NAS tylko w sieci lokalnej (start prosto z NAS-a)
-        on_lan = bool(self.srcs) and netsrc.on_lan(self.cfg)
-        nas_ok = (rom_dir / g["rel"]).exists() if (not server_all or on_lan) else False
-        if not nas_ok and not server_all:
-            raise LaunchError("NAS i serwer EmuStart niedostępne, a tej gry nie ma w cache. "
-                              "Połącz się z siecią domową lub Tailscale.")
+        self.srcs = self._found[0] if self._found else netsrc.sources(self.cfg, g)
+        if len(self.srcs) != len(g["files"]):
+            raise LaunchError("Serwer EmuStart nie odpowiada (albo nie ma tej gry), a tej gry nie ma "
+                              "na tym komputerze. Połącz się z siecią domową lub Tailscale.")
+        self.source = "serwer"
         total = cache.missing_bytes(self.cfg, g) + sum(s for _a, _b, s, _m in extra)
         self.prog = cache.Progress(total, len(g["files"]) + len(extra))
         self.phase = "downloading"
@@ -203,28 +182,13 @@ class Session:
             self.mode = "copy"
             self._wait_copy()
             return cache_dir
-
-        if self.srcs and nas_ok and on_lan:
-            self.mode = "lan"               # serwer odpowiada jak w sieci lokalnej — NAS też jest blisko
-        elif self.srcs:
-            self.mode = "remote"            # pomiar SMB nie dotyczy pobierania z serwera
-        else:
-            self.mode = self._network_mode()
-        if self.mode == "lan":
-            log.info("LAN: start z NAS, kopia w tle (%s)", g["title"])
-            return rom_dir
+        self.mode = "remote"
         if self.copy_thread.is_alive() and self.cfg.get("stream_play", True) and self._worth_streaming():
-            base = self._stream(g, rom_dir)
+            base = self._stream(g)
             if base:
                 self.mode = "stream"
                 return base
-        while self.copy_thread.is_alive():
-            if self.play_now.wait(0.2) and nas_ok:
-                log.info("Graj mimo to: start z NAS (%s)", g["title"])
-                return rom_dir
-            if self.cancel.is_set():
-                raise cache.Cancelled()
-        self._raise_copy_error()
+        self._wait_copy()
         return cache_dir
 
     def _worth_streaming(self) -> bool:
@@ -239,7 +203,7 @@ class Session:
         log.info("pobieranie potrwa ok. %.0f s (próg grania w trakcie: %.0f s)", est, limit)
         return est > limit
 
-    def _stream(self, g: dict, rom_dir: Path) -> Path | None:
+    def _stream(self, g: dict) -> Path | None:
         """Gra od razu z dysku strumieniowego (WinFsp): pobrane fragmenty z cache,
         brakujące na żądanie, reszta dalej w tle. None = nie da się (brak WinFsp,
         błąd montowania) — wtedy jak dotąd: czekanie na pobranie albo „Graj teraz”."""
@@ -256,16 +220,16 @@ class Session:
         end = time.monotonic() + 30
         for rel, size, mt in g["files"]:
             dst = cache._local_file(self.cfg, g, rel)
-            src = (getattr(self, "srcs", None) or {}).get(rel) or rom_dir / rel
+            src = self.srcs[rel]
             if size >= partial.MIN_SIZE:
                 source = partial.open_partial(src, dst, size, mt)
-                source.prewarm()          # połączenia z NAS-em i początek pliku — zanim emulator zapyta
+                source.prewarm()          # połączenia z serwerem i początek pliku — zanim emulator zapyta
             else:
                 # małe pliki (.cue, .m3u) kopiują się jako pierwsze — czekamy chwilę
                 while not cache._fresh(dst, size, mt) and self.copy_thread.is_alive() \
                         and time.monotonic() < end and not self.cancel.is_set():
                     time.sleep(0.1)
-                source = dst if cache._fresh(dst, size, mt) else rom_dir / rel
+                source = dst if cache._fresh(dst, size, mt) else src
             disk.add_file(f"{top}/{rel}", source, size, mt)
         self._streamed = (disk, top, g)
         log.info("gra strumieniowo z dysku %s: (%s), pobieranie w tle trwa", disk.letter, g["title"])
@@ -309,28 +273,6 @@ class Session:
         if self.copy_error:
             raise LaunchError(f"Kopiowanie nie powiodło się: {self.copy_error}")
 
-    def _network_mode(self) -> str:
-        forced = self.cfg.get("network_mode", "auto")
-        if forced in ("lan", "remote"):
-            return forced
-        # pomiar z ostatnich 30 min — bez 1,5 s czekania przy każdej grze
-        last = _PROBE.get("t", 0)
-        if time.monotonic() - last < 1800 and _PROBE.get("mode"):
-            self._mbps = _PROBE["mbps"]
-            return _PROBE["mode"]
-        t0 = time.monotonic()
-        while (time.monotonic() - t0 < PROBE_SECONDS and self.prog.done < PROBE_BYTES
-               and self.copy_thread.is_alive()):
-            time.sleep(0.05)
-        elapsed = max(0.001, time.monotonic() - t0)
-        mbps = self.prog.done * 8 / elapsed / 1e6
-        self._mbps = mbps
-        log.info("pomiar sieci: %.0f Mb/s", mbps)
-        mode = "lan" if mbps >= float(self.cfg.get("lan_threshold_mbps", 200)) else "remote"
-        if self.prog.done >= PROBE_BYTES // 2:      # wiarygodny pomiar — zapamiętujemy
-            _PROBE.update(t=time.monotonic(), mode=mode, mbps=mbps)
-        return mode
-
     # ── przygotowanie pliku dla emulatora ──
     def _prepare(self, g: dict, info: dict, base: Path, exe: str) -> Path:
         main = base / g["rel"]
@@ -367,10 +309,17 @@ class Session:
             members = [m for m in z.infolist() if not m.is_dir()]
             if not members:
                 raise LaunchError("Archiwum ZIP jest puste.")
-            for m in members:
+            # postęp w oknie (paczki MSU-1 mają setki MB ścieżek dźwiękowych)
+            self.prog = cache.Progress(sum(m.file_size for m in members), len(members))
+            for i, m in enumerate(members, 1):
+                self.prog.file_index = i
                 target = out_dir / Path(m.filename).name
                 with z.open(m) as src, winutil.open_temp_write(str(target)) as dst:
-                    shutil.copyfileobj(src, dst, 1024 * 1024)
+                    for buf in iter(lambda: src.read(1024 * 1024), b""):
+                        if getattr(self, "cancel", None) is not None and self.cancel.is_set():
+                            raise LaunchError("Przerwano.")
+                        dst.write(buf)
+                        self.prog.add(len(buf))
         files = [out_dir / Path(m.filename).name for m in members]
         pick = pick_rom(files, wanted)
         if not pick and len(files) > 1:
@@ -408,6 +357,7 @@ class Session:
                 except Exception:
                     log.exception("stany z telefonu")
             adapter.keyboard_game = systems.info(g["es"])["plat"] in systems.COMPUTER_PLATS
+            adapter.shader_off = bool(((self.cfg.get("systems") or {}).get(g["es"]) or {}).get("shader_off"))
             if adapter.family == "retroarch" and g["es"] in systems.WHD_SYSTEMS:
                 try:   # po podpięciu profilu — folder saves wskazuje już na właściwego gracza
                     bios.whdload_kickstarts(self.cfg, adapter.home,
@@ -417,7 +367,11 @@ class Session:
             po = (self.cfg.get("pad_order") or {}).get("mode", "windows")
             # bateria (rodzaj zasilania) potrzebna tylko w trybie „bezprzewodowe pierwsze”
             order = pads.order(self.cfg, pads.connected(battery=po == "wireless_first"))
-            if self.start_state and Path(self.start_state).is_file():
+            if self.start_state == FRESH:
+                # „Graj od początku”: bez wczytania stanu (autozapis, „Kontynuuj”, wznowienie)
+                resume = None
+                extra = adapter.launch_args(self.run_dir, False, order)
+            elif self.start_state and Path(self.start_state).is_file():
                 # stan wybrany ręcznie ma pierwszeństwo przed stanem wznowienia
                 resume = None
                 extra = adapter.start_state_args(self.run_dir, Path(self.start_state), order)
@@ -547,6 +501,15 @@ class Session:
             adapter.apply_cheevos(ra)
         except Exception:
             log.exception("RetroAchievements profilu")
+        try:
+            adapter.first_run(self.cfg)               # bez kreatora pierwszego uruchomienia, z BIOS-em
+        except Exception:
+            log.exception("pierwsze uruchomienie emulatora")
+        try:
+            from emustart import installer           # wymagane ustawienia z serwera (wygrywają z profilem)
+            adapter.apply_policy(installer.policy(adapter.family))
+        except Exception:
+            log.exception("wymagane ustawienia emulatora")
         dirs = adapter.save_dirs()               # foldery z (już podmienionych) ustawień
         names = [d.name for d in dirs]
         try:
@@ -576,7 +539,8 @@ class Session:
         names = [n for n in names if n != "-"]
         if getattr(self, "_settings_on", False):
             try:
-                n = profiles.settings_save(self.cfg, self.profile_id, adapter)
+                n = profiles.settings_save(self.cfg, self.profile_id, adapter,
+                                           (getattr(self, "game", None) or {}).get("title", "") or "ustawienia emulatora")
                 if n:
                     log.info("ustawienia %s zapisane w profilu: %d plików", adapter.family, n)
             except Exception:

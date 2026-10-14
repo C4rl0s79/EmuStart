@@ -51,8 +51,15 @@ class GameMenu:
             {"id": "back", "label": "Wróć do gry", "on": True},
             {"id": "save", "label": "Zapisz stan", "on": a.can_states()},
             {"id": "load", "label": "Wczytaj stan", "on": a.can_states()},
+            # gra od początku (np. wczytany przy starcie stan był zły) — bez wychodzenia
+            {"id": "reset", "label": "Reset gry", "on": a.can_reset(), "hint": "od początku, jak przycisk RESET konsoli"},
             {"id": "quicksave", "label": "Quicksave i wyjdź", "on": a.can_resume(),
              "hint": "przy następnym uruchomieniu gra wczyta ten stan"},
+            # czarny ekran po zmianie ustawień (shader niezgodny np. ze skalą rozdzielczości)
+            {"id": "shader", "label": "Włącz / wyłącz shader", "on": a.family == "retroarch",
+             "hint": "do końca tej gry"},
+            {"id": "shader_off", "label": "Bez shadera w tym systemie", "on": a.family == "retroarch",
+             "hint": "na stałe — przywrócisz w opcjach gry"},
             {"id": "exit", "label": "Wyjdź z gry", "on": True},
         ]
 
@@ -157,7 +164,8 @@ class GameMenu:
     def _do(self, name: str) -> None:
         try:
             {"back": self._back, "save": self._save, "load": self._load,
-             "quicksave": self._quicksave, "exit": self._exit}[name]()
+             "quicksave": self._quicksave, "exit": self._exit,
+             "shader": self._shader, "shader_off": self._shader_off, "reset": self._reset}[name]()
         except Exception:
             log.exception("akcja menu %s", name)
         finally:
@@ -171,6 +179,30 @@ class GameMenu:
         self.adapter.save_state()        # emulator pokazuje własny komunikat
         time.sleep(0.5)
         self.adapter.pause()
+
+    def _reset(self) -> None:
+        self._close_to_game(unpause=False)
+        self.adapter.reset_game()
+        time.sleep(0.3)
+        self.adapter.pause()
+
+    def _shader(self) -> None:
+        self._close_to_game(unpause=False)
+        self.adapter.toggle_shader()
+        self._shader_flipped = not getattr(self, "_shader_flipped", False)
+
+    def _shader_off(self) -> None:
+        """Shader wyłączony dla systemu na stałe (ustawienie EmuStart, emustart/launcher.py)
+        i od razu w tej grze, jeśli jeszcze działa."""
+        es = (self.s.game or {}).get("es", "")
+        if es:
+            self.s.cfg.setdefault("systems", {}).setdefault(es, {})["shader_off"] = True
+            from emustart import config
+            config.save(self.s.cfg)
+        if not self.adapter.shader_off and not getattr(self, "_shader_flipped", False):
+            self._shader()
+        else:
+            self._close_to_game()
 
     def _load(self) -> None:
         self._close_to_game(unpause=False)

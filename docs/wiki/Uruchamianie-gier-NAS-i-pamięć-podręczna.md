@@ -1,85 +1,58 @@
-# Uruchamianie gier: NAS i pamięć podręczna
+# Uruchamianie gier i pamięć podręczna
+
+Gry pochodzą z **[EmuStart Server](EmuStart-Server)**. EmuStart pobiera je na dysk
+(pamięć podręczną) i stamtąd uruchamia; gry już pobrane działają też bez serwera.
 
 ## Jak startuje gra
 
 1. **Gra jest w pamięci podręcznej** → start od razu z dysku lokalnego.
-2. **Mała gra** (kartridż, arcade; domyślnie do 64 MB) → kopia do pamięci
-   podręcznej (zwykle sekunda), potem start.
-3. **Duża gra płytowa** (CHD/RVZ/ISO) → EmuStart mierzy prędkość na początku
-   kopiowania:
-   - **LAN** (≥ 200 Mb/s, próg w Ustawieniach): start wprost z NAS-a, kopia do
-     pamięci podręcznej idzie w tle — następnym razem gra uruchomi się z dysku,
-   - **zdalnie** (wolniej, np. Tailscale): ekran pobierania — pobrano, zostało,
-     prędkość, pozostały czas. **X — Graj teraz (z sieci)** uruchamia bez czekania.
+2. **Mała gra** (kartridż, arcade; domyślnie do 64 MB) → pobranie (zwykle sekunda), start.
+3. **Duża gra płytowa** (CHD/RVZ/ISO) → ekran pobierania (pobrano, zostało, prędkość,
+   pozostały czas) albo — z WinFsp — **granie w trakcie pobierania** (niżej).
 4. **Gry PS3 (katalogi)** → zawsze najpierw pobranie.
+5. **Arcade** — razem z grą pobierają się jej zależności z serwera: gra nadrzędna (dla
+   wersji gry, np. japońskiej) i BIOS (np. `neogeo.zip`), obok gry.
 
-Tryb sieci można wymusić: Ustawienia → Tryb sieci (automatycznie / zawsze LAN /
-zawsze zdalnie).
+Serwer nie odpowiada, a gry nie ma na dysku — komunikat; gry pobrane wcześniej działają.
 
-## Szybsze pobieranie i granie w trakcie pobierania
+## Pobieranie i granie w trakcie pobierania
 
-- **Pobieranie w 4 strumieniach naraz** (pliki od 32 MB) — na łączu przez Tailscale
-  zmierzone 268 Mb/s zamiast 110 Mb/s jednym strumieniem. Plik pobierany jest
-  blokami po 1 MB, a mapa pobranych bloków (`.part.map`) pozwala wznowić przerwane
-  pobieranie od brakujących bloków.
+- **Pobieranie wieloma strumieniami** (osobne połączenie na każdy strumień) — przez
+  Tailscale na dużą odległość kilka razy szybciej niż jednym połączeniem. Plik pobierany
+  jest blokami, a mapa pobranych bloków (`.part.map`) pozwala wznowić przerwane pobieranie
+  od brakujących bloków.
 - **Graj w trakcie pobierania (WinFsp)** — gdy zainstalowany jest
-  [WinFsp](https://winfsp.dev), gra w trybie zdalnym startuje od razu z wirtualnego
-  dysku EmuStart (wolna litera, np. `Y:`). Fragmenty już pobrane czytane są z dysku
-  lokalnego, brakujące pobierane natychmiast, przed resztą kolejki (typowe ładowanie gry
-  PS2 z NAS-a oddalonego o ponad 1000 km: ok. 8 s), a pobieranie w tle
-  kieruje się w miejsce, które gra właśnie czyta. Krótkie przycięcia są możliwe tylko
-  przy pierwszym wejściu w niepobrany fragment. Po pobraniu całości gra jest w pamięci
-  podręcznej jak zwykle.
-- Domyślnie gra startuje od razu (granie w trakcie pobierania). W Ustawieniach →
-  „…gdy pobieranie potrwa dłużej niż” można ustawić próg: krótsze pobranie najpierw
-  w całości.
-- EmuStart sprawdza WinFsp przy starcie (wynik w logu i w Ustawieniach → „Graj
-  w trakcie pobierania”). Bez WinFsp działa jak dotąd: ekran pobierania i „Graj teraz”
-  wprost z NAS-a. Opcję można wyłączyć w Ustawieniach.
-
-## Gry z serwera EmuStart
-
-Gdy na komputerze z grami działa [serwer EmuStart](Serwer-dla-Androida), EmuStart na
-Windows pobiera gry z niego zamiast przez SMB. Przez Tailscale na dużą odległość to
-kilka razy szybciej: SMB łączy się z NAS-em jednym połączeniem TCP, serwer — osobnym
-połączeniem na każdy z 8 strumieni. Pomiar (ok. 1000 km, 33 ms, łącze 1 Gb/s):
-SMB ok. 25 MB/s, serwer ok. 78 MB/s.
-
-Ustawienia → **Serwer EmuStart**:
-
-1. **Zaloguj** — link z panelu serwera (Dodaj urządzenie → *Kopiuj link*) albo adres tunelu
-   (np. `emustart.emucloud.org`), potem konto i hasło. Komputer tworzy klucz urządzenia
-   (TPM/DPAPI) i łączy się z serwerem tylko szyfrowanie.
-2. **Wyloguj z serwera** — gdy komputer ma przestać korzystać z serwera.
-
-Gra jest szukana na serwerze po systemie i ścieżce; plik idzie z serwera tylko przy
-zgodnym rozmiarze. W każdym innym przypadku (serwer wyłączony, starsza wersja serwera,
-brak gry) — przez SMB jak dotąd. Granie w trakcie pobierania (WinFsp) działa tak samo.
-Gdy NAS przez SMB jest niedostępny, a serwer działa, gry i tak się pobiorą.
-Ekran pobierania pokazuje źródło („Pobieranie z serwera EmuStart”).
+  [WinFsp](https://winfsp.dev), duża gra płytowa startuje od razu z wirtualnego dysku
+  EmuStart (wolna litera, np. `Y:`). Fragmenty pobrane czytane są z dysku lokalnego,
+  brakujące pobierane natychmiast, przed resztą kolejki (typowe ładowanie gry PS2 z serwera
+  oddalonego o ponad 1000 km: ok. 8 s). Krótkie przycięcia możliwe tylko przy pierwszym
+  wejściu w niepobrany fragment.
+- Ustawienia → „…gdy pobieranie potrwa dłużej niż” — próg: krótsze pobranie najpierw
+  w całości. Bez WinFsp — ekran pobierania.
 
 ## Pamięć podręczna
 
 - Trzyma **ostatnie gry** (domyślnie 10, Ustawienia → Trzymaj ostatnie gry)
   **plus przypięte**.
-- **Y na grze** przypina ją: zostaje na dysku na stałe i pobiera się w tle
-  (postęp w górnym pasku).
+- **Y na grze** przypina ją: zostaje na dysku na stałe i pobiera się w tle (postęp
+  w górnym pasku); przerwane pobieranie przypiętej gry wznawia się samo po wejściu na nią.
 - Na liście gry lokalne mają znacznik „lokalnie”, przypięte 📌, kopiowane „⬇ kopiuje”.
-- **Usunięcie z dysku**: przytrzymaj A na grze (albo prawy przycisk myszy) →
-  **Usuń z dysku** → A, by potwierdzić. Usuwa kopię lokalną (także niedokończone
-  pobieranie) i przypięcie; gra zostaje na NAS-ie. Na telefonie tak samo:
-  **Usuń z telefonu** (długie dotknięcie gry albo przytrzymane A).
-- Przypięta gra, której pobieranie się przerwało, wznawia się sama po wejściu na nią
-  (najwyżej raz na 5 minut).
+- **Usunięcie z dysku**: przytrzymaj A na grze → **Usuń z dysku** → A, by potwierdzić. Gra
+  zostaje na serwerze. Na telefonie tak samo: **Usuń z telefonu**.
 
-## Bez NAS-a
+## Bez serwera
 
-Gdy NAS jest niedostępny, w górnym pasku widać „NAS offline, tylko gry lokalne” —
-działają gry z pamięci podręcznej. Save'y zapisane w tym czasie wysyłają się na NAS
-przy następnej okazji (patrz [Kilka komputerów, jeden NAS](Kilka-komputerów-jeden-NAS)).
+W górnym pasku: „Serwer niedostępny” — działają gry z pamięci podręcznej, lista i grafiki
+z lokalnej kopii. Zapisy z tego czasu wysyłają się na serwer przy następnej okazji (patrz
+[Kilka urządzeń, jeden serwer](Kilka-komputerów-jeden-NAS)).
 
 ## Po wyjściu z gry
 
-Ekran gry znika od razu. Zapis save'ów i ustawień profilu na NAS idzie w tle —
-w górnym pasku widać „⇅ zapisuję save'y na NAS: …”. Następna gra poczeka na koniec
-tego zapisu; zamknięcie EmuStart też (do 2 minut).
+Ekran gry znika od razu. Zapis save'ów i ustawień profilu na serwer idzie w tle —
+w górnym pasku widać „⇅ wysyłam zapisy: …”. Następna gra poczeka na koniec tego zapisu;
+zamknięcie EmuStart też (do 2 minut).
+
+## Wczytanie stanu
+
+Przytrzymane A na grze → **Wczytaj zapis**: stany gry, najnowsze pierwsze, z obrazkiem,
+gdy emulator go zapisał (RetroArch — EmuStart włącza obrazki stanów; PCSX2; DuckStation).

@@ -16,7 +16,7 @@ from test_core import _write, env  # noqa: F401  (fixture)
 
 # ── profile ──
 
-@pytest.fixture(params=["nas", "serwer"])
+@pytest.fixture(params=["serwer"])
 def prof_env(env, monkeypatch, request):
     cfg, roms, tmp = env
     monkeypatch.setattr(profiles, "LOCAL", tmp / "profiles")
@@ -181,32 +181,6 @@ def test_uipad_events_repeat_and_release(monkeypatch):
                         {"a": "down", "up": True}, {"a": "a", "up": False}, {"a": "a", "up": True}]
 
 
-def test_installer_plan_and_core_install_offline(env, tmp_path, monkeypatch):
-    import zipfile
-    from emustart import installer
-    root = tmp_path / "emu"
-    assert installer.plan_for("psx", str(root))[0]["key"] == "duckstation"
-    steps = installer.plan_for("lynx", str(root))
-    assert [s["kind"] for s in steps] == ["retroarch", "core"]
-    (root / "RetroArch").mkdir(parents=True)
-    (root / "RetroArch" / "retroarch.exe").write_bytes(b"")
-    (root / "RetroArch" / "info").mkdir()
-    (root / "RetroArch" / "info" / "handy_libretro.info").write_text(
-        'corename = "Handy"\ndatabase = "Atari - Lynx"\n')
-
-    def fake_download(url, dest, progress, cancel):
-        with zipfile.ZipFile(dest, "w") as z:
-            z.writestr("handy_libretro.dll", b"DLL")
-    monkeypatch.setattr(installer, "_download", fake_download)
-    cfg = {"emu_root": str(root), "systems": {}}
-    job = installer.Job(cfg, [("lynx", installer.plan_for("lynx", str(root)))])
-    job.start()
-    job.thread.join(10)
-    assert job.status()["errors"] == []
-    assert (root / "RetroArch" / "cores" / "handy_libretro.dll").read_bytes() == b"DLL"
-    assert cfg["systems"]["lynx"]["label"] == "RetroArch: Handy"
-
-
 def test_system_logo_choice(env, tmp_path, monkeypatch):
     from emustart import logos
     monkeypatch.setattr(paths, "MEDIA", tmp_path / "media")
@@ -214,18 +188,21 @@ def test_system_logo_choice(env, tmp_path, monkeypatch):
     pack = tmp_path / "pack" / "_variants" / "Light_Just_White"
     _write(pack / "Sony Playstation-03.png", b"\x89PNG\r\n\x1a\nWHITE")
     _write(pack / "Sega Saturn-01.png", b"\x89PNG\r\n\x1a\nX")
-    cfg = {"logo_pack_dir": str(tmp_path / "pack"), "emu_root": str(tmp_path / "emu"), "systems": {}}
+    cfg = {"emu_root": str(tmp_path / "emu"), "systems": {}}
+    assert logos.import_pack(tmp_path / "pack") == 2                  # paczka w jednym pliku magazynu
     c = [x for x in logos.candidates(cfg, "psx") if x["source"].startswith("paczka")]
     assert [x["label"] for x in c] == ["Sony Playstation"] and c[0]["source"] == "paczka (białe)"
+    assert c[0]["url"] == "/media/_logopack/Light_Just_White~Sony%20Playstation-03.png"
     assert logos.choose(cfg, "psx", c[0]["id"])
     u = logos.url_for("psx", cfg)
     assert "/media/_systems/psx.custom.png" in u["url"]
     assert logos.choose(cfg, "psx", "none") and logos.url_for("psx", cfg)["url"] == ""
-    assert not logos.choose(cfg, "psx", "file:" + str(tmp_path / "x.exe"))   # tylko obrazy
+    assert not logos.choose(cfg, "psx", "file:" + str(tmp_path / "x.exe"))   # tylko z paczki i propozycji
+    assert not logos.choose(cfg, "psx", "pack:Light_Just_White~brak.png")
 
 
 def test_filter_fields_regions_players():
-    from emustart.api import _players, _regions
+    from emustart.catalog import players as _players, regions as _regions
     assert _regions("(USA, Europe) (Rev 1)") == ["USA", "Europa"]
     assert _regions("(World, set 1)") == []                  # wariant arcade, nie region
     assert _players("1-4") == 4 and _players("") == 0

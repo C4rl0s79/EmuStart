@@ -31,6 +31,16 @@ class EmuProfile(private val server: Server, private val prefs: Prefs) {
             """input_joypad_driver|input_driver|camera_driver|location_driver|menu_driver|libretro_.*)$""")
         private val SECRET = Regex("""^(cheevos_token|cheevos_password|.*_api_key|.*_auth_token|netplay_password|netplay_spectate_password)$""")
         private val AUTOSTATE = setOf("savestate_auto_save", "savestate_auto_load")
+        /** Zawsze przy starcie z EmuStart: RetroArch zamyka się po zamknięciu gry (inaczej na
+         *  Androidzie zostaje w tle z menu i nie wraca do EmuStart), a stan gry ma obrazek
+         *  (podgląd przy wyborze zapisu w EmuStart). Pad jak na PC (emustart/emupolicy.py):
+         *  każdy zapis stanu z nowym numerem, Start+Select — menu, Select — skróty,
+         *  Select+RB — przyspieszenie, Select+Y — zapis stanu (kody przycisków Androida:
+         *  Y=100, R1=103, SELECT=109). */
+        val LAUNCH = linkedMapOf("quit_on_close_content" to "2", "savestate_thumbnail_enable" to "true",
+            "savestate_auto_index" to "true", "input_menu_toggle_gamepad_combo" to "4",
+            "input_enable_hotkey_btn" to "109", "input_toggle_fast_forward_btn" to "103",
+            "input_save_state_btn" to "100")
         private val KEY = Regex("""^\s*([A-Za-z0-9_]+)\s*=""")
     }
 
@@ -66,8 +76,9 @@ class EmuProfile(private val server: Server, private val prefs: Prefs) {
                     }
                 }
             } catch (e: Exception) { Log.w(tag, "ustawienia RetroArcha z serwera: $e") }
-            val out = body.filter { val k = keyOf(it); k.isNotEmpty() && !k.startsWith("cheevos_") && k !in AUTOSTATE }
+            val out = body.filter { val k = keyOf(it); k.isNotEmpty() && !k.startsWith("cheevos_") && k !in AUTOSTATE && k !in LAUNCH }
                 .toMutableList()
+            for ((k, v) in LAUNCH) out += "$k = \"$v\""
             // autozapis wspólny dla urządzeń: zapis przy wyjściu, wczytanie przy starcie (jak na komputerze)
             out += "savestate_auto_save = \"true\""
             out += "savestate_auto_load = \"true\""
@@ -92,13 +103,23 @@ class EmuProfile(private val server: Server, private val prefs: Prefs) {
         }
     }
 
+    /** Bez profilu gracza: mały plik z ustawieniami startu (LAUNCH) i `#include` własnych
+     *  ustawień RetroArcha — RetroArch zamyka się po grze także bez profilu. */
+    fun retroarchBase(original: String): File? = try {
+        val f = File(ext, "EmuStart/retroarch-start.cfg")
+        f.parentFile?.mkdirs()
+        val text = LAUNCH.map { (k, v) -> "$k = \"$v\"" }.joinToString("\n") + "\n#include \"$original\"\n"
+        if (!f.isFile || f.readText() != text) f.writeText(text)
+        f
+    } catch (e: Exception) { Log.w(tag, "plik startowy RetroArcha: $e"); null }
+
     /** Po grze: ustawienia zmienione w RetroArchu → serwer (bez wartości telefonu i sekretów). */
     fun retroarchAfter(profile: String) {
         val f = overlay(profile)
         if (profile.isEmpty() || !f.isFile) return
         val text = lines(f).filter {
             val k = keyOf(it)
-            k.isNotEmpty() && !MACHINE.matches(k) && !SECRET.matches(k) && !k.startsWith("cheevos_")
+            k.isNotEmpty() && !MACHINE.matches(k) && !SECRET.matches(k) && !k.startsWith("cheevos_") && k !in LAUNCH
         }.joinToString("\n") + "\n"
         val key = "ra_cfg_sent:$profile"
         if (prefs.getString(key) == text.hashCode().toString()) return

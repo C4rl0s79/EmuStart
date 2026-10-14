@@ -87,8 +87,8 @@ class ProfileExists(ValueError):
 
 
 def create(name: str, color: str = "", cfg: dict | None = None, password: str = "") -> dict:
-    """Nowy profil. Z serwerem — konto z hasłem (emustart/accounts.py); przez SMB — folder.
-    Nazwa zajęta na serwerze / NAS-ie albo tutaj → ProfileExists."""
+    """Nowy profil = konto na serwerze z hasłem (emustart/accounts.py); serwer niedostępny —
+    profil lokalny, konto powstanie z pierwszym zapisem. Nazwa zajęta → ProfileExists."""
     from emustart import pinauth
     _ensure_columns()
     name = name.strip()[:32]
@@ -102,15 +102,12 @@ def create(name: str, color: str = "", cfg: dict | None = None, password: str = 
         taken = pinauth.find(_nas_profiles(fs), name)
         if taken or local:
             raise ProfileExists(taken or local)
-        if isinstance(fs, nasfs.RemoteFs):
-            r = fs.profile_op("create", {"name": name, "password": password})
-            if r.get("exists"):
-                raise ProfileExists(r.get("name") or name)
-            if not r.get("ok"):
-                raise ValueError(r.get("error") or "Serwer nie założył konta.")
-            nas_name, token = r["name"], r["token"]
-        else:
-            fs.write(f"{nas_name}/emustart.json", b"{}")
+        r = fs.profile_op("create", {"name": name, "password": password})
+        if r.get("exists"):
+            raise ProfileExists(r.get("name") or name)
+        if not r.get("ok"):
+            raise ValueError(r.get("error") or "Serwer nie założył konta.")
+        nas_name, token = r["name"], r["token"]
     elif local:
         raise ProfileExists(local)
     with library.db() as c:
@@ -122,11 +119,8 @@ def create(name: str, color: str = "", cfg: dict | None = None, password: str = 
 
 
 def _nas_profiles(fs) -> list:
-    """Nazwy profili w folderze profili (serwer: /v1/profiles, SMB: foldery)."""
-    if isinstance(fs, nasfs.RemoteFs):
-        return [p["name"] for p in fs.profiles()]
-    return [n for n, d in fs.listdir("") if d and not n.startswith((".", "_"))
-            and not fs.exists(f"{n}/moved.json")]
+    """Nazwy kont (profili) na serwerze."""
+    return [p["name"] for p in fs.profiles()]
 
 
 # ── konto na serwerze (hasło) i PIN tego urządzenia ──
@@ -144,8 +138,6 @@ def account_state(cfg: dict, pid: int, fresh: bool = False) -> str:
     if not prof or not nas_online(cfg):
         return "ok"
     fs = nasfs.backend(cfg)
-    if not isinstance(fs, nasfs.RemoteFs):
-        return "ok"                       # bez serwera (SMB): kont z hasłem nie ma
     mine = account_of_device(cfg)
     own = bool(mine) and mine.lower() == prof["nas_name"].lower()
     try:
@@ -189,7 +181,7 @@ def account_login(cfg: dict, pid: int, password: str) -> tuple[bool, str]:
     if not prof:
         return False, "Nie ma takiego profilu."
     fs = nasfs.backend(cfg)
-    if not isinstance(fs, nasfs.RemoteFs):
+    if not fs.online():
         return False, "Konta z hasłem są na serwerze EmuStart — serwer jest niedostępny."
     r = fs.profile_op("login", {"name": prof["nas_name"], "password": password})
     if not r.get("ok"):
@@ -210,7 +202,7 @@ def account_password(cfg: dict, pid: int, password: str, old: str = "") -> tuple
     if why:
         return False, why
     fs = nasfs.backend(cfg)
-    if not isinstance(fs, nasfs.RemoteFs):
+    if not fs.online():
         return False, "Konta z hasłem są na serwerze EmuStart — serwer jest niedostępny."
     q = {"name": prof["nas_name"], "password": password, "old": old}
     r = fs.profile_op("password", q)
@@ -226,7 +218,7 @@ def account_password(cfg: dict, pid: int, password: str, old: str = "") -> tuple
 def account_join(cfg: dict, name: str, password: str) -> tuple[dict | None, str]:
     """Konto innego użytkownika (albo założone na innym urządzeniu) na tym urządzeniu — z hasłem."""
     fs = nasfs.backend(cfg)
-    if not isinstance(fs, nasfs.RemoteFs):
+    if not fs.online():
         return None, "Konta z hasłem są na serwerze EmuStart — serwer jest niedostępny."
     r = fs.profile_op("login", {"name": name, "password": password})
     if r.get("missing"):
@@ -531,13 +523,8 @@ def attach(pid: int, family: str, emu_dir: Path) -> None:
 
 # ── NAS ──
 
-def nas_root(cfg: dict) -> Path:
-    # bez ustawionego folderu — brak (nie „Z:\…” z pierwszej instalacji); SmbFs: niedostępny
-    return Path(cfg.get("profiles_nas") or "")
-
-
 def nas_online(cfg: dict) -> bool:
-    """Folder profili dostępny — przez serwer EmuStart albo SMB (nasfs.backend)."""
+    """Folder profili (konta na serwerze EmuStart) dostępny."""
     return nasfs.backend(cfg).online()
 
 
@@ -1004,32 +991,17 @@ def align_account_name(cfg: dict) -> None:
 
 
 def import_from_nas(cfg: dict) -> list:
-    """Zakłada profile dla folderów na NAS, których nie ma w bazie. Zwraca nazwy."""
+    """Zakłada profile dla kont na serwerze, których nie ma w bazie. Zwraca nazwy.
+    Konto, którym urządzenie jest zalogowane, jest zawsze — także gdy serwer chwilowo nie
+    podał listy (inaczej „Kto gra?” pokazywał tylko „Inny użytkownik”)."""
     resolve_moves(cfg)
-    fs = nasfs.backend(cfg)
+    names = [account_of_device(cfg)] if account_of_device(cfg) else []
     try:
-        if isinstance(fs, nasfs.RemoteFs):
-            # serwer zna wszystkie profile (też z PIN-em, do których bez tokenu nie zajrzymy)
-            return _import_names([p["name"] for p in fs.profiles()])
-        dirs = [name for name, is_dir in fs.listdir("") if is_dir and not name.startswith((".", "_"))]
-    except (OSError, ValueError):
-        return []
-    have = {p["nas_name"].lower() for p in all_profiles()} | {p["name"].lower() for p in all_profiles()}
-    added = []
-    for d in sorted(dirs, key=str.lower):
-        if d.lower() in have:
-            continue
-        try:
-            if not any(fs.exists(f"{d}/{sub}") for sub in ("save", "settings", "emustart.json", "retroachievements.json")):
-                continue
-            with library.db() as c:
-                c.execute("INSERT INTO profiles(name, nas_name, color) VALUES(?,?,?)", (d[:32], d, ""))
-            added.append(d)
-        except Exception:
-            log.exception("profil z NAS %s", d)
-    if added:
-        log.info("profile z NAS: %s", ", ".join(added))
-    return added
+        # serwer zna wszystkie konta (też z hasłem, do których bez tokenu nie zajrzymy)
+        names += [p["name"] for p in nasfs.backend(cfg).profiles()]
+    except (OSError, ValueError) as ex:
+        log.warning("lista kont z serwera: %s", ex)
+    return _import_names(names)
 
 
 def _import_names(names: list) -> list:
@@ -1041,6 +1013,7 @@ def _import_names(names: list) -> list:
         with library.db() as c:
             c.execute("INSERT INTO profiles(name, nas_name, color) VALUES(?,?,?)", (d[:32], d, ""))
         added.append(d)
+        have.add(d.lower())
     if added:
         log.info("profile z serwera: %s", ", ".join(added))
     return added
@@ -1199,13 +1172,100 @@ def settings_load(cfg: dict, pid: int, adapter) -> int:
     return n
 
 
-def settings_save(cfg: dict, pid: int, adapter) -> int:
-    """Po grze: ustawienia emulatora → profil (i NAS)."""
+# ── historia ustawień emulatora (cofnięcie zmiany, która coś zepsuła) ──
+HISTORY_KEEP = 10
+
+
+def _history_dir(pid: int, family: str) -> Path:
+    return LOCAL / str(pid) / "settings_history" / family
+
+
+class _History:
+    """Wpis historii tworzony przy pierwszej zmianie pliku ustawień profilu: poprzednia wersja
+    każdego zmienionego pliku (albo informacja, że go nie było)."""
+
+    def __init__(self, pid: int, family: str, label: str):
+        self.pid, self.family, self.label = pid, family, label
+        self.dir: Path | None = None
+        self.files: dict = {}
+
+    def keep(self, snap: Path, rel) -> None:
+        rel = Path(rel).as_posix()
+        if rel in self.files:
+            return
+        if self.dir is None:
+            stamp = time.strftime("%Y%m%d-%H%M%S")
+            self.dir = _history_dir(self.pid, self.family) / stamp
+            i = 1
+            while self.dir.exists():
+                i += 1
+                self.dir = _history_dir(self.pid, self.family) / f"{stamp}-{i}"
+        old = snap / rel
+        self.files[rel] = old.is_file()
+        if old.is_file():
+            _copy_file(old, self.dir / "pliki" / rel)
+
+    def close(self) -> None:
+        if self.dir is None:
+            return
+        self.dir.mkdir(parents=True, exist_ok=True)
+        _write_atomic(self.dir / "wpis.json", json.dumps(
+            {"time": time.time(), "label": self.label, "files": self.files}, ensure_ascii=False))
+        entries = sorted((d for d in _history_dir(self.pid, self.family).iterdir() if d.is_dir()), reverse=True)
+        for d in entries[HISTORY_KEEP:]:
+            shutil.rmtree(d, ignore_errors=True)
+
+
+def settings_history(pid: int, family: str) -> list:
+    """[{id, time, label, files}] — zmiany ustawień emulatora w profilu, najnowsze pierwsze."""
+    out = []
+    root = _history_dir(pid, family)
+    for d in sorted((d for d in root.iterdir() if d.is_dir()), reverse=True) if root.is_dir() else []:
+        try:
+            w = json.loads((d / "wpis.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        out.append({"id": d.name, "time": w.get("time", 0), "label": w.get("label", ""),
+                    "files": sorted(w.get("files") or {})})
+    return out
+
+
+def settings_restore(cfg: dict, pid: int, family: str, hid: str) -> dict:
+    """Ustawienia profilu sprzed zmiany `hid` (pliki z tego wpisu historii); samo przywrócenie
+    też trafia do historii — można je cofnąć. Na serwer od razu; emulator dostanie je przed grą."""
+    d = _history_dir(pid, family) / hid
+    if not re.fullmatch(r"[\w-]+", hid or "") or not (d / "wpis.json").is_file():
+        return {"ok": False, "reason": "Nie ma takiej zmiany w historii."}
+    w = json.loads((d / "wpis.json").read_text(encoding="utf-8"))
+    snap = _settings_local(pid, family)
+    hist = _History(pid, family, "przywrócenie ustawień")
+    n = 0
+    for rel, existed in (w.get("files") or {}).items():
+        hist.keep(snap, rel)
+        if existed and (d / "pliki" / rel).is_file():
+            _copy_file(d / "pliki" / rel, snap / rel)
+        else:
+            # pliku przed zmianą nie było — pusty (emulator weźmie wartości domyślne)
+            _write_atomic(snap / rel, "")
+        os.utime(snap / rel, None)             # nowszy niż na serwerze — wygrywa przy synchronizacji
+        n += 1
+    hist.close()
+    prof = get(pid)
+    if prof and nas_online(cfg):
+        _sync(cfg, pid, "settings", family, ["-"], up=True)
+    log.info("ustawienia %s profilu %s przywrócone sprzed zmiany %s: %d plików", family, pid, hid, n)
+    return {"ok": True, "files": n}
+
+
+def settings_save(cfg: dict, pid: int, adapter, label: str = "") -> int:
+    """Po grze: ustawienia emulatora → profil (i NAS). Poprzednie wersje zmienionych plików —
+    do historii (settings_restore)."""
     family, base, rels = adapter.family, adapter.settings_base(), adapter.settings_files()
     if not rels:
         return 0
     snap = _settings_local(pid, family)
     secrets = {Path(k).as_posix(): v for k, v in adapter.secret_keys().items()}
+    hist = _History(pid, family, label)
     n = 0
     for rel, f in _files_under(base, rels):
         dst = snap / rel
@@ -1219,13 +1279,16 @@ def settings_save(cfg: dict, pid: int, adapter) -> int:
                 continue
             if dst.is_file() and dst.read_text(encoding="utf-8", errors="replace") == text:
                 continue
+            hist.keep(snap, rel)
             _write_atomic(dst, text)
             n += 1
             continue
         if dst.is_file() and _same_file(f, dst):
             continue
+        hist.keep(snap, rel)
         _copy_file(f, dst)
         n += 1
+    hist.close()
     prof = get(pid)
     if prof and nas_online(cfg):
         _sync(cfg, pid, "settings", family, ["-"], up=True)
@@ -1403,45 +1466,6 @@ def resolve_moves(cfg: dict) -> int:
     return n
 
 
-def nas_rename(cfg: dict, pid: int) -> str:
-    """Przenosi folder profilu na NAS pod nazwę zgodną z nazwą profilu. '' = OK,
-    inaczej powód odmowy."""
-    prof = get(pid)
-    if not prof:
-        return "Nie ma takiego profilu."
-    new = nas_wanted(prof)
-    if new == prof["nas_name"]:
-        return ""
-    root = nas_root(cfg)
-    if not nasfs.SmbFs(root).online():
-        return "Zmiana folderu profilu wymaga dostępu do NAS-a przez sieć (SMB)."
-    old_dir, new_dir = root / prof["nas_name"], root / new
-    if new_dir.exists():
-        return f"Na NAS jest już folder „{new}”."
-    if library.db().execute("SELECT 1 FROM profiles WHERE nas_name=? AND id!=?", (new, pid)).fetchone():
-        return f"Folder „{new}” należy do innego profilu."
-    try:
-        cur = json.loads((old_dir / "lock").read_text(encoding="utf-8"))
-        if lock_active(cur):
-            return f"Profil właśnie gra na komputerze {cur.get('host', '?')}."
-    except (OSError, ValueError):
-        pass
-    try:
-        if old_dir.exists():
-            os.rename(old_dir, new_dir)
-            old_dir.mkdir()
-            (old_dir / MOVED).write_text(json.dumps({"to": new, "time": time.time(),
-                                                     "host": socket.gethostname()}), encoding="utf-8")
-        else:
-            new_dir.mkdir(parents=True)
-    except OSError as ex:
-        return f"Nie udało się przenieść folderu: {ex}"
-    with library.db() as c:
-        c.execute("UPDATE profiles SET nas_name=? WHERE id=?", (new, pid))
-    log.info("profil %s: folder na NAS %s → %s", prof["name"], old_dir.name, new)
-    return ""
-
-
 def _merge_rules(*maps) -> dict:
     out: dict = {}
     for m in maps:
@@ -1461,14 +1485,11 @@ SECRET_FILES = {
 
 
 def scrub_settings_copies(cfg: dict) -> int:
-    """Usuwa hasła/tokeny z kopii ustawień profili (lokalnie i na NAS, także
-    w _backup). Pliki emulatorów i profiles/_machine (ten komputer) zostają."""
+    """Usuwa hasła/tokeny z lokalnych kopii ustawień profili (także w _backup). Pliki
+    emulatorów i profiles/_machine (ten komputer) zostają."""
     from emustart import ingame
-    roots = [LOCAL]
-    if nasfs.SmbFs(nas_root(cfg)).online():
-        roots.append(nas_root(cfg))
     n = 0
-    for root in roots:
+    for root in [LOCAL]:
         try:
             files = [f for name in SECRET_FILES for f in root.rglob(name)]
         except OSError:
