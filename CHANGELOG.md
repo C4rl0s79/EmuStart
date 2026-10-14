@@ -191,6 +191,17 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   uruchamianie gier tylko z serwera, kilka urządzeń z jednym serwerem — bez SMB.
 
 ### Naprawione
+- **Wolne łączenie z serwerem (PC i telefon)**:
+  - wybór adresu czekał, aż adresy sieci lokalnej serwera — z innej sieci nigdy nieosiągalne —
+    przekroczą czas (PC 2,5 s, telefon 3,5 s przy każdym sprawdzeniu); teraz po pierwszym
+    działającym adresie najwyżej 0,4 s na lepszy (PC zmierzone: 2,5 → 0,6 s),
+  - logowanie po nieudanej próbie szło przez **wszystkie** adresy, czekając 8–10 s na każdy martwy
+    (na telefonie minuta i dłużej — stąd gra na starym zapisie i konflikt); teraz tylko przez
+    adresy, które odpowiedziały, a jednoznaczna odmowa serwera kończy próby,
+  - lista gier systemu skompresowana (np. SNES 5 MB → 0,86 MB),
+  - **tylko zmienione gry**: serwer pobierający grafiki podbijał wersję całego systemu, więc PC
+    co 5 minut ściągał od nowa wszystkie listy (62 systemy, 45 tys. gier — kilkadziesiąt
+    sekund); teraz zmiana grafiki lub opisu gry wysyła tylko tę grę, pełna lista — po skanie.
 - Uruchamianie gry: okno „Przygotowuję…” pokazuje się od razu po A (wcześniej dopiero po
   sprawdzeniu konta i pobraniu BIOS-ów — przez ten czas nic się nie działo); BIOS-y, których
   serwer nie ma, nie są sprawdzane przy każdej grze (pamięć na 30 minut); w logu czas przed

@@ -281,7 +281,11 @@ def handle(handler) -> None:
             q = urllib.parse.parse_qs(urllib.parse.urlsplit(handler.path).query)
             es = (q.get("es") or [""])[0]
             if es:
-                return _json(handler, {"games": libsync.server_games(es)})
+                try:
+                    since = float((q.get("since") or ["0"])[0])
+                except ValueError:
+                    since = 0.0
+                return _json(handler, {"games": libsync.server_games(es, since)})
             return _json(handler, {"systems": libsync.server_systems()})
         if parts == ["sysinfo"]:                       # opis platformy (producent, lata, opis) dla telefonu
             q = urllib.parse.parse_qs(urllib.parse.urlsplit(handler.path).query)

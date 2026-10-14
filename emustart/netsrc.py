@@ -38,6 +38,7 @@ LAN_RTT = 0.004             # odpowiedź serwera szybsza = ta sama sieć lokalna
 
 BEST_TTL = 300              # wybrany adres serwera ważny tyle s (potem ponowne sprawdzenie)
 PROBE_TIMEOUT = 2.5
+GRACE = 0.4                      # po pierwszym działającym adresie: czekanie na lepszy
 KIND_ORDER = {"lan": 0, "tailscale": 1, "public": 2, "tunnel": 3}
 
 _info: dict = {}
@@ -277,6 +278,7 @@ def best(cfg: dict, fresh: bool = False):
         if not fresh and _best.get("sig") == sig and time.monotonic() - _best.get("t", 0) < BEST_TTL:
             return _best["sp"]
     res: dict = {}
+    first_ok: dict = {}
     done = threading.Condition()
 
     def rank(sp):
@@ -299,11 +301,16 @@ def best(cfg: dict, fresh: bool = False):
             waiting = [sp for sp in cands if sp not in res]
             if not waiting or (ok and min(map(rank, ok)) <= min(map(rank, waiting))):
                 break
+            if ok:
+                # jest działający adres — na lepszy (sieć lokalna) czekamy chwilę, nie do końca
+                # limitu: adresy sieci lokalnej serwera z innej sieci nigdy nie odpowiadają
+                end = min(end, first_ok.setdefault("t", time.monotonic()) + GRACE)
             left = end - time.monotonic()
             if left <= 0:
                 break
             done.wait(left)
         ok = [sp for sp in cands if res.get(sp) is not None]
+        _alive[:] = ok                      # logowanie tylko przez adresy, które odpowiedziały
         pick = min(ok, key=lambda sp: (rank(sp), res[sp])) if ok else cands[0]
         res = dict(res)
     with _best_lock:
@@ -449,6 +456,7 @@ _signer: dict = {}               # id urządzenia → (nazwa klucza, rodzaj)
 _session_lock = threading.Lock()
 _login_lock = threading.Lock()   # jedno logowanie naraz — reszta wątków czeka i bierze ten sam token
 _hint: list = []                 # ostatni działający adres (schemat, host, port)
+_alive: list = []                # adresy, które odpowiedziały przy ostatnim wyborze (best)
 _cfg_ref: list = []
 
 
@@ -559,7 +567,8 @@ def _login_any(did: str, sp) -> str:
     tries = [sp] if sp else []
     tries += [h for h in _hint if h not in tries]
     if _cfg_ref:
-        tries += [c for c in candidates(_cfg_ref[0]) if c not in tries]
+        # martwy adres = 10 s czekania na połączenie — przy kilku logowanie trwało długo
+        tries += [c for c in candidates(_cfg_ref[0]) if c not in tries and (not _alive or c in _alive)]
     for t in tries:
         try:
             tok = _login(did, t)
@@ -579,14 +588,19 @@ def _login_any(did: str, sp) -> str:
     return ""
 
 
-def _request(ep, path: str, timeout: float = 5) -> tuple[int, bytes, float]:
+def _request(ep, path: str, timeout: float = 5, gzip: bool = False) -> tuple[int, bytes, float]:
+    """GET z kluczem; gzip — odpowiedź skompresowana (listy gier: kilka MB → kilkaset KB)."""
     host, port, key = ep
     t = time.monotonic()
     c = conn(host, port, timeout)
     try:
-        c.request("GET", path, headers=auth_headers(key))
+        c.request("GET", path, headers={**auth_headers(key), **({"Accept-Encoding": "gzip"} if gzip else {})})
         r = c.getresponse()
-        return r.status, r.read(), time.monotonic() - t
+        body = r.read()
+        if (r.getheader("Content-Encoding") or "").lower() == "gzip":
+            import gzip as _gz
+            body = _gz.decompress(body)
+        return r.status, body, time.monotonic() - t
     finally:
         c.close()
 

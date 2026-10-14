@@ -112,19 +112,27 @@ class Server(private val prefs: Prefs) {
             doneSet += e.url
             synchronized(lock) { lock.notifyAll() }
         }.apply { isDaemon = true }.start()
-        val end = System.currentTimeMillis() + 3500
+        var end = System.currentTimeMillis() + 3500
+        var firstOk = 0L
         synchronized(lock) {
             while (true) {
                 val ok = cands.filter { res.containsKey(it.url) }
                 val waiting = cands.filter { it.url !in doneSet }
                 // dość, gdy odpowiedział adres, od którego żaden niesprawdzony nie byłby lepszy
                 if (waiting.isEmpty() || (ok.isNotEmpty() && ok.minOf { it.rank } <= waiting.minOf { it.rank })) break
+                if (ok.isNotEmpty()) {
+                    // jest działający adres — na lepszy (sieć lokalna) najwyżej 0,4 s: adresy sieci
+                    // lokalnej serwera z sieci komórkowej nigdy nie odpowiadają (było: 3,5 s czekania)
+                    if (firstOk == 0L) firstOk = System.currentTimeMillis()
+                    end = minOf(end, firstOk + 400)
+                }
                 val left = end - System.currentTimeMillis()
                 if (left <= 0) break
                 lock.wait(left)
             }
         }
         val ok = cands.filter { res.containsKey(it.url) }
+        alive = ok.map { it.url }.toSet()
         val pick = ok.minWithOrNull(compareBy<Ep>({ it.rank }, { res[it.url] ?: 0L }))?.url ?: cands.first().url
         if (pick != base) android.util.Log.i("EmuStart", "serwer: adres $pick" +
             cands.joinToString(prefix = " (", postfix = ")") { e -> "${e.url} " + (res[e.url]?.let { "$it ms" } ?: "brak") })
@@ -134,6 +142,9 @@ class Server(private val prefs: Prefs) {
         lastKind = cands.firstOrNull { it.url == pick }?.let { kindName(it) } ?: ""
         return pick
     }
+
+    /** Adresy, które odpowiedziały przy ostatnim sprawdzaniu — tylko przez nie logowanie. */
+    @Volatile private var alive: Set<String> = emptySet()
 
     /** Rodzaj wybranego adresu (sieć lokalna, Tailscale, port publiczny, tunel) — do ustawień. */
     @Volatile var lastKind = ""
@@ -179,11 +190,17 @@ class Server(private val prefs: Prefs) {
         if (tok.isNotEmpty() && System.currentTimeMillis() < tokExp - margin) return tok
         synchronized(loginLock) {           // jedno logowanie naraz — reszta bierze ten sam token
             if (tok.isNotEmpty() && System.currentTimeMillis() < tokExp - margin) return tok
-            val urls = (listOfNotNull(via) + listOf(base).filter { it.isNotEmpty() } + candidates().map { it.url }).distinct()
+            // tylko adresy, które odpowiedziały przy sprawdzaniu (martwy adres = 8 s czekania na
+            // połączenie; przy kilku martwych logowanie trwało minutę i dłużej)
+            val known = candidates().map { it.url }.filter { alive.isEmpty() || it in alive }
+            val urls = (listOfNotNull(via) + listOf(base).filter { it.isNotEmpty() } + known).distinct()
             for (u in urls) {
                 try {
                     val ch = postJson(u, "/v1/auth/challenge", JSONObject().put("device", prefs.deviceId), u in caUrls)
-                    if (!ch.optBoolean("ok")) { android.util.Log.w("EmuStart", "logowanie: ${ch.optString("reason")}"); continue }
+                    if (!ch.optBoolean("ok")) {
+                        // serwer odpowiedział „nie” — inne adresy prowadzą do tego samego serwera
+                        android.util.Log.w("EmuStart", "logowanie: ${ch.optString("reason")}"); break
+                    }
                     val nonce = ch.getString("nonce")
                     val sig = DeviceKey.sign(prefs.deviceKey, "emustart-auth|${prefs.deviceId}|$nonce".toByteArray())
                     val t = postJson(u, "/v1/auth/token", JSONObject().put("device", prefs.deviceId)

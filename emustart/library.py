@@ -78,6 +78,10 @@ CREATE TABLE IF NOT EXISTS game_meta (
     online  INTEGER NOT NULL DEFAULT 0,   -- 1 = pobrano już opisy z sieci
     updated REAL NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS game_chg (     -- serwer: ostatnia zmiana grafiki / opisu gry
+    game_id INTEGER PRIMARY KEY,
+    t       REAL NOT NULL
+);
 CREATE TABLE IF NOT EXISTS game_emu (     -- emulator wybrany dla jednej gry
     game_id INTEGER PRIMARY KEY,
     label   TEXT NOT NULL,
@@ -167,21 +171,35 @@ def meta_set(key: str, value: str) -> None:
         c.execute("INSERT OR REPLACE INTO meta(key,value) VALUES(?,?)", (key, value))
 
 
-def bump_rev(es: str) -> None:
-    """Zmiana grafiki albo opisu w systemie (serwer): urządzenia pobiorą ten system od nowa."""
+def bump_rev(es: str, full: bool = True) -> None:
+    """Zmiana grafiki albo opisu w systemie (serwer): urządzenia pobiorą ten system od nowa —
+    całą listę (full) albo tylko gry zmienione od ich ostatniej synchronizacji (game_chg)."""
     if es:
-        meta_set(f"rev:{es}", repr(time.time()))
+        now = repr(time.time())
+        meta_set(f"rev:{es}", now)
+        if full:
+            meta_set(f"full:{es}", now)
 
 
 def bump_rev_game(game_id: int) -> None:
+    """Zmiana jednej gry: urządzenia pobiorą tylko ją (nie cały system)."""
     r = db().execute("SELECT es FROM games WHERE id=?", (game_id,)).fetchone()
     if r:
-        bump_rev(r["es"])
+        with db() as c:
+            c.execute("INSERT OR REPLACE INTO game_chg(game_id, t) VALUES(?,?)", (game_id, time.time()))
+        bump_rev(r["es"], full=False)
 
 
 def rev(es: str) -> float:
     try:
         return float(meta_get(f"rev:{es}", "0") or 0)
+    except ValueError:
+        return 0.0
+
+
+def full_rev(es: str) -> float:
+    try:
+        return float(meta_get(f"full:{es}", "0") or 0)
     except ValueError:
         return 0.0
 

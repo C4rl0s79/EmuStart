@@ -50,7 +50,7 @@ def _server_lib(monkeypatch, scanned):
          "core": "bsnes" if es == "snes" else "", "logo": "/media/_systems/snes.custom.png" if es == "snes" else "",
          "logo_glow": False}
         for es, g in SERVER_GAMES.items() if es in scanned])
-    monkeypatch.setattr(libsync, "server_games", lambda es: SERVER_GAMES.get(es, []))
+    monkeypatch.setattr(libsync, "server_games", lambda es, since=0: SERVER_GAMES.get(es, []))
 
 
 def test_library_comes_from_server_without_scanning(srv, monkeypatch, tmp_path):

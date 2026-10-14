@@ -325,3 +325,25 @@ def test_server_imports_art_keys_file_and_deletes_it(monkeypatch):
     assert "jawny-klucz-sgdb-123" not in json.dumps(a._cfg)                    # zaszyfrowane
     assert art_sources.keys(a._cfg)["sgdb_key"] == "jawny-klucz-sgdb-123"
     assert srvadmin.import_keys_file(a) == 0
+
+
+def test_library_delta_only_changed_games():
+    """Zmiana grafiki / opisu jednej gry: urządzenia pobierają tylko ją, nie cały system
+    (serwer pobierający grafiki podbijał wersję systemu — PC co 5 minut ściągał wszystko)."""
+    import time
+    from emustart import libsync
+    with library.db() as c:
+        c.execute("INSERT OR REPLACE INTO systems(es, display, rom_dir, games, scanned) VALUES('nes','NES','nes',2,100)")
+        for rel in ("A.nes", "B.nes"):
+            c.execute("INSERT INTO games(es, rel, name, title, files, size, seen) VALUES('nes',?,?,?,'[]',1,1)",
+                      (rel, rel[:-4], rel[:-4]))
+    ids = {r["rel"]: r["id"] for r in library.db().execute("SELECT id, rel FROM games WHERE es='nes'")}
+    before = time.time()
+    full0 = next(s for s in libsync.server_systems() if s["es"] == "nes")["full"]
+    library.bump_rev_game(ids["B.nes"])
+    s = next(s for s in libsync.server_systems() if s["es"] == "nes")
+    assert s["scanned"] > before and s["full"] == full0                  # zmiana, ale nie pełna
+    assert [g["rel"] for g in libsync.server_games("nes", before)] == ["B.nes"]
+    assert len(libsync.server_games("nes")) == 2
+    library.bump_rev("nes")                                              # zmiana całego systemu
+    assert next(s for s in libsync.server_systems() if s["es"] == "nes")["full"] > full0

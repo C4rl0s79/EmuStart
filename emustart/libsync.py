@@ -41,10 +41,10 @@ def _get(cfg: dict, path: str, timeout: float = 30):
     ep = netsrc.endpoint(cfg)
     if not ep:
         raise OSError("serwer nie jest ustawiony")
-    st, body, _rtt = netsrc._request(ep, path, timeout)
+    st, body, _rtt = netsrc._request(ep, path, timeout, gzip=True)
     if st == 401 and ep[2].startswith(netsrc.DEV):
         netsrc.drop_token()
-        st, body, _rtt = netsrc._request(ep, path, timeout)
+        st, body, _rtt = netsrc._request(ep, path, timeout, gzip=True)
     if st == 403:
         raise PermissionError(json.loads(body or b"{}").get("error") or "brak dostępu")
     if st != 200:
@@ -71,6 +71,10 @@ def sync(cfg: dict, progress=None, force: bool = False) -> dict:
             old_rec = json.loads(library.meta_get("server_emu_rec", "{}") or "{}")
         except ValueError:
             old_rec = {}
+        try:
+            fulls = json.loads(library.meta_get("server_full", "{}") or "{}")
+        except ValueError:
+            fulls = {}
         changed = games = 0
         rec = {}
         for i, s in enumerate(remote):
@@ -82,9 +86,19 @@ def sync(cfg: dict, progress=None, force: bool = False) -> dict:
             if not force and local.get(es, {}).get("scanned") == s.get("scanned"):
                 games += int(s.get("games") or 0)
                 continue
-            rows = _get(cfg, "/v1/library?" + urllib.parse.urlencode({"es": es}), timeout=120).get("games") or []
-            _write(es, s, rows)
-            games += len(rows)
+            have = local.get(es, {}).get("scanned")
+            if not force and have and s.get("full") is not None and fulls.get(es) == s["full"]:
+                # zmieniły się tylko grafiki / opisy części gier — tylko one (nie cały system)
+                rows = _get(cfg, "/v1/library?" + urllib.parse.urlencode({"es": es, "since": repr(float(have))}),
+                            timeout=120).get("games") or []
+                _write(es, s, rows, partial=True)
+                games += int(s.get("games") or 0)
+            else:
+                rows = _get(cfg, "/v1/library?" + urllib.parse.urlencode({"es": es}), timeout=120).get("games") or []
+                _write(es, s, rows)
+                games += len(rows)
+            if s.get("full") is not None:
+                fulls[es] = s["full"]
             changed += 1
         gone = set(local) - {s["es"] for s in remote}
         if gone:
@@ -101,6 +115,7 @@ def sync(cfg: dict, progress=None, force: bool = False) -> dict:
         _drop_changed_logos(old_rec, rec)
         if progress:
             progress("Gotowe", len(remote), len(remote))
+        library.meta_set("server_full", json.dumps(fulls))
         log.info("biblioteka z serwera: %d systemów (%d zmienionych), %d gier", len(remote), changed, games)
         return {"ok": True, "systems": len(remote), "games": games, "changed": changed}
     except (OSError, ValueError) as ex:
@@ -148,7 +163,8 @@ def _drop_changed_art(es: str, rows: list) -> int:
     return n
 
 
-def _write(es: str, s: dict, rows: list) -> None:
+def _write(es: str, s: dict, rows: list, partial: bool = False) -> None:
+    """Gry systemu z serwera → baza. partial — tylko zmienione gry (pozostałe zostają)."""
     now = time.time()
     _drop_changed_art(es, rows)
     data = []
@@ -177,7 +193,7 @@ def _write(es: str, s: dict, rows: list) -> None:
                  json.dumps(r["meta"].get("edits") or {}, ensure_ascii=False), 1, now)
                 for r in rows if r.get("meta") and r["rel"] in ids]
         c.executemany("INSERT OR REPLACE INTO game_meta(game_id, data, edits, online, updated) VALUES(?,?,?,?,?)", meta)
-        gone = [r["id"] for r in c.execute("SELECT id FROM games WHERE es=? AND seen<?", (es, now))]
+        gone = [] if partial else [r["id"] for r in c.execute("SELECT id FROM games WHERE es=? AND seen<?", (es, now))]
         for j in range(0, len(gone), 500):
             chunk = gone[j:j + 500]
             marks = ",".join("?" * len(chunk))
@@ -283,18 +299,25 @@ def server_systems() -> list:
         # wersja systemu: skan albo ostatnia zmiana grafiki / opisu — urządzenia pobiorą go od nowa
         out.append({"es": r["es"], "display": sc.get("name") or r["display"], "games": r["games"],
                     "scanned": max(float(r["scanned"] or 0), library.rev(r["es"])),
+                    # pełna lista potrzebna, gdy zmienił się skan albo cały system (nie pojedyncze gry)
+                    "full": max(float(r["scanned"] or 0), library.full_rev(r["es"])),
                     "emu_rec": sc.get("emu_rec", ""), "core": sc.get("core_rec", ""),
                     "logo": lg["url"], "logo_glow": bool(lg["glow"])})
     return out
 
 
-def server_games(es: str) -> list:
-    """Gry systemu dla PC: kolumny biblioteki, czasy grafik (PC podmienia zmienione) i opisy."""
+def server_games(es: str, since: float = 0) -> list:
+    """Gry systemu dla PC: kolumny biblioteki, czasy grafik (PC podmienia zmienione) i opisy.
+    since — tylko gry zmienione później (grafika / opis, game_chg)."""
     from emustart import art
     cols = ", ".join(f"g.{c}" for c in COLS)
     out = []
+    where, args = "WHERE g.es=?", [es]
+    if since:
+        where += " AND g.id IN (SELECT game_id FROM game_chg WHERE t > ?)"
+        args.append(since)
     for r in library.db().execute(f"SELECT {cols}, m.data AS m_data, m.edits AS m_edits FROM games g "
-                                  "LEFT JOIN game_meta m ON m.game_id=g.id WHERE g.es=?", (es,)):
+                                  f"LEFT JOIN game_meta m ON m.game_id=g.id {where}", args):
         d = {c: r[c] for c in COLS}
         art_m = {}
         for kind in ("box", "snap", "logo"):
