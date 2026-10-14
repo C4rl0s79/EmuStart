@@ -279,6 +279,16 @@ async function openSaveManager() {
   GO.sm = r;
   renderGopt();
 }
+/* telefon: „Wczytaj zapis” — stany RetroArcha ze wszystkich urządzeń pobrane z serwera
+   (na PC tę listę daje game_options po pobraniu stanów do folderu RetroArcha) */
+async function openRaStatesPhone() {
+  toast("Pobieram stany z serwera…", 3000);
+  const r = await api().ra_states(GO.pid);
+  if (!r || !r.ok) return toast(r?.reason || "Nie udało się pobrać stanów.", 5000);
+  if (!r.states.length) return toast(r.note || "Serwer nie ma stanów tej gry dla rdzenia wybranego na tym telefonie.", 6000);
+  GO.data = { ...(GO.data || {}), states: r.states };
+  goPage("states");
+}
 function smSlot(st) {
   const s = String(st.slot).toLowerCase();
   if (s === "auto") return "autozapis";
@@ -296,7 +306,7 @@ function saveManagerItems() {
   const ra = r.states.filter((st) => st.kind === "ra");
   const states = r.states.filter((st) => st.kind !== "ra");
   if (ra.length) items.push({ label: "Stany RetroArcha (wszystkie urządzenia)", value: "→ Wczytaj zapis",
-                              act: () => goPage("states") });
+                              act: () => S.platform === "android" ? openRaStatesPhone() : goPage("states") });
   if (!states.length && !ra.length) items.push({ label: "Brak stanów tej gry", value: "na komputerze i telefonie", act: () => {} });
   for (const st of states) {
     const here = st.platform === r.here;

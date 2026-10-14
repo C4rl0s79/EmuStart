@@ -865,6 +865,12 @@ class Api:
                 "retroarch": bool(emu["exe"]) and ingame.adapter_for(emu["exe"]).family == "retroarch",
                 "shader_off": bool(sc.get("shader_off"))}
 
+    def ra_states(self, game_id: int) -> dict:
+        """„Wczytaj zapis” — stany ze wszystkich urządzeń (na telefonie: Bridge.raStates).
+        Na PC to ta sama lista co w opcjach gry."""
+        opts = self.game_options(game_id)
+        return {"ok": bool(opts), "states": opts.get("states", []) if opts else []}
+
     @staticmethod
     def _state_label(st: dict, desc: dict) -> None:
         """Opis stanu na liście: „Kontynuuj”, „Stan #13”, urządzenie i rodzaj (z serwera)."""
