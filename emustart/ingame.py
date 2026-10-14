@@ -432,6 +432,7 @@ class RetroArch(Adapter):
 
     def toggle_shader(self) -> None:
         self._cmd("SHADER_TOGGLE")
+        self._shader_toggled = True        # tylko do końca gry — po grze nie trafia do retroarch.cfg
 
     def can_reset(self) -> bool:
         return True
@@ -535,7 +536,8 @@ class RetroArch(Adapter):
         start, sess, appended = st
         before, after = _cfg_map(start), _cfg_map(sess)
         changes = {(None, k): v for k, v in after.items()
-                   if k not in appended and not self._SESSION_KEYS.fullmatch(k) and before.get(k) != v}
+                   if k not in appended and not self._SESSION_KEYS.fullmatch(k) and before.get(k) != v
+                   and not (k == "video_shader_enable" and getattr(self, "_shader_toggled", False))}
         if changes:
             ini_set(self.home / "retroarch.cfg", changes)
             log.info("RetroArch: %d ustawień zmienionych w trakcie sesji → retroarch.cfg (%s)",

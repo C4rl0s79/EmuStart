@@ -316,3 +316,23 @@ def test_ingame_reset_and_shader_commands(tmp_path, monkeypatch):
     ra.toggle_shader()
     assert sent == ["RESET", "SHADER_TOGGLE"]
     assert not ingame.DuckStation(str(tmp_path / "duckstation.exe")).can_reset()
+
+
+def test_shader_toggle_from_emustart_menu_is_session_only(tmp_path, monkeypatch):
+    """A + Y → Włącz / wyłącz shader: tylko do końca gry. Wcześniej RetroArch zapisywał zmianę
+    przy wyjściu i EmuStart przenosił ją do retroarch.cfg (shader wyłączony na stałe)."""
+    from emustart import ingame
+    home = tmp_path / "RetroArch"
+    home.mkdir()
+    (home / "retroarch.cfg").write_text('video_shader_enable = "true"\nvideo_vsync = "true"\n', encoding="utf-8")
+    ra = ingame.RetroArch(str(home / "retroarch.exe"))
+    monkeypatch.setattr(ra, "_cmd", lambda c: None)
+    args = ra.launch_args(tmp_path / "run", resume=False)
+    sess = Path(args[args.index("--config") + 1])
+    ra.toggle_shader()
+    # RetroArch przy wyjściu zapisał kopię sesji: shader wyłączony (z menu EmuStart) i vsync (z menu RA)
+    sess.write_text(sess.read_text(encoding="utf-8").replace('video_shader_enable = "true"', 'video_shader_enable = "false"')
+                    .replace('video_vsync = "true"', 'video_vsync = "false"'), encoding="utf-8")
+    ra.after_session()
+    main = (home / "retroarch.cfg").read_text(encoding="utf-8")
+    assert 'video_shader_enable = "true"' in main and 'video_vsync = "false"' in main

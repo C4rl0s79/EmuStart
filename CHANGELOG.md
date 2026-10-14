@@ -204,6 +204,9 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   uruchamianie gier tylko z serwera, kilka urządzeń z jednym serwerem — bez SMB.
 
 ### Naprawione
+- Menu w grze → *Włącz / wyłącz shader* działało na stałe zamiast do końca gry: RetroArch zapisywał
+  zmianę przy wyjściu, a EmuStart przenosił ją do `retroarch.cfg` i profilu. Teraz zostaje tylko
+  w tej grze; inne zmiany z menu RetroArcha zapisują się jak dotąd.
 - **Wolne łączenie z serwerem (PC i telefon)**:
   - wybór adresu czekał, aż adresy sieci lokalnej serwera — z innej sieci nigdy nieosiągalne —
     przekroczą czas (PC 2,5 s, telefon 3,5 s przy każdym sprawdzeniu); teraz po pierwszym
