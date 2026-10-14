@@ -28,10 +28,11 @@ DEFAULTS = {
         "savestate_thumbnail_enable": "true",   # obrazek stanu — podgląd w EmuStart
         "quit_on_close_content": "2",           # „Zamknij grę” = wyjście (uruchomienie z EmuStart)
         "savestate_auto_index": "true",         # każdy zapis stanu = nowy numer, nic się nie nadpisuje
-        # pad (numery przycisków sterownika XInput: Y=3, RB=5, Select=6) — dlatego też sterownik
+        # pad (numery przycisków sterownika XInput, jak w autoconfig/xinput RetroArcha: Y=3, RB=5,
+        # Start=6, Select (View)=7) — dlatego też sterownik
         "input_joypad_driver": "xinput",
         "input_menu_toggle_gamepad_combo": "4",  # Start + Select = menu RetroArcha
-        "input_enable_hotkey_btn": "6",          # Select = przycisk skrótów
+        "input_enable_hotkey_btn": "7",          # Select (View) = przycisk skrótów
         "input_toggle_fast_forward_btn": "5",    # Select + RB = przyspieszenie (wł./wył.)
         "input_save_state_btn": "3",             # Select + Y = zapis stanu
     },

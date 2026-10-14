@@ -284,7 +284,7 @@ def test_retroarch_default_pad_and_auto_index(tmp_path):
     ra.launch_args(tmp_path / "run", resume=False)
     lines = set((tmp_path / "run" / "emustart_ra.cfg").read_text(encoding="utf-8").splitlines())
     for line in ('savestate_auto_index = "true"', 'input_joypad_driver = "xinput"',
-                 'input_menu_toggle_gamepad_combo = "4"', 'input_enable_hotkey_btn = "6"',
+                 'input_menu_toggle_gamepad_combo = "4"', 'input_enable_hotkey_btn = "7"',
                  'input_toggle_fast_forward_btn = "5"', 'input_save_state_btn = "3"'):
         assert line in lines, line
 
