@@ -529,7 +529,8 @@ class Session:
         names = [n for n in names if n != "-"]
         if getattr(self, "_settings_on", False):
             try:
-                n = profiles.settings_save(self.cfg, self.profile_id, adapter)
+                n = profiles.settings_save(self.cfg, self.profile_id, adapter,
+                                           (getattr(self, "game", None) or {}).get("title", "") or "ustawienia emulatora")
                 if n:
                     log.info("ustawienia %s zapisane w profilu: %d plików", adapter.family, n)
             except Exception:

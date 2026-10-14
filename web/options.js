@@ -164,7 +164,7 @@ function goptItems() {
     ...variantItem(),
     { label: "Emulator", value: d.emulator.label + (d.emulator.own ? "  (tylko ta gra)" : ""), act: () => goPage("emus") },
     { label: "Ustawienia emulatora", value: "obraz, dźwięk, sterowanie — w Twoim profilu",
-      act: () => { closeGopt(); launch("", false, true); } },
+      act: openEmuSettings },
     { label: "Wczytaj zapis", value: d.states.length ? `${d.states.length} ${plural(d.states.length, "zapis", "zapisy", "zapisów")}` : "brak zapisów",
       act: () => d.states.length ? goPage("states") : toast("Ten emulator nie ma zapisów tej gry.") },
     { label: "Zapisy i stany", value: "z komputera i telefonu", act: openSaveManager },
@@ -206,6 +206,7 @@ function goptItems() {
     act: () => { closeGopt(); launch(st.path); },
   }));
   if (GO.page === "saves") return saveManagerItems();
+  if (GO.page === "emuset") return emuSettingsItems();
   if (GO.page === "stateAct") return stateActItems();
   if (GO.page === "meta") {
     // podgląd; administrator poprawia — zapis na serwerze (wszystkie urządzenia)
@@ -226,6 +227,38 @@ function goptItems() {
   }
   return [];
 }
+/* ── ustawienia emulatora: zmiana w emulatorze i historia zmian (cofnięcie zepsutych) ── */
+async function openEmuSettings() {
+  GO.emuHist = null;
+  goPage("emuset");
+  const r = await api().emu_settings_history(GO.id);
+  if (GO.page !== "emuset") return;
+  GO.emuHist = r?.ok ? r.list : [];
+  renderGopt();
+}
+function emuSettingsItems() {
+  const items = [{ label: "Zmień w emulatorze (bez gry)", value: "zapisze się w Twoim profilu",
+                   act: () => { closeGopt(); launch("", false, true); } },
+                 { label: "Albo w trakcie gry: Start + Select → menu RetroArcha", value: "zmiana zapisze się po grze", act: () => {} }];
+  if (!GO.emuHist) items.push({ label: "Wczytuję historię zmian…", value: "", act: () => {} });
+  else if (!GO.emuHist.length) items.push({ label: "Historia zmian jest pusta", value: "", act: () => {} });
+  else {
+    items.push({ label: "— Cofnij zmianę (ustawienia sprzed niej) —", value: "", act: () => {} });
+    for (const h of GO.emuHist) items.push({
+      label: `${fmtDate(h.time)} · ${h.label || "zmiana"}`,
+      value: h.files.map((f) => f.split("/").pop()).slice(0, 3).join(", ") + (h.files.length > 3 ? ` +${h.files.length - 3}` : ""),
+      act: async () => {
+        if (GO.confirmRestore !== h.id) { GO.confirmRestore = h.id; return toast("A jeszcze raz — przywróć ustawienia sprzed tej zmiany.", 4000); }
+        GO.confirmRestore = null;
+        const r = await api().emu_settings_restore(GO.id, h.id);
+        toast(r?.ok ? `Przywrócono ustawienia (${r.files} ${plural(r.files, "plik", "pliki", "plików")}) — działają od następnej gry.` : r?.reason || "Nie udało się.", 6000);
+        if (r?.ok) openEmuSettings();
+      },
+    });
+  }
+  return items;
+}
+
 /* ── menedżer zapisów: stany z komputera i telefonu, kopiowanie między nimi ── */
 const SM_PLAT = { windows: "Komputer", android: "Telefon", shared: "Wszystkie urządzenia" };
 async function openSaveManager() {
@@ -323,7 +356,7 @@ function goPage(page) { GO.page = page; GO.idx = 0; renderGopt(); }
 
 function renderGopt() {
   const titles = { main: "Opcje gry", variants: "Wersja gry", emus: "Emulator dla tej gry", states: "Wczytaj zapis", meta: "Metadane",
-                   saves: "Zapisy i stany", stateAct: "Stan gry",
+                   saves: "Zapisy i stany", stateAct: "Stan gry", emuset: "Ustawienia emulatora",
                    art: { snap: "Zrzut ekranu", logo: "Logo gry", box: "Okładka" }[GO.art?.kind] || "Okładka" };
   $("goTitle").textContent = GO.detail?.title || "";
   $("goPage").textContent = titles[GO.page];

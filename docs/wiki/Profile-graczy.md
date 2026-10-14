@@ -88,6 +88,14 @@ już sprawdzane.
   „Stan #N”, urządzenie, data, autozapis; na górze „Kontynuuj — najnowszy stan”,
 - serwer trzyma 50 najnowszych stanów gry (dla każdego rdzenia).
 
+**Ustawienia emulatora** (opcje gry → **Ustawienia emulatora**) należą do profilu: przed grą
+kopia z profilu zastępuje plik emulatora, po grze zmiany wracają do profilu. Zmienia się je
+w emulatorze — w trakcie gry (RetroArch: **Start + Select** → menu, np. Opcje rdzenia →
+rozdzielczość) albo **Zmień w emulatorze (bez gry)**. Ręczna edycja pliku poza grą zostanie
+zastąpiona kopią z profilu. Gdy zmiana coś zepsuje (np. czarny ekran po zbyt wysokiej
+rozdzielczości): **Cofnij zmianę** — lista 10 ostatnich zmian (data, gra, pliki); wybrana
+przywraca ustawienia sprzed niej od następnej gry, a samo przywrócenie też da się cofnąć.
+
 **Menedżer zapisów** (opcje gry → **Zapisy i stany**, na komputerze i telefonie):
 stany tej gry z komputera i z telefonu oraz wspólne zapisy w grze. Stan z jednej platformy
 można skopiować na drugą (pobierze się przy następnej grze). Zgodność:

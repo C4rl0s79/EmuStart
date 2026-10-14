@@ -84,6 +84,11 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   zostawał w tle z menu. Stany gry RetroArcha mają obrazek (podgląd stanu).
 
 ### Dodane
+- **Historia ustawień emulatora — cofnięcie zepsutej zmiany**: opcje gry → *Ustawienia
+  emulatora* → *Cofnij zmianę* (10 ostatnich zmian: data, gra, pliki). Ustawienia profilu nadal
+  zastępują plik emulatora przed grą, ale zmiana, po której np. ekran jest czarny (za wysoka
+  skala rozdzielczości), da się cofnąć bez edycji plików na serwerze; samo przywrócenie też
+  trafia do historii.
 - **Stany RetroArcha jak w Steam** (koncepcja 2.0, §5.5) — tylko dochodzą, nigdy się nie
   nadpisują: numer stanu zajęty na serwerze inną zawartością (dwa urządzenia, gra bez serwera)
   → następny wolny numer (komputer i telefon); autozapis przy wyjściu trafia też do historii

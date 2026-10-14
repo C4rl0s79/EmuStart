@@ -1172,13 +1172,100 @@ def settings_load(cfg: dict, pid: int, adapter) -> int:
     return n
 
 
-def settings_save(cfg: dict, pid: int, adapter) -> int:
-    """Po grze: ustawienia emulatora → profil (i NAS)."""
+# ── historia ustawień emulatora (cofnięcie zmiany, która coś zepsuła) ──
+HISTORY_KEEP = 10
+
+
+def _history_dir(pid: int, family: str) -> Path:
+    return LOCAL / str(pid) / "settings_history" / family
+
+
+class _History:
+    """Wpis historii tworzony przy pierwszej zmianie pliku ustawień profilu: poprzednia wersja
+    każdego zmienionego pliku (albo informacja, że go nie było)."""
+
+    def __init__(self, pid: int, family: str, label: str):
+        self.pid, self.family, self.label = pid, family, label
+        self.dir: Path | None = None
+        self.files: dict = {}
+
+    def keep(self, snap: Path, rel) -> None:
+        rel = Path(rel).as_posix()
+        if rel in self.files:
+            return
+        if self.dir is None:
+            stamp = time.strftime("%Y%m%d-%H%M%S")
+            self.dir = _history_dir(self.pid, self.family) / stamp
+            i = 1
+            while self.dir.exists():
+                i += 1
+                self.dir = _history_dir(self.pid, self.family) / f"{stamp}-{i}"
+        old = snap / rel
+        self.files[rel] = old.is_file()
+        if old.is_file():
+            _copy_file(old, self.dir / "pliki" / rel)
+
+    def close(self) -> None:
+        if self.dir is None:
+            return
+        self.dir.mkdir(parents=True, exist_ok=True)
+        _write_atomic(self.dir / "wpis.json", json.dumps(
+            {"time": time.time(), "label": self.label, "files": self.files}, ensure_ascii=False))
+        entries = sorted((d for d in _history_dir(self.pid, self.family).iterdir() if d.is_dir()), reverse=True)
+        for d in entries[HISTORY_KEEP:]:
+            shutil.rmtree(d, ignore_errors=True)
+
+
+def settings_history(pid: int, family: str) -> list:
+    """[{id, time, label, files}] — zmiany ustawień emulatora w profilu, najnowsze pierwsze."""
+    out = []
+    root = _history_dir(pid, family)
+    for d in sorted((d for d in root.iterdir() if d.is_dir()), reverse=True) if root.is_dir() else []:
+        try:
+            w = json.loads((d / "wpis.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        out.append({"id": d.name, "time": w.get("time", 0), "label": w.get("label", ""),
+                    "files": sorted(w.get("files") or {})})
+    return out
+
+
+def settings_restore(cfg: dict, pid: int, family: str, hid: str) -> dict:
+    """Ustawienia profilu sprzed zmiany `hid` (pliki z tego wpisu historii); samo przywrócenie
+    też trafia do historii — można je cofnąć. Na serwer od razu; emulator dostanie je przed grą."""
+    d = _history_dir(pid, family) / hid
+    if not re.fullmatch(r"[\w-]+", hid or "") or not (d / "wpis.json").is_file():
+        return {"ok": False, "reason": "Nie ma takiej zmiany w historii."}
+    w = json.loads((d / "wpis.json").read_text(encoding="utf-8"))
+    snap = _settings_local(pid, family)
+    hist = _History(pid, family, "przywrócenie ustawień")
+    n = 0
+    for rel, existed in (w.get("files") or {}).items():
+        hist.keep(snap, rel)
+        if existed and (d / "pliki" / rel).is_file():
+            _copy_file(d / "pliki" / rel, snap / rel)
+        else:
+            # pliku przed zmianą nie było — pusty (emulator weźmie wartości domyślne)
+            _write_atomic(snap / rel, "")
+        os.utime(snap / rel, None)             # nowszy niż na serwerze — wygrywa przy synchronizacji
+        n += 1
+    hist.close()
+    prof = get(pid)
+    if prof and nas_online(cfg):
+        _sync(cfg, pid, "settings", family, ["-"], up=True)
+    log.info("ustawienia %s profilu %s przywrócone sprzed zmiany %s: %d plików", family, pid, hid, n)
+    return {"ok": True, "files": n}
+
+
+def settings_save(cfg: dict, pid: int, adapter, label: str = "") -> int:
+    """Po grze: ustawienia emulatora → profil (i NAS). Poprzednie wersje zmienionych plików —
+    do historii (settings_restore)."""
     family, base, rels = adapter.family, adapter.settings_base(), adapter.settings_files()
     if not rels:
         return 0
     snap = _settings_local(pid, family)
     secrets = {Path(k).as_posix(): v for k, v in adapter.secret_keys().items()}
+    hist = _History(pid, family, label)
     n = 0
     for rel, f in _files_under(base, rels):
         dst = snap / rel
@@ -1192,13 +1279,16 @@ def settings_save(cfg: dict, pid: int, adapter) -> int:
                 continue
             if dst.is_file() and dst.read_text(encoding="utf-8", errors="replace") == text:
                 continue
+            hist.keep(snap, rel)
             _write_atomic(dst, text)
             n += 1
             continue
         if dst.is_file() and _same_file(f, dst):
             continue
+        hist.keep(snap, rel)
         _copy_file(f, dst)
         n += 1
+    hist.close()
     prof = get(pid)
     if prof and nas_online(cfg):
         _sync(cfg, pid, "settings", family, ["-"], up=True)

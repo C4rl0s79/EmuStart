@@ -799,3 +799,44 @@ def test_remote_api_token_ranges_and_paths(env, tmp_path):
 def _append(args: list) -> Path:
     """Plik --appendconfig z parametrów RetroArcha (przed nim bywa --config kopii sesji)."""
     return Path(args[args.index("--appendconfig") + 1])
+
+
+def test_emulator_settings_history_and_restore(tmp_path, monkeypatch):
+    """Zepsute ustawienie (np. skala rozdzielczości, przy której ekran jest czarny): profil
+    nadpisuje plik emulatora przed grą, ale poprzednią wersję da się przywrócić z historii."""
+    from emustart import profiles
+    monkeypatch.setattr(profiles, "LOCAL", tmp_path / "profiles")
+    monkeypatch.setattr(profiles, "nas_online", lambda cfg: False)
+    monkeypatch.setattr(profiles, "get", lambda pid: {"id": pid, "nas_name": "Jezus"})
+
+    class Ad:
+        family = "retroarch"
+        home = tmp_path / "RA"
+
+        def settings_base(self):
+            return self.home
+
+        def settings_files(self):
+            return ["config"]
+
+        def secret_keys(self):
+            return {}
+    ad = Ad()
+    opt = ad.home / "config" / "SwanStation" / "SwanStation.opt"
+    _write(opt, b'swanstation_GPU_ResolutionScale = "2"\n')
+    profiles.settings_save({}, 1, ad, "Gra A")
+    _write(opt, b'swanstation_GPU_ResolutionScale = "6"\n')                # czarny ekran
+    profiles.settings_save({}, 1, ad, "Gra B")
+    snap = profiles._settings_local(1, "retroarch") / "config" / "SwanStation" / "SwanStation.opt"
+    assert b'"6"' in snap.read_bytes()
+    hist = profiles.settings_history(1, "retroarch")
+    assert [h["label"] for h in hist] == ["Gra B", "Gra A"]
+    assert hist[0]["files"] == ["config/SwanStation/SwanStation.opt"]
+    assert profiles.settings_restore({}, 1, "retroarch", hist[0]["id"])["ok"]
+    assert b'"2"' in snap.read_bytes()                                       # sprzed zepsucia
+    # przywrócenie też jest w historii — można je cofnąć
+    assert profiles.settings_history(1, "retroarch")[0]["label"] == "przywrócenie ustawień"
+    # plik, którego przed zmianą nie było → pusty (emulator weźmie wartości domyślne)
+    assert profiles.settings_restore({}, 1, "retroarch", hist[1]["id"])["ok"]
+    assert snap.read_bytes() == b""
+    assert not profiles.settings_restore({}, 1, "retroarch", "../x")["ok"]

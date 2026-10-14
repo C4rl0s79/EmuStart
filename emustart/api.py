@@ -881,6 +881,24 @@ class Api:
         kind = {"auto": "autozapis przy wyjściu", "manual": ""}.get(d.get("kind", ""), "")
         st["detail"] = " · ".join(x for x in (who, kind) if x)
 
+    # ── historia ustawień emulatora (opcje gry → Ustawienia emulatora) ──
+    def _emu_family(self, game_id: int) -> str:
+        g = library.game(int(game_id))
+        emu = self._effective_emu(g) if g else {}
+        return ingame.adapter_for(emu["exe"]).family if emu.get("exe") else ""
+
+    def emu_settings_history(self, game_id: int) -> dict:
+        fam = self._emu_family(game_id)
+        if not fam:
+            return {"ok": False, "reason": "Ta gra nie ma jeszcze emulatora."}
+        return {"ok": True, "family": fam, "list": profiles.settings_history(self._profile, fam)}
+
+    def emu_settings_restore(self, game_id: int, hid: str) -> dict:
+        fam = self._emu_family(game_id)
+        if not fam:
+            return {"ok": False, "reason": "Ta gra nie ma jeszcze emulatora."}
+        return profiles.settings_restore(self._cfg, self._profile, fam, str(hid))
+
     # ── menedżer zapisów (opcje gry → Zapisy i stany) ──
     def _savemgr_ctx(self, g: dict):
         prof = profiles.get(self._profile) or {}
