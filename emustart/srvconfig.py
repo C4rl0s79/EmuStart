@@ -34,7 +34,7 @@ FIELDS = {
                       "Pusty — folder emulators w katalogu serwera."),
     "logo_pack_dir": ("Paczka logo platform (opcjonalnie)", "dir", True,
                       "Własne logo systemów do wyboru (np. platform_logos z PyLinks) — dodatkowo do motywów "
-                      "z internetu. Serwer wczytuje paczkę do jednego pliku (media\_logopack.media); "
+                      "z internetu. Serwer wczytuje paczkę do jednego pliku (media/_logopack.media); "
                       "folder może potem zniknąć."),
     "backup_dir": ("Folder kopii kont", "dir", True,
                    "Kopie zapasowe kont (ZIP). Pusty — folder backup w katalogu serwera."),
