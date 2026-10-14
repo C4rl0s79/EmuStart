@@ -356,6 +356,7 @@ class Session:
                 except Exception:
                     log.exception("stany z telefonu")
             adapter.keyboard_game = systems.info(g["es"])["plat"] in systems.COMPUTER_PLATS
+            adapter.shader_off = bool(((self.cfg.get("systems") or {}).get(g["es"]) or {}).get("shader_off"))
             if adapter.family == "retroarch" and g["es"] in systems.WHD_SYSTEMS:
                 try:   # po podpięciu profilu — folder saves wskazuje już na właściwego gracza
                     bios.whdload_kickstarts(self.cfg, adapter.home,

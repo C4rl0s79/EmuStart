@@ -84,6 +84,11 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   zostawał w tle z menu. Stany gry RetroArcha mają obrazek (podgląd stanu).
 
 ### Dodane
+- **Shader ekranu bez szukania w menu RetroArcha** (czarny ekran, gdy shader nie pasuje np. do
+  skali rozdzielczości rdzenia): menu w grze (A + Y) → *Włącz / wyłącz shader* (do końca gry)
+  albo *Bez shadera w tym systemie* (na stałe); opcje gry → *Ustawienia emulatora* → *Shader
+  ekranu* przywraca. Wyłączenie działa tylko na czas gry — własne ustawienia shadera RetroArcha
+  zostają nietknięte.
 - **Historia ustawień emulatora — cofnięcie zepsutej zmiany**: opcje gry → *Ustawienia
   emulatora* → *Cofnij zmianę* (10 ostatnich zmian: data, gra, pliki). Ustawienia profilu nadal
   zastępują plik emulatora przed grą, ale zmiana, po której np. ekran jest czarny (za wysoka

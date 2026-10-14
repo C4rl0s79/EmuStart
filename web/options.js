@@ -240,6 +240,14 @@ function emuSettingsItems() {
   const items = [{ label: "Zmień w emulatorze (bez gry)", value: "zapisze się w Twoim profilu",
                    act: () => { closeGopt(); launch("", false, true); } },
                  { label: "Albo w trakcie gry: Start + Select → menu RetroArcha", value: "zmiana zapisze się po grze", act: () => {} }];
+  const d = GO.data;
+  if (d?.retroarch) items.push({
+    label: "Shader ekranu", value: d.shader_off ? `wyłączony (${d.system})` : `jak w RetroArchu (${d.system})`,
+    act: async () => {
+      const r = await api().set_shader_off(d.es, !d.shader_off);
+      if (r?.ok) { d.shader_off = r.off; renderGopt(); toast(r.off ? `${d.system}: gry bez shadera.` : `${d.system}: shader jak w ustawieniach RetroArcha.`); }
+    },
+  });
   if (!GO.emuHist) items.push({ label: "Wczytuję historię zmian…", value: "", act: () => {} });
   else if (!GO.emuHist.length) items.push({ label: "Historia zmian jest pusta", value: "", act: () => {} });
   else {

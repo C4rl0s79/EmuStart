@@ -9,6 +9,8 @@ EmuStart pauzuje emulator (gdy trzeba) i pokazuje menu nad grą:
 | Zapisz stan | zapis w bieżącym slocie emulatora |
 | Wczytaj stan | wczytanie z bieżącego slotu |
 | Quicksave i wyjdź | zapisuje stan „wznowienia” i zamyka grę — następne uruchomienie tej gry wczyta go automatycznie |
+| Włącz / wyłącz shader | RetroArch: shader ekranu do końca gry — np. czarny ekran, bo shader nie pasuje do ustawień rdzenia (skala rozdzielczości) |
+| Bez shadera w tym systemie | RetroArch: gry tego systemu bez shadera na stałe (własne ustawienia shadera RetroArcha zostają); przywrócenie: opcje gry → Ustawienia emulatora → Shader ekranu |
 | Wyjdź z gry | zamyka emulator |
 
 Pozycje niedostępne dla danego emulatora są wyszarzone (tabela w [Emulatory](Emulatory)).

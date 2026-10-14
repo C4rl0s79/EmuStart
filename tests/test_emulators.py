@@ -287,3 +287,19 @@ def test_retroarch_default_pad_and_auto_index(tmp_path):
                  'input_menu_toggle_gamepad_combo = "4"', 'input_enable_hotkey_btn = "6"',
                  'input_toggle_fast_forward_btn = "5"', 'input_save_state_btn = "3"'):
         assert line in lines, line
+
+
+def test_retroarch_without_shader_for_system(tmp_path):
+    """„Bez shadera” (czarny ekran przy niezgodnym shaderze): tylko na czas gry — linia w
+    konfiguracji sesji, własne ustawienia shadera RetroArcha zostają."""
+    from emustart import ingame
+    home = tmp_path / "RetroArch"
+    home.mkdir()
+    (home / "retroarch.cfg").write_text('video_shader_enable = "true"\n', encoding="utf-8")
+    ra = ingame.RetroArch(str(home / "retroarch.exe"))
+    ra.launch_args(tmp_path / "run", resume=False)
+    assert 'video_shader_enable = "false"' not in (tmp_path / "run" / "emustart_ra.cfg").read_text(encoding="utf-8")
+    ra.shader_off = True
+    ra.launch_args(tmp_path / "run2", resume=False)
+    assert 'video_shader_enable = "false"' in (tmp_path / "run2" / "emustart_ra.cfg").read_text(encoding="utf-8")
+    assert ra.after_session() == 0 or 'video_shader_enable = "true"' in (home / "retroarch.cfg").read_text(encoding="utf-8")

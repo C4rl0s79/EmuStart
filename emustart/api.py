@@ -859,8 +859,11 @@ class Api:
                 st["thumb"] = "/media/_stany/" + th
             self._state_label(st, desc)
         states.sort(key=lambda x: (not x.get("resume"), not x.get("continue"), -x["time"]))
+        sc = (self._cfg.get("systems") or {}).get(g["es"]) or {}
         return {"id": g["id"], "title": g["title"], "emulator": emu, "options": opts,
-                "states": states}
+                "states": states, "es": g["es"], "system": systems.info(g["es"])["display"],
+                "retroarch": bool(emu["exe"]) and ingame.adapter_for(emu["exe"]).family == "retroarch",
+                "shader_off": bool(sc.get("shader_off"))}
 
     @staticmethod
     def _state_label(st: dict, desc: dict) -> None:
@@ -880,6 +883,18 @@ class Api:
             who = ("telefon " if d.get("platform") == "telefon" else "") + who
         kind = {"auto": "autozapis przy wyjściu", "manual": ""}.get(d.get("kind", ""), "")
         st["detail"] = " · ".join(x for x in (who, kind) if x)
+
+    def set_shader_off(self, es: str, off: bool) -> dict:
+        """RetroArch w tym systemie bez shadera (czarny ekran przy niezgodnym shaderze)."""
+        if es not in systems.SYSTEMS and not library.db().execute("SELECT 1 FROM systems WHERE es=?", (es,)).fetchone():
+            return {"ok": False}
+        sc = self._cfg.setdefault("systems", {}).setdefault(es, {})
+        if off:
+            sc["shader_off"] = True
+        else:
+            sc.pop("shader_off", None)
+        config.save(self._cfg)
+        return {"ok": True, "off": bool(off)}
 
     # ── historia ustawień emulatora (opcje gry → Ustawienia emulatora) ──
     def _emu_family(self, game_id: int) -> str:

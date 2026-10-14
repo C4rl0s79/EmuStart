@@ -265,6 +265,10 @@ class Adapter:
     pause_key = ""            # pusty = emulator pauzuje się sam po utracie fokusu
     state_glob = ""
     policy: dict = {}         # wymagane ustawienia z serwera (apply_policy; tylko podmieniane, nie zmieniane)
+    shader_off = False        # RetroArch: gra bez shadera (ustawienie systemu w EmuStart)
+
+    def toggle_shader(self) -> None:
+        """Shader ekranu włącz / wyłącz w trakcie gry (tylko RetroArch)."""
 
     def __init__(self, exe: str):
         self.exe = Path(exe)
@@ -420,6 +424,9 @@ class RetroArch(Adapter):
     def save_state(self) -> None:
         self._cmd("SAVE_STATE")
 
+    def toggle_shader(self) -> None:
+        self._cmd("SHADER_TOGGLE")
+
     def load_state(self) -> None:
         self._cmd("LOAD_STATE")
 
@@ -432,8 +439,10 @@ class RetroArch(Adapter):
     def launch_args(self, run_dir: Path, resume: bool, pad_order: list | None = None) -> list:
         run_dir.mkdir(parents=True, exist_ok=True)
         cfg = run_dir / "emustart_ra.cfg"
-        # najpierw wymagane ustawienia z serwera — niżej ustawienia sesji EmuStart (wygrywają)
-        lines = [f'{k} = "{v}"' for k, v in self.policy.items()] + [
+        # najpierw wymagane ustawienia z serwera — niżej ustawienia sesji EmuStart (wygrywają);
+        # „bez shadera” tylko na czas gry: własne ustawienia shadera RetroArcha zostają
+        lines = [f'{k} = "{v}"' for k, v in self.policy.items()] + \
+            (['video_shader_enable = "false"'] if self.shader_off else []) + [
             'network_cmd_enable = "true"',
             f'network_cmd_port = "{RA_PORT}"',
             'savestate_auto_save = "true"',

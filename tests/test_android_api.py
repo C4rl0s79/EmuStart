@@ -18,7 +18,7 @@ BRIDGE = ROOT / "android" / "app" / "src" / "main" / "java" / "io" / "github" / 
 WINDOWS_ONLY = {
     # emulatory na komputerze, odświeżenie biblioteki z serwera
     "autodetect", "scan_status", "set_game_emulator", "emulator_options", "emu_sync_status", "art_keys_push",
-    "emu_settings_history", "emu_settings_restore",
+    "emu_settings_history", "emu_settings_restore", "set_shader_off",
     # opcje gier i systemów (openGameOptions / openSystemOptions zablokowane na Androidzie)
     "game_options",
 

@@ -95,6 +95,8 @@ rozdzielczość) albo **Zmień w emulatorze (bez gry)**. Ręczna edycja pliku po
 zastąpiona kopią z profilu. Gdy zmiana coś zepsuje (np. czarny ekran po zbyt wysokiej
 rozdzielczości): **Cofnij zmianę** — lista 10 ostatnich zmian (data, gra, pliki); wybrana
 przywraca ustawienia sprzed niej od następnej gry, a samo przywrócenie też da się cofnąć.
+**Shader ekranu** (ta sama strona): gry systemu bez shadera RetroArcha — gdy szukasz shadera
+pasującego do ustawień rdzenia, a obecny daje czarny ekran (też z menu w grze A + Y).
 
 **Menedżer zapisów** (opcje gry → **Zapisy i stany**, na komputerze i telefonie):
 stany tej gry z komputera i z telefonu oraz wspólne zapisy w grze. Stan z jednej platformy
