@@ -84,6 +84,9 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   zostawał w tle z menu. Stany gry RetroArcha mają obrazek (podgląd stanu).
 
 ### Dodane
+- **Reset gry** w menu w grze (A + Y, RetroArch) i **Graj od początku** w opcjach gry — start bez
+  wczytywania stanu (autozapis / „Kontynuuj” / wznowienie), np. gdy wczytany stan nie pasuje do
+  zmienionych ustawień rdzenia albo shadera.
 - **Shader ekranu bez szukania w menu RetroArcha** (czarny ekran, gdy shader nie pasuje np. do
   skali rozdzielczości rdzenia): menu w grze (A + Y) → *Włącz / wyłącz shader* (do końca gry)
   albo *Bez shadera w tym systemie* (na stałe); opcje gry → *Ustawienia emulatora* → *Shader

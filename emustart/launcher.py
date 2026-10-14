@@ -27,6 +27,7 @@ from emustart import (bios, cache, emulators, hotkey, ingame, library, pads,
                       paths, profiles, systems, winutil)
 
 log = logging.getLogger("emustart.launcher")
+FRESH = "__od_poczatku__"         # start_state: gra od początku, bez wczytywania stanu
 
 
 
@@ -366,7 +367,11 @@ class Session:
             po = (self.cfg.get("pad_order") or {}).get("mode", "windows")
             # bateria (rodzaj zasilania) potrzebna tylko w trybie „bezprzewodowe pierwsze”
             order = pads.order(self.cfg, pads.connected(battery=po == "wireless_first"))
-            if self.start_state and Path(self.start_state).is_file():
+            if self.start_state == FRESH:
+                # „Graj od początku”: bez wczytania stanu (autozapis, „Kontynuuj”, wznowienie)
+                resume = None
+                extra = adapter.launch_args(self.run_dir, False, order)
+            elif self.start_state and Path(self.start_state).is_file():
                 # stan wybrany ręcznie ma pierwszeństwo przed stanem wznowienia
                 resume = None
                 extra = adapter.start_state_args(self.run_dir, Path(self.start_state), order)

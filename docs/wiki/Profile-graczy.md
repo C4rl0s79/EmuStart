@@ -83,7 +83,8 @@ już sprawdzane.
   także autozapis przy wyjściu z gry trafia do historii jako kolejny stan,
 - gdy dwa urządzenia zrobiły stan o tym samym numerze (np. gra bez serwera), drugi dostaje
   następny wolny numer — nic nie ginie,
-- przed grą najnowszy stan z dowolnego urządzenia konta wczytuje się sam („Kontynuuj”),
+- przed grą najnowszy stan z dowolnego urządzenia konta wczytuje się sam („Kontynuuj”);
+  start bez stanu: opcje gry → **Graj od początku**, w trakcie gry: A + Y → **Reset gry**,
 - opcje gry → **Wczytaj zapis**: wszystkie stany gry ze wszystkich urządzeń — miniatura,
   „Stan #N”, urządzenie, data, autozapis; na górze „Kontynuuj — najnowszy stan”,
 - serwer trzyma 50 najnowszych stanów gry (dla każdego rdzenia).

@@ -270,6 +270,12 @@ class Adapter:
     def toggle_shader(self) -> None:
         """Shader ekranu włącz / wyłącz w trakcie gry (tylko RetroArch)."""
 
+    def can_reset(self) -> bool:
+        return False
+
+    def reset_game(self) -> None:
+        """Gra od początku bez zamykania emulatora."""
+
     def __init__(self, exe: str):
         self.exe = Path(exe)
         self.home = self.exe.parent
@@ -426,6 +432,12 @@ class RetroArch(Adapter):
 
     def toggle_shader(self) -> None:
         self._cmd("SHADER_TOGGLE")
+
+    def can_reset(self) -> bool:
+        return True
+
+    def reset_game(self) -> None:
+        self._cmd("RESET")
 
     def load_state(self) -> None:
         self._cmd("LOAD_STATE")

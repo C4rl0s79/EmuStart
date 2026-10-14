@@ -303,3 +303,16 @@ def test_retroarch_without_shader_for_system(tmp_path):
     ra.launch_args(tmp_path / "run2", resume=False)
     assert 'video_shader_enable = "false"' in (tmp_path / "run2" / "emustart_ra.cfg").read_text(encoding="utf-8")
     assert ra.after_session() == 0 or 'video_shader_enable = "true"' in (home / "retroarch.cfg").read_text(encoding="utf-8")
+
+
+def test_ingame_reset_and_shader_commands(tmp_path, monkeypatch):
+    """Menu w grze (A + Y): Reset gry i shader — komendy sieciowe RetroArcha."""
+    from emustart import ingame
+    ra = ingame.RetroArch(str(tmp_path / "retroarch.exe"))
+    sent = []
+    monkeypatch.setattr(ra, "_cmd", sent.append)
+    assert ra.can_reset()
+    ra.reset_game()
+    ra.toggle_shader()
+    assert sent == ["RESET", "SHADER_TOGGLE"]
+    assert not ingame.DuckStation(str(tmp_path / "duckstation.exe")).can_reset()

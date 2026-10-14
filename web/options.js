@@ -161,6 +161,7 @@ function goptItems() {
   ];
   if (GO.page === "main") return [
     { label: "Graj", act: () => { closeGopt(); launch(); } },
+    { label: "Graj od początku", value: "bez wczytania stanu", act: () => { closeGopt(); launch("__od_poczatku__"); } },
     ...variantItem(),
     { label: "Emulator", value: d.emulator.label + (d.emulator.own ? "  (tylko ta gra)" : ""), act: () => goPage("emus") },
     { label: "Ustawienia emulatora", value: "obraz, dźwięk, sterowanie — w Twoim profilu",
