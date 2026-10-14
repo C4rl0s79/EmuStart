@@ -199,8 +199,10 @@ function goptItems() {
       act: async () => { await api().set_game_emulator(GO.id, o); await reloadGo("main"); toast(`Ta gra: ${o.label}`); },
     }))];
   }
+  // stany ze wszystkich urządzeń (koncepcja 2.0 §5.5): „Kontynuuj”, „Stan #N”, urządzenie, data
   if (GO.page === "states") return d.states.map((st) => ({
-    label: st.resume ? "★ " + st.name : st.name, value: fmtDate(st.time), thumb: st.thumb || "",
+    label: st.resume ? "★ " + st.name : (st.continue ? "▶ " : "") + (st.label || st.name),
+    value: fmtDate(st.time) + (st.detail ? " · " + st.detail : ""), thumb: st.thumb || "",
     act: () => { closeGopt(); launch(st.path); },
   }));
   if (GO.page === "saves") return saveManagerItems();
@@ -248,8 +250,13 @@ function saveManagerItems() {
   const r = GO.sm;
   if (!r) return [{ label: "Wczytuję zapisy z serwera…", value: "", act: () => {} }];
   const items = [];
-  if (!r.states.length) items.push({ label: "Brak stanów tej gry", value: "na komputerze i telefonie", act: () => {} });
-  for (const st of r.states) {
+  // stany RetroArcha są wspólne dla urządzeń — jeden widok w „Wczytaj zapis” (z miniaturami)
+  const ra = r.states.filter((st) => st.kind === "ra");
+  const states = r.states.filter((st) => st.kind !== "ra");
+  if (ra.length) items.push({ label: "Stany RetroArcha (wszystkie urządzenia)", value: "→ Wczytaj zapis",
+                              act: () => goPage("states") });
+  if (!states.length && !ra.length) items.push({ label: "Brak stanów tej gry", value: "na komputerze i telefonie", act: () => {} });
+  for (const st of states) {
     const here = st.platform === r.here;
     const t = st.targets.map((x) => `${smMark(x)} ${SM_PLAT[x.platform]}`).join(" ");
     items.push({

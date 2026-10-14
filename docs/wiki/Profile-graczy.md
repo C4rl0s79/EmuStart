@@ -77,6 +77,17 @@ komputerze: **Start** na karcie profilu → **Ustaw PIN na tym urządzeniu** / *
 zostaje na urządzeniu — serwer go nie zna. Dawne PIN-y profili z serwera (0.27–0.39) nie są
 już sprawdzane.
 
+**Stany RetroArcha — jak w Steam** (tylko dochodzą, nigdy się nie nadpisują):
+
+- każdy zapis stanu dostaje nowy numer (**Select + Y** na padzie albo menu RetroArcha),
+  także autozapis przy wyjściu z gry trafia do historii jako kolejny stan,
+- gdy dwa urządzenia zrobiły stan o tym samym numerze (np. gra bez serwera), drugi dostaje
+  następny wolny numer — nic nie ginie,
+- przed grą najnowszy stan z dowolnego urządzenia konta wczytuje się sam („Kontynuuj”),
+- opcje gry → **Wczytaj zapis**: wszystkie stany gry ze wszystkich urządzeń — miniatura,
+  „Stan #N”, urządzenie, data, autozapis; na górze „Kontynuuj — najnowszy stan”,
+- serwer trzyma 50 najnowszych stanów gry (dla każdego rdzenia).
+
 **Menedżer zapisów** (opcje gry → **Zapisy i stany**, na komputerze i telefonie):
 stany tej gry z komputera i z telefonu oraz wspólne zapisy w grze. Stan z jednej platformy
 można skopiować na drugą (pobierze się przy następnej grze). Zgodność:

@@ -84,6 +84,17 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   zostawał w tle z menu. Stany gry RetroArcha mają obrazek (podgląd stanu).
 
 ### Dodane
+- **Stany RetroArcha jak w Steam** (koncepcja 2.0, §5.5) — tylko dochodzą, nigdy się nie
+  nadpisują: numer stanu zajęty na serwerze inną zawartością (dwa urządzenia, gra bez serwera)
+  → następny wolny numer (komputer i telefon); autozapis przy wyjściu trafia też do historii
+  jako kolejny stan, także gdy inne urządzenie zapisało w międzyczasie (wcześniej szedł do kopii
+  zapasowej); przed grą najnowszy stan z dowolnego urządzenia wczytuje się sam („Kontynuuj”);
+  opis każdego stanu (urządzenie, czas, autozapis / ręczny) w `.states.json` na serwerze;
+  serwer trzyma 50 najnowszych stanów gry.
+- **Jeden widok stanów**: opcje gry → *Wczytaj zapis* pokazuje stany ze wszystkich urządzeń
+  konta (pobierane przy otwarciu) z miniaturą, numerem, urządzeniem i datą, na górze
+  „Kontynuuj — najnowszy stan”; *Zapisy i stany* nie powtarza już stanów RetroArcha (zostają
+  tam stany PS2 z kopiowaniem między komputerem a telefonem i zapisy w grze).
 - **Panel serwera: zakładki** (Stan, Konfiguracja, Grafiki i opisy, Urządzenia i konta, Emulatory, Aktualizacja).
 - **Emulatory z serwera.** EmuStart Server trzyma emulatory i rdzenie RetroArcha potrzebne
   systemom biblioteki (zalecany emulator i rdzeń z panelu): raz dziennie i przyciskiem w nowej

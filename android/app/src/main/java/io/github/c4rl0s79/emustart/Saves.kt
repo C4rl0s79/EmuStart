@@ -98,6 +98,8 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
         /** Stany RetroArcha wspólne dla wszystkich urządzeń: <profil>/states/shared/retroarch/<rdzeń>/…
          *  (emustart/rastates.py). Każde urządzenie zgłasza swój układ w .layouts.json. */
         const val SHARED_RA = "states/shared/retroarch"
+        /** Numerowany stan RetroArcha („Gra.state”, „Gra.state13”) — niezmienny (bez .auto i .png). */
+        val NUMBERED = Regex("""^(.+?)\.state(\d*)$""", RegexOption.IGNORE_CASE)
 
         /** „Beetle PSX HW” = „beetle_psx_hw” — porównanie folderów rdzeni. */
         fun normCore(s: String) = s.lowercase().replace(Regex("[^a-z0-9]"), "")
@@ -679,6 +681,30 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
             ?: newRel(f, g, x, nas)
         val v = nas[rel]
         val nSig = v?.let { sig(it[0].toLong(), it[1]) }
+        val numbered = NUMBERED.matchEntire(nasName)
+        if (f.kind == Kind.RA_STATES && v != null && !same(nSig, pSig) && numbered != null) {
+            // stany jak w Steam (koncepcja 2.0 §5.5): numer zajęty na serwerze inną zawartością —
+            // stan z telefonu dostaje następny wolny numer, nic się nie nadpisuje
+            val folder = rel.substringBeforeLast('/', "")
+            val stem = numbered.groupValues[1]
+            val used = (nas.keys.map { it.substringAfterLast('/') } + (x.parentFile?.list()?.toList() ?: emptyList()))
+                .mapNotNull { NUMBERED.matchEntire(it) }.filter { it.groupValues[1].equals(stem, true) }
+                .map { it.groupValues[2].ifEmpty { "0" }.toInt() }
+            val newName = "$stem.state${(used.maxOrNull() ?: 0) + 1}"
+            val nx = File(x.parentFile, newName)
+            if (!x.renameTo(nx)) return false
+            File(x.parentFile, x.name + ".png").takeIf { it.isFile }?.renameTo(File(x.parentFile, "$newName.png"))
+            val newRel = if (folder.isEmpty()) newName else "$folder/$newName"
+            val sec = nx.lastModified() / 1000.0
+            server.nasPut("$profile/${f.nas}/$newRel", nx.readBytes(), sec, "")
+            File(x.parentFile, "$newName.png").takeIf { it.isFile }?.let {
+                server.nasPut("$profile/${f.nas}/$newRel.png", it.readBytes(), it.lastModified() / 1000.0, "")
+            }
+            man.put("${f.id}/$newName", JSONObject().put("n", sig(nx.length(), sec)).put("p", sig(nx)).put("rel", newRel))
+            if (man0 == null) writeJson(manName(profile), man)
+            Log.i(tag, "stan $nasName: numer zajęty na serwerze — zapisany jako $newName")
+            return true
+        }
         val bak = "$profile/_backup/${stamp()}-${safe(device)}/${f.nas}"
         val first = v != null && m == null && !same(nSig, pSig)
         if (first || (v != null && m != null && !same(m.optJSONArray("n"), nSig) && v[1] > x.lastModified() / 1000.0 + 2)) {

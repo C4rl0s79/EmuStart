@@ -24,9 +24,10 @@ import urllib.parse
 from pathlib import Path
 
 from emustart import (__version__, art, bios, cache, catalog, ingame, installer, logos, sysinfo, metadata, pads, profiles, translations, uipad, config, emulators, launcher, library,
-                      nasfs, netsrc, paths, systems, winutil)
+                      nasfs, netsrc, paths, rastates, systems, winutil)
 
 log = logging.getLogger("emustart.api")
+KEEP_LIST = 60                     # stanów na liście „Wczytaj zapis”
 PIN_RETRY = 300                 # s — wznowienie pobierania przypiętej gry najwyżej tak często
 
 class Api:
@@ -829,9 +830,20 @@ class Api:
         emu = self._effective_emu(g)
         opts = emulators.options_for(systems.info(g["es"]), self._cfg.get("emu_root", ""))
         states = []
+        desc: dict = {}
         if emu["exe"]:
             ad = ingame.adapter_for(emu["exe"])
             meta = metadata.ensure_local(self._cfg, g)
+            prof = profiles.get(self._profile)
+            core = rastates.core_id(emu.get("args", ""))
+            if ad.family == "retroarch" and prof and core and profiles.nas_online(self._cfg):
+                # stany ze wszystkich urządzeń konta (koncepcja 2.0 §5.5) — tu, z miniaturami,
+                # zanim gracz wybierze; najnowszy czeka jako „Kontynuuj”
+                try:
+                    rastates.present(self._cfg, prof, ad, core, cache.local_path(self._cfg, g), {})
+                    desc = rastates.describe(self._cfg, prof, ad, core)
+                except Exception:
+                    log.exception("stany z serwera do listy")
             learned = [r["prefix"] for r in library.db().execute(
                 "SELECT prefix FROM states WHERE game_id=? AND family=?", (g["id"], ad.family))]
             states = ingame.list_states(ad, g, meta, learned)
@@ -840,13 +852,34 @@ class Api:
             if res and res["path"] and Path(res["path"]).is_file() and res["family"] == ad.family:
                 states.insert(0, {"path": res["path"], "name": "Quicksave EmuStart",
                                   "time": res["created"], "resume": True})
-        states = states[:30]
+        states = states[:KEEP_LIST]
         for st in states:                     # obrazek stanu (jeśli emulator go zapisał)
             th = ingame.state_thumb(Path(st["path"]))
             if th:
                 st["thumb"] = "/media/_stany/" + th
+            self._state_label(st, desc)
+        states.sort(key=lambda x: (not x.get("resume"), not x.get("continue"), -x["time"]))
         return {"id": g["id"], "title": g["title"], "emulator": emu, "options": opts,
                 "states": states}
+
+    @staticmethod
+    def _state_label(st: dict, desc: dict) -> None:
+        """Opis stanu na liście: „Kontynuuj”, „Stan #13”, urządzenie i rodzaj (z serwera)."""
+        name = Path(st["path"]).name if st.get("path") else st.get("name", "")
+        d = desc.get(name) or {}
+        m = re.match(r"^.+?\.state(\d*)(\.auto)?$", name, re.I)
+        if st.get("resume") or not m:
+            return
+        if m.group(2):
+            st["continue"] = True
+            st["label"] = "Kontynuuj — najnowszy stan"
+        else:
+            st["label"] = f"Stan #{int(m.group(1) or 0)}"
+        who = d.get("device") or ""
+        if who:
+            who = ("telefon " if d.get("platform") == "telefon" else "") + who
+        kind = {"auto": "autozapis przy wyjściu", "manual": ""}.get(d.get("kind", ""), "")
+        st["detail"] = " · ".join(x for x in (who, kind) if x)
 
     # ── menedżer zapisów (opcje gry → Zapisy i stany) ──
     def _savemgr_ctx(self, g: dict):
