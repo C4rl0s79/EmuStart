@@ -1,7 +1,7 @@
 """server — lokalny serwer HTTP dla UI: /web, /media (okładki), /assets (loga).
 
 Okładki leżą poza katalogiem UI, a przesyłanie ich przez most pywebview jako
-data-URI byłoby wolne przy przewijaniu tysięcy gier. Serwer słucha tylko na
+/data-URI byłoby wolne przy przewijaniu tysięcy gier. Serwer słucha tylko na
 127.0.0.1, na losowym porcie.
 """
 
@@ -144,6 +144,9 @@ class _Handler(BaseHTTPRequestHandler):
         p = urllib.parse.urlsplit(self.path).path
         if p.startswith("/v1/") and not _v1_ok(self):
             return
+        if p.startswith(("/v1/savesync/", "/v1/files/")):
+            from emustart import savesync    # synchronizacja zapisów gier
+            return savesync.handle(self, "POST")
         if p in ("/v1/enroll/request", "/v1/enroll/poll", "/v1/enroll/pending", "/v1/enroll/decide",
                  "/v1/auth/challenge", "/v1/auth/token", "/v1/auth/logout",
                  "/v1/enroll/account", "/v1/enroll/account_poll"):
@@ -181,6 +184,9 @@ class _Handler(BaseHTTPRequestHandler):
         if urllib.parse.urlsplit(self.path).path.startswith("/v1/"):
             if not _v1_ok(self):
                 return
+            if urllib.parse.urlsplit(self.path).path.startswith("/v1/files/ul/"):
+                from emustart import savesync  # upload bundle zapisów
+                return savesync.handle(self, "PUT")
             from emustart import remote      # zapis w folderze profili (z kluczem)
             return remote.handle_write(self, "PUT")
         return refuse(self, 405)
@@ -210,6 +216,9 @@ class _Handler(BaseHTTPRequestHandler):
         if raw.startswith("/v1/"):
             if not _v1_ok(self):
                 return
+            if raw.startswith(("/v1/savesync/", "/v1/files/dl/")):
+                from emustart import savesync  # manifest i pobieranie bundle zapisów
+                return savesync.handle(self, "GET")
             from emustart import remote      # API urządzeń — token zamiast sprawdzania Host
             return remote.handle(self)
         if not _local_ui(self):
@@ -317,7 +326,7 @@ class _TLSServer(ThreadingHTTPServer):
             request.settimeout(15)
             request.do_handshake()
         except (OSError, ssl.SSLError):
-            return                                   # nie TLS, zły klient, przerwane
+            return                                   # zerwane połączenia z internetu — bez śladu w konsoli
         super().finish_request(request, client_address)
 
     def handle_error(self, request, client_address):
