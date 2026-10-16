@@ -1,0 +1,62 @@
+name: Build binaries
+
+on:
+  push:
+    branches:
+      - feature/save-sync
+  workflow_dispatch:
+
+jobs:
+  windows:
+    name: Windows binaries
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Run tests and build portable binaries
+        shell: pwsh
+        run: |
+          powershell -ExecutionPolicy Bypass -File ./build.ps1
+
+      - name: Upload Windows client
+        uses: actions/upload-artifact@v4
+        with:
+          name: EmuStart-windows-binaries
+          path: |
+            dist/EmuStart-*-win64.zip
+            dist/EmuStart-Server-*-win64.zip
+          if-no-files-found: error
+
+  android:
+    name: Android debug APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Build Android debug APK
+        working-directory: android
+        run: gradle assembleDebug --no-daemon
+
+      - name: Upload Android APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: EmuStart-android-apk
+          path: android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
