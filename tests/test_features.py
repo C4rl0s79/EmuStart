@@ -62,17 +62,23 @@ def test_sync_up_down_newer_wins(prof_env):
     assert list((profiles.LOCAL / str(pid) / "_backup").rglob("a.ps2"))   # stara wersja w kopii
 
 
-def test_lock_blocks_other_host(prof_env):
+def test_lock_blocks_other_device(prof_env):
+    """Blokada na serwerze (emustart/plock.py): inne urządzenie gra — „gra na: …”; przejęcie
+    po potwierdzeniu; po grze blokada zwolniona."""
+    from emustart import plock
     cfg, tmp = prof_env
     pid = profiles.first_id()
-    assert profiles.lock(cfg, pid) == ""
-    lock = Path(cfg["profiles_nas"]) / "Gracz" / "lock"
-    lock.write_text('{"host": "INNY-PC", "time": %d}' % int(__import__("time").time()))
-    assert profiles.lock(cfg, pid) == "INNY-PC"
-    lock.write_text('{"host": "%s", "time": 0}' % socket.gethostname())
+    acc = profiles.get(pid)["nas_name"]
+    plock.reset()
     assert profiles.lock(cfg, pid) == ""
     profiles.unlock(cfg, pid)
-    assert not lock.exists()
+    assert plock.status(acc)["held"] is False
+    plock.take(acc, "tel-1", "Telefon X")                    # telefon gra
+    assert profiles.lock(cfg, pid) == "Telefon X"
+    assert profiles.lock(cfg, pid, force=True) == ""         # przejęcie po potwierdzeniu
+    assert plock.renew(acc, "tel-1")["lost"]                 # telefon wie, że stracił profil
+    profiles.unlock(cfg, pid)
+    assert plock.status(acc)["held"] is False and not profiles._beats
 
 
 # ── pady ──
@@ -271,31 +277,3 @@ def test_clean_look_keeps_only_simple_values():
     assert clean_look(None) == {}
 
 
-def test_lock_lease_expiry_and_takeover(prof_env):
-    import json
-    import time
-    cfg, tmp = prof_env
-    pid = profiles.first_id()
-    nas = tmp / "nas" / profiles.get(pid)["nas_name"]
-    nas.mkdir(parents=True, exist_ok=True)
-
-    def other(age, lease=None):
-        d = {"host": "Telefon X", "time": time.time() - age}
-        if lease is not None:
-            d["lease"] = lease
-        (nas / "lock").write_text(json.dumps(d), encoding="utf-8")
-
-    other(10, lease=900)                                   # telefon gra — blokuje
-    assert profiles.lock(cfg, pid) == "Telefon X"
-    assert profiles.lock(cfg, pid, force=True) == ""       # przejęcie po potwierdzeniu
-    assert json.loads((nas / "lock").read_text())["host"] != "Telefon X"
-    profiles.unlock(cfg, pid)
-    assert not (nas / "lock").exists()
-
-    other(1000, lease=900)                                 # dzierżawa minęła (aplikację zamknięto)
-    assert profiles.lock(cfg, pid) == ""
-    profiles.unlock(cfg, pid)
-    other(16 * 60)                                         # stara blokada bez dzierżawy (12 h w starszych wersjach)
-    assert profiles.lock(cfg, pid) == ""
-    profiles.unlock(cfg, pid)
-    assert not profiles._beats                             # odnawianie zatrzymane

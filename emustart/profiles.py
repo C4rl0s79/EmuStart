@@ -42,7 +42,6 @@ log = logging.getLogger("emustart.profiles")
 
 LOCK_LEASE = 300           # blokada bez odnowienia przez tyle s przestaje blokować
 LOCK_BEAT = 60             # odnawianie w trakcie gry
-LOCK_LEGACY = 900          # blokady bez „lease” (starsze wersje)
 LOCAL = paths.APP / "profiles"
 
 
@@ -951,58 +950,44 @@ def push_all(cfg: dict) -> int:
 
 # ── blokada ──
 
-# Dzierżawa: {"host", "time", "lease"} — urządzenie w grze odnawia ją co LOCK_BEAT s
-# (telefon rzadziej, dłuższa dzierżawa). Urządzenie, które padło albo zamknięto
-# aplikację w trakcie gry, przestaje blokować po upływie dzierżawy; wcześniej można
-# profil przejąć (force) — po potwierdzeniu w interfejsie.
-
-def lock_active(cur: dict, me: str = "") -> bool:
-    """Blokada innego urządzenia, która jeszcze obowiązuje."""
-    me = me or socket.gethostname()
-    if not cur.get("host") or cur.get("host") == me:
-        return False
-    return time.time() - float(cur.get("time", 0)) < float(cur.get("lease", LOCK_LEGACY))
-
+# Jedna gra naraz na profil (konto): blokada po stronie serwera (emustart/plock.py) — atomowa,
+# urządzenie rozpoznawane po tokenie sesji. Dzierżawa: urządzenie w grze odnawia ją co
+# LOCK_BEAT s; urządzenie, które padło albo zamknięto aplikację w trakcie gry, przestaje
+# blokować po LOCK_LEASE s; wcześniej można profil przejąć (force) — po potwierdzeniu gracza.
 
 _beats: dict = {}
 _beats_lock = threading.Lock()
 
 
-def _lock_write(cfg: dict, rel: str) -> None:
-    data = {"host": socket.gethostname(), "time": time.time(), "lease": LOCK_LEASE}
-    nasfs.backend(cfg).write(rel, json.dumps(data).encode("utf-8"))
+def _lock_call(cfg: dict, pid: int, op: str, body: dict) -> dict:
+    from emustart import syncclient
+    return syncclient._Client(cfg, pid).json("POST", f"/v1/lock/{op}", body)
 
 
 def lock(cfg: dict, pid: int, force: bool = False) -> str:
-    """'' = zablokowano (i odnawiane co minutę do unlock); inaczej nazwa urządzenia,
-    na którym profil właśnie gra. force — przejęcie profilu po potwierdzeniu."""
-    prof = get(pid)
-    if not prof or not nas_online(cfg):
+    """'' = zablokowano (i odnawiane do unlock) albo serwer nieosiągalny (gra bez blokady);
+    inaczej nazwa urządzenia, na którym profil właśnie gra. force — przejęcie po potwierdzeniu."""
+    from emustart import syncclient
+    if not get(pid):
         return ""
-    fs = nasfs.backend(cfg)
-    rel = f"{prof['nas_name']}/lock"
     try:
-        cur = json.loads(fs.read(rel) or b"{}")
-        if lock_active(cur) and not force:
-            return cur.get("host", "?")
-        if lock_active(cur):
-            log.warning("profil %s przejęty od %s", prof["name"], cur.get("host"))
-    except (OSError, ValueError):
-        pass
-    try:
-        _lock_write(cfg, rel)
-    except OSError as ex:
-        log.warning("blokada profilu: %s", ex)
+        r = _lock_call(cfg, pid, "take", {"lease": LOCK_LEASE, "force": bool(force)})
+    except (syncclient.Offline, syncclient.ConflictError) as ex:
+        log.info("blokada profilu bez serwera: %s", ex)
+        return ""
+    if not r.get("ok"):
+        return r.get("held_by") or "?"
+    if r.get("took_over"):
+        log.warning("profil %s przejęty od innego urządzenia", (get(pid) or {}).get("name"))
     stop = threading.Event()
 
     def beat():
         while not stop.wait(LOCK_BEAT):
             try:
-                cur = json.loads(fs.read(rel) or b"{}")
-                if cur.get("host") != socket.gethostname():
+                if not _lock_call(cfg, pid, "renew", {"lease": LOCK_LEASE}).get("ok"):
+                    log.warning("blokada profilu przejęta przez inne urządzenie")
                     return                     # ktoś przejął profil — nie odbieramy
-                _lock_write(cfg, rel)
-            except (OSError, ValueError) as ex:
+            except (syncclient.Offline, syncclient.ConflictError) as ex:
                 log.info("odnowienie blokady: %s", ex)
     with _beats_lock:
         old = _beats.pop(pid, None)
@@ -1014,20 +999,17 @@ def lock(cfg: dict, pid: int, force: bool = False) -> str:
 
 
 def unlock(cfg: dict, pid: int) -> None:
+    from emustart import syncclient
     with _beats_lock:
         stop = _beats.pop(pid, None)
     if stop:
         stop.set()
-    prof = get(pid)
-    if not prof:
+    if not get(pid):
         return
-    fs = nasfs.backend(cfg)
-    rel = f"{prof['nas_name']}/lock"
     try:
-        if json.loads(fs.read(rel) or b"{}").get("host") == socket.gethostname():
-            fs.unlink(rel)
-    except (OSError, ValueError):
-        pass
+        _lock_call(cfg, pid, "release", {})
+    except (syncclient.Offline, syncclient.ConflictError) as ex:
+        log.info("zwolnienie blokady: %s", ex)
 
 
 # ── profile z NAS (czysta instalacja / drugi komputer) ──

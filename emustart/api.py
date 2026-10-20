@@ -53,8 +53,15 @@ class Api:
         # lokalne save'y i ustawienia profili → NAS/serwer (zaległe po grze bez połączenia,
         # pierwsze przejście na serwer); gra uruchomiona w tym czasie poczeka (post_busy)
         launcher.start_post(lambda: profiles.push_all(self._cfg), "zapisy profili")
-        # zapisy gier niewysłane na serwer (gra bez połączenia) — paczki, syncclient
-        launcher.start_post(lambda: syncclient.retry(self._cfg), "zapisy gier na serwer")
+        # zapisy gier niewysłane na serwer (gra bez połączenia) — paczki, syncclient; potem
+        # nowsze wersje z innych urządzeń (lokalnie bez zmian; konflikty — przy uruchomieniu gry)
+        def saves_at_start():
+            try:
+                syncclient.retry(self._cfg)
+                syncclient.pull_all(self._cfg, self._profile)
+            except Exception:
+                log.exception("zapisy gier przy starcie")
+        launcher.start_post(saves_at_start, "zapisy gier")
         threading.Thread(target=self._profiles_bootstrap, daemon=True, name="profiles").start()
         from emustart import mediastore
         mediastore.migrate_later()                # lokalna kopia grafik: jeden plik na system
@@ -334,9 +341,16 @@ class Api:
         if i is None:
             return {"ok": False, "checking": True, "name": "", "account": self._cfg.get("server_account", ""),
                     "key_rejected": False}
-        return {"ok": bool(i.get("ok")), "name": i.get("name", ""), "account": self._cfg.get("server_account", ""),
-                "key_rejected": bool(i.get("key_rejected")) or bool(netsrc.rejected()),
-                "reason": netsrc.rejected() or i.get("reason", "")}
+        rejected = bool(i.get("key_rejected")) or bool(netsrc.rejected())
+        out = {"ok": bool(i.get("ok")), "name": i.get("name", ""), "account": self._cfg.get("server_account", ""),
+               "key_rejected": rejected, "reason": netsrc.rejected() or i.get("reason", "")}
+        if rejected:
+            # urządzenie unieważnione na serwerze — ile gier ma zapisy, które czekają na wysłanie
+            try:
+                out["pending_saves"] = len(syncclient.pending(self._cfg))
+            except Exception:
+                out["pending_saves"] = 0
+        return out
 
     # ── stan ogólny ──
     def get_state(self) -> dict:
@@ -1424,7 +1438,24 @@ class Api:
         self._profile = int(pid)
         library.meta_set("last_profile", str(self._profile))
         self._user_load(self._profile)
+        self._pull_saves()
         return {"ok": True}
+
+    def _pull_saves(self) -> None:
+        """W tle: nowsze wersje paczek zapisów tego profilu z serwera (lokalnie bez zmian);
+        bez gry, która właśnie działa albo wysyła zapisy."""
+        pid = self._profile
+
+        def run():
+            skip = set()
+            s = getattr(self, "_session", None)
+            if s and s.game:
+                skip.add(syncclient.game_ids(s.game))
+            try:
+                syncclient.pull_all(self._cfg, pid, skip)
+            except Exception:
+                log.exception("zapisy z serwera")
+        launcher.start_post(run, "zapisy z serwera")
 
     def profile_create(self, name: str, password: str = "") -> dict:
         """Nowy profil — z serwerem konto z hasłem. Nazwa zajęta (bez względu na wielkość
@@ -1634,6 +1665,7 @@ class Api:
                              name="adresy-serwera").start()
             log.info("zalogowano na serwerze %s (konto %s)", p["url"], self._cfg["server_account"])
             self._adopt_account(self._cfg["server_account"])
+            self._pull_saves()                          # zapisy gier tego konta z serwera
             from emustart import libsync
             if libsync.thin(self._cfg):
                 threading.Thread(target=self._thin_sync, daemon=True, name="biblioteka-serwera").start()
@@ -1641,10 +1673,25 @@ class Api:
             self.server_enroll_cancel()
         return {"ok": True, "status": st, "account": p["account"], "code": p["code"], "reason": r.get("reason", "")}
 
-    def server_logout(self) -> dict:
+    def server_logout(self, force: bool = False) -> dict:
         """Ustawienia → Wyloguj z serwera: serwer unieważnia to urządzenie, klucz urządzenia
-        i zapamiętane adresy znikają z tego komputera. Gry, zapisy i profile zostają."""
+        i zapamiętane adresy znikają z tego komputera. Gry, zapisy i profile zostają.
+        Najpierw zapisy: po ostatniej grze (wysyłanie w tle) i zaległe — gdy czegoś nie udało
+        się wysłać, bez `force` nie wylogowuje (gracz wybiera: jeszcze raz / mimo to / anuluj)."""
         from emustart import keystore
+        s = getattr(self, "_session", None)
+        if s and s.phase in ("preparing", "downloading", "extracting", "running", "conflict"):
+            return {"ok": False, "reason": "Trwa gra — wyloguj się po jej zakończeniu."}
+        if self._cfg.get("server_key") and not force:
+            launcher.wait_post(120)                     # zapisy po ostatniej grze
+            try:
+                syncclient.retry(self._cfg)
+            except Exception:
+                log.exception("zapisy przed wylogowaniem")
+            left = syncclient.pending(self._cfg)
+            if left:
+                return {"ok": False, "ask": True, "pending": len(left), "games": [g["name"] for g in left[:8]],
+                        "reason": f"Zapisy {len(left)} {'gry' if len(left) == 1 else 'gier'} nie doszły na serwer."}
         if self._cfg.get("server_key"):
             r = netsrc.authed_post(self._cfg, "/v1/auth/logout", {})
             if not r.get("ok"):

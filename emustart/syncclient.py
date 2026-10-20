@@ -85,7 +85,20 @@ def _db():
         revision INTEGER NOT NULL DEFAULT 0, content TEXT NOT NULL DEFAULT '',
         dirty INTEGER NOT NULL DEFAULT 0, spec TEXT NOT NULL DEFAULT '', updated REAL NOT NULL DEFAULT 0,
         PRIMARY KEY(profile_id, platform, game, emu, core, kind))""")
+    # konto, na które paczka należy: niewysłane zapisy poprzedniego konta nie trafią na nowe
+    if _schema.get(id(c)) is not c:
+        library.add_columns(c, "save_sync", [("account", "TEXT NOT NULL DEFAULT ''")])
+        _schema[id(c)] = c
     return c
+
+
+_schema: dict = {}
+
+
+def _account_of(pid: int) -> str:
+    from emustart import profiles
+    prof = profiles.get(pid) or {}
+    return prof.get("nas_name") or prof.get("name") or ""
 
 
 def _state(pid: int, plat: str, gid: str, b) -> dict | None:
@@ -94,10 +107,15 @@ def _state(pid: int, plat: str, gid: str, b) -> dict | None:
     return dict(r) if r else None
 
 
-def _remember(pid: int, plat: str, gid: str, b, revision: int, content: str, dirty: bool = False) -> None:
+def _remember(pid: int, plat: str, gid: str, b, revision: int, content: str, dirty: bool = False,
+              account: str = "") -> None:
+    st = _state(pid, plat, gid, b)
+    account = account or (st or {}).get("account") or _account_of(pid)
     with _db() as c:
-        c.execute("INSERT OR REPLACE INTO save_sync VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-                  (pid, plat, gid, *b.key, int(revision), content, int(dirty), json.dumps(b.spec()), time.time()))
+        c.execute("INSERT OR REPLACE INTO save_sync(profile_id, platform, game, emu, core, kind, revision, content, "
+                  "dirty, spec, updated, account) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                  (pid, plat, gid, *b.key, int(revision), content, int(dirty), json.dumps(b.spec()), time.time(),
+                   account))
 
 
 def _mark_dirty(pid: int, plat: str, gid: str, b) -> None:
@@ -113,7 +131,7 @@ def game_ids(game: dict) -> tuple[str, str]:
 # ── serwer ──
 
 class _Client:
-    def __init__(self, cfg: dict, pid: int):
+    def __init__(self, cfg: dict, pid: int, account: str = ""):
         from emustart import netsrc, profiles
         self.cfg = cfg
         ep = netsrc.endpoint(cfg)
@@ -121,7 +139,9 @@ class _Client:
             raise Offline("serwer nie jest ustawiony")
         self.ep = ep
         prof = profiles.get(pid) or {}
-        self.account = prof.get("nas_name") or prof.get("name") or ""
+        self.account = account or prof.get("nas_name") or prof.get("name") or ""
+        if account and account.lower() != (prof.get("nas_name") or "").lower():
+            prof = {}                        # paczka innego konta niż profil — tylko z tokenem tamtego konta
         mine = profiles.account_of_device(cfg)
         self.extra = {}
         if self.account and self.account.lower() != (mine or "").lower():
@@ -458,10 +478,10 @@ def retry(cfg: dict) -> int:
         if not local or local == r["content"]:
             continue
         try:
-            cl = _Client(cfg, r["profile_id"])
+            cl = _Client(cfg, r["profile_id"], r.get("account") or "")
             with _lock:
                 out = _upload(cl, r["platform"], r["game"], b, r["revision"])
-            _remember(r["profile_id"], r["platform"], r["game"], b, out["revision"], local)
+            _remember(r["profile_id"], r["platform"], r["game"], b, out["revision"], local, account=cl.account)
             sent += 1
         except ConflictError:
             continue                     # decyzja gracza przy następnej grze
@@ -519,6 +539,88 @@ def other_core_states(cfg: dict, pid: int, game: dict, core: str) -> list:
         for f in sorted(d.glob("game.state*")):
             if not f.name.endswith(".png"):
                 out.append({"core": c, "path": str(f), "time": f.stat().st_mtime})
+    return out
+
+
+def pending(cfg: dict, account: str = "") -> list:
+    """Paczki czekające na wysłanie (gra bez połączenia): [{platform, game, name, account}] —
+    po jednej na grę; `account` — tylko tego konta."""
+    rows = [dict(r) for r in _db().execute("SELECT * FROM save_sync WHERE dirty=1")]
+    out, seen = [], set()
+    names = None
+    for r in rows:
+        acc = r.get("account") or _account_of(r["profile_id"])
+        if account and acc.lower() != account.lower():
+            continue
+        try:
+            b = savebundles.from_spec(json.loads(r["spec"]))
+        except (ValueError, KeyError, OSError):
+            continue
+        if savebundles.content_hash(b.files) in ("", r["content"]):
+            continue
+        k = (acc.lower(), r["platform"], r["game"])
+        if k in seen:
+            continue
+        seen.add(k)
+        if names is None:
+            from emustart import savesync
+            names = {(str(g["es"]).lower(), savesync.game_id(g["es"], g["name"])): g["title"] or g["name"]
+                     for g in library.db().execute("SELECT es, name, title FROM games")}
+        out.append({"platform": r["platform"], "game": r["game"], "account": acc,
+                    "name": names.get((r["platform"], r["game"]), r["game"])})
+    return out
+
+
+def pull_all(cfg: dict, pid: int, skip: set | None = None) -> dict:
+    """Po zalogowaniu i przy starcie: nowsze wersje paczek znanych na tym urządzeniu (tego
+    konta), gdy lokalnie bez zmian. Konfliktów nie rozstrzyga — zostają do decyzji przy
+    uruchomieniu gry. `skip` — {(platforma, gra)} gier, które właśnie działają / wysyłają."""
+    account = _account_of(pid)
+    out = {"downloaded": 0, "conflicts": 0, "offline": ""}
+    rows = [dict(r) for r in _db().execute("SELECT * FROM save_sync WHERE profile_id=?", (pid,))]
+    games: dict = {}
+    for r in rows:
+        if (r.get("account") or account).lower() != account.lower():
+            continue                           # paczki innego konta tego profilu
+        if (r["platform"], r["game"]) in (skip or set()):
+            continue
+        games.setdefault((r["platform"], r["game"]), []).append(r)
+    if not games:
+        return out
+    try:
+        cl = _Client(cfg, pid)
+    except Offline as ex:
+        out["offline"] = str(ex)
+        return out
+    for (plat, gid), rs in games.items():
+        try:
+            man = cl.json("GET", f"/v1/savesync/{plat}/{gid}/manifest")
+        except Offline as ex:
+            out["offline"] = str(ex)
+            break
+        except ConflictError:
+            continue
+        with _lock:
+            for r in rs:
+                try:
+                    b = savebundles.from_spec(json.loads(r["spec"]))
+                except (ValueError, KeyError, OSError):
+                    continue
+                srv = _server_bundle(man, b)
+                rev_s = int(srv.get("revision") or 0)
+                if not rev_s or rev_s == r["revision"]:
+                    continue
+                if savebundles.content_hash(b.files) != r["content"]:
+                    out["conflicts"] += 1          # zmiany tu i tam — decyzja przy uruchomieniu gry
+                    continue
+                try:
+                    _download(cl, pid, plat, gid, b, srv)
+                    out["downloaded"] += 1
+                except (Offline, OSError, ValueError, zipfile.BadZipFile) as ex:
+                    log.info("zapisy %s/%s %s: %s", plat, gid, b.key, ex)
+    if out["downloaded"] or out["conflicts"]:
+        log.info("zapisy z serwera po zalogowaniu / starcie: pobrano %d, konfliktów %d",
+                 out["downloaded"], out["conflicts"])
     return out
 
 
