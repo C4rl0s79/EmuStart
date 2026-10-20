@@ -471,6 +471,57 @@ def retry(cfg: dict) -> int:
     return sent
 
 
+def other_core_states(cfg: dict, pid: int, game: dict, core: str) -> list:
+    """Stany tej gry z innych rdzeni RetroArcha (z serwera) — do listy „Wczytaj zapis” z
+    oznaczeniem, że w bieżącym rdzeniu się nie wczytają. Paczki rozpakowane do pamięci
+    podręcznej profilu (pobierane, gdy na serwerze jest nowsza wersja). [{core, path, time}]."""
+    plat, gid = game_ids(game)
+    try:
+        cl = _Client(cfg, pid)
+        man = cl.json("GET", f"/v1/savesync/{plat}/{gid}/manifest")
+    except (Offline, ConflictError):
+        return []
+    from emustart import profiles
+    out = []
+    cores = ((man.get("emulators") or {}).get("retroarch") or {}).get("cores") or {}
+    for c, node in sorted(cores.items()):
+        b = (node.get("bundles") or {}).get("states") or {}
+        if c == core or not b.get("download_url"):
+            continue
+        d = profiles.LOCAL / str(pid) / "_inne_rdzenie" / plat / gid / c
+        mark = d / ".revision"
+        try:
+            have = mark.read_text(encoding="utf-8").strip()
+        except OSError:
+            have = ""
+        if have != str(b.get("revision")):
+            try:
+                zp = _fetch(cl, b)
+            except Offline as ex:
+                log.info("stany rdzenia %s: %s", c, ex)
+                continue
+            try:
+                shutil.rmtree(d, ignore_errors=True)
+                d.mkdir(parents=True, exist_ok=True)
+                with zipfile.ZipFile(zp) as z:
+                    for i in z.infolist():
+                        n = Path(i.filename).name
+                        if i.is_dir() or n != i.filename or n.startswith("."):
+                            continue
+                        dst = d / n
+                        with z.open(i) as src, open(dst, "wb") as f:
+                            shutil.copyfileobj(src, f, 1 << 20)
+                        t = time.mktime(i.date_time + (0, 0, -1))
+                        os.utime(dst, (t, t))
+                mark.write_text(str(b.get("revision")), encoding="utf-8")
+            finally:
+                zp.unlink(missing_ok=True)
+        for f in sorted(d.glob("game.state*")):
+            if not f.name.endswith(".png"):
+                out.append({"core": c, "path": str(f), "time": f.stat().st_mtime})
+    return out
+
+
 def status(cfg: dict, pid: int, game: dict) -> dict:
     """Stan synchronizacji gry dla opcji gry: {state: synced|pending|never|offline, bundles}."""
     plat, gid = game_ids(game)

@@ -172,7 +172,7 @@ def _take_login_code(code: str, ip: str) -> str:
 # ── prośby ──
 def request(mode: str, account: str, name: str, cls: str, ip: str, version: str, pubkey: str,
             accounts: list, hw: str = "", password: str = "", login_code: str = "",
-            create_account=None) -> dict:
+            create_account=None, app: str = "") -> dict:
     """Nowa instalacja prosi o dołączenie. `accounts` — istniejące konta (profile).
     „Nowe konto” ustawia hasło, „Mam konto” je sprawdza (konto bez hasła — ustawia je
     przy zatwierdzeniu); w prośbie zostaje tylko skrót hasła (emustart/accounts.py)."""
@@ -232,7 +232,7 @@ def request(mode: str, account: str, name: str, cls: str, ip: str, version: str,
                      "class": cls if cls in devices.CLASSES else "pc", "ip": ip, "version": version[:20],
                      "pubkey": pubkey, "code": code, "created": now, "expires": now + ENROLL_TTL,
                      "status": "pending", "device": "", "decided_by": "", "hw": devices._valid_hw(hw),
-                     "pw": pw_rec}
+                     "app": devices.app_name(app, cls), "pw": pw_rec}
         if login_code:                    # kod z panelu = zatwierdzenie
             _approve_locked(reqs[rid], True, "kod QR z panelu serwera", create_account, first_admin=True)
         _save()
@@ -343,7 +343,8 @@ def pending(viewer: str) -> list:
             if not _visible(q, viewer) or (_admin_only(q) and viewer and not devices.is_admin(viewer)):
                 continue
             out.append({k: q[k] for k in ("id", "mode", "account", "name", "class", "ip", "created", "expires")}
-                       | {"code": pretty(q["code"]), "replaces": devices.same_hw(q.get("hw", "")),
+                       | {"code": pretty(q["code"]), "app": devices.app_name(q.get("app", ""), q["class"]),
+                          "replaces": devices.same_hw(q.get("hw", ""), q.get("app", ""), q["class"]),
                           "from_account": q.get("for_account", "")})
     return sorted(out, key=lambda q: q["created"])
 
@@ -364,7 +365,7 @@ def _approve_locked(q: dict, games: bool, by: str, create_account=None, first_ad
         q.update(status="approved", device=q["for_device"], decided_by=by)
         return
     did = devices.add_keyed(q["name"], q["class"], q["ip"], q["version"], q["pubkey"], q["account"],
-                            games=bool(games), by=by, hw=q.get("hw", ""))
+                            games=bool(games), by=by, hw=q.get("hw", ""), app=q.get("app", ""))
     q.update(status="approved", device=did, decided_by=by)
 
 

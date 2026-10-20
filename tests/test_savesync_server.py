@@ -136,13 +136,27 @@ def test_bad_sha_bad_zip_and_paths_rejected(srv):
 
 
 def test_retroarch_cores_are_separate(srv):
-    assert upload(srv, {"Gra.srm": b"snes9x"}, 0, core="snes9x")[0] == 200
-    assert upload(srv, {"Gra.srm": b"bsnes"}, 0, core="bsnes")[0] == 200      # osobna paczka, rev od 0
-    assert upload(srv, {"Gra.srm": b"snes9x-2"}, 1, core="snes9x")[0] == 200
+    """Stany per rdzeń (niezgodne); zapisy w grze SNES wspólne dla Snes9x i bsnes (surowy SRAM)."""
+    assert upload(srv, {"game.state1": b"snes9x"}, 0, core="snes9x", kind="states")[0] == 200
+    assert upload(srv, {"game.state1": b"bsnes"}, 0, core="bsnes", kind="states")[0] == 200   # osobna paczka
+    assert upload(srv, {"game.state1": b"snes9x-2"}, 1, core="snes9x", kind="states")[0] == 200
     cores = req(srv, "GET", "/v1/savesync/snes/g1/manifest")[1]["emulators"]["retroarch"]["cores"]
-    st, data = req(srv, "GET", cores["bsnes"]["bundles"]["saves"]["download_url"])
+    st, data = req(srv, "GET", cores["bsnes"]["bundles"]["states"]["download_url"])
     with zipfile.ZipFile(io.BytesIO(data)) as z:
-        assert z.read("Gra.srm") == b"bsnes"                                     # bsnes nietknięty
+        assert z.read("game.state1") == b"bsnes"                                 # stany bsnes nietknięte
+    # zapisy w grze: Snes9x i bsnes — jedna paczka; klient sprzed 0.47 widzi ją pod swoim rdzeniem
+    assert upload(srv, {"game.srm": b"SRAM"}, 0, core="snes9x")[0] == 200
+    st, r = upload(srv, {"game.srm": b"SRAM-bsnes"}, 0, core="bsnes")
+    assert st == 409                                                             # ta sama paczka, rev 1
+    cores = req(srv, "GET", "/v1/savesync/snes/g1/manifest")[1]["emulators"]["retroarch"]["cores"]
+    assert cores["bsnes"]["bundles"]["saves"]["revision"] == cores["sram-snes"]["bundles"]["saves"]["revision"]
+    assert upload(srv, {"game.srm": b"SRAM-bsnes"}, cores["bsnes"]["bundles"]["saves"]["revision"], core="bsnes")[0] == 200
+    cores = req(srv, "GET", "/v1/savesync/snes/g1/manifest")[1]["emulators"]["retroarch"]["cores"]
+    st, data = req(srv, "GET", cores["snes9x"]["bundles"]["saves"]["download_url"])
+    with zipfile.ZipFile(io.BytesIO(data)) as z:
+        assert z.read("game.srm") == b"SRAM-bsnes"
+    # rdzeń spoza listy — zapisy jak dotąd per rdzeń
+    assert upload(srv, {"game.srm": b"x"}, 0, core="nieznany_rdzen")[0] == 200
     assert upload(srv, {"x": b"1"}, 0, core="")[0] == 400                        # RetroArch bez rdzenia
     # PCSX2: karta pamięci osobna dla każdej gry, bez rdzenia
     assert upload(srv, {"Gra.ps2": b"karta"}, 0, game="g2", emu="pcsx2", core="", kind="memcards")[0] == 200

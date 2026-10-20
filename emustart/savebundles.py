@@ -109,6 +109,24 @@ def _match(emu: str, kind: str, name: str, names: set):
     return None
 
 
+# Zapisy w grze (rodzaj „saves”) wspólne dla rdzeni o zgodnym formacie zapisu — surowy SRAM /
+# pamięć baterii (.srm) — jak „root overrides” Steam Cloud: różne programy, te same pliki.
+# Stany zostają per rdzeń (format stanu zależy od rdzenia). Rdzenie spoza listy — per rdzeń.
+SAVE_GROUPS = {
+    "sram-snes": {"snes9x", "snes9x2002", "snes9x2005", "snes9x2005_plus", "snes9x2010", "bsnes", "bsnes_hd_beta",
+                  "bsnes2014_accuracy", "bsnes2014_balanced", "bsnes2014_performance", "bsnes_mercury_accuracy",
+                  "bsnes_mercury_balanced", "bsnes_mercury_performance", "bsnes_cplusplus98", "mesen-s"},
+    "sram-nes": {"fceumm", "nestopia", "mesen", "quicknes"},
+}
+_GROUP_OF = {c: g for g, members in SAVE_GROUPS.items() for c in members}
+
+
+def save_core(core: str) -> str:
+    """Rdzeń paczki zapisów w grze: grupa zgodnych rdzeni („sram-snes”) albo sam rdzeń."""
+    c = (core or "").lower()
+    return _GROUP_OF.get(c, c)
+
+
 def core_id(args: str) -> str:
     """Rdzeń z parametrów RetroArcha (-L …\\cores\\bsnes_libretro.dll → bsnes)."""
     m = _CORE_ARG.search(args or "")
@@ -142,7 +160,7 @@ def retroarch(adapter, core: str, content: Path, names: list) -> list:
         return d
 
     stem = Path(content).stem
-    return [Bundle("retroarch", core, "saves",
+    return [Bundle("retroarch", save_core(core), "saves",
                    folder("savefile_directory", "saves", "sort_savefiles_by_content_enable", "sort_savefiles_enable"),
                    stem, names).collect(),
             Bundle("retroarch", core, "states",

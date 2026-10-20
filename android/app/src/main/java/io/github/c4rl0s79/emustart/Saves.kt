@@ -254,7 +254,7 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
     private fun bundleOf(f: Fam, g: Game): SaveSync.Bundle? {
         val core = SaveSync.coreId(g.core)
         val (emu, c, kind) = when (f.kind) {
-            Kind.BY_STEM -> Triple("retroarch", core, "saves")
+            Kind.BY_STEM -> Triple("retroarch", SaveSync.saveCore(core), "saves")      // zgodne rdzenie — wspólne
             Kind.RA_STATES -> Triple("retroarch", core, "states")
             Kind.PS1_SRM -> Triple("duckstation", "", "memcards")
             Kind.PS2_CARDS -> Triple("pcsx2", "", "memcards")
@@ -593,6 +593,10 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
         if (res.conflicts.isNotEmpty())
             Log.i(tag, "zapisy ${b.key}: na serwerze nowsza wersja z innego urządzenia — decyzja przy następnej grze")
     }
+
+    /** Stany tej gry z innych rdzeni (podgląd w „Wczytaj zapis”). */
+    fun otherCoreStates(profile: String, g: Game): List<Pair<String, File>> =
+        sync.otherCoreStates(profile, g.es, g.name, SaveSync.coreId(g.core))
 
     /** Stan synchronizacji gry z serwerem (opcje gry). */
     fun syncStatus(profile: String, es: String, name: String): JSONObject = sync.status(profile, es, name)

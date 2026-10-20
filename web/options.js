@@ -203,9 +203,11 @@ function goptItems() {
   }
   // stany ze wszystkich urządzeń (koncepcja 2.0 §5.5): „Kontynuuj”, „Stan #N”, urządzenie, data
   if (GO.page === "states") return d.states.map((st) => ({
-    label: st.resume ? "★ " + st.name : (st.continue ? "▶ " : "") + (st.label || st.name),
+    label: st.resume ? "★ " + st.name : (st.other_core ? "✗ " : st.continue ? "▶ " : "") + (st.label || st.name),
     value: fmtDate(st.time) + (st.detail ? " · " + st.detail : ""), thumb: st.thumb || "",
-    act: () => { closeGopt(); launch(st.path); },
+    // stan innego rdzenia — tylko do podglądu (inny format); zapisy w grze są wspólne
+    act: () => st.other_core ? toast(`Ten stan zapisał rdzeń ${st.other_core} — wybierz go dla tej gry (Emulator), żeby go wczytać.`, 6000)
+                             : (closeGopt(), launch(st.path)),
   }));
   if (GO.page === "saves") return saveManagerItems();
   if (GO.page === "emuset") return emuSettingsItems();

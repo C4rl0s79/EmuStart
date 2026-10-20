@@ -102,6 +102,11 @@ def _key(emulator_id, core_id, bundle_kind) -> tuple:
         raise SyncError("RetroArch: core_id jest wymagany (dane rdzeni są osobne)")
     if emu != "retroarch":
         core = ""
+    elif kind == "saves":
+        # zapisy w grze wspólne dla rdzeni o zgodnym formacie (Snes9x ↔ bsnes: surowy SRAM);
+        # klient starszy niż 0.47 podaje swój rdzeń — trafia do tej samej paczki
+        from emustart import savebundles
+        core = savebundles.save_core(core)
     return emu, core, kind
 
 
@@ -160,6 +165,47 @@ def _bundle(m: dict, emu: str, core: str, kind: str, create: bool = False) -> di
     return e.setdefault("bundles", {}).setdefault(kind, {}) if create else (e.get("bundles") or {}).get(kind)
 
 
+def _fold_groups(m: dict) -> bool:
+    """Paczki zapisów zgodnych rdzeni (sprzed 0.47: osobno Snes9x, bsnes…) → jedna paczka grupy:
+    najnowsza zostaje aktualną wersją grupy (ten sam plik i numer wersji — urządzenia, które
+    ją mają, nic nie pobierają), pozostałe trafiają do historii grupy. Paczki rdzeni zostają
+    (nic nie znika). True — manifest zmieniony."""
+    from emustart import savebundles
+    cores = ((m.get("emulators") or {}).get("retroarch") or {}).get("cores") or {}
+    changed = False
+    for group, members in savebundles.SAVE_GROUPS.items():
+        if ((cores.get(group) or {}).get("bundles") or {}).get("saves"):
+            continue
+        old = [(c, cores[c]["bundles"]["saves"]) for c in sorted(members)
+               if ((cores.get(c) or {}).get("bundles") or {}).get("saves", {}).get("bundle_id")
+               and not cores[c]["bundles"]["saves"].get("mirror")]
+        if not old:
+            continue
+        old.sort(key=lambda x: -float(x[1].get("updated_at") or 0))
+        top_core, top = old[0]
+        hist = []
+        for c, b in old[1:]:
+            hist.append({**_public(b), "core_id": c, "note": f"zapisy rdzenia {c} sprzed wspólnych zapisów"})
+        for c, b in old:
+            hist += [dict(h, core_id=h.get("core_id") or c) for h in (b.get("history") or [])]
+        hist.sort(key=lambda h: -float(h.get("updated_at") or 0))
+        g = cores.setdefault(group, {}).setdefault("bundles", {}).setdefault("saves", {})
+        g.update({**_public(top), "from_core": top_core, "history": hist[:KEEP_HISTORY]})
+        for _c, b in old:
+            b["folded_into"] = group
+        changed = True
+    return changed
+
+
+def _load_live(account: str, platform: str, game: str) -> dict:
+    """Manifest do pracy (pod blokadą gry): z paczkami zgodnych rdzeni w grupie."""
+    m = _load(account, platform, game)
+    if _fold_groups(m):
+        _save(account, platform, game, m)
+        log.info("savesync: zapisy rdzeni → wspólna paczka grupy (%s/%s)", platform, game)
+    return m
+
+
 def _bundles(m: dict):
     """(emulator, rdzeń, rodzaj, węzeł) — wszystkie paczki manifestu."""
     for emu, e in (m.get("emulators") or {}).items():
@@ -207,12 +253,24 @@ def read_token(token: str, op: str) -> dict | None:
 
 def manifest(account: str, device: str, platform, game, urls: bool = True) -> dict:
     """Manifest gry dla klienta: wersje paczek i (urls) krótkotrwałe adresy pobrania."""
+    from emustart import savebundles
     platform, game = _id(platform, "platform_id"), _id(game, "game_id")
-    m = _load(account, platform, game)
+    with _lock_for(account, platform, game):
+        m = _load_live(account, platform, game)
     out = json.loads(json.dumps(m))
+    cores = ((out.get("emulators") or {}).get("retroarch") or {}).get("cores") or {}
+    for group, members in savebundles.SAVE_GROUPS.items():
+        gb = ((cores.get(group) or {}).get("bundles") or {}).get("saves")
+        if not gb:
+            continue
+        # klient sprzed 0.47 szuka zapisów pod swoim rdzeniem — ta sama paczka grupy
+        for c in members:
+            cores.setdefault(c, {}).setdefault("bundles", {})["saves"] = dict(gb, mirror=group)
     for emu, core, kind, b in _bundles(out):
-        b.pop("history", None)
-        b.pop("file", None)
+        if b.get("mirror"):
+            core = b["mirror"]
+        for k in ("history", "file", "folded_into", "from_core"):
+            b.pop(k, None)
         if urls and b.get("bundle_id"):
             b["download_url"] = "/v1/files/d/" + make_token(
                 {"op": "get", "acc": account, "dev": device, "p": platform, "g": game,
@@ -247,7 +305,7 @@ def upload_init(account: str, device: str, d: dict) -> dict:
         raise SyncError("nieprawidłowy rozmiar")
     base = int(d.get("base_revision", -1))
     with _lock_for(account, platform, game):
-        b = _bundle(_load(account, platform, game), emu, core, kind) or {}
+        b = _bundle(_load_live(account, platform, game), emu, core, kind) or {}
     if base != int(b.get("revision") or 0):
         raise Conflict(_public(b))           # szybciej niż po wysłaniu całej paczki
     uid = "upl_" + secrets.token_urlsafe(16)
@@ -334,36 +392,159 @@ def upload_commit(account: str, device: str, d: dict, force: bool = False) -> di
         raise SyncError("paczka nie została wysłana")
     p, g = rec["p"], rec["g"]
     with _lock_for(account, p, g):
-        m = _load(account, p, g)
+        m = _load_live(account, p, g)
         b = _bundle(m, rec["e"], rec["c"], rec["k"], create=True)
         cur = int(b.get("revision") or 0)
         if not force and int(d.get("base_revision", -1)) != cur:
             _log("conflict", account, device, p, g, rec["e"], rec["c"], rec["k"], cur, uid=uid)
             raise Conflict(_public(b))
-        gdir = _game_dir(account, p, g)
-        (gdir / "bundles").mkdir(parents=True, exist_ok=True)
-        bid = "bnd_" + secrets.token_urlsafe(12)
-        os.replace(data, gdir / "bundles" / f"{bid}.zip")
-        hist = list(b.get("history") or [])
-        if b.get("bundle_id"):
-            # poprzednia wersja zostaje (kopia zapasowa) — także przegrana przy konflikcie
-            hist.insert(0, {k: b.get(k) for k in ("bundle_id", "revision", "sha256", "size", "file_count",
-                                                   "updated_at", "updated_by_device_id")})
-        for old in hist[KEEP_HISTORY:]:
-            (gdir / "bundles" / f"{old['bundle_id']}.zip").unlink(missing_ok=True)
-        with zipfile.ZipFile(gdir / "bundles" / f"{bid}.zip") as z:
-            nfiles = len(z.namelist())
-        m["revision"] = int(m.get("revision") or 0) + 1
-        now = time.time()
-        b.clear()
-        b.update(bundle_id=bid, revision=m["revision"], sha256=rec["sha256"], size=rec["size"],
-                 file_count=nfiles, updated_at=now, updated_by_device_id=device, history=hist[:KEEP_HISTORY])
-        m["updated_at"], m["updated_by_device_id"] = now, device
-        _save(account, p, g, m)
+        bid = _install(account, p, g, m, b, data, rec["sha256"], rec["size"], device)
     (_uploads() / f"{uid}.json").unlink(missing_ok=True)
     _log("upload/commit" + (" (wymuszone)" if force else ""), account, device, p, g, rec["e"], rec["c"],
          rec["k"], f"{cur}→{m['revision']}", sha=rec["sha256"], size=rec["size"], uid=uid)
     return {"ok": True, "revision": m["revision"], "bundle_id": bid}
+
+
+_PUBLIC = ("bundle_id", "revision", "sha256", "size", "file_count", "updated_at", "updated_by_device_id", "note")
+
+
+def _install(account: str, p: str, g: str, m: dict, b: dict, src: Path, sha: str, size: int, device: str,
+             move: bool = True, note: str = "", updated_at: float | None = None) -> str:
+    """Nowa aktualna wersja paczki `b` z pliku `src` (wołający trzyma blokadę gry); poprzednia
+    do historii (ostatnie KEEP_HISTORY). Zwraca bundle_id."""
+    gdir = _game_dir(account, p, g)
+    (gdir / "bundles").mkdir(parents=True, exist_ok=True)
+    bid = "bnd_" + secrets.token_urlsafe(12)
+    dst = gdir / "bundles" / f"{bid}.zip"
+    if move:
+        os.replace(src, dst)
+    else:
+        import shutil
+        shutil.copyfile(src, dst)
+    hist = list(b.get("history") or [])
+    if b.get("bundle_id"):
+        # poprzednia wersja zostaje (kopia zapasowa) — także przegrana przy konflikcie
+        hist.insert(0, {k: b.get(k) for k in _PUBLIC if b.get(k) is not None})
+    _prune_history(gdir, m, hist, b)
+    with zipfile.ZipFile(dst) as z:
+        nfiles = len(z.namelist())
+    m["revision"] = int(m.get("revision") or 0) + 1
+    now = time.time()
+    b.clear()
+    b.update(bundle_id=bid, revision=m["revision"], sha256=sha, size=size, file_count=nfiles,
+             updated_at=updated_at or now, updated_by_device_id=device, history=hist[:KEEP_HISTORY])
+    if note:
+        b["note"] = note
+    m["updated_at"], m["updated_by_device_id"] = now, device
+    _save(account, p, g, m)
+    return bid
+
+
+def _prune_history(gdir: Path, m: dict, hist: list, b: dict) -> None:
+    """Pliki wersji wypadających z historii — tylko gdy żadna inna paczka ich nie używa
+    (paczka grupy rdzeni dzieli plik z paczką rdzenia)."""
+    used = set()
+    for _e, _c, _k, bb in _bundles(m):
+        if bb is b:
+            continue
+        used.add(bb.get("bundle_id"))
+        used.update(h.get("bundle_id") for h in (bb.get("history") or []))
+    keep = {h.get("bundle_id") for h in hist[:KEEP_HISTORY]}
+    for old in hist[KEEP_HISTORY:]:
+        if old.get("bundle_id") not in keep and old.get("bundle_id") not in used - {None}:
+            (gdir / "bundles" / f"{old['bundle_id']}.zip").unlink(missing_ok=True)
+
+
+def zip_content(p: Path) -> str:
+    """Skrót zawartości paczki — jak savebundles.content_hash na urządzeniach (nazwy w paczce
+    i SHA-256 plików), niezależny od czasów i kompresji ZIP-a."""
+    with zipfile.ZipFile(p) as z:
+        items = [i for i in z.infolist() if not i.is_dir()]
+        if not items:
+            return ""
+        h = hashlib.sha256()
+        for i in sorted(items, key=lambda x: x.filename):
+            fh = hashlib.sha256()
+            with z.open(i) as f:
+                for buf in iter(lambda: f.read(CHUNK), b""):
+                    fh.update(buf)
+            h.update(i.filename.encode("utf-8") + b"\0" + fh.hexdigest().encode() + b"\n")
+        return h.hexdigest()
+
+
+def _content_of(gdir: Path, entry: dict) -> str:
+    if entry.get("content"):
+        return entry["content"]
+    f = gdir / "bundles" / f"{entry.get('bundle_id')}.zip"
+    try:
+        return zip_content(f) if f.is_file() else ""
+    except (OSError, zipfile.BadZipFile):
+        return ""
+
+
+def import_bundle(account: str, platform: str, game: str, emu: str, core: str, kind: str, src: Path,
+                  device: str, note: str, updated_at: float) -> str:
+    """Paczka spoza urządzeń (migracja zapisów sprzed 0.46): gdy paczki jeszcze nie ma — zostaje
+    aktualną wersją; gdy jest — NIE nadpisuje jej, trafia do historii paczki z opisem (do
+    przywrócenia w panelu). Ta sama zawartość już jest (bieżąca albo w historii) — nic.
+    Zwraca "new" | "history" | "same"."""
+    platform, game = _id(platform, "platform_id"), _id(game, "game_id")
+    emu, core, kind = _key(emu, core, kind)
+    why = check_zip(src)
+    if why:
+        raise SyncError(why)
+    content = zip_content(src)
+    sha = hashlib.sha256(src.read_bytes()).hexdigest()
+    with _lock_for(account, platform, game):
+        m = _load_live(account, platform, game)
+        b = _bundle(m, emu, core, kind, create=True)
+        gdir = _game_dir(account, platform, game)
+        if any(_content_of(gdir, e) == content for e in [b] + list(b.get("history") or []) if e.get("bundle_id")):
+            return "same"
+        if not b.get("bundle_id"):
+            _install(account, platform, game, m, b, src, sha, src.stat().st_size, device, move=False,
+                     note=note, updated_at=updated_at)
+            b["content"] = content
+            _save(account, platform, game, m)
+            _log("import (nowa)", account, device, platform, game, emu, core, kind, b["revision"], sha=sha)
+            return "new"
+        (gdir / "bundles").mkdir(parents=True, exist_ok=True)
+        bid = "bnd_" + secrets.token_urlsafe(12)
+        import shutil
+        shutil.copyfile(src, gdir / "bundles" / f"{bid}.zip")
+        with zipfile.ZipFile(src) as z:
+            nfiles = len(z.namelist())
+        hist = list(b.get("history") or [])
+        hist.insert(0, {"bundle_id": bid, "revision": 0, "sha256": sha, "size": src.stat().st_size,
+                        "file_count": nfiles, "updated_at": updated_at, "updated_by_device_id": device,
+                        "note": note, "content": content, "imported": True})
+        _prune_history(gdir, m, hist, b)
+        b["history"] = hist[:KEEP_HISTORY]
+        _save(account, platform, game, m)
+    _log("import (historia)", account, device, platform, game, emu, core, kind, b.get("revision"), sha=sha)
+    return "history"
+
+
+def restore(account: str, platform, game, emu: str, core: str, kind: str, bundle_id: str, by: str) -> dict:
+    """Wersja z historii paczki → nowa aktualna wersja (bieżąca do historii). Urządzenia
+    pobiorą ją przy następnej grze (bez zmian u siebie) albo zobaczą konflikt."""
+    platform, game = _id(platform, "platform_id"), _id(game, "game_id")
+    emu, core, kind = _key(emu, core, kind)
+    with _lock_for(account, platform, game):
+        m = _load_live(account, platform, game)
+        b = _bundle(m, emu, core, kind)
+        hit = next((h for h in (b or {}).get("history") or [] if h.get("bundle_id") == bundle_id), None)
+        if not hit:
+            raise SyncError("nie ma takiej wersji w historii")
+        gdir = _game_dir(account, platform, game)
+        src = gdir / "bundles" / f"{bundle_id}.zip"
+        if not src.is_file():
+            raise SyncError("plik tej wersji już nie istnieje")
+        note = "przywrócone: " + (hit.get("note") or f"wersja {hit.get('revision')}")
+        _install(account, platform, game, m, b, src, hit["sha256"], hit["size"], by, move=False, note=note)
+        rev = b["revision"]
+    _log("restore", account, by, platform, game, emu, core, kind, rev)
+    return {"ok": True, "revision": rev}
 
 
 def resolve(account: str, device: str, platform, game, d: dict) -> dict:
@@ -386,8 +567,7 @@ def resolve(account: str, device: str, platform, game, d: dict) -> dict:
 
 
 def _public(b: dict) -> dict:
-    return {k: b.get(k) for k in ("bundle_id", "revision", "sha256", "size", "file_count",
-                                  "updated_at", "updated_by_device_id")}
+    return {k: b.get(k) for k in _PUBLIC if k != "note" or b.get(k)}
 
 
 def _prune_uploads() -> None:
@@ -404,6 +584,7 @@ def _prune_uploads() -> None:
 def history(account: str, platform, game) -> list:
     """Dla panelu serwera: poprzednie wersje paczek gry (kopie zapasowe)."""
     m = _load(account, _id(platform, "platform_id"), _id(game, "game_id"))
+    _fold_groups(m)
     return [{"emulator_id": e, "core_id": c, "bundle_kind": k, **_public(b), "history": b.get("history") or []}
             for e, c, k, b in _bundles(m)]
 
