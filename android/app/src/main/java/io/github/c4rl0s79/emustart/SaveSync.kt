@@ -294,7 +294,7 @@ class SaveSync(ctx: Context, private val server: Server) {
                     if (dst.exists()) dst.delete()
                     if (!tmp.renameTo(dst)) { tmp.copyTo(dst, true); tmp.delete() }
                 }
-                fun target(arc: String): File = mine[arc] ?: b.target(arc).firstOrNull() ?: return File("")
+                fun target(arc: String): File = mine[arc] ?: b.target(arc).firstOrNull() ?: File("")
                 for (arc in other.keys.sorted()) {
                     if (arc.endsWith(".png")) continue
                     val png = "$arc.png"
