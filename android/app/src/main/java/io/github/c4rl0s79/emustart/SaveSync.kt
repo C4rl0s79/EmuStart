@@ -295,6 +295,7 @@ class SaveSync(ctx: Context, private val server: Server) {
                     if (!tmp.renameTo(dst)) { tmp.copyTo(dst, true); tmp.delete() }
                 }
                 fun target(arc: String): File = mine[arc] ?: b.target(arc).firstOrNull() ?: File("")
+                val taken = HashSet<String>()
                 for (arc in other.keys.sorted()) {
                     if (arc.endsWith(".png")) continue
                     val png = "$arc.png"
@@ -309,9 +310,18 @@ class SaveSync(ctx: Context, private val server: Server) {
                         if (png in other && png !in mine) write(png, File(t.path + ".png"))
                         continue
                     }
-                    val newArc = "game.state$next"
-                    next++
-                    val newFile = File(t.parentFile, t.name.replace(Regex("\\.state\\d*(\\.auto)?$"), ".state${next - 1}"))
+                    val p2s = Regex("^(.+?)\\.(\\d{2}|resume|autosave(?:\\.\\d)?)\\.p2s$", RegexOption.IGNORE_CASE).find(arc)
+                    val newArc = if (p2s != null) {
+                        // PCSX2 / ArmSX2: pierwszy wolny slot 00–09 tej gry
+                        val pre = p2s.groupValues[1]
+                        (0..9).map { "$pre.%02d.p2s".format(it) }.firstOrNull { it !in mine && it !in other && it !in taken }
+                    } else "game.state${next++}"
+                    if (newArc == null) {                      // wszystkie sloty zajęte — nowszy w slocie
+                        if (other.getValue(arc).time > mine.getValue(arc).lastModified()) write(arc, t)
+                        continue
+                    }
+                    taken += newArc
+                    val newFile = b.target(newArc).firstOrNull() ?: continue
                     if (other.getValue(arc).time > mine.getValue(arc).lastModified()) {
                         // serwer nowszy: nasz stan na nowy slot, w slocie stan z serwera
                         mine.getValue(arc).renameTo(newFile)
