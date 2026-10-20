@@ -152,7 +152,8 @@ function goptItems() {
   if (GO.page === "main" && S.platform === "android") return [
     { label: "Graj", act: () => { closeGopt(); launch(); } },
     ...variantItem(),
-    { label: "Zapisy i stany", value: "z komputera i telefonu", act: openSaveManager },
+    { label: "Wczytaj zapis", value: "zapisy i stany z serwera (wszystkie urządzenia)", act: openRaStatesPhone },
+    { label: "Stany PS2", value: "komputer ↔ telefon", act: openSaveManager },
     { label: "Ustawienia emulatora", value: "tylko na tym telefonie", act: () => { closeGopt(); launch("", false, true); } },
     { label: "Metadane i opis", value: [det.meta?.developer, det.meta?.year].filter(Boolean).join(" · "), act: () => goPage("meta") },
     ...adminItems(),
@@ -292,10 +293,14 @@ async function openSaveManager() {
 /* telefon: „Wczytaj zapis” — stany RetroArcha ze wszystkich urządzeń pobrane z serwera
    (na PC tę listę daje game_options po pobraniu stanów do folderu RetroArcha) */
 async function openRaStatesPhone() {
-  toast("Pobieram stany z serwera…", 3000);
+  toast("Pobieram zapisy z serwera…", 3000);
   const r = await api().ra_states(GO.pid);
-  if (!r || !r.ok) return toast(r?.reason || "Nie udało się pobrać stanów.", 5000);
-  if (!r.states.length) return toast(r.note || "Serwer nie ma stanów tej gry dla rdzenia wybranego na tym telefonie.", 6000);
+  if (!r || !r.ok) return toast(r?.reason || "Nie udało się pobrać zapisów.", 5000);
+  const saves = r.saves ? `Zapisy w grze są na telefonie (${r.saves} ${plural(r.saves, "plik", "pliki", "plików")}). ` : "";
+  if (r.offline) toast(`Bez synchronizacji z serwerem: ${r.offline}`, 7000);
+  else if (r.conflicts) toast("Zapisy zmieniły się tu i na innym urządzeniu — wybór przy uruchomieniu gry.", 7000);
+  if (!r.states.length) return toast(r.note || saves + "Stanów tej gry jeszcze nie ma na serwerze.", 7000);
+  if (saves) toast(saves, 4000);
   GO.data = { ...(GO.data || {}), states: r.states };
   goPage("states");
 }
@@ -317,7 +322,8 @@ function saveManagerItems() {
   const states = r.states.filter((st) => st.kind !== "ra");
   if (ra.length) items.push({ label: "Stany RetroArcha (wszystkie urządzenia)", value: "→ Wczytaj zapis",
                               act: () => S.platform === "android" ? openRaStatesPhone() : goPage("states") });
-  if (!states.length && !ra.length) items.push({ label: "Brak stanów tej gry", value: "na komputerze i telefonie", act: () => {} });
+  if (!states.length && !ra.length) items.push({ label: "Brak stanów PS2 tej gry", value: "zapisy w grze i stany RetroArcha → „Wczytaj zapis”",
+                                                 act: () => S.platform === "android" ? openRaStatesPhone() : goPage("states") });
   for (const st of states) {
     const here = st.platform === r.here;
     const t = st.targets.map((x) => `${smMark(x)} ${SM_PLAT[x.platform]}`).join(" ");

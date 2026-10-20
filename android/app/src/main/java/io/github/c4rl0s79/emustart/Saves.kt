@@ -121,7 +121,6 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
         // zamknięciu w trakcie gry blokada przestaje obowiązywać po LOCK_LEASE s
         private const val LOCK_LEASE = 900.0
         private const val LOCK_BEAT_MS = 120_000L
-        private const val LOCK_LEGACY = 900.0
 
         /** Folder rdzenia RetroArcha (nazwa jak w RetroArchu) dla identyfikatora rdzenia („bsnes_libretro_android”). */
         fun coreDirOf(core: String): String {
@@ -261,7 +260,8 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
             else -> return null
         }
         if (emu == "retroarch" && c.isEmpty()) return null           // dane rdzeni są osobne
-        return SaveSync.Bundle(emu, c, kind, { collect(f, g, phoneDirs(f, g)) }, { arc -> targetsFor(f, g, arc) })
+        return SaveSync.Bundle(emu, c, kind, { collect(f, g, phoneDirs(f, g)) }, { arc -> targetsFor(f, g, arc) },
+                               JSONObject().put("fam", f.id).put("game", g.toJson()))
     }
 
     /** Nazwa w paczce dla pliku z telefonu (null — plik nie należy do paczki tej gry). */
@@ -351,33 +351,26 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
         return n
     }
 
-    // ── blokada: ten sam profil nie gra na dwóch urządzeniach naraz ──
+    // ── blokada: ten sam profil nie gra na dwóch urządzeniach naraz (serwer: emustart/plock.py) ──
+    // Atomowa blokada po stronie serwera; urządzenie rozpoznawane po tokenie sesji, nie po nazwie.
     @Volatile private var beat: Thread? = null
 
-    private fun now() = System.currentTimeMillis() / 1000.0
-
-    private fun writeLock(profile: String) = server.nasPut("$profile/lock",
-        JSONObject().put("host", device).put("time", now()).put("lease", LOCK_LEASE).toString().toByteArray(), now())
+    private fun lockCall(profile: String, op: String, body: JSONObject): JSONObject {
+        val r = server.sync("POST", "/v1/lock/$op", profile, body)
+        if (r.code != 200) throw Server.HttpError(r.code, "blokada profilu: serwer odpowiedział ${r.code}")
+        return try { JSONObject(String(r.body)) } catch (e: Exception) { JSONObject() }
+    }
 
     private fun lockProfile(profile: String, force: Boolean) {
-        val raw = server.nasRead("$profile/lock")
-        if (raw != null) {
-            val cur = try { JSONObject(String(raw)) } catch (e: Exception) { JSONObject() }
-            val host = cur.optString("host")
-            val active = host.isNotEmpty() && host != device &&
-                now() - cur.optDouble("time", 0.0) < cur.optDouble("lease", LOCK_LEGACY)
-            if (active && !force) throw Locked(host)
-        }
-        writeLock(profile)
+        val r = lockCall(profile, "take", JSONObject().put("lease", LOCK_LEASE).put("force", force))
+        if (!r.optBoolean("ok")) throw Locked(r.optString("held_by").ifEmpty { "inne urządzenie" })
         // odnawianie, dopóki proces aplikacji żyje (gra w emulatorze, EmuStart w tle)
         beat?.interrupt()
         beat = Thread({
             try {
                 while (true) {
                     Thread.sleep(LOCK_BEAT_MS)
-                    val cur = server.nasRead("$profile/lock")?.let { JSONObject(String(it)) } ?: break
-                    if (cur.optString("host") != device) break      // przejęty przez inne urządzenie
-                    writeLock(profile)
+                    if (!lockCall(profile, "renew", JSONObject().put("lease", LOCK_LEASE)).optBoolean("ok")) break   // przejęty
                 }
             } catch (e: InterruptedException) { } catch (e: Exception) { Log.w(tag, "odnowienie blokady: $e") }
         }, "blokada").apply { isDaemon = true; start() }
@@ -385,16 +378,42 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
 
     private fun unlockProfile(profile: String) {
         beat?.interrupt(); beat = null
-        try {
-            val raw = server.nasRead("$profile/lock") ?: return
-            if (JSONObject(String(raw)).optString("host") == device) server.nasDelete("$profile/lock")
-        } catch (e: Exception) { Log.w(tag, "blokada: $e") }
+        try { lockCall(profile, "release", JSONObject()) } catch (e: Exception) { Log.w(tag, "blokada: $e") }
     }
 
     /** Start aplikacji bez trwającej gry: własna blokada z poprzedniego uruchomienia
      *  (aplikację zamknięto w trakcie gry) nie może dalej blokować komputera. */
     fun releaseStaleLock(profile: String) {
         if (profile.isNotEmpty()) synchronized(lock) { unlockProfile(profile) }
+    }
+
+    /** Po zalogowaniu i przy starcie: nowsze wersje zapisów gier znanych na telefonie (tego
+     *  konta), gdy w telefonie bez zmian; bez gry, która właśnie działa (`skip` — Game.key). */
+    fun pullAll(profile: String, skip: Set<String> = emptySet()): Int {
+        if (profile.isEmpty()) return 0
+        synchronized(lock) {
+            val byGame = LinkedHashMap<String, MutableList<Pair<Fam, Game>>>()
+            for (t in sync.known(profile)) {
+                val g = try { Game.of(t.getJSONObject("game")) } catch (e: Exception) { continue }
+                val f = byId(t.optString("fam")) ?: continue
+                if (g.key in skip) continue
+                byGame.getOrPut(g.key) { mutableListOf() }.add(f to g)
+            }
+            var n = 0
+            val owners = readJson("owners.json")
+            for ((_, list) in byGame) {
+                val g = list.first().second
+                // pliki w folderze emulatora należą do kogoś innego (inny profil / karta innej gry) — pomijamy
+                val bundles = list.mapNotNull { (f, gg) -> bundleOf(f, gg)?.takeIf { b ->
+                    b.files().values.none { owners.optString(it.absolutePath).let { o -> o.isNotEmpty() && o != ownerOf(profile, f, gg) } }
+                } }
+                val res = sync.pull(profile, g.es, g.name, bundles)
+                n += res.downloaded
+                if (res.offline.isNotEmpty()) break
+            }
+            if (n > 0) Log.i(tag, "zapisy z serwera po zalogowaniu / starcie: $n paczek ($profile)")
+            return n
+        }
     }
 
     // ── właściciel plików w folderze emulatora ──
@@ -464,6 +483,7 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
             var msg = ""
             val fams = famsFor(emu, g.plat)
             try { lockProfile(profile, takeover) } catch (e: Locked) { throw e } catch (e: Exception) {
+                Log.w(tag, "blokada profilu: $e")
                 msg = "Serwer niedostępny — gra na zapisach z telefonu; wyślą się później."
             }
             for (f in fams.filter { it.kind == Kind.PS2_STATES }) {
@@ -504,16 +524,30 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
         }
     }
 
-    /** „Wczytaj zapis”: stany RetroArcha tej gry (po pobraniu z serwera) — nazwa w paczce → plik. */
-    fun raStates(profile: String, g: Game): Map<String, File> {
-        val f = byId("retroarch_states") ?: return emptyMap()
-        val b = bundleOf(f, g) ?: return emptyMap()
+    /** Zapisy gry na telefonie po synchronizacji z serwerem: stany (nazwa w paczce → plik),
+     *  liczba plików zapisów w grze, powód braku synchronizacji ('' = zsynchronizowane). */
+    class View(val states: Map<String, File>, val saves: Int, val offline: String, val conflicts: Int)
+
+    /** „Wczytaj zapis”: zapisy w grze i stany RetroArcha tej gry z serwera (jak przed grą, bez
+     *  pytania o konflikty — te rozstrzyga gracz przy uruchomieniu). */
+    fun raStates(profile: String, emu: String, g: Game): View {
+        val fams = listOfNotNull(famFor(emu, g.plat), byId("retroarch_states"))
+        val bundles = fams.mapNotNull { f -> bundleOf(f, g)?.let { f to it } }
         synchronized(lock) {
-            if (!swapOwner(profile, f, g, b.files())) {
-                try { sync.before(profile, g.es, g.name, listOf(b)) } catch (e: Exception) { Log.w(tag, "stany z serwera: $e") }
-                own(profile, b.files().values)
+            var offline = ""
+            var conflicts = 0
+            val ready = bundles.filter { (f, b) -> !swapOwner(ownerOf(profile, f, g), f, g, b.files()) }
+            if (ready.isNotEmpty()) {
+                try {
+                    val res = sync.before(profile, g.es, g.name, ready.map { it.second })
+                    offline = res.offline
+                    conflicts = res.conflicts.size
+                } catch (e: Exception) { Log.w(tag, "zapisy z serwera: $e"); offline = e.message ?: e.toString() }
+                for ((f, b) in ready) own(ownerOf(profile, f, g), b.files().values)
             }
-            return b.files()
+            val st = bundles.firstOrNull { it.first.kind == Kind.RA_STATES }?.second?.files() ?: emptyMap()
+            val sv = bundles.firstOrNull { it.first.kind != Kind.RA_STATES }?.second?.files()?.size ?: 0
+            return View(st, sv, offline, conflicts)
         }
     }
 
@@ -774,7 +808,14 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
         if (o.has(pendKey(profile, f, g))) { o.remove(pendKey(profile, f, g)); writeJson("do-wyslania.json", o) }
     }
 
-    fun pendingCount(): Int = readJson("do-wyslania.json").length()
+    fun pendingCount(): Int = pendingGames().size
+
+    /** Gry, których zapisy czekają na wysłanie (bez połączenia) — nazwy, po jednej na grę. */
+    fun pendingGames(): List<String> {
+        val o = readJson("do-wyslania.json")
+        return o.keys().asSequence().mapNotNull { o.optJSONObject(it)?.optJSONObject("game")?.optString("name") }
+            .filter { it.isNotEmpty() }.distinct().toList()
+    }
 
     /** Zaległe wysyłki (przy starcie aplikacji i przed grą). */
     fun retryPending(): Int {

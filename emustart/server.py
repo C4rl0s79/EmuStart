@@ -152,6 +152,9 @@ class _Handler(BaseHTTPRequestHandler):
         if p.startswith("/v1/savesync/"):
             from emustart import remote      # synchronizacja zapisów gier (emustart/savesync.py)
             return remote.savesync_post(self)
+        if p.startswith("/v1/lock/"):
+            from emustart import remote      # jedna gra naraz na profil (emustart/plock.py)
+            return remote.lock_post(self)
         if p.startswith("/v1/"):
             return refuse(self, 404)
         # API tylko dla naszego UI: właściwy Host i własny nagłówek (zwykła strona

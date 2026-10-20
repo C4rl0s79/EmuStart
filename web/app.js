@@ -868,12 +868,26 @@ async function loginDone(account) {
   toast(`Zalogowano — konto „${account}” na tym urządzeniu.`, 6000);
   openProfiles(true);
 }
+async function doLogout(force) {
+  toast("Wysyłam zapisy na serwer…", 3000);
+  const r = await api().server_logout(!!force);
+  if (r && r.ask) return logoutPendingAsk(r);
+  if (!r?.ok) return toast(r?.reason || "Nie udało się wylogować.", 6000);
+  S.settings = await api().get_settings(); await refreshState();
+  renderSettings(); toast("Wylogowano z serwera. Gry i zapisy na tym urządzeniu zostały.", 6000);
+}
+/** Zapisy nie doszły na serwer (np. brak połączenia) — wylogowanie dopiero po decyzji gracza. */
+function logoutPendingAsk(r) {
+  S.menu = [["Spróbuj jeszcze raz", () => doLogout(false)],
+            ["Wyloguj mimo to — zapisy zostaną tutaj i wyślą się po zalogowaniu na to samo konto", () => doLogout(true)],
+            ["Anuluj", () => {}]];
+  S.menuIdx = 0; S.modal = "menu";
+  $("menu").querySelector("h2").textContent = `${r.reason} ${(r.games || []).join(", ")}`;
+  $("menu").classList.remove("hidden");
+  renderMenu();
+}
 function logoutAsk() {
-  S.menu = [["Wyloguj — to urządzenie straci dostęp do serwera", async () => {
-    await api().server_logout();
-    S.settings = await api().get_settings(); await refreshState();
-    renderSettings(); toast("Wylogowano z serwera. Gry i zapisy na tym urządzeniu zostały.", 6000);
-  }], ["Anuluj", () => {}]];
+  S.menu = [["Wyloguj — to urządzenie straci dostęp do serwera", () => doLogout(false)], ["Anuluj", () => {}]];
   S.menuIdx = 1; S.modal = "menu";
   $("menu").querySelector("h2").textContent = "Wylogować z serwera?";
   $("menu").classList.remove("hidden");
@@ -1259,8 +1273,10 @@ async function refreshState() {
       : st.server.key_rejected ? "Klucz urządzenia nieważny" : "Serwer niedostępny";
     if (st.server.key_rejected && !S.keyWarned) {
       S.keyWarned = true;
-      toast(st.server.reason || ("Serwer nie przyjmuje tego urządzenia (unieważnione?) — zaloguj się ponownie: " +
-            "Ustawienia → Wyloguj z serwera → Zaloguj."), 9000);
+      const n = st.server.pending_saves || 0;
+      toast((st.server.reason || ("Serwer nie przyjmuje tego urządzenia (unieważnione?) — zaloguj się ponownie: " +
+            "Ustawienia → Wyloguj z serwera → Zaloguj.")) +
+            (n ? ` Zapisy ${n} ${n === 1 ? "gry czekają" : "gier czekają"} na wysłanie — zaloguj się ponownie na to samo konto, wyślą się same.` : ""), 12000);
     }
     net.className = "pill " + (st.server.ok || st.server.checking ? "ok" : "warn");
   } else {

@@ -141,3 +141,79 @@ def test_bundle_rejects_unsafe_names(tmp_path):
         with pytest.raises(ValueError):
             b.local_path(bad)
     assert savebundles.core_id('-L "D:\\RA\\cores\\bsnes_libretro.dll"') == "bsnes"
+
+
+# ── po zalogowaniu / przy starcie (pull_all), wylogowanie z niewysłanymi zapisami ──
+
+def _two_devices(cfgs, tmp, stem="Chrono Trigger (USA)"):
+    _write(tmp / "dev1" / "saves" / f"{stem}.srm", b"V1")
+    syncclient.before(cfgs[PC], PC, ra_bundles(tmp, PC, stem), GAME)
+    syncclient.before(cfgs[TEL], TEL, ra_bundles(tmp, TEL, stem), GAME)
+    _write(tmp / "dev1" / "saves" / f"{stem}.srm", b"V2")
+    syncclient.after(cfgs[PC], PC, ra_bundles(tmp, PC, stem), GAME)       # PC wysłał nowszą wersję
+    return tmp / "dev2" / "saves" / f"{stem}.srm"
+
+
+def test_pull_after_login_unchanged_conflict_offline(net):
+    cfgs, tmp = net
+    tel = _two_devices(cfgs, tmp)
+    off = {**cfgs[TEL], "dev": ""}
+    r = syncclient.pull_all(off, TEL)
+    assert r["offline"] and tel.read_bytes() == b"V1"                       # bez serwera nic się nie zmienia
+    _write(tel, b"TEL-LOCAL")                                                # zmiana tu i tam — konflikt
+    r = syncclient.pull_all(cfgs[TEL], TEL)
+    assert r == {"downloaded": 0, "conflicts": 1, "offline": ""} and tel.read_bytes() == b"TEL-LOCAL"
+    _write(tel, b"V1")                                                       # bez zmian lokalnie — pobranie
+    r = syncclient.pull_all(cfgs[TEL], TEL)
+    assert r["downloaded"] == 1 and tel.read_bytes() == b"V2"
+
+
+def test_pending_saves_of_previous_account_never_land_on_new_one(net, monkeypatch):
+    from emustart import devices
+    cfgs, tmp = net
+    stem = "Chrono Trigger (USA)"
+    _write(tmp / "dev1" / "saves" / f"{stem}.srm", b"V1")
+    syncclient.before(cfgs[PC], PC, ra_bundles(tmp, PC, stem), GAME)
+    _write(tmp / "dev1" / "saves" / f"{stem}.srm", b"OFFLINE")
+    syncclient.after({**cfgs[PC], "dev": ""}, PC, ra_bundles(tmp, PC, stem), GAME)
+    assert [p["account"] for p in syncclient.pending(cfgs[PC])] == ["Jezus"]
+    # komputer zalogowany teraz kontem Ola (ten sam profil lokalny)
+    monkeypatch.setattr(devices, "account_raw", lambda did: "Ola")
+    monkeypatch.setattr(profiles, "account_of_device", lambda c: "Ola")
+    monkeypatch.setattr(profiles, "get", lambda pid: {"id": pid, "name": "Ola", "nas_name": "Ola"})
+    assert syncclient.retry(cfgs[PC]) == 0                                   # bez tokenu konta Jezus — czeka
+    assert syncclient.pending(cfgs[PC], "Ola") == [] and len(syncclient.pending(cfgs[PC], "Jezus")) == 1
+    _p, gid = syncclient.game_ids(GAME)
+    assert savesync.manifest("Ola", "pc", "snes", gid, urls=False)["revision"] == 0   # nic na koncie Oli
+    assert syncclient.pull_all(cfgs[PC], PC)["downloaded"] == 0             # paczki Jezusa pominięte
+
+
+def test_logout_waits_for_unsent_saves(monkeypatch):
+    from emustart import api as api_mod, config, keystore, launcher, nasfs
+    a = api_mod.Api.__new__(api_mod.Api)
+    a._cfg = {"server_key": "dev:abc", "server_url": "https://x"}
+    calls = []
+    monkeypatch.setattr(launcher, "wait_post", lambda t=None: calls.append("wait") or True)
+    monkeypatch.setattr(syncclient, "retry", lambda cfg: calls.append("retry") or 0)
+    left = [{"name": "Chrono Trigger", "platform": "snes", "game": "g1", "account": "Jezus"}]
+    monkeypatch.setattr(syncclient, "pending", lambda cfg, account="": left)
+    monkeypatch.setattr(api_mod.netsrc, "authed_post", lambda *a_, **k: {"ok": True})
+    monkeypatch.setattr(api_mod.netsrc, "forget_server", lambda: None)
+    monkeypatch.setattr(keystore, "delete", lambda *a_: None)
+    monkeypatch.setattr(config, "save", lambda c: None)
+    monkeypatch.setattr(nasfs, "reset", lambda: None)
+    r = a.server_logout()
+    assert r["ask"] and r["pending"] == 1 and r["games"] == ["Chrono Trigger"] and a._cfg.get("server_key")
+    assert calls == ["wait", "retry"]                                        # najpierw zapisy po ostatniej grze
+    left.clear()
+    assert a.server_logout()["ok"] and not a._cfg.get("server_key")          # wszystko wysłane — wylogowanie
+    a._cfg["server_key"] = "dev:abc"
+    left.append({"name": "X", "platform": "snes", "game": "g2", "account": "Jezus"})
+    assert a.server_logout(force=True)["ok"]                                 # „wyloguj mimo to”
+
+    class S:
+        phase = "running"
+        game = {}
+    a._cfg["server_key"] = "dev:abc"
+    a._session = S()
+    assert not a.server_logout(force=True)["ok"]                             # w trakcie gry — zablokowane

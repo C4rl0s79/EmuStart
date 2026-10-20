@@ -35,7 +35,8 @@ class SaveSync(ctx: Context, private val server: Server) {
     /** Paczka gry na tym telefonie: `files()` — pliki teraz (nazwa w paczce → plik),
      *  `target(arc)` — gdzie położyć plik pobrany z serwera (może być kilka miejsc). */
     class Bundle(val emu: String, val core: String, val kind: String,
-                 val files: () -> Map<String, File>, val target: (String) -> List<File>) {
+                 val files: () -> Map<String, File>, val target: (String) -> List<File>,
+                 val tag: JSONObject = JSONObject()) {
         val key: String get() = "$emu/${core.ifEmpty { "-" }}/$kind"
     }
 
@@ -116,7 +117,7 @@ class SaveSync(ctx: Context, private val server: Server) {
     private fun remember(account: String, plat: String, gid: String, b: Bundle, rev: Int, content: String, dirty: Boolean = false) {
         val o = readState(account)
         o.put(skey(plat, gid, b), JSONObject().put("rev", rev).put("content", content).put("dirty", dirty)
-            .put("time", System.currentTimeMillis() / 1000.0))
+            .put("time", System.currentTimeMillis() / 1000.0).put("tag", b.tag))
         writeState(account, o)
     }
 
@@ -317,6 +318,38 @@ class SaveSync(ctx: Context, private val server: Server) {
             here && there -> res.conflicts += Conflict(b, srv, newest(b))
             st.optBoolean("dirty") -> remember(account, plat, gid, b, revS, local)
         }
+    }
+
+    /** Metki paczek znanych na telefonie dla konta (gra, rodzina) — do pobrania po zalogowaniu. */
+    fun known(account: String): List<JSONObject> {
+        val o = readState(account)
+        return o.keys().asSequence().mapNotNull { o.optJSONObject(it)?.optJSONObject("tag") }
+            .filter { it.has("game") }.toList()
+    }
+
+    /** Po zalogowaniu i przy starcie: nowsze wersje paczek z serwera, gdy w telefonie bez zmian.
+     *  Nic nie wysyła i nie rozstrzyga konfliktów (zostają do decyzji przy uruchomieniu gry). */
+    fun pull(account: String, es: String, name: String, bundles: List<Bundle>): Result {
+        val res = Result()
+        if (bundles.isEmpty()) return res
+        val plat = es.lowercase(Locale.ROOT)
+        val gid = gameId(es, name)
+        val man = try { json(account, "GET", "/v1/savesync/$plat/$gid/manifest") } catch (e: Offline) {
+            res.offline = e.message ?: ""; return res
+        } catch (e: Rejected) { return res }
+        for (b in bundles) {
+            try {
+                val srv = serverBundle(man, b)
+                val st = state(account, plat, gid, b) ?: continue
+                val revS = srv.optInt("revision")
+                if (revS == 0 || revS == st.optInt("rev")) continue
+                if (localHash(b) != st.optString("content")) { res.conflicts += Conflict(b, srv, newest(b)); continue }
+                download(account, plat, gid, b, srv)
+                res.downloaded++
+            } catch (e: Offline) { res.offline = e.message ?: ""; break }
+            catch (e: Exception) { Log.w(tag, "zapisy ${b.key}: $e") }
+        }
+        return res
     }
 
     /** Decyzja gracza: local — wersja z telefonu zostaje (serwerowa w historii na serwerze),

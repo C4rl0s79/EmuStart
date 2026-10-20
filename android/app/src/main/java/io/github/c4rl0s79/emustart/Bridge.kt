@@ -32,6 +32,8 @@ class Bridge(private val act: MainActivity) {
     init {
         pool.execute {
             try { saves.retryPending() } catch (e: Exception) { Log.w(tag, "zaległe zapisy: $e") }
+            // nowsze wersje zapisów z innych urządzeń (w telefonie bez zmian; konflikty — przy grze)
+            try { if (launch == null) saves.pullAll(prefs.profile) } catch (e: Exception) { Log.w(tag, "zapisy z serwera: $e") }
             // blokada profilu z poprzedniego uruchomienia (aplikację zamknięto w trakcie gry)
             try { if (launch == null) saves.releaseStaleLock(prefs.profile) } catch (e: Exception) { }
         }
@@ -91,7 +93,7 @@ class Bridge(private val act: MainActivity) {
         "get_settings" -> settings()
         "save_settings" -> { saveSettings(a.getJSONObject(0)); JSONObject().put("ok", true) }
         "server_scan" -> scanQr()
-        "server_logout" -> logout()
+        "server_logout" -> logout(a.optBoolean(0, false))
         "server_enroll" -> enrollStart(a.optString(0, ""), a.optString(1, ""), a.optString(2, ""), a.optString(3, ""))
         "server_enroll_poll" -> enrollPoll()
         "server_enroll_cancel" -> { enrollCancel(); JSONObject().put("ok", true) }
@@ -227,7 +229,9 @@ class Bridge(private val act: MainActivity) {
             .put("profiles", profList.size.coerceAtLeast(1))
             .put("account", if (prefs.deviceId.isNotEmpty()) prefs.serverAccount else "")
             .put("server", if (prefs.configured) JSONObject().put("ok", online).put("name", "")
-                .put("checking", checking && !online).put("key_rejected", keyRejected) else JSONObject.NULL)
+                .put("checking", checking && !online).put("key_rejected", keyRejected)
+                // urządzenie unieważnione na serwerze — ile gier ma zapisy czekające na wysłanie
+                .put("pending_saves", if (keyRejected) saves.pendingCount() else 0) else JSONObject.NULL)
             .put("py_pad", false).put("pad_backend", "android")
             .put("admin", server.admin)
     }
@@ -929,6 +933,8 @@ class Bridge(private val act: MainActivity) {
                 systemsCache = null
                 learnedAt = 0L
                 Log.i(tag, "zalogowano na serwerze $url (konto ${prefs.serverAccount})")
+                val acc = prefs.serverAccount
+                pool.execute { try { saves.pullAll(acc) } catch (e: Exception) { Log.w(tag, "zapisy konta: $e") } }
             }
             "denied", "expired" -> enrollCancel()
         }
@@ -943,7 +949,21 @@ class Bridge(private val act: MainActivity) {
     }
 
     /** Wyloguj z serwera: serwer unieważnia ten telefon, klucz urządzenia i adresy znikają. */
-    private fun logout(): JSONObject {
+    /** Wylogowanie: najpierw zapisy (po ostatniej grze i zaległe); gdy czegoś nie udało się
+     *  wysłać, bez `force` nie wylogowuje — gracz wybiera: jeszcze raz / mimo to / anuluj. */
+    private fun logout(force: Boolean = false): JSONObject {
+        val l = launch
+        if (l != null && l.phase in setOf("preparing", "downloading", "running", "conflict"))
+            return JSONObject().put("ok", false).put("reason", "Trwa gra — wyloguj się po jej zakończeniu.")
+        if (prefs.configured && !force) {
+            val t0 = System.currentTimeMillis()
+            while (saves.busy.isNotEmpty() && System.currentTimeMillis() - t0 < 120_000) Thread.sleep(500)
+            try { saves.retryPending() } catch (e: Exception) { Log.w(tag, "zapisy przed wylogowaniem: $e") }
+            val left = saves.pendingGames()
+            if (left.isNotEmpty()) return JSONObject().put("ok", false).put("ask", true).put("pending", left.size)
+                .put("games", JSONArray(left.take(8)))
+                .put("reason", "Zapisy ${left.size} ${if (left.size == 1) "gry" else "gier"} nie doszły na serwer.")
+        }
         if (prefs.configured) try { server.postAuthed("/v1/auth/logout", JSONObject()) } catch (e: Exception) { Log.w(tag, "wylogowanie: $e") }
         if (prefs.deviceKey.isNotEmpty()) DeviceKey.delete(prefs.deviceKey)
         prefs.forgetServer()
@@ -1227,6 +1247,7 @@ class Bridge(private val act: MainActivity) {
             prefs.lookTime = 0L
             try { pullLook() } catch (e: Exception) { Log.w(tag, "wygląd profilu: $e") }
             try { pullEmuChoices() } catch (e: Exception) { Log.w(tag, "wybory emulatorów profilu: $e") }
+            pool.execute { try { saves.pullAll(n, setOfNotNull(launch?.saveGame?.key)) } catch (e: Exception) { Log.w(tag, "zapisy profilu: $e") } }
             systemsCache = null
         }
         return JSONObject().put("ok", true).put("look", prefs.look)
@@ -1402,7 +1423,8 @@ class Bridge(private val act: MainActivity) {
             val file = File(g.optString("file"))
             val sg = Saves.Game(g.optString("es"), g.optString("name"), file.nameWithoutExtension, File(act.filesDir, "brak"),
                                 core, s.optString("plat"))
-            val files = saves.raStates(prefs.profile, sg)
+            val view = saves.raStates(prefs.profile, emu, sg)
+            val files = view.states
             val out = JSONArray()
             var thumbs = 0
             val list = files.filterKeys { !it.endsWith(".png") }.entries
@@ -1437,7 +1459,8 @@ class Bridge(private val act: MainActivity) {
                 }
                 out.put(o)
             }
-            JSONObject().put("ok", true).put("states", out)
+            JSONObject().put("ok", true).put("states", out).put("saves", view.saves)
+                .put("offline", view.offline).put("conflicts", view.conflicts)
         } catch (e: Exception) {
             JSONObject().put("ok", false).put("reason", explain(e))
         }

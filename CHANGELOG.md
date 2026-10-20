@@ -8,6 +8,34 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+Wersja 0.48.0 (niewydana).
+
+### Dodane
+- **Jedna gra naraz na profil — blokada na serwerze** (`emustart/plock.py`, `/v1/lock/take|renew|
+  release|status`): atomowa (dwa urządzenia startujące w tej samej chwili — blokadę dostaje
+  jedno), urządzenie rozpoznawane po tokenie sesji, nie po nazwie komputera. Dzierżawa i
+  odnawianie jak dotąd, przejęcie tylko po potwierdzeniu gracza; urządzenie, któremu profil
+  przejęto, przestaje go odnawiać. PC i telefon korzystają z API; plik `<profil>/lock` w folderze
+  profilu nie jest już używany.
+- **Zapisy przy wylogowaniu** (PC i telefon): najpierw czeka na wysyłanie po ostatniej grze i
+  wysyła zaległe zapisy; gdy czegoś nie udało się wysłać — pytanie „spróbuj jeszcze raz /
+  wyloguj mimo to (zapisy zostaną na urządzeniu i wyślą się po zalogowaniu na to samo konto) /
+  anuluj”; w trakcie gry wylogowanie zablokowane.
+- **Zapisy po zalogowaniu i przy starcie** (PC i telefon, także po zmianie profilu): nowsze wersje
+  paczek gier znanych na urządzeniu pobierają się, gdy lokalnie bez zmian; konflikty zostają do
+  decyzji przy uruchomieniu gry; gra, która właśnie działa, jest pomijana.
+
+### Poprawione
+- **Telefon: „Wczytaj zapis” wprost w opcjach gry** — pobiera z serwera zapisy w grze i stany tej
+  gry (z innych rdzeni z oznaczeniem). Od 0.46 telefon miał tylko „Zapisy i stany” (menedżer
+  zapisów), który pokazuje już tylko stany PS2 — wyglądało, jakby telefon nie widział żadnych
+  zapisów. Menedżer nazywa się teraz „Stany PS2”.
+- **Niewysłane zapisy poprzedniego konta nie trafiają na nowe** — paczka pamięta konto (PC: w
+  bazie, telefon: osobny stan na konto); po zalogowaniu innym kontem czekają i wyślą się po
+  powrocie na tamto konto.
+- **Urządzenie unieważnione na serwerze** — komunikat mówi, ile gier ma zapisy czekające na
+  wysłanie (zamiast samego „nieznane urządzenie”).
+
 ## [0.47.0] — 2026-10-20
 
 Zakres: zapisy jak Steam Cloud — jeden zestaw na konto i grę. Serwer (`savesync.py`,
