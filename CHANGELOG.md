@@ -8,7 +8,11 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
-Wersja 0.48.0 (niewydana).
+## [0.48.0] — 2026-10-20
+
+Zakres: serwer (`plock.py`, `remote.py`), PC (`profiles.py`, `syncclient.py`, `api.py`, `web/app.js`),
+Android (`Saves.kt`, `SaveSync.kt`, `Bridge.kt`, `web/options.js`). Wymaga EmuStart Server 0.48.0
+(blokada profilu) — zaktualizuj serwer i aplikacje.
 
 ### Dodane
 - **Jedna gra naraz na profil — blokada na serwerze** (`emustart/plock.py`, `/v1/lock/take|renew|
