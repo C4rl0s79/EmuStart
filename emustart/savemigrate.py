@@ -14,9 +14,10 @@ idempotentna; z panelu serwera) dopasowuje pliki do gier biblioteki tak jak save
 (nazwy umowne „game.srm”, „game.state3.png”, „game_1.mcd”) i:
 
   - paczki jeszcze nie ma → zapisy sprzed 0.46 zostają jej aktualną wersją;
-  - paczka jest (np. z urządzenia z 0.46) → NIE jest nadpisywana: wersja ze starego folderu
-    trafia do historii paczki z opisem „zapisy sprzed 0.46 (urządzenie, data)” — do
-    przywrócenia w panelu;
+  - paczka jest (np. z urządzenia z 0.46) → NIE jest nadpisywana: zapisy w grze ze starego
+    folderu trafiają do historii paczki z opisem „zapisy sprzed 0.46 (urządzenie, data)” — do
+    przywrócenia w panelu; stany dołączają się do bieżących jako dodatkowe sloty (bieżące
+    zostają w swoich slotach, nic nie znika);
   - ta sama zawartość już jest (ponowne uruchomienie) → nic.
 
 Ze starych folderów nic nie znika. Raport (ile gier, plików, czego nie dopasowano) zostaje
@@ -228,7 +229,7 @@ def run(nas_root: Path, dry: bool = False, accounts: list | None = None) -> dict
     """Migracja wszystkich kont (folderów profili). `dry` — tylko raport, bez zmian."""
     nas_root = Path(nas_root)
     report = {"time": time.time(), "dry": dry, "accounts": 0, "games": 0, "files": 0, "new": 0,
-              "history": 0, "same": 0, "errors": 0, "items": [], "unmatched": [], "unmatched_count": 0}
+              "history": 0, "merged": 0, "same": 0, "errors": 0, "items": [], "unmatched": [], "unmatched_count": 0}
     games = _Games()
     profs = [d for d in sorted(nas_root.iterdir()) if d.is_dir() and not d.name.startswith(("_", "."))] \
         if nas_root.is_dir() else []

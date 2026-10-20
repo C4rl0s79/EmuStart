@@ -499,6 +499,9 @@ def import_bundle(account: str, platform: str, game: str, emu: str, core: str, k
         m = _load_live(account, platform, game)
         b = _bundle(m, emu, core, kind, create=True)
         gdir = _game_dir(account, platform, game)
+        if kind == "states" and b.get("bundle_id"):
+            # stany się sumują: bieżące zostają w swoich slotach, starsze dochodzą jako nowe sloty
+            return _merge_into(account, platform, game, m, b, gdir, src, device, note)
         if any(_content_of(gdir, e) == content for e in [b] + list(b.get("history") or []) if e.get("bundle_id")):
             return "same"
         if not b.get("bundle_id"):
@@ -523,6 +526,41 @@ def import_bundle(account: str, platform: str, game: str, emu: str, core: str, k
         _save(account, platform, game, m)
     _log("import (historia)", account, device, platform, game, emu, core, kind, b.get("revision"), sha=sha)
     return "history"
+
+
+def _merge_into(account: str, platform: str, game: str, m: dict, b: dict, gdir: Path, src: Path,
+                device: str, note: str) -> str:
+    """Stany z `src` dołączone do bieżącej paczki stanów (savebundles.merge_states; bieżące
+    wygrywają sloty, dołączane dostają wolne numery). Wołający trzyma blokadę gry."""
+    import shutil
+    import tempfile
+    from emustart import savebundles
+    cur = gdir / "bundles" / f"{b['bundle_id']}.zip"
+    with zipfile.ZipFile(cur) as zc, zipfile.ZipFile(src) as zs:
+        def index(z):
+            return {i.filename: (hashlib.sha256(z.read(i)).hexdigest(), 0.0) for i in z.infolist() if not i.is_dir()}
+        mine = {k: (v[0], 1.0) for k, v in index(zc).items()}          # bieżące zawsze wygrywają slot
+        merged, _moves = savebundles.merge_states(mine, index(zs))
+        if set(merged) == set(mine) and all(merged[a][0] == "mine" for a in merged):
+            return "same"
+        fd, tmp = tempfile.mkstemp(prefix="emustart-stany-", suffix=".zip")
+        os.close(fd)
+        tmp = Path(tmp)
+        try:
+            with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as out:
+                for arc, (side, name) in sorted(merged.items()):
+                    z = zc if side == "mine" else zs
+                    info = z.getinfo(name)
+                    zi = zipfile.ZipInfo(arc, info.date_time)
+                    zi.compress_type = zipfile.ZIP_DEFLATED
+                    out.writestr(zi, z.read(name))
+            sha = hashlib.sha256(tmp.read_bytes()).hexdigest()
+            _install(account, platform, game, m, b, tmp, sha, tmp.stat().st_size, device, move=False,
+                     note=note + " — dołączone do bieżących stanów")
+        finally:
+            tmp.unlink(missing_ok=True)
+    _log("import (stany dołączone)", account, device, platform, game, "", "", "states", b.get("revision"))
+    return "merged"
 
 
 def restore(account: str, platform, game, emu: str, core: str, kind: str, bundle_id: str, by: str) -> dict:

@@ -325,6 +325,64 @@ def _download(cl, pid, plat, gid, b, srv: dict) -> None:
         zp.unlink(missing_ok=True)
 
 
+def _merge_states(cl, pid, plat, gid, b, srv: dict, res: Result) -> None:
+    """Stany zmienione tu i na innym urządzeniu: suma slotów (savebundles.merge_states) —
+    nic nie znika, kolizja tego samego slotu: starszy stan dostaje nowy numer. Wynik na
+    urządzenie i na serwer (bez pytania gracza — stany się sumują, nie wykluczają)."""
+    zp = _fetch(cl, srv)
+    try:
+        with zipfile.ZipFile(zp) as z:
+            other = {}
+            for i in z.infolist():
+                if not i.is_dir():
+                    other[i.filename] = (hashlib.sha256(z.read(i)).hexdigest(), time.mktime(i.date_time + (0, 0, -1)))
+            mine = {arc: (savebundles.file_sha(Path(p)), Path(p).stat().st_mtime) for p, arc in b.files}
+            merged, moves = savebundles.merge_states(mine, other)
+            paths = {arc: Path(p) for p, arc in b.files}
+            tmp = Path(tempfile.mkdtemp(prefix="emustart-stany-"))
+            try:
+                final = {}
+                for arc, (src, name) in merged.items():
+                    t = tmp / arc
+                    if src == "mine":
+                        shutil.copy2(paths[name], t)
+                    else:
+                        t.write_bytes(z.read(name))
+                        ts = other[name][1]
+                        os.utime(t, (ts, ts))
+                    final[arc] = t
+                if b.files:
+                    bak = _backup_dir(pid) / time.strftime("%Y%m%d-%H%M%S") / f"{b.emulator_id}-{b.core_id or '-'}-{b.kind}"
+                    bak.mkdir(parents=True, exist_ok=True)
+                    for p, _arc in b.files:
+                        shutil.copy2(p, bak / Path(p).name)
+                    _prune_backups(pid)
+                b.folder.mkdir(parents=True, exist_ok=True)
+                for arc, t in final.items():
+                    dst = paths.get(arc) or b.local_path(arc)
+                    dst.parent.mkdir(parents=True, exist_ok=True)
+                    new = dst.with_name(dst.name + ".emustart-new")
+                    shutil.copy2(t, new)
+                    os.replace(new, dst)
+                for arc, p in paths.items():
+                    if arc not in final:
+                        p.unlink(missing_ok=True)
+            finally:
+                shutil.rmtree(tmp, ignore_errors=True)
+        server_content = _zip_hash(zp)
+    finally:
+        zp.unlink(missing_ok=True)
+    b.collect()
+    local = savebundles.content_hash(b.files)
+    res.downloaded += 1
+    if moves:
+        log.info("stany %s/%s %s: połączone z serwerem, %d przeniesione na nowe sloty", plat, gid, b.key, len(moves))
+    if local == server_content:
+        _remember(pid, plat, gid, b, int(srv.get("revision") or 0), local)
+    else:
+        _push(cl, pid, plat, gid, b, int(srv.get("revision") or 0), local, res)
+
+
 def _newest(b) -> float:
     return max((Path(p).stat().st_mtime for p, _a in b.files), default=0.0)
 
@@ -377,6 +435,8 @@ def _before_one(cl, pid, plat, gid, b, srv: dict, res: Result) -> None:
             zp.unlink(missing_ok=True)
         if same:
             _remember(pid, plat, gid, b, rev_s, local)
+        elif b.kind == "states":
+            _merge_states(cl, pid, plat, gid, b, srv, res)      # stany się sumują
         else:
             res.conflicts.append(Conflict(b, srv, _newest(b)))
         return
@@ -389,7 +449,10 @@ def _before_one(cl, pid, plat, gid, b, srv: dict, res: Result) -> None:
     elif changed_here and not changed_there:
         _push(cl, pid, plat, gid, b, rev_s, local, res)
     elif changed_here and changed_there:
-        res.conflicts.append(Conflict(b, srv, _newest(b)))
+        if b.kind == "states":
+            _merge_states(cl, pid, plat, gid, b, srv, res)      # stany się sumują
+        else:
+            res.conflicts.append(Conflict(b, srv, _newest(b)))
     elif st["dirty"]:
         _remember(pid, plat, gid, b, rev_s, local)
 
@@ -459,6 +522,16 @@ def after(cfg: dict, pid: int, bundles: list, game: dict, skip: set | None = Non
             except Offline as ex:
                 res.offline = str(ex)
                 _mark_dirty(pid, plat, gid, b)
+    states = [c for c in res.conflicts if c.bundle.kind == "states"]
+    if states:
+        try:
+            man = cl.json("GET", f"/v1/savesync/{plat}/{gid}/manifest")
+            with _lock:
+                for c in states:
+                    res.conflicts.remove(c)
+                    _merge_states(cl, pid, plat, gid, c.bundle, _server_bundle(man, c.bundle), res)
+        except (Offline, ConflictError, OSError, ValueError, zipfile.BadZipFile) as ex:
+            log.info("stany %s/%s: połączenie odłożone (%s)", plat, gid, ex)
     for c in res.conflicts:
         log.info("zapisy %s/%s %s: na serwerze nowsza wersja z innego urządzenia — decyzja przy następnej grze",
                  plat, gid, c.bundle.key)

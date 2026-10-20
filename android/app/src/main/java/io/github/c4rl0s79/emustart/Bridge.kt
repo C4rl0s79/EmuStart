@@ -103,6 +103,7 @@ class Bridge(private val act: MainActivity) {
         "rescan" -> { systemsCache = null; synchronized(gamesCache) { gamesCache.clear() }; JSONObject().put("ok", true) }
         "launch" -> startLaunch(a.getInt(0), a.optBoolean(2, false), a.optString(1, ""))
         "ra_states" -> raStates(a.getInt(0))
+        "play_other_core" -> playOtherCore(a.getInt(0), a.getString(1))
         "launch_status" -> launchStatus()
         "launch_cancel" -> { launch?.downloader?.cancel?.set(true); launch?.let { if (it.conflict != null) it.choice = "skip" }; null }
         "launch_choice" -> launch?.let { l ->
@@ -1015,7 +1016,11 @@ class Bridge(private val act: MainActivity) {
         }
         pinBlock(prefs.profile)?.let { return it.put("profile_pin", true) }
         val l = Launch(g, s)
-        l.startState = if (state.startsWith("ra:")) state.removePrefix("ra:") else ""
+        l.startState = when {
+            state.startsWith("ra:") -> state.removePrefix("ra:")
+            state.startsWith("arc:") -> state                     // stan z paczki — po synchronizacji przed grą
+            else -> ""
+        }
         launch = l
         pool.execute { runLaunch(l, emu, takeover) }
         return JSONObject().put("ok", true)
@@ -1448,10 +1453,10 @@ class Bridge(private val act: MainActivity) {
             val mine = SaveSync.coreId(core)
             for ((c, f) in saves.otherCoreStates(prefs.profile, sg).sortedByDescending { it.second.lastModified() }) {
                 val m = Regex("\\.state(\\d*)(\\.auto)?$").find(f.name)
-                val o = JSONObject().put("path", "inny:" + f.absolutePath).put("name", f.name)
+                val o = JSONObject().put("path", "inny:" + f.absolutePath).put("name", f.name).put("arc", f.name)
                     .put("time", f.lastModified() / 1000.0).put("other_core", c)
                     .put("label", if (m?.groupValues?.get(2)?.isNotEmpty() == true) "Kontynuuj" else "Stan #${m?.groupValues?.get(1)?.toIntOrNull() ?: 0}")
-                    .put("detail", "rdzeń $c — nie wczyta się w $mine")
+                    .put("detail", "rdzeń $c — wczytanie przełączy system na ten rdzeń")
                 val shot = File(f.path + ".png")
                 if (shot.isFile && shot.length() < 600_000 && thumbs < 24) {
                     o.put("thumb", "data:image/png;base64," + android.util.Base64.encodeToString(shot.readBytes(), android.util.Base64.NO_WRAP))
@@ -1465,6 +1470,23 @@ class Bridge(private val act: MainActivity) {
             JSONObject().put("ok", false).put("reason", explain(e))
         }
     }
+
+    /** „Wczytaj zapis” — stan innego rdzenia: system przechodzi na RetroArch z tym rdzeniem
+     *  (wybór na koncie, jak w Ustawieniach), potem gra startuje z tego stanu. */
+    private fun playOtherCore(id: Int, core: String): JSONObject = try {
+        val g = server.game(id)
+        val s = sysByEs(g.optString("es")) ?: throw IllegalStateException("Nieznany system.")
+        val opts = Emulators.options(act, s.optString("plat"), s.optString("core"), cores(s))
+        val pick = opts.firstOrNull { Emulators.baseId(it.first) == "retroarch" && SaveSync.coreId(Emulators.coreOf(it.first)) == core }
+        if (pick == null) JSONObject().put("ok", false).put("reason",
+            "RetroArch na tym telefonie nie ma rdzenia $core dla tego systemu — pobierz go w RetroArchu (Online Updater → Core Downloader).")
+        else {
+            prefs.setEmulatorChoice(s.optString("es"), pick.first)
+            systemsCache = null
+            pool.execute { pushEmuChoices() }
+            JSONObject().put("ok", true).put("label", pick.second)
+        }
+    } catch (e: Exception) { JSONObject().put("ok", false).put("reason", explain(e)) }
 
     private fun saveManager(id: Int): JSONObject {
         if (prefs.profile.isEmpty()) return JSONObject().put("ok", false)

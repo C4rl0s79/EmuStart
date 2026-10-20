@@ -825,7 +825,8 @@ Każdy plik zostanie skopiowany i sprawdzony; ` +
 });
 
 /* ── zapisy sprzed 0.46 → paczki synchronizacji (emustart/savemigrate.py) ── */
-const SM_RES = { new: "przeniesione", history: "do historii (paczka już była)", same: "bez zmian", plan: "do przeniesienia", error: "błąd" };
+const SM_RES = { new: "przeniesione", history: "do historii (paczka już była)", merged: "stany dołączone do bieżących",
+                 same: "bez zmian", plan: "do przeniesienia", error: "błąd" };
 const SM_KIND = { saves: "zapisy", states: "stany", memcards: "karta pamięci" };
 let smPoll = null;
 async function smTick() {
@@ -841,7 +842,7 @@ async function smTick() {
   const when = new Date(r.time * 1000).toLocaleString("pl-PL");
   $("smText").textContent = (r.dry ? `Próba (${when}, bez zmian): ` : `Ostatnia migracja (${when}): `) +
     `kont ${r.accounts}, gier ${r.games}, plików ${r.files}` +
-    (r.dry ? "" : ` — przeniesione ${r.new}, do historii ${r.history}, bez zmian ${r.same}, błędy ${r.errors}`) +
+    (r.dry ? "" : ` — przeniesione ${r.new}, stany dołączone ${r.merged || 0}, do historii ${r.history}, bez zmian ${r.same}, błędy ${r.errors}`) +
     `; nie dopasowano ${r.unmatched_count}` + (r.folded ? `; wspólne zapisy rdzeni: ${r.folded} gier` : "") + ".";
   $("smItems").innerHTML = (r.items.length ? `<details><summary>Paczki (${r.items.length})</summary><table>` +
     r.items.map((it) => `<tr><td>${esc(it.account)}</td><td>${esc(it.game)} <span class="muted">${esc(it.es)}</span></td>` +

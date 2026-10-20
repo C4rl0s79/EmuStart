@@ -383,6 +383,16 @@ class Session:
                 # „Graj od początku”: bez wczytania stanu (autozapis, „Kontynuuj”, wznowienie)
                 resume = None
                 extra = adapter.launch_args(self.run_dir, False, order)
+            elif self.start_state.startswith("arc:"):
+                # „Wczytaj zapis”: stan z paczki (po synchronizacji — także z innego urządzenia)
+                hit = next((b.local_path(self.start_state[4:]) for b in getattr(self, "_sync_bundles", [])
+                            if b.kind == "states"), None)
+                resume = None
+                if hit and hit.is_file():
+                    extra = adapter.start_state_args(self.run_dir, hit, order)
+                else:
+                    self.notice = "Nie ma już tego stanu na serwerze — gra startuje bez niego."
+                    extra = adapter.launch_args(self.run_dir, False, order)
             elif self.start_state and Path(self.start_state).is_file():
                 # stan wybrany ręcznie ma pierwszeństwo przed stanem wznowienia
                 resume = None
@@ -548,6 +558,8 @@ class Session:
         self._sync_bundles, self._sync_skip = [], set()
         try:
             bundles = savebundles.for_game(adapter, savebundles.core_id(args), Path(rom), g)
+            for b in bundles:
+                b.adopt_names()                     # nazwy od pliku, który uruchomi emulator
         except Exception:
             log.exception("paczki zapisów gry")
             return
@@ -706,6 +718,18 @@ def resume_from_nas(cfg: dict, pid: int, g: dict) -> None:
         return
     if not local or e["created"] > local["created"] + 1:
         library.set_resume(pid, g["id"], e["family"], e["path"], e["created"])
+
+
+def content_guess(cfg: dict, g: dict, exe: str) -> Path:
+    """Plik gry, który dostanie emulator (bez uruchamiania): ZIP rozpakowany do `rom` (MSU-1,
+    emulator bez ZIP-ów) — ROM ze środka; inaczej plik z pamięci podręcznej. Do nazw zapisów."""
+    local = cache.local_path(cfg, g)
+    if local.suffix.lower() == ".zip" and local.is_file() and (not emulators.zip_native(exe) or _zip_multi(local)):
+        from emustart import savemgr
+        stems = savemgr.zip_stems(local)
+        if stems:
+            return paths.RUN_TMP / "_" / "rom" / (stems[0] + ".rom")
+    return local
 
 
 def _zip_multi(path: Path) -> bool:

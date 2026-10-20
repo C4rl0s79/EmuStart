@@ -217,3 +217,27 @@ def test_logout_waits_for_unsent_saves(monkeypatch):
     a._cfg["server_key"] = "dev:abc"
     a._session = S()
     assert not a.server_logout(force=True)["ok"]                             # w trakcie gry — zablokowane
+
+
+def test_states_from_two_devices_are_summed_not_conflicting(net):
+    """Stany zmienione na PC i na telefonie (tu i tam) — suma slotów na obu urządzeniach i na
+    serwerze; zapis tego samego slotu: starszy stan na nowy numer. Bez okna konfliktu."""
+    cfgs, tmp = net
+    stem = "Chrono Trigger (USA)"
+    st = lambda who, n: tmp / f"dev{who}" / "states" / f"{stem}.{n}"
+    _write(st(PC, "state1"), b"PC-1")
+    syncclient.before(cfgs[PC], PC, ra_bundles(tmp, PC, stem), GAME)
+    syncclient.before(cfgs[TEL], TEL, ra_bundles(tmp, TEL, stem), GAME)
+    _write(st(PC, "state2"), b"PC-2")
+    syncclient.after(cfgs[PC], PC, ra_bundles(tmp, PC, stem), GAME)
+    _write(st(TEL, "state3"), b"TEL-3")
+    _write(st(TEL, "state1"), b"TEL-1-NEW")                                 # ten sam slot, inna zawartość
+    r = syncclient.after(cfgs[TEL], TEL, ra_bundles(tmp, TEL, stem), GAME)
+    assert not r.conflicts
+    r = syncclient.before(cfgs[PC], PC, ra_bundles(tmp, PC, stem), GAME)
+    assert not r.conflicts
+    names = lambda who: {p.name: p.read_bytes() for p in (tmp / f"dev{who}" / "states").iterdir()}
+    pc, tel = names(PC), names(TEL)
+    assert pc == tel                                                        # jedna prawda
+    vals = set(pc.values())
+    assert {b"PC-1", b"PC-2", b"TEL-3", b"TEL-1-NEW"} <= vals              # nic nie zniknęło
