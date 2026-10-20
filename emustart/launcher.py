@@ -303,8 +303,9 @@ class Session:
         if g["multidisc"] and emulators.supports_m3u(exe):
             self.run_dir.mkdir(parents=True, exist_ok=True)
             m3u = self.run_dir / (g["name"] + ".m3u")
-            m3u.write_text("\n".join(str(base / rel) for rel, _s, _m in g["files"]) + "\n",
-                           encoding="utf-8")
+            from emustart import scanner      # tylko płyty, bez ścieżek .bin / .wav
+            rels = scanner.playlist_entries([rel for rel, _s, _m in g["files"]])
+            m3u.write_text("\n".join(str(base / rel) for rel in rels) + "\n", encoding="utf-8")
             return m3u
         if main.suffix.lower() == ".m3u" and not emulators.supports_m3u(exe):
             discs = [base / rel for rel, _s, _m in g["files"][1:]
