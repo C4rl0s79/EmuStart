@@ -23,7 +23,7 @@ import time
 import zipfile
 from pathlib import Path
 
-from emustart import (bios, cache, emulators, hotkey, ingame, library, pads,
+from emustart import (bios, cache, emulators, hotkey, ingame, library, pads, savebundles,
                       paths, profiles, systems, winutil)
 
 log = logging.getLogger("emustart.launcher")
@@ -398,6 +398,7 @@ class Session:
                     log.exception("przepinanie padów")
         except BaseException:
             # blokada profilu założona, a emulator nie wystartował — zdejmujemy ją
+            self._release_dirs()
             if save_names:
                 profiles.unlock(self.cfg, self.profile_id)
             raise
@@ -409,6 +410,7 @@ class Session:
                 adapter.after_session()          # ustawienia zmienione w trakcie gry zostają
             except Exception:
                 log.exception("ustawienia po sesji")
+            self._release_dirs()
             if restore_pads:
                 try:
                     restore_pads()
@@ -446,6 +448,7 @@ class Session:
         try:
             cmd = [exe] + adapter.config_args(self.run_dir)
         except BaseException:
+            self._release_dirs()
             if save_names:
                 profiles.unlock(self.cfg, self.profile_id)
             raise
@@ -467,6 +470,7 @@ class Session:
                 adapter.after_session()
             except Exception:
                 log.exception("ustawienia po sesji")
+            self._release_dirs()
             if save_names:
                 start_post(lambda: self._profile_finish(adapter, save_names), "ustawienia " + label)
         self.phase = "finished"
@@ -517,10 +521,26 @@ class Session:
             if n:
                 log.info("pobrano z NAS %d plików save'ów", n)
             for d in dirs:
-                profiles.attach(self.profile_id, adapter.family, d)
+                if adapter.can_redirect():
+                    profiles.adopt(adapter.family, d)        # bez junction (folder w ustawieniach)
+                else:
+                    profiles.attach(self.profile_id, adapter.family, d)
+            if profiles.bind(adapter, self.profile_id):
+                g = getattr(self, "game", None) or {}
+                card = savebundles.card_stem(Path(g.get("rel", "")), g) if g.get("name") else ""
+                self._restore_dirs = adapter.redirect_session(card)
         except Exception:
             log.exception("podpinanie save'ów profilu")
         return names or ["-"]
+
+    def _release_dirs(self) -> None:
+        """Ustawienia folderów zapisów i karty pamięci sprzed gry (redirect_session)."""
+        restore, self._restore_dirs = getattr(self, "_restore_dirs", None), None
+        if restore:
+            try:
+                restore()
+            except Exception:
+                log.exception("przywracanie folderów zapisów")
 
     def _resume_to_nas(self, g: dict, started_at: float) -> None:
         """Nowy stan wznowienia → NAS (drugi komputer go zobaczy); zużyty → usunięty."""

@@ -77,15 +77,79 @@ def test_clean_reinstall_restores_saves_from_nas(prof_env):
     s = _session(cfg, pid)
     names = s._profile_prepare(ad)
     assert "memcards" in names
-    mc = ad.settings_base() / "memcards"
-    assert os.path.isjunction(mc)
+    ini = ad.settings_base() / "inis" / "PCSX2.ini"
+    mc = profiles.local_dir(pid, "pcsx2", "memcards")
+    # bez junction: PCSX2 dostaje folder profilu w ustawieniach na czas gry
+    assert not os.path.isjunction(ad.settings_base() / "memcards")
+    assert ad.memcard_dir() == mc and ingame.ini_section(ini, "Folders")["MemoryCards"] == str(mc)
     assert (mc / "Mcd001.ps2").read_bytes() == b"MOJE-ZAPISY"
     # pusta karta nie przepadła, ale nie zasłania save'a — leży w kopii zapasowej
     assert [p.read_bytes() for p in (profiles.LOCAL / str(pid) / "_backup").rglob("Mcd001.ps2")] == [b"PUSTA"]
 
     _write(mc / "Mcd001.ps2", b"NOWY-ZAPIS")                # gra zapisała
+    s._release_dirs()
+    assert ingame.ini_section(ini, "Folders")["MemoryCards"] == "memcards"   # ustawienia sprzed gry
     s._profile_finish(ad, names)
     assert nas_card.read_bytes() == b"NOWY-ZAPIS"
+
+
+def test_saves_without_junction_and_per_game_cards(prof_env):
+    """RetroArch / DuckStation / PCSX2: dowiązanie z wcześniejszych wersji znika, zapisy są
+    w folderze profilu wskazanym w ustawieniach na czas gry; PCSX2 i DuckStation — karta
+    pamięci osobna dla gry, pierwsza z dotychczasowej wspólnej."""
+    cfg, tmp = prof_env
+    pid = profiles.first_id()
+    ad = _pcsx2(tmp)
+    natural = ad.settings_base() / "memcards"
+    store = profiles.local_dir(pid, "pcsx2", "memcards")
+    _write(store / "Mcd001.ps2", b"WSPOLNA")
+    import _winapi
+    _winapi.CreateJunction(str(store), str(natural))                     # stan z 0.45
+    s = _session(cfg, pid)
+    s.game = {"name": "Gran Turismo 4 (Europe) (Disc 1)", "rel": "gt4.chd"}
+    names = s._profile_prepare(ad)
+    ini = ad.settings_base() / "inis" / "PCSX2.ini"
+    assert natural.is_dir() and not os.path.isjunction(natural) and not any(natural.iterdir())
+    assert ingame.ini_section(ini, "MemoryCards")["Slot1_Filename"] == "Gran Turismo 4 (Europe).ps2"
+    assert (store / "Gran Turismo 4 (Europe).ps2").read_bytes() == b"WSPOLNA"
+    assert (store / "Mcd001.ps2").read_bytes() == b"WSPOLNA"                 # wspólna nietknięta
+    s._release_dirs()
+    s._profile_finish(ad, names)
+    assert ingame.ini_section(ini, "MemoryCards")["Slot1_Filename"] == "Mcd001.ps2"
+
+    # DuckStation: karta „per tytuł” tej gry → karta gry EmuStart
+    du = _duck(tmp)
+    dstore = profiles.local_dir(pid, "duckstation", "memcards")
+    _write(du.settings_base() / "memcards" / "Final Fantasy VII_1.mcd", b"FF7")
+    s = _session(cfg, pid)
+    s.game = {"name": "Final Fantasy VII (USA) (Disc 2)", "rel": "ff7.m3u"}
+    names = s._profile_prepare(du)
+    dini = du.settings_base() / "settings.ini"
+    mcs = ingame.ini_section(dini, "MemoryCards")
+    assert mcs["Card1Type"] == "Shared" and mcs["Card1Path"] == "Final Fantasy VII (USA)_1.mcd"
+    assert mcs["Directory"] == str(dstore)
+    assert (dstore / "Final Fantasy VII (USA)_1.mcd").read_bytes() == b"FF7"
+    s._release_dirs()
+    s._profile_finish(du, names)
+    mcs = ingame.ini_section(dini, "MemoryCards")
+    assert mcs["Directory"] == "memcards" and mcs["Card1Type"] == "PerGameTitle"
+
+    # RetroArch: foldery profilu tylko w ustawieniach sesji, retroarch.cfg bez zmian
+    home = tmp / "emu" / "RetroArch"
+    _write(home / "retroarch.cfg", b'savefile_directory = ":\\saves"\nsavestate_directory = ":\\states"\n')
+    ra = ingame.RetroArch(str(home / "retroarch.exe"))
+    s = _session(cfg, pid)
+    s.game = {"name": "Chrono Trigger (USA)", "rel": "ct.zip"}
+    s.run_dir = tmp / "run"
+    names = s._profile_prepare(ra)
+    args = ra.launch_args(s.run_dir, False)
+    sess = (s.run_dir / "emustart_ra.cfg").read_text(encoding="utf-8")
+    assert str(profiles.local_dir(pid, "retroarch", "saves")) in sess
+    assert str(profiles.local_dir(pid, "retroarch", "states")) in sess
+    assert b"profiles" not in (home / "retroarch.cfg").read_bytes()
+    assert (home / "saves").is_dir() and not os.path.isjunction(home / "saves")
+    s._release_dirs()
+    s._profile_finish(ra, names)
 
 
 def test_settings_per_profile_keep_machine_values(prof_env):

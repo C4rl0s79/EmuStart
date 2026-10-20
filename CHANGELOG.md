@@ -26,6 +26,22 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   i poprawność ZIP-a sprawdzane przy wysyłce. Stały `game_id` w listach gier (ten sam na PC
   i telefonie). Klient Windows i Android — następne etapy.
 
+### Zmienione
+- **Zapisy profilu bez dowiązań (junction)** w RetroArchu, DuckStation i PCSX2: emulator
+  dostaje folder zapisów profilu w swoich ustawieniach tylko na czas gry (RetroArch w
+  ustawieniach sesji, DuckStation i PCSX2 w ini — po grze, także po awarii EmuStart, wracają
+  poprzednie wartości). Folder emulatora zostaje zwykłym folderem: emulator uruchomiony poza
+  EmuStart nie widzi zapisów ostatniego gracza, aktualizacja emulatora ich nie dotyka.
+  Dowiązania z wcześniejszych wersji znikają przy pierwszej grze, zapisy zostają w folderze
+  profilu. Dolphin, PPSSPP i RPCS3 (bez ustawienia folderu zapisów) — na razie jak dotąd.
+- **Karta pamięci osobna dla każdej gry** w PCSX2 (`<gra>.ps2`) i DuckStation
+  (`<gra>_1.mcd`, nazwa od gry w bibliotece — taka sama na każdym urządzeniu, dyski jednej
+  gry na jednej karcie). Pierwsza karta gry to kopia dotychczasowej (wspólnej `Mcd001.ps2`
+  albo karty „per tytuł” DuckStation), wspólna karta zostaje nietknięta. Przygotowanie do
+  synchronizacji zapisów z serwerem — wspólna karta wszystkich gier byłaby konfliktem przy
+  każdej zmianie na dwóch urządzeniach.
+
+
 ## [0.45.1] — 2026-10-14
 
 Zakres: „Wczytaj zapis” na telefonie (`web/options.js`, Android: `Bridge.kt`, `Saves.kt`),

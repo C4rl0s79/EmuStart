@@ -219,7 +219,7 @@ def restore_pending() -> None:
         for sec, key, val in reversed(items):        # najstarsza wartość wygrywa
             changes[(sec, key)] = val
         ini_edit(Path(path), changes)
-        log.info("przywrócono ustawienia padów: %s", path)
+        log.info("przywrócono ustawienia sprzed gry (pady, foldery zapisów): %s", path)
     _restore_file().unlink(missing_ok=True)
 
 
@@ -245,6 +245,47 @@ def _remap_sdl_ini(path: Path, section_fmt: str, order: list, players: int = 4):
     return restore
 
 
+def _session_ini(path: Path, changes: dict, defaults: dict | None = None):
+    """Ustawienia ini tylko na czas gry: zapisuje `changes` (brakujące klucze dopisuje),
+    pamięta poprzednie wartości na dysku (restore_pending po awarii) i zwraca funkcję
+    przywracającą. Klucz, którego nie było, wraca do wartości z `defaults`."""
+    old = {}
+    for (sec, key), val in changes.items():
+        cur = ini_section(path, sec).get(key)
+        if cur is None:
+            cur = (defaults or {}).get((sec, key), "")
+        if cur != val:
+            old[(sec, key)] = cur
+    if not old:
+        return None
+    ini_set(path, {k: changes[k] for k in old})
+    _remember_restore(path, old)
+
+    def restore():
+        ini_set(path, old)
+        _restore_file().unlink(missing_ok=True)
+    return restore
+
+
+def _seed_card(dst: Path, candidates: list) -> None:
+    """Karta pamięci gry jeszcze nie istnieje: kopia pierwszej istniejącej z `candidates`
+    (dotychczasowa wspólna karta zawiera też zapisy tej gry). Bez kandydata emulator
+    założy pustą kartę sam."""
+    if dst.exists():
+        return
+    for c in candidates:
+        if c and c.is_file() and c != dst:
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(c, dst)
+            log.info("karta pamięci gry %s z %s", dst.name, c.name)
+            return
+
+
+def _bare(name: str) -> str:
+    """Nazwa bez dopisków w nawiasach i bez wielkości liter — do porównań kart pamięci."""
+    return re.sub(r"\s+", " ", re.sub(r"[([].*?[)\]]", " ", name.replace("_", " "))).strip().lower()
+
+
 def _newest(dirs, pattern: str, since: float) -> Path | None:
     best = None
     for d in dirs:
@@ -266,6 +307,7 @@ class Adapter:
     state_glob = ""
     policy: dict = {}         # wymagane ustawienia z serwera (apply_policy; tylko podmieniane, nie zmieniane)
     shader_off = False        # RetroArch: gra bez shadera (ustawienie systemu w EmuStart)
+    redirect: dict = {}       # foldery zapisów emulatora (nazwa) → foldery profilu (profiles.bind)
 
     def toggle_shader(self) -> None:
         """Shader ekranu włącz / wyłącz w trakcie gry (tylko RetroArch)."""
@@ -295,6 +337,23 @@ class Adapter:
         self.exe = Path(exe)
         self.home = self.exe.parent
         self.policy: dict = {}
+        self.redirect: dict = {}
+
+    def can_redirect(self) -> bool:
+        """Foldery zapisów da się wskazać w ustawieniach emulatora — profil gracza bez
+        dowiązań (junction) w folderze emulatora."""
+        return False
+
+    def _r(self, p: Path) -> Path:
+        return self.redirect.get(p.name, p) if self.redirect else p
+
+    def redirect_session(self, card: str = ""):
+        """Na czas gry emulator dostaje foldery profilu (self.redirect) w swoich ustawieniach,
+        a `card` — nazwę karty pamięci tej gry. Zwraca funkcję przywracającą albo None."""
+        return None
+
+    def memcard_dir(self) -> Path | None:
+        return None
 
     def policy_ini(self) -> Path | None:
         """Plik ini, do którego trafiają wymagane ustawienia z serwera (emustart/emupolicy.py)."""
@@ -461,6 +520,9 @@ class RetroArch(Adapter):
     def state_dirs(self) -> list:
         return [self._cfg_dir("savestate_directory", "states")]
 
+    def can_redirect(self) -> bool:
+        return True                         # foldery w ustawieniach sesji (--appendconfig)
+
     def apply_policy(self, values: dict) -> None:
         self.policy = {k: v for k, v in (values or {}).items() if "|" not in k}
 
@@ -476,8 +538,9 @@ class RetroArch(Adapter):
             'savestate_auto_save = "true"',
             f'savestate_auto_load = "{"true" if resume else "false"}"',
             'savestate_thumbnail_enable = "true"',      # obrazek stanu (podgląd w EmuStart)
-            # save'y zawsze w podpiętym folderze — także gdy retroarch.cfg każe
-            # trzymać je obok gry (gra bywa w RAM-ie albo w pamięci podręcznej)
+            # save'y zawsze w folderze profilu — także gdy retroarch.cfg każe trzymać
+            # je obok gry (gra bywa w RAM-ie albo w pamięci podręcznej); tylko na czas
+            # sesji, retroarch.cfg wskazuje dalej własne foldery RetroArcha
             f'savefile_directory = "{self._cfg_dir("savefile_directory", "saves")}"',
             f'savestate_directory = "{self._cfg_dir("savestate_directory", "states")}"',
         ]
@@ -563,7 +626,8 @@ class RetroArch(Adapter):
         d = _ini_value(self.home / "retroarch.cfg", key)
         if d.startswith(":"):
             d = str(self.home) + d[1:]
-        return Path(d) if d and d != "default" else self.home / default
+        p = Path(d) if d and d != "default" else self.home / default
+        return self._r(p) if key in ("savefile_directory", "savestate_directory") else p
 
     def settings_files(self) -> list:
         return ["retroarch.cfg", "config"]
@@ -641,10 +705,42 @@ class DuckStation(Adapter):
 
     def _dir(self, section: str, key: str, default: str) -> Path:
         p = Path(ini_section(self._ini(), section).get(key, "") or default)
-        return p if p.is_absolute() else self._ini().parent / p
+        return self._r(p if p.is_absolute() else self._ini().parent / p)
 
     def state_dirs(self) -> list:
         return [self._dir("Folders", "SaveStates", "savestates")]
+
+    def memcard_dir(self) -> Path:
+        return self._dir("MemoryCards", "Directory", "memcards")
+
+    def can_redirect(self) -> bool:
+        return True
+
+    def redirect_session(self, card: str = ""):
+        """Foldery profilu i karta pamięci gry (Card1Type = Shared, Card1Path = <gra>_1.mcd):
+        nazwa karty od EmuStart, stała na każdym urządzeniu (DuckStation „per tytuł” bierze
+        tytuł z własnej bazy, inny niż nazwa gry w bibliotece)."""
+        ini = self._ini()
+        if not ini.is_file() or not self.redirect:
+            return None
+        mem, states = self.memcard_dir(), self._dir("Folders", "SaveStates", "savestates")
+        changes = {("MemoryCards", "Directory"): str(mem), ("Folders", "SaveStates"): str(states)}
+        mc = ini_section(ini, "MemoryCards")
+        if card:
+            # karta gry z dotychczasowej: tej gry (karta „per tytuł”) albo wspólnej
+            old_type = mc.get("Card1Type", "PerGameTitle")
+            shared = mem / (mc.get("Card1Path") or "shared_card_1.mcd")
+            same = [f for f in sorted(mem.glob("*_1.mcd")) if _bare(f.stem[:-2]) == _bare(card)] if mem.is_dir() else []
+            _seed_card(mem / f"{card}_1.mcd", same + ([shared] if old_type == "Shared" else []))
+            changes[("MemoryCards", "Card1Type")] = "Shared"
+            changes[("MemoryCards", "Card1Path")] = f"{card}_1.mcd"
+            if mc.get("Card2Type", "None") not in ("None", ""):
+                changes[("MemoryCards", "Card2Type")] = "Shared"
+                changes[("MemoryCards", "Card2Path")] = f"{card}_2.mcd"
+        return _session_ini(ini, changes, {
+            ("MemoryCards", "Directory"): "memcards", ("Folders", "SaveStates"): "savestates",
+            ("MemoryCards", "Card1Type"): "PerGameTitle", ("MemoryCards", "Card1Path"): "shared_card_1.mcd",
+            ("MemoryCards", "Card2Type"): "None", ("MemoryCards", "Card2Path"): "shared_card_2.mcd"})
 
     def settings_base(self) -> Path:
         return self._ini().parent
@@ -687,7 +783,7 @@ class DuckStation(Adapter):
         winutil.send_keys(_qt_key(_ini_value(self._ini(), "TogglePause")) or "SPACE")
 
     def save_dirs(self) -> list:
-        return [self._dir("MemoryCards", "Directory", "memcards"), self._dir("Folders", "SaveStates", "savestates")]
+        return [self.memcard_dir(), self._dir("Folders", "SaveStates", "savestates")]
 
     def state_patterns(self, game: dict, meta: dict) -> list:
         serial = _serial(meta)
@@ -735,10 +831,33 @@ class PCSX2(Adapter):
 
     def _dir(self, key: str, default: str) -> Path:
         p = Path(ini_section(self._ini(), "Folders").get(key, "") or default)
-        return p if p.is_absolute() else self._ini().parent.parent / p
+        return self._r(p if p.is_absolute() else self._ini().parent.parent / p)
 
     def state_dirs(self) -> list:
         return [self._dir("Savestates", "sstates")]
+
+    def memcard_dir(self) -> Path:
+        return self._dir("MemoryCards", "memcards")
+
+    def can_redirect(self) -> bool:
+        return True
+
+    def redirect_session(self, card: str = ""):
+        """Foldery profilu i karta pamięci osobna dla gry (Slot1_Filename = <gra>.ps2) —
+        wspólna karta wszystkich gier dawałaby konflikt synchronizacji przy każdej zmianie.
+        Pierwsza karta gry to kopia dotychczasowej wspólnej (ma też zapisy tej gry)."""
+        ini = self._ini()
+        if not ini.is_file() or not self.redirect:
+            return None
+        mem = self.memcard_dir()
+        changes = {("Folders", "MemoryCards"): str(mem), ("Folders", "Savestates"): str(self._dir("Savestates", "sstates"))}
+        if card:
+            cur = ini_section(ini, "MemoryCards").get("Slot1_Filename") or "Mcd001.ps2"
+            _seed_card(mem / f"{card}.ps2", [mem / cur])
+            changes[("MemoryCards", "Slot1_Filename")] = f"{card}.ps2"
+        return _session_ini(ini, changes, {
+            ("Folders", "MemoryCards"): "memcards", ("Folders", "Savestates"): "sstates",
+            ("MemoryCards", "Slot1_Filename"): "Mcd001.ps2"})
 
     def settings_base(self) -> Path:
         return self._ini().parent.parent
@@ -778,7 +897,7 @@ class PCSX2(Adapter):
         winutil.send_keys(_qt_key(_ini_value(self._ini(), "TogglePause")) or "SPACE")
 
     def save_dirs(self) -> list:
-        return [self._dir("MemoryCards", "memcards"), self._dir("Savestates", "sstates")]
+        return [self.memcard_dir(), self._dir("Savestates", "sstates")]
 
     def state_patterns(self, game: dict, meta: dict) -> list:
         serial = _serial(meta)

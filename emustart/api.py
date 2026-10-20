@@ -833,6 +833,10 @@ class Api:
         desc: dict = {}
         if emu["exe"]:
             ad = ingame.adapter_for(emu["exe"])
+            try:
+                profiles.bind(ad, self._profile)       # stany w folderze profilu, nie emulatora
+            except Exception:
+                log.exception("foldery profilu")
             meta = metadata.ensure_local(self._cfg, g)
             prof = profiles.get(self._profile)
             core = rastates.core_id(emu.get("args", ""))
