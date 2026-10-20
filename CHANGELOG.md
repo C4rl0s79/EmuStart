@@ -8,7 +8,12 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
-Wersja 0.48.1 (niewydana).
+## [0.48.1] — 2026-10-20
+
+Zakres: synchronizacja stanów (`syncclient.py`, `savebundles.py`, `savesync.py`, `savemigrate.py`,
+`api.py`, `launcher.py`, `web/options.js`; Android: `SaveSync.kt`, `Saves.kt`, `Bridge.kt`). Po
+aktualizacji serwera: panel → Konfiguracja → „Zapisy sprzed 0.46” → „Przenieś zapisy” (dołącza
+stany przeniesione wcześniej do historii).
 
 ### Poprawione
 - **Lista „Wczytaj zapis” to zawsze stan serwera** (PC i telefon): przy otwarciu opcji gry
