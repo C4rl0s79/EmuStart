@@ -8,6 +8,19 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+### Poprawione
+- **Gry wielopłytowe jako jedna gra — skan biblioteki** (`emustart/scanner.py`). Dotąd łączyły się tylko
+  płyty „(Disc N)” o nazwach różniących się wyłącznie numerem. Teraz także:
+  - płyty oznaczone literą — „(Disc A)”, „(Disc B)” (3DO: D's Diner),
+  - płyty z podtytułem po numerze (Redump) — „(Disc 1) (GDI)”, „(Disc 2) (NOD)” (Command & Conquer,
+    Metal Gear Solid 3 Subsistence, Red Alert, Growlanser Generations…),
+  - płyty `.iso` obok gier-katalogów (Xbox 360: Lost Odyssey, Witcher 2).
+  Na przykładowej bibliotece (41 712 gier): 36 niepołączonych płyt → 18 gier; wersje regionalne zostają
+  osobno. „(CD32)”, „(CDTV)”, „(Disk Writer)” nie są już traktowane jak numer płyty.
+- **Nie zmienia się:** nazwy gier już łączonych (płyty różniące się tylko numerem) — te same
+  identyfikatory gier i zapisów; `.m3u`, `.cue`, `.gdi` jak dotąd. Zmiana działa po ponownym skanie
+  biblioteki na serwerze.
+
 ## [0.46.1] — 2026-10-20
 
 Zakres: wybór emulatora i rdzenia na koncie gracza (`emustart/emuchoice.py`, `emustart/api.py`;

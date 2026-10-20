@@ -19,7 +19,46 @@ from pathlib import Path
 
 from emustart import arcade, config, library, systems, translations
 
-_DISC_RE = re.compile(r"\s*\((?:disc|disk|cd)\s*\d+[^)]*\)", re.I)
+# „(Disc 1)”, „(Disc 2 of 3)”, „(Disk 1)”, „(CD 2)”, „(Disc A)” (Redump, np. 3DO D's Diner) — ale nie
+# „(CD32)” (Amiga CD32) ani „(CDTV)”, „(Disk Writer)” (FDS) — to oznaczenia platformy/wydania, nie płyty
+_DISC_RE = re.compile(r"\s*\((?:disc|disk)\s*(?:\d{1,2}|[a-h])\b[^)]*\)|\s*\(cd\s*(?!32\b)\d{1,2}\b[^)]*\)", re.I)
+
+
+def disc_split(stem: str) -> tuple | None:
+    """'C&C (USA) (Disc 1) (GDI)' → ('C&C (USA)', '(Disc 1)', '(GDI)'); bez oznaczenia płyty → None.
+    Płyty jednej gry mają ten sam początek nazwy (do oznaczenia płyty); po nim bywa podtytuł płyty
+    (Redump: „(Disc 1) (Allies)”, „(Disc 2) (Soviet)”)."""
+    m = _DISC_RE.search(stem)
+    if not m:
+        return None
+    return stem[:m.start()].strip(), m.group(0).strip(), stem[m.end():].strip()
+
+
+def merge_discs(entries: list) -> list:
+    """Pliki-płyty bez .m3u → jedna gra na (katalog, nazwa do oznaczenia płyty):
+    [{rel, files, multidisc}]. Pliki bez oznaczenia płyty — każdy osobno."""
+    games, discs = [], {}
+    for f in entries:
+        sp = disc_split(Path(f[0]).stem)
+        if sp:
+            discs.setdefault((os.path.dirname(f[0]).lower(), sp[0].lower()), []).append(f)
+        else:
+            games.append({"rel": f[0], "files": [f], "multidisc": False})
+    for group in discs.values():
+        group.sort(key=lambda f: f[0].lower())
+        games.append({"rel": group[0][0], "files": group, "multidisc": len(group) > 1})
+    return games
+
+
+def multidisc_name(files: list) -> str:
+    """Nazwa gry wielopłytowej. Gdy płyty różnią się tylko numerem — jak dotąd: nazwa bez oznaczenia
+    płyty (te same identyfikatory gier i zapisów co w starszych wersjach); gdy mają różne podtytuły —
+    nazwa do oznaczenia płyty."""
+    stems = [Path(f[0]).stem for f in files]
+    tails = {(disc_split(s) or ("", "", ""))[2].lower() for s in stems}
+    if len(tails) == 1:
+        return _DISC_RE.sub("", stems[0])
+    return (disc_split(stems[0]) or (stems[0], "", ""))[0]
 _TAG_SPLIT = re.compile(r"\s+(?=[(\[])")
 
 
@@ -115,23 +154,12 @@ def _group_files(base: Path, files: list, exts: set) -> list:
     # 2) pozostałe pliki z rozszerzeniem systemu; płyty bez .m3u łączymy w jedną grę
     loose = [f for f in files if f[0].lower() not in covered
              and Path(f[0]).suffix.lower().lstrip(".") in exts]
-    discs: dict = {}
-    for f in loose:
-        stem = Path(f[0]).stem
-        if _DISC_RE.search(stem):
-            key = (os.path.dirname(f[0]).lower(), _DISC_RE.sub("", stem).lower())
-            discs.setdefault(key, []).append(f)
-        else:
-            games.append({"rel": f[0], "files": [f], "multidisc": False})
-    for group in discs.values():
-        group.sort(key=lambda f: f[0].lower())
-        games.append({"rel": group[0][0], "files": group, "multidisc": len(group) > 1})
-    return games
+    return games + merge_discs(loose)
 
 
 def _folder_games(base: Path, exts: set) -> list:
     """Systemy z grami-katalogami (PS3): każdy podkatalog to gra, pliki obok też."""
-    games = []
+    games, loose = [], []
     try:
         entries = list(os.scandir(base))
     except OSError:
@@ -145,11 +173,11 @@ def _folder_games(base: Path, exts: set) -> list:
                                   "multidisc": False})
             elif Path(e.name).suffix.lower().lstrip(".") in exts:
                 st = e.stat()
-                games.append({"rel": e.name, "files": [(e.name, st.st_size, st.st_mtime)],
-                              "multidisc": False})
+                loose.append((e.name, st.st_size, st.st_mtime))
         except OSError:
             continue
-    return games
+    # pliki obok katalogów (np. Xbox 360: „Gra (Disc 1).iso”, „Gra (Disc 2).iso”) — płyty jak w _group_files
+    return games + merge_discs(loose)
 
 
 def _scan_dir(rom_dir: Path, exts: set) -> list:
@@ -205,7 +233,7 @@ def scan_system(es: str, rom_dirs, progress=None) -> int:
                 parent = a["parent"]
                 hidden = 1 if a["category"] in ("bios", "device") else 0
         else:
-            name = _DISC_RE.sub("", stem) if g["multidisc"] else stem
+            name = multidisc_name(g["files"]) if g["multidisc"] else stem
         if es in systems.WHD_SYSTEMS:
             title, tags = systems.whd_title(stem, demo=es == "amigawhddemos")
             name = f"{title} {tags}".strip()
