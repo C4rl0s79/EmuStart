@@ -8,6 +8,12 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.46.2] — 2026-10-20
+
+Zakres: skan biblioteki na serwerze (`emustart/scanner.py`), playlista płyt (`emustart/launcher.py`,
+Android: `Prepare.kt`). Gry dopiero teraz łączone w zestaw dostają nazwę bez „(Disc …)”
+(id bez zmian) — po aktualizacji serwera odśwież bibliotekę.
+
 ### Poprawione
 - **Gry wielopłytowe łączą się w jedną pozycję także wtedy, gdy dotąd się rozpadały**
   (skan biblioteki na serwerze, `emustart/scanner.py`):
