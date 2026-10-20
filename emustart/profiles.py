@@ -428,7 +428,11 @@ def adopt_existing_install() -> bool:
     return True
 
 
-# ── save'y: junction na folder profilu ──
+# ── save'y: folder profilu ──
+# RetroArch, DuckStation, PCSX2: emulator dostaje folder profilu w ustawieniach na czas gry
+# (bind + adapter.redirect_session) — folder emulatora zostaje zwykłym folderem. Pozostałe
+# (Dolphin, PPSSPP, RPCS3 — bez ustawienia folderu zapisów): folder emulatora to dowiązanie
+# (junction) do folderu profilu na tym komputerze (attach).
 
 def local_dir(pid: int, family: str, name: str) -> Path:
     return LOCAL / str(pid) / family / name
@@ -496,6 +500,49 @@ def _adopt_old_store(cur: Path, family: str, name: str) -> None:
     _merge_move(old_root, LOCAL)
 
 
+def _owner_takes(family: str, emu_dir: Path) -> None:
+    """Zapisy w folderze emulatora (sprzed EmuStart albo z gry poza EmuStart) należą do
+    pierwszego profilu; pliki, które profil już ma (np. pusta karta pamięci założona przez
+    świeży emulator), idą do kopii zapasowej."""
+    fid = machine_owner()
+    owner = local_dir(fid, family, emu_dir.name)
+    if _same(emu_dir, owner):
+        return
+    log.info("przenoszę save'y %s → %s", emu_dir, owner)
+    _merge_move(emu_dir, owner, LOCAL / str(fid) / "_backup" / time.strftime("%Y%m%d-%H%M%S")
+                / "emulator" / family / emu_dir.name)
+
+
+def adopt(family: str, emu_dir: Path) -> None:
+    """Folder zapisów emulatora, który dostaje folder profilu w ustawieniach (bez junction).
+    Dowiązanie z wcześniejszych wersji znika (zapisy są w folderze profilu, na który
+    wskazywało); pliki w zwykłym folderze emulatora przechodzą do pierwszego profilu."""
+    if _is_junction(emu_dir):
+        cur = _junction_target(emu_dir)
+        if cur:
+            _adopt_old_store(cur, family, emu_dir.name)
+        os.rmdir(emu_dir)                    # usuwa samo dowiązanie, nie zawartość
+        log.info("bez dowiązania: %s (folder profilu w ustawieniach emulatora)", emu_dir)
+    elif emu_dir.is_dir():
+        if any(emu_dir.iterdir()) and not (_same(emu_dir.parent.parent.parent, LOCAL)):
+            _owner_takes(family, emu_dir)
+    elif emu_dir.exists():
+        raise OSError(f"{emu_dir} nie jest katalogiem")
+    emu_dir.mkdir(parents=True, exist_ok=True)
+
+
+def bind(adapter, pid: int) -> bool:
+    """Foldery zapisów adaptera → foldery profilu `pid` (adapter.redirect). Bez zmian
+    w plikach — emulator dostaje je w ustawieniach dopiero na czas gry (redirect_session)."""
+    if not adapter.can_redirect():
+        return False
+    adapter.redirect = {}
+    adapter.redirect = {d.name: local_dir(pid, adapter.family, d.name) for d in adapter.save_dirs()}
+    for d in adapter.redirect.values():
+        d.mkdir(parents=True, exist_ok=True)
+    return True
+
+
 def attach(pid: int, family: str, emu_dir: Path) -> None:
     """Podpina folder save'ów emulatora pod profil `pid`."""
     target = local_dir(pid, family, emu_dir.name)
@@ -507,14 +554,7 @@ def attach(pid: int, family: str, emu_dir: Path) -> None:
             _adopt_old_store(cur, family, emu_dir.name)
         os.rmdir(emu_dir)                    # usuwa samo dowiązanie, nie zawartość
     elif emu_dir.is_dir():
-        # pierwszy raz (albo emulator zainstalowany od nowa): dotychczasowe save'y
-        # należą do pierwszego profilu; pliki, które profil już ma (np. pusta
-        # karta pamięci założona przez świeży emulator), idą do kopii zapasowej
-        fid = machine_owner()
-        owner = local_dir(fid, family, emu_dir.name)
-        log.info("przenoszę save'y %s → %s", emu_dir, owner)
-        _merge_move(emu_dir, owner, LOCAL / str(fid) / "_backup" / time.strftime("%Y%m%d-%H%M%S")
-                    / "emulator" / family / emu_dir.name)
+        _owner_takes(family, emu_dir)        # pierwszy raz (albo emulator zainstalowany od nowa)
     elif emu_dir.exists():
         raise OSError(f"{emu_dir} nie jest katalogiem")
     emu_dir.parent.mkdir(parents=True, exist_ok=True)
@@ -857,6 +897,24 @@ def local_families(pid: int) -> dict:
     return out
 
 
+def mark_bundled(family: str, names) -> None:
+    """Foldery zapisów emulatora, które synchronizują się paczkami z serwerem (syncclient) —
+    synchronizacja całych folderów profilu (push_all, sync_up) je pomija: jedna prawda."""
+    cur = bundled()
+    want = sorted(set(cur.get(family, [])) | set(names))
+    if want != cur.get(family):
+        cur[family] = want
+        library.meta_set("bundled_dirs", json.dumps(cur))
+
+
+def bundled() -> dict:
+    try:
+        d = json.loads(library.meta_get("bundled_dirs", "{}"))
+        return d if isinstance(d, dict) else {}
+    except ValueError:
+        return {}
+
+
 def push_all(cfg: dict) -> int:
     """Przy starcie: wszystkie lokalne save'y i ustawienia profili → NAS/serwer (tylko
     zmienione i brakujące). Np. po przejściu na serwer albo po grze bez połączenia."""
@@ -864,9 +922,13 @@ def push_all(cfg: dict) -> int:
         return 0
     resolve_moves(cfg)
     n = 0
+    skip = bundled()
     for prof in all_profiles():
         pid = prof["id"]
         for family, names in local_families(pid).items():
+            names = [x for x in names if x not in skip.get(family, [])]
+            if not names:
+                continue
             try:
                 n += _sync(cfg, pid, "save", family, names, up=True)
             except Exception:

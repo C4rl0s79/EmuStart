@@ -507,6 +507,54 @@ class Server(private val prefs: Prefs) {
         throw HttpError(401, "zły klucz serwera")
     }
 
+    // ── synchronizacja zapisów gier (emustart/savesync.py) ──
+    class SyncReply(val code: Int, val body: ByteArray)
+
+    /** Zapytanie do API zapisów. Konto gracza w nagłówku — inne niż konto telefonu tylko
+     *  z tokenem tego konta (serwer bierze konto z tokenu sesji, nie z treści zapytania).
+     *  `file` — treść PUT (paczka ZIP), `sink` — tu trafia pobrana paczka. */
+    fun sync(method: String, path: String, account: String, json: JSONObject? = null,
+             file: java.io.File? = null, sink: java.io.File? = null): SyncReply {
+        for (attempt in 0..1) {
+            val c = conn(path)
+            try {
+                c.connectTimeout = 8000
+                c.readTimeout = if (file != null || sink != null) 120000 else 20000
+                c.requestMethod = method
+                c.setRequestProperty("Authorization", "Bearer " + bearer())
+                c.setRequestProperty("X-EmuStart-Version", BuildConfig.VERSION_NAME)
+                if (hwId.isNotEmpty()) c.setRequestProperty("X-EmuStart-Hw", hwId)
+                if (account.isNotEmpty()) {
+                    c.setRequestProperty("X-EmuStart-Account", enc(account))
+                    prefs.token(account).takeIf { it.isNotEmpty() }?.let { c.setRequestProperty("X-Profile-Token", it) }
+                }
+                if (json != null) {
+                    val b = json.toString().toByteArray()
+                    c.doOutput = true
+                    c.setRequestProperty("Content-Type", "application/json")
+                    c.setFixedLengthStreamingMode(b.size)
+                    c.outputStream.use { it.write(b) }
+                } else if (file != null) {
+                    c.doOutput = true
+                    c.setRequestProperty("Content-Type", "application/zip")
+                    c.setFixedLengthStreamingMode(file.length())
+                    file.inputStream().use { i -> c.outputStream.use { o -> i.copyTo(o) } }
+                }
+                val code = try { c.responseCode } catch (e: java.io.IOException) { forgetBase(); throw e }
+                if (code == 401 && attempt == 0 && prefs.deviceId.isNotEmpty()) { dropToken(); continue }
+                if (code == 200 && sink != null) {
+                    c.inputStream.use { i -> sink.outputStream().use { o -> i.copyTo(o) } }
+                    return SyncReply(code, ByteArray(0))
+                }
+                val body = try {
+                    (if (code in 200..299) c.inputStream else c.errorStream)?.use { it.readBytes() } ?: ByteArray(0)
+                } catch (e: java.io.IOException) { ByteArray(0) }
+                return SyncReply(code, body)
+            } finally { c.disconnect() }
+        }
+        return SyncReply(401, ByteArray(0))
+    }
+
     fun nasDelete(p: String) {
         val c = conn(nasPath("file", p))
         try {

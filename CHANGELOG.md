@@ -8,6 +8,13 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.46.0] — 2026-10-20
+
+Zakres: synchronizacja zapisów gier z serwerem (serwer, EmuStart na PC, aplikacja na
+Androida), foldery zapisów profilu bez dowiązań, karta pamięci osobna dla gry. Po
+aktualizacji zaktualizuj też **EmuStart Server** i aplikację na telefonie — starszy serwer
+nie ma API zapisów (gra wtedy rusza na zapisach z urządzenia).
+
 ### Dokumentacja
 - Koncepcja 2.0 (`docs/koncepcja-2.0.md`, wersja robocza 3): **stany jak w Steam** — każdy
   zapis stanu to nowy, niezmienny wpis na serwerze, przed grą sloty wypełniane najnowszymi
@@ -16,6 +23,57 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   „Kontynuuj” = najnowszy stan; **nowy stan kombinacją pada** (LB + Y) na Windows i w
   RetroArchu na Androidzie; ocena „wyświetlania nad innymi aplikacjami” i usługi ułatwień
   dostępu dla pozostałych emulatorów na Androidzie.
+
+### Dodane
+- **Synchronizacja zapisów gier z serwerem — jak Steam Cloud** (`docs/SAVE_SYNC_DESIGN.md`).
+  Serwer jest jedynym źródłem prawdy: zapisy w grze, stany i karty pamięci każdej gry
+  synchronizują się paczkami per konto, gra, emulator i rdzeń RetroArcha (Snes9x i bsnes
+  osobno — nic nie kopiuje się między rdzeniami). Przed grą pobierają się zmiany z innych
+  urządzeń, po grze zmiany idą na serwer; gra bez połączenia rusza na zapisach z
+  urządzenia, a zmiany wysyłają się, gdy wróci połączenie.
+  - **Konflikt** (zapisy zmienione tu i na innym urządzeniu, np. gra offline): okno
+    uruchamiania pokazuje obie wersje (kiedy, z którego urządzenia) i czeka na decyzję —
+    **X** zostaw z tego urządzenia, **Y** weź z serwera, **B** pomiń. Druga wersja nie ginie:
+    zostaje w historii na serwerze (10 ostatnich) albo w kopii zapasowej na urządzeniu.
+  - Serwer (`emustart/savesync.py`): wersje paczek, odrzucanie nieaktualnych zmian (409),
+    konto i urządzenie z tokenu sesji (cudze konto tylko z jego tokenem), pliki przez
+    krótkotrwałe podpisane adresy bez ścieżek serwera, SHA-256 i poprawność ZIP-a, nazwa
+    urządzenia w manifeście. Stały `game_id` w listach gier.
+  - Windows (`emustart/syncclient.py`, `savebundles.py`): RetroArch (zapisy i stany per
+    rdzeń), DuckStation i PCSX2 (karty pamięci gry). W opcjach gry: „Zapisy na serwerze” —
+    zsynchronizowane / czekają na wysłanie.
+  - Android (`SaveSync.kt`, `Saves.kt`): RetroArch (zapisy i stany per rdzeń), PS1 w
+    RetroArchu (`<gra>.srm` = karta DuckStation `<gra>_1.mcd` z PC), ArmSX2 / AetherSX2
+    (`Mcd001.ps2` = karta tej gry z PC; telefon trzyma karty innych gier w schowku aplikacji
+    i podmienia je przed grą). „Wczytaj zapis” — stany tej gry z paczki (te same na każdym
+    urządzeniu), z miniaturami.
+  - Pliki w paczce mają nazwy umowne — urządzenia nazywające grę inaczej (ZIP z MSU-1,
+    rozpakowany ROM, .m3u) widzą te same zapisy.
+
+### Zmienione
+- **Zapisy profilu bez dowiązań (junction)** w RetroArchu, DuckStation i PCSX2: emulator
+  dostaje folder zapisów profilu w swoich ustawieniach tylko na czas gry (RetroArch w
+  ustawieniach sesji, DuckStation i PCSX2 w ini — po grze, także po awarii EmuStart, wracają
+  poprzednie wartości). Folder emulatora zostaje zwykłym folderem: emulator uruchomiony poza
+  EmuStart nie widzi zapisów ostatniego gracza, aktualizacja emulatora ich nie dotyka.
+  Dowiązania z wcześniejszych wersji znikają przy pierwszej grze, zapisy zostają w folderze
+  profilu. Dolphin, PPSSPP i RPCS3 (bez ustawienia folderu zapisów) — na razie jak dotąd.
+- **Karta pamięci osobna dla każdej gry** w PCSX2 (`<gra>.ps2`) i DuckStation
+  (`<gra>_1.mcd`, nazwa od gry w bibliotece — taka sama na każdym urządzeniu, dyski jednej
+  gry na jednej karcie). Pierwsza karta gry to kopia dotychczasowej (wspólnej `Mcd001.ps2`
+  albo karty „per tytuł” DuckStation), wspólna karta zostaje nietknięta. Przygotowanie do
+  synchronizacji zapisów z serwerem — wspólna karta wszystkich gier byłaby konfliktem przy
+  każdej zmianie na dwóch urządzeniach.
+- Stany RetroArcha, zapisy w grze i karty pamięci **nie synchronizują się już całymi
+  folderami profilu** (ani przez wspólny folder stanów `states/shared`) — tylko paczkami
+  (jedna prawda). Stany PS2 (.p2s, różne wersje formatu na PC i telefonie) i pozostałe
+  emulatory — jak dotąd; menedżer zapisów kopiuje już tylko stany PS2.
+
+### Usunięte
+- `emustart/rastates.py` (wspólne stany RetroArcha z numeracją nadawaną przez serwer) —
+  zastąpione paczkami stanów; menedżer zapisów bez stanów RetroArcha i podglądu zapisów w
+  grze z folderów profilu (stan zapisów: opcje gry → „Zapisy na serwerze”).
+
 
 ## [0.45.1] — 2026-10-14
 

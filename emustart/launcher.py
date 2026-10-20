@@ -23,8 +23,8 @@ import time
 import zipfile
 from pathlib import Path
 
-from emustart import (bios, cache, emulators, hotkey, ingame, library, pads,
-                      paths, profiles, systems, winutil)
+from emustart import (bios, cache, emulators, hotkey, ingame, library, pads, savebundles,
+                      paths, profiles, syncclient, systems, winutil)
 
 log = logging.getLogger("emustart.launcher")
 FRESH = "__od_poczatku__"         # start_state: gra od początku, bez wczytywania stanu
@@ -53,6 +53,9 @@ class Session:
         self.configure = configure        # sam emulator, bez gry — zmiana ustawień profilu
         self.takeover = takeover          # przejęcie profilu zablokowanego przez inne urządzenie
         self.locked_by = ""
+        self.conflict: list = []          # konflikt zapisów z serwerem — czeka na decyzję gracza
+        self._choice = ""
+        self._choice_event = threading.Event()
         self.notice = ""                  # komunikat dla gracza w trakcie gry (np. stan z telefonu)
         self._t_created = time.monotonic()
         self.game_id = game_id
@@ -87,7 +90,7 @@ class Session:
         out = {"phase": self.phase, "message": self.message, "mode": self.mode, "source": self.source,
                "title": self.game.get("title", ""), "tags": self.game.get("tags", ""),
                "system": info["display"], "game_id": self.game_id, "locked_by": self.locked_by,
-               "notice": getattr(self, "notice", "")}
+               "notice": getattr(self, "notice", ""), "conflict": getattr(self, "conflict", [])}
         if self.prog:
             out["progress"] = self.prog.snapshot()
         out["copying"] = bool(self.copy_thread and self.copy_thread.is_alive())
@@ -95,6 +98,15 @@ class Session:
 
     def abort(self) -> None:
         self.cancel.set()
+        self._choice_event.set()
+
+    def choose(self, choice: str) -> bool:
+        """Decyzja gracza przy konflikcie zapisów: local | remote | skip."""
+        if self.phase != "conflict" or choice not in ("local", "remote", "skip"):
+            return False
+        self._choice = choice
+        self._choice_event.set()
+        return True
 
     # ── przebieg ──
     def _run(self) -> None:
@@ -345,17 +357,16 @@ class Session:
         # zanim policzymy parametry startu (RetroArch czyta z nich foldery)
         t_prof = time.monotonic()
         save_names = self._profile_prepare(adapter)
-        self._t_prof = time.monotonic() - t_prof
-        ra_info: dict = {}           # stany RetroArcha z serwera na starcie (autozapis, konflikty)
         try:
-            if adapter.family == "retroarch" and save_names:
-                # stany tej gry z telefonu tam, gdzie ten RetroArch ich szuka (ten sam rdzeń)
-                try:
-                    from emustart import rastates
-                    self.notice = rastates.present(self.cfg, profiles.get(self.profile_id), adapter,
-                                                   rastates.core_id(args), Path(rom), ra_info)
-                except Exception:
-                    log.exception("stany z telefonu")
+            if save_names:
+                self._sync_before(g, adapter, args, rom)    # zapisy tej gry z serwera
+        except BaseException:
+            self._release_dirs()
+            if save_names:
+                profiles.unlock(self.cfg, self.profile_id)
+            raise
+        self._t_prof = time.monotonic() - t_prof
+        try:
             adapter.keyboard_game = systems.info(g["es"])["plat"] in systems.COMPUTER_PLATS
             adapter.shader_off = bool(((self.cfg.get("systems") or {}).get(g["es"]) or {}).get("shader_off"))
             if adapter.family == "retroarch" and g["es"] in systems.WHD_SYSTEMS:
@@ -383,8 +394,7 @@ class Session:
                     resume = None              # stan zapisał inny emulator — nie wczytamy go
                 if resume and resume["path"] and not Path(resume["path"]).is_file():
                     resume = None
-                # autozapis wspólny dla urządzeń (np. z telefonu) wczytuje się sam
-                extra = adapter.launch_args(self.run_dir, bool(resume) or bool(ra_info.get("autoload")), order)
+                extra = adapter.launch_args(self.run_dir, bool(resume), order)
                 if resume and resume["path"]:
                     extra += adapter.resume_args(Path(resume["path"]))
             cmd[1:1] = extra
@@ -398,6 +408,7 @@ class Session:
                     log.exception("przepinanie padów")
         except BaseException:
             # blokada profilu założona, a emulator nie wystartował — zdejmujemy ją
+            self._release_dirs()
             if save_names:
                 profiles.unlock(self.cfg, self.profile_id)
             raise
@@ -409,6 +420,7 @@ class Session:
                 adapter.after_session()          # ustawienia zmienione w trakcie gry zostają
             except Exception:
                 log.exception("ustawienia po sesji")
+            self._release_dirs()
             if restore_pads:
                 try:
                     restore_pads()
@@ -420,14 +432,7 @@ class Session:
                 try:
                     if save_names:
                         self._resume_to_nas(g, started_at)
-                    if adapter.family == "retroarch" and save_names:
-                        try:          # stany tej gry → wspólne miejsce na serwerze (inne urządzenia)
-                            from emustart import rastates
-                            rastates.publish(self.cfg, profiles.get(self.profile_id), adapter,
-                                             rastates.core_id(args), Path(rom), started_at,
-                                             ra_info if "base" in ra_info else None)
-                        except Exception:
-                            log.exception("stany na serwer")
+                    self._sync_after(g)                       # zapisy tej gry → serwer
                     self._profile_finish(adapter, save_names)
                     self._learn_states(g, adapter, started_at)
                     cache.enforce_limit(self.cfg, keep_ids=(g["id"],))
@@ -446,6 +451,7 @@ class Session:
         try:
             cmd = [exe] + adapter.config_args(self.run_dir)
         except BaseException:
+            self._release_dirs()
             if save_names:
                 profiles.unlock(self.cfg, self.profile_id)
             raise
@@ -467,6 +473,7 @@ class Session:
                 adapter.after_session()
             except Exception:
                 log.exception("ustawienia po sesji")
+            self._release_dirs()
             if save_names:
                 start_post(lambda: self._profile_finish(adapter, save_names), "ustawienia " + label)
         self.phase = "finished"
@@ -512,15 +519,88 @@ class Session:
             log.exception("wymagane ustawienia emulatora")
         dirs = adapter.save_dirs()               # foldery z (już podmienionych) ustawień
         names = [d.name for d in dirs]
+        # zapisy, stany i karty pamięci w paczkach z serwerem (syncclient) — bez
+        # dotychczasowej synchronizacji całych folderów (jedna prawda)
+        covered = {d.name for d in savebundles.covered_dirs(adapter)}
+        self._folder_names = [n for n in names if n not in covered]
+        if covered:
+            profiles.mark_bundled(adapter.family, covered)
         try:
-            n = profiles.sync_down(self.cfg, self.profile_id, adapter.family, names)
+            n = profiles.sync_down(self.cfg, self.profile_id, adapter.family, self._folder_names)
             if n:
                 log.info("pobrano z NAS %d plików save'ów", n)
             for d in dirs:
-                profiles.attach(self.profile_id, adapter.family, d)
+                if adapter.can_redirect():
+                    profiles.adopt(adapter.family, d)        # bez junction (folder w ustawieniach)
+                else:
+                    profiles.attach(self.profile_id, adapter.family, d)
+            if profiles.bind(adapter, self.profile_id):
+                g = getattr(self, "game", None) or {}
+                card = savebundles.card_stem(Path(g.get("rel", "")), g) if g.get("name") else ""
+                self._restore_dirs = adapter.redirect_session(card)
         except Exception:
             log.exception("podpinanie save'ów profilu")
         return names or ["-"]
+
+    # ── zapisy gry z serwerem (emustart/syncclient.py) ──
+    def _sync_before(self, g: dict, adapter, args: str, rom) -> None:
+        self._sync_bundles, self._sync_skip = [], set()
+        try:
+            bundles = savebundles.for_game(adapter, savebundles.core_id(args), Path(rom), g)
+        except Exception:
+            log.exception("paczki zapisów gry")
+            return
+        if not bundles:
+            return
+        self._sync_bundles = bundles
+        self.message = "Synchronizuję zapisy z serwerem…"
+        res = syncclient.before(self.cfg, self.profile_id, bundles, g)
+        if res.conflicts:
+            choice = self._ask_conflict(res.conflicts)
+            if choice != "skip":
+                try:
+                    syncclient.resolve(self.cfg, self.profile_id, g, res.conflicts, choice)
+                except (syncclient.Offline, syncclient.ConflictError, OSError, ValueError) as ex:
+                    log.info("konflikt zapisów: %s", ex)
+                    self.notice = "Nie udało się rozstrzygnąć konfliktu zapisów — gram na zapisach z tego urządzenia."
+                    choice = "skip"
+            if choice == "skip":
+                # bez wysyłania po grze: konflikt wróci przy następnej grze
+                self._sync_skip = {c.bundle.key for c in res.conflicts}
+        elif res.offline:
+            self.notice = "Zapisy bez synchronizacji z serwerem — wyślę je, gdy wróci połączenie."
+        self.message = ""
+
+    def _ask_conflict(self, conflicts: list) -> str:
+        """Faza „conflict”: okno uruchamiania pokazuje obie wersje i czeka na decyzję gracza."""
+        self.conflict = [c.describe() for c in conflicts]
+        self._choice, prev = "", self.phase
+        self._choice_event.clear()
+        self.phase = "conflict"
+        self.message = "Zapisy tej gry zmieniły się na tym urządzeniu i na innym."
+        self._choice_event.wait()
+        self.phase, self.conflict = prev, []
+        if self.cancel.is_set() and not self._choice:
+            raise cache.Cancelled()
+        return self._choice or "skip"
+
+    def _sync_after(self, g: dict) -> None:
+        bundles = getattr(self, "_sync_bundles", None)
+        if not bundles:
+            return
+        try:
+            syncclient.after(self.cfg, self.profile_id, bundles, g, getattr(self, "_sync_skip", set()))
+        except Exception:
+            log.exception("zapisy na serwer")
+
+    def _release_dirs(self) -> None:
+        """Ustawienia folderów zapisów i karty pamięci sprzed gry (redirect_session)."""
+        restore, self._restore_dirs = getattr(self, "_restore_dirs", None), None
+        if restore:
+            try:
+                restore()
+            except Exception:
+                log.exception("przywracanie folderów zapisów")
 
     def _resume_to_nas(self, g: dict, started_at: float) -> None:
         """Nowy stan wznowienia → NAS (drugi komputer go zobaczy); zużyty → usunięty."""
@@ -545,6 +625,7 @@ class Session:
                     log.info("ustawienia %s zapisane w profilu: %d plików", adapter.family, n)
             except Exception:
                 log.exception("zapis ustawień profilu")
+        names = [n for n in names if n in getattr(self, "_folder_names", names)]
         try:
             n = profiles.sync_up(self.cfg, self.profile_id, adapter.family, names)
             if n:

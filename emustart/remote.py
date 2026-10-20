@@ -245,7 +245,9 @@ def _games_rows(es: str) -> list:
     hit = _games_cache.get(es)
     if hit and _t.monotonic() - hit[0] < GAMES_TTL:
         return hit[1]
-    rows = [_game_row(r) for r in API.list_games(es)]
+    from emustart import savesync
+    # game_id — stały identyfikator gry dla synchronizacji zapisów (ten sam na każdym urządzeniu)
+    rows = [dict(_game_row(r), game_id=savesync.game_id(es, r.get("name", ""))) for r in API.list_games(es)]
     _games_cache[es] = (_t.monotonic(), rows)
     return rows
 
@@ -302,6 +304,8 @@ def handle(handler) -> None:
             return _bios_get(handler)
         if parts and parts[0] == "emulators":
             return _emulators_get(handler, parts[1:])
+        if len(parts) == 4 and parts[0] == "savesync" and parts[3] in ("manifest", "status"):
+            return savesync_get(handler, parts[1], parts[2], parts[3] == "manifest")
         if parts == ["systems"]:
             from emustart import emucatalog, emulators, systems
             out = []
@@ -948,6 +952,101 @@ def _bios_get(handler) -> None:
     handler.send_header("Content-Length", str(len(data)))
     handler.end_headers()
     handler.wfile.write(data)
+
+
+# ── synchronizacja zapisów gier (emustart/savesync.py) ──
+def _sync_identity(handler, d: dict | None = None) -> tuple[str, str]:
+    """(konto, urządzenie) zapytania — z tokenu sesji, nie z treści. Inne konto niż konto
+    urządzenia tylko z tokenem tego konta (X-Profile-Token, gracz zalogowany hasłem)."""
+    from emustart import accounts, devices, savesync
+    did = getattr(handler, "device", "")
+    want = str((d or {}).get("account")
+               or urllib.parse.unquote(handler.headers.get("X-EmuStart-Account") or "")).strip()   # nazwa z polskimi znakami
+    if not did:
+        # wspólny klucz serwera (EmuStart na komputerze z serwerem) — konto podane wprost
+        if not want:
+            raise savesync.Denied("brak konta")
+        return want, "serwer"
+    own = devices.account_raw(did)
+    if not want or want.lower() == own.lower():
+        if not own:
+            raise savesync.Denied("urządzenie nie jest przypisane do konta")
+        return own, did
+    if accounts.token_ok(_secret(), want, handler.headers.get("X-Profile-Token") or ""):
+        return want, did
+    raise savesync.Denied("brak dostępu do zapisów tego konta")
+
+
+def _sync_errors(handler, fn) -> None:
+    from emustart import savesync
+    try:
+        out = fn()
+    except savesync.Conflict as ex:
+        return _json(handler, {"ok": False, "conflict": True, "current": ex.current}, 409)
+    except savesync.Denied as ex:
+        return _json(handler, {"ok": False, "reason": str(ex)}, 403)
+    except (savesync.SyncError, ValueError, TypeError) as ex:
+        return _json(handler, {"ok": False, "reason": str(ex)}, 400)
+    if out is not None:
+        return _json(handler, out)
+
+
+def savesync_get(handler, platform: str, game: str, urls: bool) -> None:
+    from emustart import savesync
+
+    def run():
+        from emustart import devices
+        acc, dev = _sync_identity(handler)
+        out = savesync.manifest(acc, dev, platform, game, urls=urls)
+        for _e, _c, _k, b in savesync._bundles(out):    # nazwa urządzenia do okna konfliktu
+            did = b.get("updated_by_device_id") or ""
+            b["updated_by_device_name"] = (devices.name_of(did) if did and did != "serwer" else did) or did
+        return out
+    return _sync_errors(handler, run)
+
+
+def savesync_post(handler) -> None:
+    """POST /v1/savesync/upload/init | upload/commit | <platforma>/<gra>/resolve."""
+    from emustart import savesync
+    if not authorized(handler):
+        return _json(handler, {"error": "brak lub zły klucz serwera"}, 401)
+    _seen(handler)
+    n = int(handler.headers.get("Content-Length") or 0)
+    try:
+        d = json.loads(handler.rfile.read(min(n, 65536)) or b"{}") if n else {}
+    except ValueError:
+        d = {}
+    d = d if isinstance(d, dict) else {}
+    parts = [p for p in urllib.parse.urlsplit(handler.path).path.split("/") if p][2:]
+
+    def run():
+        acc, dev = _sync_identity(handler, d)
+        if parts == ["upload", "init"]:
+            return savesync.upload_init(acc, dev, d)
+        if parts == ["upload", "commit"]:
+            return savesync.upload_commit(acc, dev, d)
+        if len(parts) == 3 and parts[2] == "resolve":
+            return savesync.resolve(acc, dev, parts[0], parts[1], d)
+        raise savesync.SyncError("nieznany adres")
+    return _sync_errors(handler, run)
+
+
+def files_put(handler) -> None:
+    """PUT /v1/files/u/<token> — treść paczki (adres z upload/init)."""
+    from emustart import savesync
+    token = urllib.parse.urlsplit(handler.path).path.rsplit("/", 1)[-1]
+    n = int(handler.headers.get("Content-Length") or 0)
+    return _sync_errors(handler, lambda: savesync.upload_body(token, handler.rfile, n))
+
+
+def files_get(handler) -> None:
+    """GET /v1/files/d/<token> — paczka (adres z manifestu), z Range."""
+    from emustart import savesync
+    token = urllib.parse.urlsplit(handler.path).path.rsplit("/", 1)[-1]
+    hit = savesync.download_path(token)
+    if not hit:
+        return _json(handler, {"ok": False, "reason": "adres pobrania nieważny albo wygasł"}, 403)
+    return _send_path(handler, hit[0])
 
 
 def _emulators_get(handler, parts: list) -> None:

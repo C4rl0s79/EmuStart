@@ -149,6 +149,9 @@ class _Handler(BaseHTTPRequestHandler):
                  "/v1/enroll/account", "/v1/enroll/account_poll"):
             from emustart import remote      # zalogowanie urządzenia, logowanie podpisem
             return remote.enroll_flow(self, p.rsplit("/", 1)[1])
+        if p.startswith("/v1/savesync/"):
+            from emustart import remote      # synchronizacja zapisów gier (emustart/savesync.py)
+            return remote.savesync_post(self)
         if p.startswith("/v1/"):
             return refuse(self, 404)
         # API tylko dla naszego UI: właściwy Host i własny nagłówek (zwykła strona
@@ -181,8 +184,10 @@ class _Handler(BaseHTTPRequestHandler):
         if urllib.parse.urlsplit(self.path).path.startswith("/v1/"):
             if not _v1_ok(self):
                 return
-            from emustart import remote      # zapis w folderze profili (z kluczem)
-            return remote.handle_write(self, "PUT")
+            from emustart import remote
+            if urllib.parse.urlsplit(self.path).path.startswith("/v1/files/u/"):
+                return remote.files_put(self)     # paczka zapisów — uprawnienie w podpisanym adresie
+            return remote.handle_write(self, "PUT")   # zapis w folderze profili (z kluczem)
         return refuse(self, 405)
 
     def do_DELETE(self):
@@ -211,6 +216,8 @@ class _Handler(BaseHTTPRequestHandler):
             if not _v1_ok(self):
                 return
             from emustart import remote      # API urządzeń — token zamiast sprawdzania Host
+            if raw.startswith("/v1/files/d/"):
+                return remote.files_get(self)     # paczka zapisów — uprawnienie w podpisanym adresie
             return remote.handle(self)
         if not _local_ui(self):
             from emustart import remote      # grafiki dla urządzeń (z tokenem, szyfrowanym połączeniem)

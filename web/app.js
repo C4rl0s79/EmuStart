@@ -652,6 +652,7 @@ async function updateLaunch() {
     running: st.mode === "config" ? "Ustawienia emulatora — zamknij emulator, aby zapisać w profilu" : "Gra uruchomiona",
     finished: st.mode === "config" ? "Ustawienia zapisane w profilu" : "Koniec gry",
     error: "Nie udało się uruchomić gry",
+    conflict: "Konflikt zapisów",
     cancelled: "Pobieranie przerwane",
   }[st.phase] || "";
   $("lHead").textContent = head;
@@ -678,6 +679,8 @@ async function updateLaunch() {
   const hints = [];
   if (st.phase === "downloading") {
     hints.push(["b", "Anuluj"]);
+  } else if (st.phase === "conflict") {
+    hints.push(["x", "Zostaw z tego urządzenia"], ["y", "Weź z serwera"], ["b", "Pomiń (bez synchronizacji)"]);
   } else if (["error", "cancelled"].includes(st.phase)) {
     if (st.locked_by) hints.push(["y", "Przejmij profil i graj"]);
     if (st.missing_core) hints.push(["y", "Otwórz RetroArch"]);
@@ -685,7 +688,22 @@ async function updateLaunch() {
   }
   setHints(hints, $("lHints"));
 
+  renderConflict(st);
   if (st.phase === "finished") closeLaunch();
+}
+const KIND_PL = { saves: "zapisy w grze", states: "stany", memcards: "karta pamięci" };
+function renderConflict(st) {
+  const box = $("lConflict");
+  const c = st.phase === "conflict" ? st.conflict || [] : [];
+  box.classList.toggle("hidden", !c.length);
+  if (!c.length) return;
+  const newest = (k) => Math.max(...c.map((x) => x[k] || 0));
+  const kinds = [...new Set(c.map((x) => KIND_PL[x.kind] || x.kind))].join(", ");
+  const devs = [...new Set(c.map((x) => x.server_device).filter(Boolean))].join(", ");
+  box.innerHTML =
+    `<div><b>To urządzenie</b><small>${esc(kinds)}</small><small>zmienione ${esc(fmtDate(newest("local_time")))}</small></div>` +
+    `<div><b>Serwer</b><small>${devs ? "z urządzenia " + esc(devs) : "inne urządzenie"}</small>` +
+    `<small>zmienione ${esc(fmtDate(newest("server_time")))}</small></div>`;
 }
 async function closeLaunch() {
   clearInterval(launchPoll);
@@ -698,6 +716,11 @@ async function closeLaunch() {
 function launchInput(a) {
   const ph = lastLaunch.phase;
   if (ph === "downloading" && a === "b") api().launch_cancel();
+  else if (ph === "conflict") {
+    // druga wersja nie ginie: zostaje w historii na serwerze albo w kopii zapasowej tutaj
+    const choice = { x: "local", y: "remote", b: "skip" }[a];
+    if (choice) api().launch_choice(choice);
+  }
   else if (ph === "error" && a === "y" && lastLaunch.missing_core) {
     // telefon: RetroArch bez rdzenia — otwarcie RetroArcha (Online Updater → Core Downloader)
     const gid = lastLaunch.game_id;
