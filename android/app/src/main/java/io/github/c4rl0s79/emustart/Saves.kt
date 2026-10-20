@@ -554,7 +554,11 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
     /** Wybrany stan (plik w telefonie) jako autozapis tej gry — RetroArch wczytuje go przy
      *  starcie (autowczytywanie jest zawsze włączone). Zwraca liczbę plików. */
     fun placeAuto(profile: String, g: Game, path: String): Int {
-        val src = File(path.removePrefix("ra:"))
+        // „arc:game.state3” — stan z paczki (po synchronizacji przed grą, także z innego urządzenia)
+        val src = if (path.startsWith("arc:")) {
+            val f = byId("retroarch_states") ?: return 0
+            bundleOf(f, g)?.files()?.get(path.removePrefix("arc:")) ?: return 0
+        } else File(path.removePrefix("ra:"))
         if (!src.isFile) return 0
         val m = RA_STATE.matchEntire(src.name) ?: return 0
         val auto = File(src.parentFile, m.groupValues[1] + ".state.auto")

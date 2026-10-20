@@ -206,9 +206,15 @@ function goptItems() {
   if (GO.page === "states") return d.states.map((st) => ({
     label: st.resume ? "★ " + st.name : (st.other_core ? "✗ " : st.continue ? "▶ " : "") + (st.label || st.name),
     value: fmtDate(st.time) + (st.detail ? " · " + st.detail : ""), thumb: st.thumb || "",
-    // stan innego rdzenia — tylko do podglądu (inny format); zapisy w grze są wspólne
-    act: () => st.other_core ? toast(`Ten stan zapisał rdzeń ${st.other_core} — wybierz go dla tej gry (Emulator), żeby go wczytać.`, 6000)
-                             : (closeGopt(), launch(st.path)),
+    // stan innego rdzenia (inny format): gra przechodzi na ten rdzeń i startuje z tego stanu
+    act: async () => {
+      if (!st.other_core) { closeGopt(); return launch(st.arc ? "arc:" + st.arc : st.path); }
+      toast(`Przełączam grę na rdzeń ${st.other_core}…`, 4000);
+      const r = await api().play_other_core(GO.pid, st.other_core);
+      if (!r?.ok) return toast(r?.reason || "Nie udało się przełączyć rdzenia.", 6000);
+      closeGopt();
+      launch("arc:" + st.arc);
+    },
   }));
   if (GO.page === "saves") return saveManagerItems();
   if (GO.page === "emuset") return emuSettingsItems();

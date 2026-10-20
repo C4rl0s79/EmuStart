@@ -97,7 +97,41 @@ def test_rerun_changes_nothing(nas):
     # nowy plik w starym folderze (urządzenie z 0.45) — dochodzi przy następnym uruchomieniu
     _write(nas / "Jezus/save/retroarch/states/bsnes/Chrono_Trigger_(USA)_(MSU1).state4", b"ST4")
     third = savemigrate.run(nas)
-    assert third["history"] == 1 and third["new"] == 0
+    assert third["merged"] == 1 and third["new"] == 0                       # stany dołączone, nie historia
+    st = files_of("Jezus", "snesmsu1", CT, bundle("Jezus", "snesmsu1", CT, "bsnes", "states"))
+    assert st["game.state3"] == b"ST3" and st["game.state4"] == b"ST4"
+
+
+def test_states_merge_into_existing_bundle_current_wins_slots(nas):
+    """Paczka stanów z urządzenia już jest (Lumen: slot 3 i autozapis) — stany sprzed 0.46
+    dochodzą jako nowe sloty; bieżące zostają w swoich slotach, nic nie znika."""
+    gid = savesync.game_id("snesmsu1", CT)
+    zp = nas.parent / "lumen-states.zip"
+    with zipfile.ZipFile(zp, "w") as z:
+        z.writestr("game.state3", b"LUMEN-3")
+        z.writestr("game.state.auto", b"LUMEN-AUTO")
+    savesync.import_bundle("Jezus", "snesmsu1", gid, "retroarch", "bsnes", "states", zp, "lumen-pc", "", 2e9)
+    rep = savemigrate.run(nas)
+    assert rep["merged"] >= 1
+    st = files_of("Jezus", "snesmsu1", CT, bundle("Jezus", "snesmsu1", CT, "bsnes", "states"))
+    assert st["game.state3"] == b"LUMEN-3" and st["game.state.auto"] == b"LUMEN-AUTO"   # bieżące w slotach
+    moved = [a for a, v in st.items() if v == b"ST3"]
+    assert moved and moved[0].startswith("game.state") and moved[0] != "game.state3"     # stary stan — nowy slot
+    assert st.get(moved[0] + ".png") == b"PNG3"                                          # z miniaturą
+
+
+def test_merge_states_rules():
+    mine = {"game.state1": ("a", 10.0), "game.state1.png": ("ap", 10.0), "game.state.auto": ("x", 50.0)}
+    other = {"game.state1": ("b", 20.0), "game.state1.png": ("bp", 20.0), "game.state2": ("c", 5.0),
+             "game.state.auto": ("y", 40.0)}
+    out, moves = savebundles.merge_states(mine, other)
+    assert out["game.state1"] == ("other", "game.state1")                 # nowszy z drugiego miejsca w slocie
+    assert out["game.state1.png"] == ("other", "game.state1.png")
+    assert out["game.state2"] == ("other", "game.state2")                 # brakujący slot dochodzi
+    assert out["game.state.auto"] == ("mine", "game.state.auto")          # nasz autozapis nowszy
+    new = {n for _s, _o, n in moves}
+    assert {out[n] for n in new} == {("mine", "game.state1"), ("other", "game.state.auto")}   # starsze — nowe sloty
+    assert len(out) == 7
 
 
 def test_dry_run_writes_nothing(nas):

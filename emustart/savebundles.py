@@ -16,6 +16,7 @@ tym urządzeniu. Zmiany wykrywa skrót zawartości (nazwy umowne i treść), nie
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -49,6 +50,19 @@ class Bundle:
         if not arc.startswith(ARC) or "/" in arc or "\\" in arc or ".." in arc:
             raise ValueError(f"nieoczekiwana nazwa w paczce: {arc}")
         return self.folder / (self.stem + arc[len(ARC):])
+
+    def adopt_names(self) -> int:
+        """Pliki paczki nazwane od innej nazwy gry (np. od nazwy ZIP-a zamiast ROM-u w środku)
+        → nazwa od pliku gry, którą uruchomi emulator (inaczej RetroArch ich nie widzi)."""
+        n = 0
+        for p, arc in list(self.files):
+            want = self.local_path(arc)
+            if Path(p) != want and not want.exists():
+                os.replace(p, want)
+                n += 1
+        if n:
+            self.collect()
+        return n
 
     def spec(self) -> dict:
         return {"emu": self.emulator_id, "core": self.core_id, "kind": self.kind,
@@ -215,3 +229,54 @@ def content_hash(files: list) -> str:
     for path, arc in sorted(files, key=lambda x: x[1]):
         h.update(arc.encode("utf-8") + b"\0" + file_sha(Path(path)).encode() + b"\n")
     return h.hexdigest()
+
+
+# ── łączenie stanów z dwóch miejsc (urządzenie ↔ serwer, migracja ↔ paczka) ──
+_SLOT = re.compile(r"^game\.state(\d*)(\.auto)?$")
+
+
+def _slot_no(arc: str) -> int:
+    m = _SLOT.match(arc)
+    return int(m.group(1) or 0) if m and not m.group(2) else -1
+
+
+def merge_states(mine: dict, other: dict) -> tuple[dict, list]:
+    """Stany z dwóch miejsc → suma slotów (nic nie znika). `mine` / `other`:
+    {nazwa w paczce: (sha256, czas)} — stan i jego miniatura „.png” razem. Ten sam slot z inną
+    zawartością: nowszy zostaje w slocie, starszy dostaje następny wolny numer (z miniaturą).
+    Zwraca (wynik {nazwa: ("mine"|"other", nazwa źródłowa)}, [(skąd, stara nazwa, nowa nazwa)])."""
+    out = {a: ("mine", a) for a in mine}
+    moves = []
+    used = {_slot_no(a) for a in list(mine) + list(other)}
+    nxt = max(used | {0}) + 1
+    for arc, (sha, t) in sorted(other.items()):
+        if arc.endswith(".png"):
+            continue
+        png = arc + ".png"
+        if arc not in mine:
+            out[arc] = ("other", arc)
+            if png in other:
+                out[png] = ("other", png)
+            continue
+        if mine[arc][0] == sha:
+            if png in other and png not in mine:
+                out[png] = ("other", png)
+            continue
+        # kolizja: nowszy w slocie, starszy — nowy numer
+        new = f"game.state{nxt}"
+        nxt += 1
+        if t > mine[arc][1]:
+            moves.append(("mine", arc, new))
+            out[new] = ("mine", arc)
+            if png in mine:
+                out[new + ".png"] = ("mine", png)
+            out[arc] = ("other", arc)
+            out.pop(png, None)
+            if png in other:
+                out[png] = ("other", png)
+        else:
+            moves.append(("other", arc, new))
+            out[new] = ("other", arc)
+            if png in other:
+                out[new + ".png"] = ("other", png)
+    return out, moves

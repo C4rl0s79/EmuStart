@@ -259,6 +259,79 @@ class SaveSync(ctx: Context, private val server: Server) {
         } finally { z.delete() }
     }
 
+    /** Numer slotu stanu („game.state3” → 3, „game.state” → 0; autozapis i miniatury → -1). */
+    private fun slotNo(arc: String): Int {
+        val m = Regex("^game\\.state(\\d*)(\\.auto)?$").find(arc) ?: return -1
+        return if (m.groupValues[2].isNotEmpty()) -1 else m.groupValues[1].toIntOrNull() ?: 0
+    }
+
+    /** Stany zmienione tu i na innym urządzeniu: suma slotów (jak savebundles.merge_states na
+     *  komputerze) — nic nie znika; ten sam slot z inną zawartością: nowszy zostaje, starszy
+     *  dostaje następny wolny numer (z miniaturą). Wynik w telefonie i na serwerze. */
+    private fun mergeStates(account: String, plat: String, gid: String, b: Bundle, srv: JSONObject, res: Result) {
+        val z = fetch(account, srv)
+        try {
+            val serverContent = zipHash(z)
+            val mine = b.files()
+            val mineSha = mine.mapValues { fileSha(it.value) }
+            ZipFile(z).use { zf ->
+                val other = zf.entries().asSequence().filter { !it.isDirectory }.associateBy { it.name }
+                fun otherSha(n: String): String {
+                    val md = MessageDigest.getInstance("SHA-256")
+                    zf.getInputStream(other.getValue(n)).use { i ->
+                        val buf = ByteArray(1 shl 16)
+                        while (true) { val k = i.read(buf); if (k <= 0) break; md.update(buf, 0, k) }
+                    }
+                    return hex(md.digest())
+                }
+                var next = ((mine.keys + other.keys).map { slotNo(it) } + 0).maxOrNull()!! + 1
+                fun write(n: String, dst: File) {
+                    dst.parentFile?.mkdirs()
+                    val tmp = File(dst.path + ".emustart-new")
+                    zf.getInputStream(other.getValue(n)).use { i -> tmp.outputStream().use { o -> i.copyTo(o) } }
+                    val t = other.getValue(n).time
+                    if (t > 0) tmp.setLastModified(t)
+                    if (dst.exists()) dst.delete()
+                    if (!tmp.renameTo(dst)) { tmp.copyTo(dst, true); tmp.delete() }
+                }
+                fun target(arc: String): File = mine[arc] ?: b.target(arc).firstOrNull() ?: File("")
+                for (arc in other.keys.sorted()) {
+                    if (arc.endsWith(".png")) continue
+                    val png = "$arc.png"
+                    val t = target(arc)
+                    if (t.path.isEmpty()) continue
+                    if (arc !in mine) {
+                        write(arc, t)
+                        if (png in other) write(png, File(t.path + ".png"))
+                        continue
+                    }
+                    if (mineSha[arc] == otherSha(arc)) {
+                        if (png in other && png !in mine) write(png, File(t.path + ".png"))
+                        continue
+                    }
+                    val newArc = "game.state$next"
+                    next++
+                    val newFile = File(t.parentFile, t.name.replace(Regex("\\.state\\d*(\\.auto)?$"), ".state${next - 1}"))
+                    if (other.getValue(arc).time > mine.getValue(arc).lastModified()) {
+                        // serwer nowszy: nasz stan na nowy slot, w slocie stan z serwera
+                        mine.getValue(arc).renameTo(newFile)
+                        mine[png]?.renameTo(File(newFile.path + ".png"))
+                        write(arc, t)
+                        if (png in other) write(png, File(t.path + ".png"))
+                    } else {
+                        write(arc, newFile)
+                        if (png in other) write(png, File(newFile.path + ".png"))
+                    }
+                    Log.i(tag, "stany ${b.key}: slot $arc zajęty — starszy stan jako $newArc")
+                }
+            }
+            res.downloaded++
+            val local = localHash(b)
+            if (local == serverContent) remember(account, plat, gid, b, srv.optInt("revision"), local)
+            else push(account, plat, gid, b, srv.optInt("revision"), local, res)
+        } finally { z.delete() }
+    }
+
     private fun push(account: String, plat: String, gid: String, b: Bundle, base: Int, local: String, res: Result) {
         if (local.isEmpty()) return                     // pusty zestaw nie kasuje zapisów na serwerze
         try {
@@ -305,7 +378,9 @@ class SaveSync(ctx: Context, private val server: Server) {
                 else -> {
                     val z = fetch(account, srv)
                     val same = try { zipHash(z) == local } finally { z.delete() }
-                    if (same) remember(account, plat, gid, b, revS, local) else res.conflicts += Conflict(b, srv, newest(b))
+                    if (same) remember(account, plat, gid, b, revS, local)
+                    else if (b.kind == "states") mergeStates(account, plat, gid, b, srv, res)     // stany się sumują
+                    else res.conflicts += Conflict(b, srv, newest(b))
                 }
             }
             return
@@ -315,7 +390,8 @@ class SaveSync(ctx: Context, private val server: Server) {
         when {
             there && !here -> if (revS > 0) { download(account, plat, gid, b, srv); res.downloaded++ }
             here && !there -> push(account, plat, gid, b, revS, local, res)
-            here && there -> res.conflicts += Conflict(b, srv, newest(b))
+            here && there -> if (b.kind == "states") mergeStates(account, plat, gid, b, srv, res)
+                             else res.conflicts += Conflict(b, srv, newest(b))
             st.optBoolean("dirty") -> remember(account, plat, gid, b, revS, local)
         }
     }

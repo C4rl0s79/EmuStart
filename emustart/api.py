@@ -868,18 +868,19 @@ class Api:
             meta = metadata.ensure_local(self._cfg, g)
             learned = [r["prefix"] for r in library.db().execute(
                 "SELECT prefix FROM states WHERE game_id=? AND family=?", (g["id"], ad.family))]
-            states = ingame.list_states(ad, g, meta, learned)
+            bundled = self._bundle_states(g, emu, ad)
+            states = bundled if bundled is not None else ingame.list_states(ad, g, meta, learned)
             if ad.family == "retroarch":
-                # stany innych rdzeni tej gry (inne urządzenia) — widać je, ale nie wczytają się
+                # stany innych rdzeni tej gry (inne urządzenia) — wczytanie przełącza rdzeń gry
                 from emustart import savebundles
                 core = savebundles.core_id(emu.get("args", ""))
                 try:
                     for st in syncclient.other_core_states(self._cfg, self._profile, g, core):
                         m = re.search(r"\.state(\d*)(\.auto)?$", st["path"])
                         states.append({"path": st["path"], "time": st["time"], "other_core": st["core"],
-                                       "name": Path(st["path"]).name,
+                                       "arc": Path(st["path"]).name, "name": Path(st["path"]).name,
                                        "label": ("Kontynuuj" if m and m.group(2) else f"Stan #{int(m.group(1) or 0) if m else 0}"),
-                                       "detail": f"rdzeń {st['core']} — nie wczyta się w {core or 'tym rdzeniu'}"})
+                                       "detail": f"rdzeń {st['core']} — wczytanie przełączy grę na ten rdzeń"})
                 except Exception:
                     log.exception("stany innych rdzeni")
             launcher.resume_from_nas(self._cfg, self._profile, g)
@@ -900,6 +901,55 @@ class Api:
                 "retroarch": bool(emu["exe"]) and ingame.adapter_for(emu["exe"]).family == "retroarch",
                 "shader_off": bool(sc.get("shader_off")),
                 "sync": self._sync_status(g)}
+
+    def _bundle_states(self, g: dict, emu: dict, ad) -> list | None:
+        """Stany gry z paczki — po synchronizacji z serwerem (serwer jest jedyną prawdą: lista
+        to dokładnie paczka, bez lokalnych plików spoza niej). None — emulator bez paczek stanów."""
+        from emustart import savebundles
+        core = savebundles.core_id(emu.get("args", ""))
+        try:
+            bundles = savebundles.for_game(ad, core, launcher.content_guess(self._cfg, g, emu["exe"]), g)
+        except Exception:
+            log.exception("paczki zapisów gry")
+            return None
+        st = next((b for b in bundles if b.kind == "states"), None)
+        if st is None:
+            return None
+        if launcher.post_busy():
+            launcher.wait_post(30)               # zapisy po ostatniej grze jeszcze idą na serwer
+        try:
+            for b in bundles:
+                b.adopt_names()
+            syncclient.before(self._cfg, self._profile, bundles, g)   # konflikty zapisów — przy uruchomieniu
+        except Exception:
+            log.exception("zapisy gry z serwera")
+        st.collect()
+        return [{"path": str(p), "arc": arc, "name": Path(p).name, "time": Path(p).stat().st_mtime}
+                for p, arc in st.files if not arc.endswith(".png")]
+
+    def play_other_core(self, game_id: int, core: str) -> dict:
+        """„Wczytaj zapis” — stan innego rdzenia: ta gra przechodzi na RetroArch z tym rdzeniem
+        (wybór także na koncie), brakujący rdzeń — z serwera. Potem launch("arc:<stan>")."""
+        from emustart import emuchoice, installer
+        g = library.game(int(game_id))
+        if not g:
+            return {"ok": False, "reason": "Nie ma takiej gry."}
+        key = f"retroarch#{str(core).lower()}"
+        opt = emuchoice.find(self._cfg, g["es"], key)
+        if not opt:
+            item = emuchoice.install_item(key)
+            if item in (installer.index().get("items") or {}):
+                try:
+                    installer.install(self._cfg, item)
+                    emulators.forget_scan()
+                    opt = emuchoice.find(self._cfg, g["es"], key)
+                except Exception as ex:
+                    log.exception("pobieranie rdzenia %s", core)
+                    return {"ok": False, "reason": f"Nie udało się pobrać rdzenia {core}: {ex}"}
+        if not opt:
+            return {"ok": False, "reason": f"Brak rdzenia {core} na tym komputerze i na serwerze."}
+        self.set_game_emulator(int(game_id), opt)
+        return {"ok": True, "label": opt["label"]}
 
     def _sync_status(self, g: dict) -> dict:
         """Stan synchronizacji zapisów gry z serwerem (opcje gry)."""
