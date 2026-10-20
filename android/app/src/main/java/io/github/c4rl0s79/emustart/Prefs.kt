@@ -122,14 +122,26 @@ class Prefs(ctx: Context) {
     fun learnedDir(fam: String): String = sp.getString("learned_dir:$fam", "") ?: ""
     fun setLearnedDir(fam: String, v: String) = sp.edit().putString("learned_dir:$fam", v).apply()
 
-    fun emulator(es: String): String = sp.getString("emu:$es", "") ?: ""
-    fun setEmulator(es: String, id: String) = sp.edit().putString("emu:$es", id).apply()
+    /** Wybór emulatora / rdzenia należy do profilu (konta), nie do telefonu: inny gracz na tym
+     *  telefonie ma swoje wybory, a nowy telefon konta dostaje je z serwera. Wybory sprzed
+     *  0.46.1 (bez profilu w kluczu) należą do właściciela telefonu. */
+    private fun ek(es: String) = "emu:" + profile.lowercase() + "|" + es
+    private fun tk(es: String) = "emu_t:" + profile.lowercase() + "|" + es
+    private val legacy: Boolean get() = profile.isEmpty() || profile.equals(phoneOwner, true)
+    fun emulator(es: String): String = sp.getString(ek(es), null)
+        ?: (if (legacy) sp.getString("emu:$es", "") ?: "" else "")
+    fun setEmulator(es: String, id: String) = sp.edit().putString(ek(es), id).apply()
     /** Czas wyboru emulatora przez gracza (synchronizacja z kontem na serwerze; 0 = nie wybierał). */
-    fun emulatorTime(es: String): Long = sp.getLong("emu_t:$es", 0L)
+    fun emulatorTime(es: String): Long = if (sp.contains(tk(es))) sp.getLong(tk(es), 0L)
+        else if (legacy) sp.getLong("emu_t:$es", 0L) else 0L
     fun setEmulatorChoice(es: String, id: String, t: Long = System.currentTimeMillis()) =
-        sp.edit().putString("emu:$es", id).putLong("emu_t:$es", t).apply()
-    fun emulatorChoices(): Map<String, Pair<String, Long>> = sp.all.keys.filter { it.startsWith("emu_t:") }
-        .associate { k -> val es = k.removePrefix("emu_t:"); es to Pair(emulator(es), emulatorTime(es)) }
+        sp.edit().putString(ek(es), id).putLong(tk(es), t).apply()
+    fun emulatorChoices(): Map<String, Pair<String, Long>> {
+        val mine = "emu_t:" + profile.lowercase() + "|"
+        val keys = sp.all.keys.filter { it.startsWith(mine) }.map { it.removePrefix(mine) }.toMutableSet()
+        if (legacy) keys += sp.all.keys.filter { it.startsWith("emu_t:") && !it.contains('|') }.map { it.removePrefix("emu_t:") }
+        return keys.associateWith { es -> Pair(emulator(es), emulatorTime(es)) }
+    }
 
     /** Zalogowany na serwerze: adres i klucz urządzenia (od 0.43 jedyna droga). */
     val configured: Boolean get() = serverUrl.startsWith("https://") && deviceId.isNotBlank()

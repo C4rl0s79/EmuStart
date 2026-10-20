@@ -1226,6 +1226,8 @@ class Bridge(private val act: MainActivity) {
             // wygląd innego użytkownika — z jego konta (bez nadpisywania go wyglądem poprzedniego)
             prefs.lookTime = 0L
             try { pullLook() } catch (e: Exception) { Log.w(tag, "wygląd profilu: $e") }
+            try { pullEmuChoices() } catch (e: Exception) { Log.w(tag, "wybory emulatorów profilu: $e") }
+            systemsCache = null
         }
         return JSONObject().put("ok", true).put("look", prefs.look)
     }

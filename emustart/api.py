@@ -223,6 +223,11 @@ class Api:
 
     def _user_load(self, pid: int) -> None:
         """Ustawienia EmuStart profilu (wygląd itp.); profil bez nich dziedziczy bieżące."""
+        # emulatory i rdzenie wybrane na innych komputerach tego konta (w tle: serwer, pobieranie)
+        from emustart import emuchoice
+        self._choices = threading.Thread(target=emuchoice.apply_and_fetch, args=(self._cfg, pid), daemon=True,
+                                         name="wybory-emulatorow")
+        self._choices.start()
         data = profiles.json_get(self._cfg, pid, "emustart.json")
         if not data:
             return
@@ -556,6 +561,9 @@ class Api:
                                                      "extracting", "running"):
             return {"ok": False, "reason": "Inna gra jest właśnie uruchamiana."}
         t0 = time.monotonic()
+        ch = getattr(self, "_choices", None)
+        if ch and ch.is_alive():
+            ch.join(15)                       # wybory emulatorów z konta (zaraz po zalogowaniu)
         block = self._pin_block(self._profile)
         if block:
             return {**block, "profile_pin": True}
@@ -992,12 +1000,17 @@ class Api:
         return out
 
     def set_game_emulator(self, game_id: int, opt: dict | None) -> dict:
+        from emustart import emuchoice
         with library.db() as c:
             if not opt:
                 c.execute("DELETE FROM game_emu WHERE game_id=?", (int(game_id),))
             else:
                 c.execute("INSERT OR REPLACE INTO game_emu VALUES(?,?,?,?)",
                           (int(game_id), opt["label"], opt["exe"], opt.get("args", "")))
+        g = library.game(int(game_id))
+        if g:                                 # wybór dla gry → konto (inne komputery konta)
+            threading.Thread(target=lambda: _quiet(emuchoice.record_game, self._cfg, self._profile, g, opt),
+                             daemon=True, name="wybor-emulatora").start()
         return {"ok": True}
 
     def meta_fetch(self, game_id: int, full: bool = False) -> dict:
@@ -1189,8 +1202,15 @@ class Api:
         if data.get("emulator"):
             o = data["emulator"]
             sc.update(label=o["label"], exe=o["exe"], args=o.get("args", ""), enabled=True)
+            self._record_choice(es, o)
         config.save(self._cfg)
         return {"ok": True}
+
+    def _record_choice(self, es: str, opt: dict) -> None:
+        """Wybór emulatora systemu → konto gracza (inne komputery konta — ten sam)."""
+        from emustart import emuchoice
+        threading.Thread(target=lambda: _quiet(emuchoice.record_system, self._cfg, self._profile, es, opt),
+                         daemon=True, name="wybor-emulatora").start()
 
     # ── pobieranie emulatorów ──
     def install_missing(self) -> list:
@@ -1715,6 +1735,8 @@ class Api:
                 for k in ("enabled", "label", "exe", "args"):
                     if k in sc:
                         cur[k] = sc[k]
+                if sc.get("exe"):
+                    self._record_choice(es, sc)
         config.save(cfg)
         return {"ok": True}
 
@@ -1868,6 +1890,13 @@ def clean_look(data) -> dict:
         elif isinstance(v, str) and _LOOK_STR.match(v):
             out[k] = v
     return out
+
+
+def _quiet(fn, *args) -> None:
+    try:
+        fn(*args)
+    except Exception:
+        log.exception("%s", getattr(fn, "__name__", "zadanie"))
 
 
 def _recommended_option(es: str, cfg: dict) -> dict:
