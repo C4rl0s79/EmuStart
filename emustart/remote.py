@@ -960,7 +960,8 @@ def _sync_identity(handler, d: dict | None = None) -> tuple[str, str]:
     urządzenia tylko z tokenem tego konta (X-Profile-Token, gracz zalogowany hasłem)."""
     from emustart import accounts, devices, savesync
     did = getattr(handler, "device", "")
-    want = str((d or {}).get("account") or handler.headers.get("X-EmuStart-Account") or "").strip()
+    want = str((d or {}).get("account")
+               or urllib.parse.unquote(handler.headers.get("X-EmuStart-Account") or "")).strip()   # nazwa z polskimi znakami
     if not did:
         # wspólny klucz serwera (EmuStart na komputerze z serwerem) — konto podane wprost
         if not want:
@@ -994,8 +995,13 @@ def savesync_get(handler, platform: str, game: str, urls: bool) -> None:
     from emustart import savesync
 
     def run():
+        from emustart import devices
         acc, dev = _sync_identity(handler)
-        return savesync.manifest(acc, dev, platform, game, urls=urls)
+        out = savesync.manifest(acc, dev, platform, game, urls=urls)
+        for _e, _c, _k, b in savesync._bundles(out):    # nazwa urządzenia do okna konfliktu
+            did = b.get("updated_by_device_id") or ""
+            b["updated_by_device_name"] = (devices.name_of(did) if did and did != "serwer" else did) or did
+        return out
     return _sync_errors(handler, run)
 
 

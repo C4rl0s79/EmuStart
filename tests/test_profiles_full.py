@@ -63,34 +63,35 @@ def test_ini_set_edits_adds_and_creates(tmp_path):
 
 
 def test_clean_reinstall_restores_saves_from_nas(prof_env):
-    """Emulator zainstalowany od nowa (pusta karta pamięci założona przez emulator),
-    lokalnego magazynu profili brak — save wraca z NAS przy pierwszej grze."""
+    """Emulator zainstalowany od nowa (pusty plik założony przez emulator), lokalnego
+    magazynu profili brak — stany wracają z folderu profilu na serwerze przy pierwszej grze.
+    (Karty pamięci PCSX2 synchronizują się paczkami z serwerem — syncclient, nie folderem.)"""
     cfg, tmp = prof_env
     pid = profiles.first_id()
-    nas_card = Path(cfg["profiles_nas"]) / "Gracz" / "save" / "pcsx2" / "memcards" / "Mcd001.ps2"
-    _write(nas_card, b"MOJE-ZAPISY")
+    nas_st = Path(cfg["profiles_nas"]) / "Gracz" / "save" / "pcsx2" / "sstates" / "SLUS-1.p2s"
+    _write(nas_st, b"MOJE-ZAPISY")
     ad = _pcsx2(tmp)
-    blank = ad.settings_base() / "memcards" / "Mcd001.ps2"
+    blank = ad.settings_base() / "sstates" / "SLUS-1.p2s"
     _write(blank, b"PUSTA")
-    os.utime(blank, (1, 1))                                  # świeża karta starsza niż save z NAS
+    os.utime(blank, (1, 1))                                  # świeży plik starszy niż ten z NAS
 
     s = _session(cfg, pid)
     names = s._profile_prepare(ad)
-    assert "memcards" in names
+    assert "sstates" in names and "memcards" not in s._folder_names
     ini = ad.settings_base() / "inis" / "PCSX2.ini"
-    mc = profiles.local_dir(pid, "pcsx2", "memcards")
+    st = profiles.local_dir(pid, "pcsx2", "sstates")
     # bez junction: PCSX2 dostaje folder profilu w ustawieniach na czas gry
-    assert not os.path.isjunction(ad.settings_base() / "memcards")
-    assert ad.memcard_dir() == mc and ingame.ini_section(ini, "Folders")["MemoryCards"] == str(mc)
-    assert (mc / "Mcd001.ps2").read_bytes() == b"MOJE-ZAPISY"
-    # pusta karta nie przepadła, ale nie zasłania save'a — leży w kopii zapasowej
-    assert [p.read_bytes() for p in (profiles.LOCAL / str(pid) / "_backup").rglob("Mcd001.ps2")] == [b"PUSTA"]
+    assert not os.path.isjunction(ad.settings_base() / "sstates")
+    assert ad.state_dirs() == [st] and ingame.ini_section(ini, "Folders")["Savestates"] == str(st)
+    assert (st / "SLUS-1.p2s").read_bytes() == b"MOJE-ZAPISY"
+    # pusty plik nie przepadł, ale nie zasłania zapisu — leży w kopii zapasowej
+    assert [p.read_bytes() for p in (profiles.LOCAL / str(pid) / "_backup").rglob("SLUS-1.p2s")] == [b"PUSTA"]
 
-    _write(mc / "Mcd001.ps2", b"NOWY-ZAPIS")                # gra zapisała
+    _write(st / "SLUS-1.p2s", b"NOWY-ZAPIS")                # gra zapisała
     s._release_dirs()
-    assert ingame.ini_section(ini, "Folders")["MemoryCards"] == "memcards"   # ustawienia sprzed gry
+    assert ingame.ini_section(ini, "Folders")["Savestates"] == "sstates"     # ustawienia sprzed gry
     s._profile_finish(ad, names)
-    assert nas_card.read_bytes() == b"NOWY-ZAPIS"
+    assert nas_st.read_bytes() == b"NOWY-ZAPIS"
 
 
 def test_saves_without_junction_and_per_game_cards(prof_env):

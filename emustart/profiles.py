@@ -897,6 +897,24 @@ def local_families(pid: int) -> dict:
     return out
 
 
+def mark_bundled(family: str, names) -> None:
+    """Foldery zapisów emulatora, które synchronizują się paczkami z serwerem (syncclient) —
+    synchronizacja całych folderów profilu (push_all, sync_up) je pomija: jedna prawda."""
+    cur = bundled()
+    want = sorted(set(cur.get(family, [])) | set(names))
+    if want != cur.get(family):
+        cur[family] = want
+        library.meta_set("bundled_dirs", json.dumps(cur))
+
+
+def bundled() -> dict:
+    try:
+        d = json.loads(library.meta_get("bundled_dirs", "{}"))
+        return d if isinstance(d, dict) else {}
+    except ValueError:
+        return {}
+
+
 def push_all(cfg: dict) -> int:
     """Przy starcie: wszystkie lokalne save'y i ustawienia profili → NAS/serwer (tylko
     zmienione i brakujące). Np. po przejściu na serwer albo po grze bez połączenia."""
@@ -904,9 +922,13 @@ def push_all(cfg: dict) -> int:
         return 0
     resolve_moves(cfg)
     n = 0
+    skip = bundled()
     for prof in all_profiles():
         pid = prof["id"]
         for family, names in local_families(pid).items():
+            names = [x for x in names if x not in skip.get(family, [])]
+            if not names:
+                continue
             try:
                 n += _sync(cfg, pid, "save", family, names, up=True)
             except Exception:

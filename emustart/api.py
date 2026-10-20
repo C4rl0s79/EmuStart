@@ -24,7 +24,7 @@ import urllib.parse
 from pathlib import Path
 
 from emustart import (__version__, art, bios, cache, catalog, ingame, installer, logos, sysinfo, metadata, pads, profiles, translations, uipad, config, emulators, launcher, library,
-                      nasfs, netsrc, paths, rastates, systems, winutil)
+                      nasfs, netsrc, paths, syncclient, systems, winutil)
 
 log = logging.getLogger("emustart.api")
 KEEP_LIST = 60                     # stanów na liście „Wczytaj zapis”
@@ -53,6 +53,8 @@ class Api:
         # lokalne save'y i ustawienia profili → NAS/serwer (zaległe po grze bez połączenia,
         # pierwsze przejście na serwer); gra uruchomiona w tym czasie poczeka (post_busy)
         launcher.start_post(lambda: profiles.push_all(self._cfg), "zapisy profili")
+        # zapisy gier niewysłane na serwer (gra bez połączenia) — paczki, syncclient
+        launcher.start_post(lambda: syncclient.retry(self._cfg), "zapisy gier na serwer")
         threading.Thread(target=self._profiles_bootstrap, daemon=True, name="profiles").start()
         from emustart import mediastore
         mediastore.migrate_later()                # lokalna kopia grafik: jeden plik na system
@@ -635,6 +637,10 @@ class Api:
         if self._session:
             self._session.abort()
 
+    def launch_choice(self, choice: str) -> bool:
+        """Konflikt zapisów przy uruchamianiu: local | remote | skip."""
+        return bool(self._session and self._session.choose(str(choice)))
+
     def launch_dismiss(self) -> None:
         s = self._session
         if s and s.phase in ("finished", "error", "cancelled"):
@@ -838,16 +844,6 @@ class Api:
             except Exception:
                 log.exception("foldery profilu")
             meta = metadata.ensure_local(self._cfg, g)
-            prof = profiles.get(self._profile)
-            core = rastates.core_id(emu.get("args", ""))
-            if ad.family == "retroarch" and prof and core and profiles.nas_online(self._cfg):
-                # stany ze wszystkich urządzeń konta (koncepcja 2.0 §5.5) — tu, z miniaturami,
-                # zanim gracz wybierze; najnowszy czeka jako „Kontynuuj”
-                try:
-                    rastates.present(self._cfg, prof, ad, core, cache.local_path(self._cfg, g), {})
-                    desc = rastates.describe(self._cfg, prof, ad, core)
-                except Exception:
-                    log.exception("stany z serwera do listy")
             learned = [r["prefix"] for r in library.db().execute(
                 "SELECT prefix FROM states WHERE game_id=? AND family=?", (g["id"], ad.family))]
             states = ingame.list_states(ad, g, meta, learned)
@@ -867,7 +863,16 @@ class Api:
         return {"id": g["id"], "title": g["title"], "emulator": emu, "options": opts,
                 "states": states, "es": g["es"], "system": systems.info(g["es"])["display"],
                 "retroarch": bool(emu["exe"]) and ingame.adapter_for(emu["exe"]).family == "retroarch",
-                "shader_off": bool(sc.get("shader_off"))}
+                "shader_off": bool(sc.get("shader_off")),
+                "sync": self._sync_status(g)}
+
+    def _sync_status(self, g: dict) -> dict:
+        """Stan synchronizacji zapisów gry z serwerem (opcje gry)."""
+        try:
+            return syncclient.status(self._cfg, self._profile, g)
+        except Exception:
+            log.exception("stan synchronizacji zapisów")
+            return {"state": "never"}
 
     def ra_states(self, game_id: int) -> dict:
         """„Wczytaj zapis” — stany ze wszystkich urządzeń (na telefonie: Bridge.raStates).

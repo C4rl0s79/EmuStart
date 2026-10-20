@@ -54,7 +54,9 @@ class Bridge(private val act: MainActivity) {
         var profile = ""
         var lockedBy = ""
         var emuId = ""
-        var startState = ""        // „Wczytaj zapis”: stan RetroArcha na serwerze (względem profilu)
+        var startState = ""        // „Wczytaj zapis”: wybrany stan RetroArcha (plik w telefonie)
+        @Volatile var conflict: JSONArray? = null   // konflikt zapisów — czeka na decyzję gracza
+        @Volatile var choice = ""
     }
     @Volatile private var launch: Launch? = null
 
@@ -100,7 +102,11 @@ class Bridge(private val act: MainActivity) {
         "launch" -> startLaunch(a.getInt(0), a.optBoolean(2, false), a.optString(1, ""))
         "ra_states" -> raStates(a.getInt(0))
         "launch_status" -> launchStatus()
-        "launch_cancel" -> { launch?.downloader?.cancel?.set(true); null }
+        "launch_cancel" -> { launch?.downloader?.cancel?.set(true); launch?.let { if (it.conflict != null) it.choice = "skip" }; null }
+        "launch_choice" -> launch?.let { l ->
+            val c = a.optString(0, "")
+            if (l.conflict != null && c in setOf("local", "remote", "skip")) { l.choice = c; true } else false
+        } ?: false
         "launch_dismiss" -> { val l = launch; if (l != null && l.phase in setOf("finished", "error", "cancelled")) launch = null; null }
         "toggle_pin" -> togglePin(a.getInt(0))
         // administrator: grafiki, opisy i wygląd systemów na serwerze (wszystkie urządzenia)
@@ -1037,7 +1043,7 @@ class Bridge(private val act: MainActivity) {
                                     l.sys.optString("plat"), g.optJSONObject("meta")?.optString("serial") ?: "",
                                     zipStems(main0).joinToString("|"))
                 try {
-                    val msg = saves.before(prefs.profile, emu, sg, takeover)
+                    val msg = saves.before(prefs.profile, emu, sg, takeover) { cs -> askConflict(l, cs) }
                     l.message = msg
                     if (msg.isNotEmpty()) Log.i(tag, msg)
                     // „Wczytaj zapis”: wybrany stan (z dowolnego urządzenia) jako autozapis — RetroArch go wczyta
@@ -1095,8 +1101,26 @@ class Bridge(private val act: MainActivity) {
             .put("system", l.sys.optString("display")).put("game_id", l.game.optInt("id"))
             .put("copying", false).put("locked_by", l.lockedBy)
             .put("missing_core", l.missingCore)
+        l.conflict?.let { o.put("conflict", it) }
         l.progress?.let { o.put("progress", JSONObject(it.snapshot())) }
         return o
+    }
+
+    /** Konflikt zapisów (zmiany tu i na innym urządzeniu): okno uruchamiania pokazuje obie
+     *  wersje i czeka na decyzję gracza — z tego urządzenia / z serwera / pomiń. */
+    private fun askConflict(l: Launch, cs: List<SaveSync.Conflict>): String {
+        l.choice = ""
+        l.message = "Zapisy tej gry zmieniły się na tym urządzeniu i na innym."
+        l.conflict = JSONArray(cs.map { it.describe() })
+        l.phase = "conflict"
+        try {
+            while (l.choice.isEmpty() && launch === l) Thread.sleep(200)
+        } finally {
+            l.conflict = null
+            l.phase = "preparing"
+            l.message = "Zapisy profilu…"
+        }
+        return l.choice.ifEmpty { "skip" }
     }
 
     /** Powrót z emulatora: gra skończona. */
@@ -1360,8 +1384,8 @@ class Bridge(private val act: MainActivity) {
     }
 
     /** Menedżer zapisów: stany tej gry z komputera i telefonu, wspólne zapisy w grze. */
-    /** „Wczytaj zapis” na telefonie: stany RetroArcha tej gry ze wszystkich urządzeń konta
-     *  (wspólny folder na serwerze, rdzeń wybrany na tym telefonie), najnowsze pierwsze, z miniaturami. */
+    /** „Wczytaj zapis” na telefonie: stany RetroArcha tej gry (rdzeń wybrany na tym telefonie)
+     *  po synchronizacji z serwerem — te same na każdym urządzeniu, najnowsze pierwsze, z miniaturami. */
     private fun raStates(id: Int): JSONObject {
         if (prefs.profile.isEmpty()) return JSONObject().put("ok", false)
             .put("reason", "Wybierz profil gracza — stany należą do profilu.")
@@ -1371,38 +1395,28 @@ class Bridge(private val act: MainActivity) {
             val emu = chosenEmu(s)
             if (Emulators.baseId(emu) != "retroarch")
                 return JSONObject().put("ok", true).put("states", JSONArray())
-                    .put("note", "Wspólne stany ma tylko RetroArch — ten system gra w innym emulatorze.")
+                    .put("note", "Stany na serwerze ma tylko RetroArch — ten system gra w innym emulatorze.")
             val core = Emulators.retroCore(s.optString("plat"), Emulators.coreOf(emu).ifEmpty { s.optString("core") })
-            val coreDir = Saves.normCore(Saves.coreDirOf(core))
-            val file = g.optString("file")
-            val stems = listOf(File(file).nameWithoutExtension, g.optString("name")).filter { it.isNotEmpty() }
-            val cat = server.saveCatalog(mapOf("profile" to prefs.profile, "es" to g.optString("es"),
-                                               "name" to g.optString("name"), "stems" to stems.joinToString("|")))
-            val all = cat.optJSONArray("states") ?: JSONArray()
+            val file = File(g.optString("file"))
+            val sg = Saves.Game(g.optString("es"), g.optString("name"), file.nameWithoutExtension, File(act.filesDir, "brak"),
+                                core, s.optString("plat"))
+            val files = saves.raStates(prefs.profile, sg)
             val out = JSONArray()
             var thumbs = 0
-            val list = (0 until all.length()).map { all.getJSONObject(it) }
-                .filter { it.optString("kind") == "ra" && it.optString("platform") == "shared"
-                          && Saves.normCore(it.optString("core")) == coreDir }
-                .sortedWith(compareBy<JSONObject>({ it.optString("slot") != "auto" }, { -it.optDouble("mtime") }))
-            for (st in list) {
-                val auto = st.optString("slot") == "auto"
-                val who = st.optString("device").let { d ->
-                    if (d.isEmpty()) "" else (if (st.optString("device_platform") == "telefon") "telefon " else "") + d }
-                val kind = if (st.optString("state_kind") == "auto") "autozapis przy wyjściu" else ""
-                val o = JSONObject().put("path", "ra:" + st.optString("rel")).put("name", st.optString("name"))
-                    .put("time", st.optDouble("mtime"))
-                    .put("label", if (auto) "Kontynuuj — najnowszy stan" else "Stan #${st.optString("slot").toIntOrNull() ?: 0}")
+            val list = files.filterKeys { !it.endsWith(".png") }.entries
+                .sortedWith(compareBy<Map.Entry<String, File>>({ !it.key.endsWith(".auto") }, { -it.value.lastModified() }))
+            val slotRx = Regex("\\.state(\\d*)")
+            for ((arc, f) in list) {
+                val auto = arc.endsWith(".auto")
+                val slot = slotRx.find(arc)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+                val o = JSONObject().put("path", "ra:" + f.absolutePath).put("name", f.name)
+                    .put("time", f.lastModified() / 1000.0)
+                    .put("label", if (auto) "Kontynuuj — najnowszy stan" else "Stan #$slot")
                     .put("continue", auto)
-                    .put("detail", listOf(who, kind).filter { it.isNotEmpty() }.joinToString(" · "))
-                val shot = st.optString("shot")
-                if (shot.isNotEmpty() && thumbs < 24) {
-                    try {
-                        server.nasRead("${prefs.profile}/$shot")?.takeIf { it.size < 600_000 }?.let {
-                            o.put("thumb", "data:image/png;base64," + android.util.Base64.encodeToString(it, android.util.Base64.NO_WRAP))
-                            thumbs++
-                        }
-                    } catch (e: Exception) { Log.w(tag, "miniatura stanu: $e") }
+                val shot = files["$arc.png"]
+                if (shot != null && shot.length() < 600_000 && thumbs < 24) {
+                    o.put("thumb", "data:image/png;base64," + android.util.Base64.encodeToString(shot.readBytes(), android.util.Base64.NO_WRAP))
+                    thumbs++
                 }
                 out.put(o)
             }

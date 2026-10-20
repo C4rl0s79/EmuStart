@@ -55,13 +55,9 @@ def test_p2s_version(tmp_path):
 
 def test_catalog_lists_both_platforms(tmp_path):
     fs = _nas(tmp_path)
+    # stany RetroArcha i zapisy w grze — paczki z serwerem (syncclient), nie menedżer
     ra = savemgr.catalog(fs, "Jezus", "psx", "Crash (USA)", ["Crash (USA)"])
-    names = {(s["platform"], s["name"]) for s in ra["states"]}
-    assert names == {("windows", "Crash (USA).state1"), ("android", "Crash (USA).state.auto")}
-    pc = next(s for s in ra["states"] if s["platform"] == "windows")
-    assert pc["slot"] == "1" and pc["core"] == "SwanStation" and pc["shot"].endswith(".png")
-    assert [t["platform"] for t in pc["targets"]] == ["android"]
-    assert any(s["name"] == "Crash (USA).srm" for s in ra["saves"])
+    assert ra["states"] == [] and ra["saves"] == []
 
     ps2 = savemgr.catalog(fs, "Jezus", "ps2", "Okage (USA)", ["Okage (USA)"], serial="SLUS-20431")
     st = {s["platform"] + "/" + s["emu"]: s for s in ps2["states"]}
@@ -91,21 +87,6 @@ def test_copy_pc_to_phone_ps2_updates_index(tmp_path):
     # telefon widzi go potem po przedrostku z indeksu, bez numeru płyty
     ps2 = savemgr.catalog(fs, "Jezus", "ps2", "Okage (USA)", [])
     assert any(s["platform"] == "android" and s["slot"] == "01" for s in ps2["states"])
-
-
-def test_copy_phone_to_pc_ra_keeps_core_folder_and_backs_up(tmp_path):
-    fs = _nas(tmp_path)
-    _w(tmp_path / "nas/Jezus/states/android/retroarch/Crash (USA).state1", b"z telefonu")
-    r = savemgr.copy(fs, "Jezus", "states/android/retroarch/Crash (USA).state1",
-                     "windows", "retroarch", "psx", "Crash (USA)", "telefon")
-    assert r["ok"] and r["rel"] == "save/retroarch/states/SwanStation/Crash (USA).state1"
-    g = tmp_path / "nas/Jezus"
-    assert (g / r["rel"]).read_bytes() == b"z telefonu"
-    bak = list((g / "_backup").rglob("Crash (USA).state1"))
-    assert bak and bak[0].read_bytes() == b"pc1"                     # poprzedni stan w kopii
-    assert "menedzer" in (g / "save/retroarch/.emustart-stamp").read_text()  # komputer pobierze
-    assert savemgr.copy(fs, "Jezus", "states/android/retroarch/Crash (USA).state1",
-                        "windows", "retroarch", "psx", "Crash (USA)")["same"]
 
 
 def test_copy_rejects_bad_paths(tmp_path):
@@ -143,22 +124,6 @@ def test_server_endpoints(tmp_path, monkeypatch):
         assert ex.code == 400
 
 
-def test_saves_only_for_own_platform(tmp_path):
-    """Gra SNES nie widzi kart ani stanów PlayStation; gra PS1 — kart PS2."""
-    fs = _nas(tmp_path)
-    _w(tmp_path / "nas/Jezus/save/duckstation/memcards/shared_card_1.mcd", b"m" * 10)
-    _w(tmp_path / "nas/Jezus/save/retroarch/saves/Snes9x/Chrono Trigger (USA).srm", b"s")
-    snes = savemgr.catalog(fs, "Jezus", "snes", "Chrono Trigger (USA)", ["Chrono Trigger (USA)"],
-                           serial="SLUS-20431")
-    assert [s["name"] for s in snes["saves"]] == ["Chrono Trigger (USA).srm"]
-    assert not any(s["kind"] == "ps2" for s in snes["states"])
-    psx = savemgr.catalog(fs, "Jezus", "psx", "Crash (USA)", ["Crash (USA)"])
-    names = {s["name"] for s in psx["saves"]}
-    assert "shared_card_1.mcd" in names and not any(n.endswith(".ps2") for n in names)
-    ps2 = savemgr.catalog(fs, "Jezus", "ps2", "Okage (USA)", [], serial="SLUS-20431")
-    assert {s["name"] for s in ps2["saves"]} == {"Mcd001.ps2"}
-
-
 def test_armsx2_autosave_listed_and_copied_as_resume(tmp_path):
     """ARMSX2 zapisuje stan przy wyjściu jako .autosave.p2s (wczytywany przy starcie) —
     menedżer go pokazuje, a kopia na komputer trafia jako .resume.p2s PCSX2 (i odwrotnie)."""
@@ -181,55 +146,9 @@ def test_armsx2_autosave_listed_and_copied_as_resume(tmp_path):
     assert two["rel"].endswith(".autosave.2.p2s")                     # starsze autozapisy bez zmiany nazwy
 
 
-def test_ra_state_named_after_rom_inside_zip(tmp_path):
-    """RetroArch nazywa stan od ROM-u w ZIP-ie (MSU-1: „Chrono_Trigger_(USA)_(MSU1).state”),
-    nie od nazwy gry — menedżer dobiera go po nazwach z archiwum (i bez różnicy „_”/spacja)."""
-    fs = _nas(tmp_path)
-    z = tmp_path / "roms" / "Chrono Trigger (USA) (MSU1).zip"
-    z.parent.mkdir()
-    with zipfile.ZipFile(z, "w") as zf:
-        zf.writestr("Chrono_Trigger_(USA)_(MSU1).sfc", b"rom")
-        zf.writestr("Chrono_Trigger_(USA)_(MSU1)-1.pcm", b"pcm")
-        zf.writestr("Chrono_Trigger_(USA)_(MSU1).msu", b"msu")
-    assert savemgr.zip_stems(z) == ["Chrono_Trigger_(USA)_(MSU1)"]
-    tel = tmp_path / "nas/Jezus/states/android/retroarch/bsnes"
-    _w(tel / "Chrono_Trigger_(USA)_(MSU1).state", b"t")
-    _w(tel / "Chrono_Trigger_(USA)_(MSU1).state.png", b"p")
-    name = "Chrono Trigger (USA) (MSU1)"
-    assert savemgr.catalog(fs, "Jezus", "SNESMSU1", name, [name])["states"]   # „_” = spacja
-    cat = savemgr.catalog(fs, "Jezus", "SNESMSU1", name, [name] + savemgr.zip_stems(z))
-    (st,) = cat["states"]
-    assert st["platform"] == "android" and st["core"] == "bsnes" and st["shot"].endswith(".png")
-    # bez różnicy „_” / spacja (nazwa gry vs nazwa pliku)
-    assert savemgr.catalog(fs, "Jezus", "SNESMSU1", name, ["chrono trigger (usa) (msu1)"])["states"]
-    # kopia na komputer — do podfolderu rdzenia
-    _w(tmp_path / "nas/Jezus/save/retroarch/states/bsnes/Inna.state1", b"x")
-    r = savemgr.copy(fs, "Jezus", st["rel"], "windows", "retroarch", "SNESMSU1", name)
-    assert r["rel"] == "save/retroarch/states/bsnes/Chrono_Trigger_(USA)_(MSU1).state"
-
-
 def test_retroarch_learns_state_prefix():
     from emustart import ingame
     ra = ingame.RetroArch.__new__(ingame.RetroArch)
     assert ra.prefix_of("Chrono_Trigger_(USA)_(MSU1).state1") == "Chrono_Trigger_(USA)_(MSU1).state"
     assert ra.prefix_of("Gra.state.auto") == "Gra.state"
     assert ra.prefix_of("Gra.state1.png") == ""
-
-
-def test_shared_ra_states_carry_device_from_index(tmp_path):
-    """Wspólne stany RetroArcha z opisem z indeksu serwera — lista „Wczytaj zapis” na telefonie."""
-    root = tmp_path / "nas"
-    shared = root / "Jezus" / "states" / "shared" / "retroarch" / "bsnes"
-    _w(shared / "Chrono Trigger (USA).state3")
-    _w(shared / "Chrono Trigger (USA).state3.png", b"PNG")
-    _w(shared / "Chrono Trigger (USA).state.auto")
-    (shared / ".states.json").write_text(json.dumps({
-        "Chrono Trigger (USA).state3": {"device": "PC-SALON", "platform": "komputer", "kind": "manual"},
-        "Chrono Trigger (USA).state.auto": {"device": "Pixel", "platform": "telefon", "kind": "auto"}}))
-    fs = nasfs.DirFs(root)
-    cat = savemgr.catalog(fs, "Jezus", "snes", "Chrono Trigger (USA)", ["Chrono Trigger (USA)"])
-    sh = {s["name"]: s for s in cat["states"] if s["platform"] == "shared"}
-    st3, auto = sh["Chrono Trigger (USA).state3"], sh["Chrono Trigger (USA).state.auto"]
-    assert (st3["core"], st3["slot"], st3["device"], st3["state_kind"]) == ("bsnes", "3", "PC-SALON", "manual")
-    assert st3["shot"].endswith("Chrono Trigger (USA).state3.png")
-    assert (auto["slot"], auto["device"], auto["device_platform"]) == ("auto", "Pixel", "telefon")

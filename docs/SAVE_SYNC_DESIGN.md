@@ -58,11 +58,22 @@ blokadą gry. Poprzednia wersja paczki zostaje w historii (ostatnie 10).
 
 ## Etapy
 
-1. **Serwer** — API, wersje, konflikty, historia, podpisane adresy (gotowe: `emustart/savesync.py`).
-2. **Klient Windows** — lokalny stan synchronizacji, pakowanie / pobieranie, przed i po grze;
-   RetroArch saves i states per rdzeń, DuckStation memcards, PCSX2 memcards per gra; status
-   gry i okno konfliktu; zastępuje dotychczasową synchronizację zapisów profilu i `rastates`.
-3. **Android (zewnętrzne emulatory)** — adaptery DIRECT_DIRECTORY / SAF_DIRECTORY /
-   EXPORT_IMPORT / UNSUPPORTED, ekran „Integracja emulatora” z testem dostępu, WorkManager.
-4. Później: stany PCSX2 (.p2s) ze zgodnością wersji, eksport / import.
-5. Osobny projekt: Android z własnym frontendem libretro.
+1. **Serwer** — API, wersje, konflikty, historia, podpisane adresy (`emustart/savesync.py`). Gotowe (0.46.0).
+2. **Klient Windows** (`emustart/syncclient.py`, `savebundles.py`) — stan lokalny w bazie,
+   pobieranie / wysyłanie przed i po grze, okno konfliktu, status w opcjach gry. RetroArch
+   saves i states per rdzeń, DuckStation i PCSX2 — karta pamięci gry. Foldery zapisów
+   profilu w ustawieniach emulatora na czas gry (bez junction). Zastępuje synchronizację
+   tych folderów profilu i `rastates`. Gotowe (0.46.0).
+3. **Android** (`SaveSync.kt`, `Saves.kt`) — te same paczki: RetroArch per rdzeń, PS1 w
+   RetroArchu (`.srm` = karta DuckStation z PC), ArmSX2 / AetherSX2 (`Mcd001.ps2` = karta
+   gry z PC, karty innych gier w schowku aplikacji), okno konfliktu, „Wczytaj zapis” z
+   paczki. Gotowe (0.46.0) — z dotychczasowym dostępem do plików
+   (`MANAGE_EXTERNAL_STORAGE`).
+4. **Android bez `MANAGE_EXTERNAL_STORAGE`** (SAF: jednorazowy wybór folderu emulatora,
+   ekran „Integracja emulatora” z testem dostępu, WorkManager do wysyłania zaległych
+   zmian). Uprawnienie służy dziś też grom w publicznym folderze (emulatory muszą je
+   czytać), BIOS-om i ustawieniom RetroArcha — zmiana dotyka uruchamiania gier, wymaga
+   testów na telefonie.
+5. Później: stany PCSX2 / ARMSX2 (.p2s) paczkami ze zgodnością wersji formatu, Dolphin,
+   PPSSPP, RPCS3 (dziś: synchronizacja folderów profilu, junction), eksport / import.
+6. Osobny projekt: Android z własnym frontendem libretro.

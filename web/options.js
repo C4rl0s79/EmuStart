@@ -168,6 +168,7 @@ function goptItems() {
       act: openEmuSettings },
     { label: "Wczytaj zapis", value: d.states.length ? `${d.states.length} ${plural(d.states.length, "zapis", "zapisy", "zapisów")}` : "brak zapisów",
       act: () => d.states.length ? goPage("states") : toast("Ten emulator nie ma zapisów tej gry.") },
+    syncItem(d),
     { label: "Zapisy i stany", value: "z komputera i telefonu", act: openSaveManager },
     { label: "Metadane i opis", value: [det.meta.developer, det.meta.year].filter(Boolean).join(" · "), act: () => goPage("meta") },
     ...adminItems(),
@@ -236,6 +237,13 @@ async function openEmuSettings() {
   if (GO.page !== "emuset") return;
   GO.emuHist = r?.ok ? r.list : [];
   renderGopt();
+}
+function syncItem(d) {
+  // stan synchronizacji zapisów gry z serwerem (emustart/syncclient.py)
+  const sy = d.sync || {};
+  const value = { synced: `zsynchronizowane · ${fmtDate(sy.last)}`, pending: "czekają na wysłanie (brak połączenia)",
+                  never: "jeszcze nie synchronizowane" }[sy.state] || "—";
+  return { label: "Zapisy na serwerze", value, act: () => toast("Zapisy tej gry synchronizują się przed i po każdej grze.") };
 }
 function emuSettingsItems() {
   const items = [{ label: "Zmień w emulatorze (bez gry)", value: "zapisze się w Twoim profilu",
