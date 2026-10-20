@@ -8,7 +8,12 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
-Wersja 0.47.0 (niewydana) — zapisy jak Steam Cloud: jeden zestaw na konto i grę.
+## [0.47.0] — 2026-10-20
+
+Zakres: zapisy jak Steam Cloud — jeden zestaw na konto i grę. Serwer (`savesync.py`,
+`savemigrate.py`, panel), PC (`syncclient.py`, `savebundles.py`), Android (`SaveSync.kt`,
+`Saves.kt`, `Bridge.kt`), rejestracja urządzeń (`devices.py`, `enroll.py`). Po aktualizacji
+serwera: panel → Konfiguracja → „Zapisy sprzed 0.46” → Sprawdź, potem Przenieś zapisy.
 
 ### Dodane
 - **Migracja zapisów sprzed 0.46 do synchronizacji zapisów** (`emustart/savemigrate.py`, panel
