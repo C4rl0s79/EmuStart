@@ -27,6 +27,19 @@ object Prepare {
 
     class Result(val rom: File, val extra: List<File>)   // extra — utworzone pliki/foldery (do sprzątania z grą)
 
+    /** Ścieżki płyt (.bin, .wav…) i obrazy CloneCD (.img obok .ccd) — nie wpisy playlisty. */
+    private val TRACK_EXTS = setOf("bin", "raw", "wav", "sub", "ape", "flac", "ogg", "mp3")
+
+    /** Pliki płyt zestawu do playlisty .m3u (jak emustart/scanner.playlist_entries). */
+    fun playlistEntries(files: List<String>): List<String> {
+        val ccd = files.filter { it.endsWith(".ccd", true) }.map { it.substringBeforeLast('.').lowercase() }.toSet()
+        val out = files.filter { f ->
+            val ext = f.substringAfterLast('.', "").lowercase()
+            ext !in TRACK_EXTS && !(ext == "img" && f.substringBeforeLast('.').lowercase() in ccd)
+        }
+        return out.ifEmpty { files }
+    }
+
     /**
      * @param base   folder systemu w telefonie (pliki gry względem niego)
      * @param main   główny plik gry
@@ -48,7 +61,7 @@ object Prepare {
             val dir = File(base, ".emustart")
             dir.mkdirs()
             val m3u = File(dir, "$name.m3u")
-            m3u.writeText(files.joinToString("\n") { File(base, it).absolutePath } + "\n")
+            m3u.writeText(playlistEntries(files).joinToString("\n") { File(base, it).absolutePath } + "\n")
             extra += m3u
             return Result(m3u, extra)
         }

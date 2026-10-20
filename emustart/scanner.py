@@ -4,8 +4,10 @@ Gra może składać się z wielu plików i wszystkie trafiają do `games.files`,
 cache musi skopiować komplet:
   .m3u  → playlista + płyty, które wskazuje
   .cue/.gdi → arkusz + ścieżki (.bin/.raw)
-  kilka płyt „(Disc N)” bez .m3u → jedna gra, playlistę dopisze launcher
-  folder (PS3, Vita, X360) → cały katalog jako jedna gra
+  kilka płyt „(Disc N)” / „(Disc A)” bez .m3u → jedna gra (także płyty .cue z .bin-ami
+        i podtytułem po numerze: „(Disc 2) - Second Act”), playlistę dopisze launcher
+  folder (PS3, Vita, X360) → cały katalog jako jedna gra; płyty .iso obok folderów
+        łączą się jak wyżej
 Gry, które zniknęły z NAS-a, są usuwane z bazy (wraz z wpisem cache).
 """
 
@@ -20,7 +22,75 @@ from pathlib import Path
 from emustart import arcade, config, library, systems, translations
 
 _DISC_RE = re.compile(r"\s*\((?:disc|disk|cd)\s*\d+[^)]*\)", re.I)
+# płyta zestawu: „(Disc 1)”, „(Disc A)”, „(Disk 2 of 3)”, „(CD 1)”, „(Disc 1 - Part One)”
+_DISC_TOKEN = re.compile(r"\s*\((?:disc|disk|cd)\s*(\d+|[a-z])(?![a-z])[^)]*\)", re.I)
 _TAG_SPLIT = re.compile(r"\s+(?=[(\[])")
+# „Disk N” to tu osobne programy / dyski danych, nie płyty jednej gry
+_NO_MERGE = re.compile(r"\b(?:cd32|cdtv)\b|disk\s*writer", re.I)
+NO_MERGE_SYSTEMS = {"amigawhddemos"}
+
+
+def disc_of(stem: str):
+    """(tytuł przed płytą, numer płyty do sortowania, reszta po płycie) albo None.
+    „Gra (USA) (Disc B) (Rev 1)” → („Gra (USA)”, 2, „(Rev 1)”)."""
+    m = _DISC_TOKEN.search(stem)
+    if not m or not stem[:m.start()].strip():
+        return None
+    d = m.group(1)
+    idx = int(d) if d.isdigit() else ord(d.upper()) - ord("A") + 1
+    return stem[:m.start()].rstrip(), idx, stem[m.end():].strip(" -_")
+
+
+# ścieżki płyt (.bin, .wav…) i obrazy CloneCD (.img obok .ccd) — nie wpisy playlisty
+TRACK_EXTS = {".bin", ".raw", ".wav", ".sub", ".ape", ".flac", ".ogg", ".mp3"}
+
+
+def playlist_entries(rels: list) -> list:
+    """Pliki płyt zestawu do playlisty .m3u (.cue, .chd, .iso, .ccd, .gdi…), bez ścieżek
+    .bin / .wav i bez .img obok .ccd; brak takich — wszystkie."""
+    ccd = {str(Path(r).with_suffix("")).lower() for r in rels if r.lower().endswith(".ccd")}
+    out = [r for r in rels if Path(r).suffix.lower() not in TRACK_EXTS
+           and not (r.lower().endswith(".img") and str(Path(r).with_suffix("")).lower() in ccd)]
+    return out or list(rels)
+
+
+def mergeable(es: str, stem: str) -> bool:
+    return es not in NO_MERGE_SYSTEMS and not _NO_MERGE.search(f"{es} {stem}")
+
+
+def _merge_discs(units: list, es: str = "") -> list:
+    """Jednostki [(plik wejściowy, [pliki])] → gry; płyty jednej gry („(Disc N)”, „(Disc A)”)
+    w jednym folderze łączą się w jedną (kolejność płyt, pozycja = pierwsza płyta). Tytuł =
+    część przed „(Disc …)”; dopiski po płycie (podtytuł płyty) nie rozbijają zestawu — chyba
+    że ten sam numer płyty powtarza się (np. dwie wersje regionalne), wtedy rozdzielają."""
+    games, groups = [], {}
+    for entry, files in units:
+        stem = Path(entry[0]).stem
+        d = disc_of(stem) if mergeable(es, stem) else None
+        if not d:
+            games.append({"rel": entry[0], "files": files, "multidisc": False})
+            continue
+        key = (os.path.dirname(entry[0]).lower(), d[0].lower())
+        groups.setdefault(key, []).append((d, entry, files))
+    for members in groups.values():
+        idxs = [m[0][1] for m in members]
+        if len(set(idxs)) < len(idxs):
+            # ten sam numer płyty dwa razy — rozdzielamy po dopisku za płytą
+            sub: dict = {}
+            for m in members:
+                sub.setdefault(m[0][2].lower(), []).append(m)
+            parts = list(sub.values())
+        else:
+            parts = [members]
+        for part in parts:
+            part.sort(key=lambda m: (m[0][1], m[1][0].lower()))
+            files = [f for _d, _e, fs in part for f in fs]
+            tails = {m[0][2] for m in part}
+            # ten sam dopisek na każdej płycie (np. „(USA)”, „(Rev 1)”) zostaje w nazwie, jak dotąd
+            name = part[0][0][0] + (f" {part[0][0][2]}" if len(tails) == 1 and part[0][0][2] else "")
+            games.append({"rel": part[0][1][0], "files": files, "multidisc": len(part) > 1,
+                          "set_name": name if len(part) > 1 else ""})
+    return games
 
 
 def split_title(name: str) -> tuple:
@@ -83,11 +153,11 @@ def _norm_rel(rel_dir: str, ref: str) -> str:
     return os.path.normpath(os.path.join(rel_dir, ref)).lower()
 
 
-def _group_files(base: Path, files: list, exts: set) -> list:
+def _group_files(base: Path, files: list, exts: set, es: str = "") -> list:
     """Pliki systemu → gry: [{rel, files:[(rel,size,mtime)], multidisc}]."""
     by_rel = {f[0].lower(): f for f in files}
     covered = set()
-    games = []
+    games, units = [], []
 
     # 1) .m3u / .cue / .gdi pochłaniają pliki, które wskazują
     for ext in (".m3u", ".cue", ".gdi"):
@@ -110,28 +180,21 @@ def _group_files(base: Path, files: list, exts: set) -> list:
                                 parts.append(h2)
             for p in parts:
                 covered.add(p[0].lower())
-            games.append({"rel": f[0], "files": parts, "multidisc": False})
+            if ext == ".m3u":
+                games.append({"rel": f[0], "files": parts, "multidisc": False})
+            else:
+                units.append((f, parts))      # płyta .cue / .gdi — może należeć do zestawu
 
     # 2) pozostałe pliki z rozszerzeniem systemu; płyty bez .m3u łączymy w jedną grę
-    loose = [f for f in files if f[0].lower() not in covered
-             and Path(f[0]).suffix.lower().lstrip(".") in exts]
-    discs: dict = {}
-    for f in loose:
-        stem = Path(f[0]).stem
-        if _DISC_RE.search(stem):
-            key = (os.path.dirname(f[0]).lower(), _DISC_RE.sub("", stem).lower())
-            discs.setdefault(key, []).append(f)
-        else:
-            games.append({"rel": f[0], "files": [f], "multidisc": False})
-    for group in discs.values():
-        group.sort(key=lambda f: f[0].lower())
-        games.append({"rel": group[0][0], "files": group, "multidisc": len(group) > 1})
-    return games
+    units += [(f, [f]) for f in files if f[0].lower() not in covered
+              and Path(f[0]).suffix.lower().lstrip(".") in exts]
+    return games + _merge_discs(units, es)
 
 
-def _folder_games(base: Path, exts: set) -> list:
-    """Systemy z grami-katalogami (PS3): każdy podkatalog to gra, pliki obok też."""
-    games = []
+def _folder_games(base: Path, exts: set, es: str = "") -> list:
+    """Systemy z grami-katalogami (PS3, X360 GOD/XEX): każdy podkatalog to gra, pliki obok
+    też — płyty .iso „(Disc N)” obok folderów łączą się w jedną grę (foldery osobno)."""
+    games, loose = [], []
     try:
         entries = list(os.scandir(base))
     except OSError:
@@ -145,21 +208,21 @@ def _folder_games(base: Path, exts: set) -> list:
                                   "multidisc": False})
             elif Path(e.name).suffix.lower().lstrip(".") in exts:
                 st = e.stat()
-                games.append({"rel": e.name, "files": [(e.name, st.st_size, st.st_mtime)],
-                              "multidisc": False})
+                f = (e.name, st.st_size, st.st_mtime)
+                loose.append((f, [f]))
         except OSError:
             continue
-    return games
+    return games + _merge_discs(loose, es)
 
 
-def _scan_dir(rom_dir: Path, exts: set) -> list:
+def _scan_dir(rom_dir: Path, exts: set, es: str = "") -> list:
     if not exts:   # nieznany system: wszystko poza oczywistymi śmieciami
         exts = {Path(f[0]).suffix.lower().lstrip(".") for f in _walk(rom_dir, 1)}
         exts -= systems.JUNK_EXTS
         exts.discard("")
     if "folder" in exts:
-        return _folder_games(rom_dir, exts - {"folder"})
-    return _group_files(rom_dir, _walk(rom_dir), exts)
+        return _folder_games(rom_dir, exts - {"folder"}, es)
+    return _group_files(rom_dir, _walk(rom_dir), exts, es)
 
 
 def scan_system(es: str, rom_dirs, progress=None) -> int:
@@ -177,7 +240,7 @@ def scan_system(es: str, rom_dirs, progress=None) -> int:
         # tłumaczenie często ma tę samą nazwę pliku co oryginał (język tylko w nazwie kolekcji)
         pool = es_kind != "arcade" and translations.is_pool(d.name, d.parent.name)
         ptrans = translations.pool_trans(d.name, d.parent.name, systems.match_folder) if pool else None
-        for g in _scan_dir(d, exts):
+        for g in _scan_dir(d, exts, es):
             g["pool"] = ptrans
             if pool:
                 g["rel"] = os.path.join(d.name, g["rel"])
@@ -205,7 +268,7 @@ def scan_system(es: str, rom_dirs, progress=None) -> int:
                 parent = a["parent"]
                 hidden = 1 if a["category"] in ("bios", "device") else 0
         else:
-            name = _DISC_RE.sub("", stem) if g["multidisc"] else stem
+            name = g.get("set_name") or stem if g["multidisc"] else stem
         if es in systems.WHD_SYSTEMS:
             title, tags = systems.whd_title(stem, demo=es == "amigawhddemos")
             name = f"{title} {tags}".strip()
