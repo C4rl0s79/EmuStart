@@ -8,6 +8,45 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.47.0] — 2026-10-20
+
+Zakres: zapisy jak Steam Cloud — jeden zestaw na konto i grę. Serwer (`savesync.py`,
+`savemigrate.py`, panel), PC (`syncclient.py`, `savebundles.py`), Android (`SaveSync.kt`,
+`Saves.kt`, `Bridge.kt`), rejestracja urządzeń (`devices.py`, `enroll.py`). Po aktualizacji
+serwera: panel → Konfiguracja → „Zapisy sprzed 0.46” → Sprawdź, potem Przenieś zapisy.
+
+### Dodane
+- **Migracja zapisów sprzed 0.46 do synchronizacji zapisów** (`emustart/savemigrate.py`, panel
+  serwera → Konfiguracja → „Zapisy sprzed 0.46”). Zapisy w grze, stany i karty DuckStation z
+  folderów profili (`save/retroarch/saves|states/<rdzeń>/…`, `states/shared/retroarch/<rdzeń>/…`,
+  `states/android/retroarch/…`, `save/duckstation/memcards/…`) trafiają do paczek (konto +
+  platforma + gra + emulator + rdzeń + rodzaj), dopasowane do gier biblioteki jak na
+  urządzeniach (nazwy umowne, miniatury stanów). Paczki, które już są (np. z urządzenia z 0.46),
+  **nie są nadpisywane** — stara wersja trafia do ich historii z opisem „zapisy sprzed 0.46
+  (urządzenie, data)” i można ją przywrócić w panelu. Ze starych folderów nic nie znika;
+  ponowne uruchomienie niczego nie dubluje (porównanie zawartości). „Sprawdź (bez zmian)” —
+  sam raport; raport w panelu: ile gier i plików, czego nie dopasowano (np. wspólne karty
+  PCSX2, stany bez folderu rdzenia). Próba na kopii danych: `python -m emustart.savemigrate
+  --server <kopia folderu server> [--dry]`. Migracja nie uruchamia się sama.
+- „Wczytaj zapis” (PC i telefon) pokazuje też **stany z innych rdzeni** tej gry (np. bsnes,
+  gdy gra jest na Snes9x) z oznaczeniem „✗ rdzeń … — nie wczyta się” (stany są per rdzeń).
+
+### Zmienione
+- **Zapisy w grze wspólne dla zgodnych rdzeni** (`savebundles.SAVE_GROUPS`, jawna lista):
+  SNES — Snes9x (wszystkie wersje), bsnes (w tym HD beta, Mercury, 2014), Mesen-S; NES —
+  FCEUmm, Nestopia, Mesen, QuickNES (surowy SRAM / bateria, jak „root overrides” Steam Cloud).
+  Stany zostają per rdzeń; rdzenie spoza listy — jak dotąd per rdzeń. Serwer przyjmuje zapisy
+  rdzenia z grupy do wspólnej paczki także od urządzeń z 0.46 (widzą ją pod swoim rdzeniem), a
+  paczki zapisów wysłane wcześniej osobno dla rdzeni łączy przy pierwszym dostępie do gry
+  (nowsza aktualna, pozostałe w historii; nic nie znika).
+
+### Poprawione
+- **Dwa programy na jednym komputerze nie wylogowują się nawzajem** — nowa rejestracja zastępuje
+  tylko wcześniejszą rejestrację tego samego programu na tym sprzęcie (wcześniej EmuStart i
+  Lumen unieważniały się na zmianę: 401). Prośba o zalogowanie (panel, zatwierdzanie na
+  urządzeniu) pokazuje program („EmuStart”, „EmuStart Android”, „Lumen” — pole `app` albo
+  User-Agent) i to, którą rejestrację zastąpi.
+
 ## [0.46.2] — 2026-10-20
 
 Zakres: skan biblioteki na serwerze (`emustart/scanner.py`), playlista płyt (`emustart/launcher.py`,

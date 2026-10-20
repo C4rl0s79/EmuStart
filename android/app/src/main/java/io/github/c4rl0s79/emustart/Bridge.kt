@@ -876,7 +876,7 @@ class Bridge(private val act: MainActivity) {
             return JSONObject().put("ok", false).put("reason", "Nie udało się utworzyć klucza urządzenia: ${e.message}")
         }
         val body = JSONObject().put("mode", mode).put("account", account).put("password", password)
-            .put("name", saves.device).put("class", "phone").put("version", BuildConfig.VERSION_NAME)
+            .put("name", saves.device).put("class", "phone").put("app", "EmuStart Android").put("version", BuildConfig.VERSION_NAME)
             .put("pubkey", pem).put("hw", server.hwId).put("login_code", login.code)
         var r = JSONObject().put("ok", false).put("reason", "Serwer nie odpowiada.")
         var used = Triple("", "", true)
@@ -1417,6 +1417,21 @@ class Bridge(private val act: MainActivity) {
                     .put("continue", auto)
                 val shot = files["$arc.png"]
                 if (shot != null && shot.length() < 600_000 && thumbs < 24) {
+                    o.put("thumb", "data:image/png;base64," + android.util.Base64.encodeToString(shot.readBytes(), android.util.Base64.NO_WRAP))
+                    thumbs++
+                }
+                out.put(o)
+            }
+            // stany innych rdzeni tej gry (inne urządzenia) — widać je, ale tu się nie wczytają
+            val mine = SaveSync.coreId(core)
+            for ((c, f) in saves.otherCoreStates(prefs.profile, sg).sortedByDescending { it.second.lastModified() }) {
+                val m = Regex("\\.state(\\d*)(\\.auto)?$").find(f.name)
+                val o = JSONObject().put("path", "inny:" + f.absolutePath).put("name", f.name)
+                    .put("time", f.lastModified() / 1000.0).put("other_core", c)
+                    .put("label", if (m?.groupValues?.get(2)?.isNotEmpty() == true) "Kontynuuj" else "Stan #${m?.groupValues?.get(1)?.toIntOrNull() ?: 0}")
+                    .put("detail", "rdzeń $c — nie wczyta się w $mine")
+                val shot = File(f.path + ".png")
+                if (shot.isFile && shot.length() < 600_000 && thumbs < 24) {
                     o.put("thumb", "data:image/png;base64," + android.util.Base64.encodeToString(shot.readBytes(), android.util.Base64.NO_WRAP))
                     thumbs++
                 }

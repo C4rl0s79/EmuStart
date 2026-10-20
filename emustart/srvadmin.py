@@ -752,3 +752,57 @@ def _wait(port: int, seconds: float) -> bool:
             return True
         time.sleep(0.5)
     return False
+
+
+# ── zapisy sprzed 0.46 → paczki synchronizacji (emustart/savemigrate.py) ──
+_smig: dict = {}
+
+
+def savesync_migrate(_api, args: dict) -> dict:
+    """Panel: próba (dry — sam raport) albo migracja zapisów sprzed 0.46 do paczek (w tle)."""
+    import threading
+    from emustart import remote, savemigrate
+    if not remote.NAS_ROOT:
+        return {"ok": False, "reason": "Serwer nie ma folderu profili."}
+    if _smig.get("phase") == "running":
+        return {"ok": False, "reason": "Migracja już trwa."}
+    dry = not args.get("confirm")
+    _smig.clear()
+    _smig.update(phase="running", dry=dry)
+
+    def run():
+        try:
+            rep = savemigrate.run(remote.NAS_ROOT, dry=dry)
+            _smig.update(phase="done", report=rep)
+        except Exception as ex:
+            log.exception("migracja zapisów")
+            _smig.update(phase="error", error=str(ex))
+    threading.Thread(target=run, daemon=True, name="migracja-zapisow").start()
+    return {"ok": True, "dry": dry}
+
+
+def savesync_migrate_status(_api) -> dict:
+    from emustart import savemigrate
+    rep = _smig.get("report") or savemigrate.last_report()
+    out = {k: v for k, v in _smig.items() if k != "report"}
+    if rep:
+        out["report"] = {**rep, "items": rep.get("items", [])[:300]}
+    return {"ok": True, **out}
+
+
+def savesync_legacy(_api, args: dict) -> dict:
+    """Wersje sprzed 0.46 w historii paczek konta (paczka już była — do przywrócenia)."""
+    from emustart import savemigrate
+    return {"ok": True, "items": savemigrate.legacy_versions(str(args.get("account", "")))}
+
+
+def savesync_restore(_api, args: dict) -> dict:
+    from emustart import savesync
+    return savesync.restore(str(args.get("account", "")), str(args.get("es", "")).lower(), str(args.get("game_id", "")),
+                            str(args.get("emulator", "")), str(args.get("core", "")), str(args.get("kind", "")),
+                            str(args.get("bundle_id", "")), "panel")
+
+
+ACTIONS["savesync_migrate_status"] = savesync_migrate_status
+ACTIONS_ARGS.update({"savesync_migrate": savesync_migrate, "savesync_legacy": savesync_legacy,
+                     "savesync_restore": savesync_restore})

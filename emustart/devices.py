@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import secrets
 import threading
 import time
@@ -82,13 +83,25 @@ def reset_cache() -> None:
         _cache = None
 
 
+def app_name(app: str, cls: str = "pc") -> str:
+    """Program urządzenia („EmuStart”, „EmuStart Android”, „Lumen”…); bez nazwy — EmuStart
+    tej klasy urządzenia (rejestracje sprzed 0.47)."""
+    a = re.sub(r"[^\w .+-]+", "", str(app or "")).strip()[:40]
+    return a or ("EmuStart Android" if cls == "phone" else "EmuStart")
+
+
+def app_of(d: dict) -> str:
+    return app_name(d.get("app", ""), d.get("class", "pc"))
+
+
 def add_keyed(name: str, cls: str, ip: str, version: str, pubkey: str, account: str,
-              games: bool = False, by: str = "", hw: str = "") -> str:
+              games: bool = False, by: str = "", hw: str = "", app: str = "") -> str:
     """Nowe urządzenie konta (po zatwierdzeniu logowania)."""
     did = secrets.token_hex(6)
     now = time.time()
+    cls = cls if cls in CLASSES else "pc"
     with _lock:
-        _load()[did] = {"name": (str(name).strip() or "urządzenie")[:40], "class": cls if cls in CLASSES else "pc",
+        _load()[did] = {"name": (str(name).strip() or "urządzenie")[:40], "class": cls, "app": app_name(app, cls),
                         "pubkey": pubkey, "account": account, "games": bool(games), "created": now,
                         "last_seen": now, "ip": ip, "version": version, "approved_by": by}
         if _valid_hw(hw):
@@ -119,8 +132,9 @@ def _valid_hw(hw: str) -> str:
 
 
 def replace_same_hw(did: str, hw: str) -> list:
-    """Jedna rejestracja na sprzęt: inne aktywne rejestracje tego samego sprzętu (ponowne
-    zalogowanie, nowa instalacja aplikacji) są unieważniane. Wołający trzyma _lock. Zwraca nazwy.
+    """Jedna rejestracja na sprzęt i program: inne aktywne rejestracje tego samego programu na
+    tym samym sprzęcie (ponowne zalogowanie, nowa instalacja aplikacji) są unieważniane — inny
+    program na tym komputerze (EmuStart i Lumen) zostaje. Wołający trzyma _lock. Zwraca nazwy.
     Wołane tylko przy dodaniu urządzenia (zatwierdzone logowanie, które pokazuje „zastąpi: …”).
     Bez sięgania po blokadę próśb (emustart/enroll.py) — odwrotna kolejność blokad groziłaby
     zakleszczeniem; sesji unieważnionych i tak nie przyjmie `verify`."""
@@ -128,8 +142,9 @@ def replace_same_hw(did: str, hw: str) -> list:
     if not hw:
         return []
     gone = []
+    mine = app_of(_load().get(did) or {})
     for other, d in _load().items():
-        if other != did and not d.get("revoked") and d.get("hw") == hw:
+        if other != did and not d.get("revoked") and d.get("hw") == hw and app_of(d) == mine:
             d["revoked"] = time.time()
             d["replaced_by"] = did
             gone.append(d.get("name", other))
@@ -138,11 +153,13 @@ def replace_same_hw(did: str, hw: str) -> list:
     return gone
 
 
-def same_hw(hw: str) -> list:
-    """Nazwy aktywnych rejestracji tego sprzętu (do prośby o zalogowanie: „zastąpi …”)."""
-    hw = _valid_hw(hw)
+def same_hw(hw: str, app: str = "", cls: str = "pc") -> list:
+    """Aktywne rejestracje, które zastąpi nowa (ten sam sprzęt i program) — do prośby o
+    zalogowanie: „zastąpi: <nazwa> (<program>, ostatnio …)”."""
+    hw, mine = _valid_hw(hw), app_name(app, cls)
     with _lock:
-        return [d.get("name", k) for k, d in _load().items() if hw and not d.get("revoked") and d.get("hw") == hw]
+        return [f"{d.get('name', k)} ({app_of(d)}{', wersja ' + d['version'] if d.get('version') else ''})"
+                for k, d in _load().items() if hw and not d.get("revoked") and d.get("hw") == hw and app_of(d) == mine]
 
 
 def touch(did: str, ip: str = "", version: str = "", hw: str = "") -> None:

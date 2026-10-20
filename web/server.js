@@ -576,10 +576,11 @@ async function refreshDevices() {
   const enr = r.enroll || [];
   $("enrBox").hidden = !enr.length;
   $("enroll").innerHTML = enr.map((q) =>
-    `<tr><td>${esc(q.name)}<div class="muted">${esc(KIND[q.class] || q.class)} · ${esc(q.ip)} · ${ago(q.created)}</div></td>` +
+    `<tr><td>${esc(q.name)}<div class="muted">${esc(q.app || "EmuStart")} · ${esc(KIND[q.class] || q.class)} · ${esc(q.ip)} · ${ago(q.created)}</div></td>` +
     `<td>${q.mode === "new" ? "nowe konto" : "konto"} <b>${esc(q.account)}</b>` +
     `${q.from_account ? `<div class="muted">prosi zalogowane urządzenie konta ${esc(q.from_account)}</div>` : ""}` +
-    `${(q.replaces || []).length ? `<div class="muted">zastąpi: ${esc(q.replaces.join(", "))}</div>` : ""}</td>` +
+    `${(q.replaces || []).length ? `<div class="muted">zastąpi (ten sam sprzęt i program): ${esc(q.replaces.join(", "))}</div>`
+                                  : `<div class="muted">nie zastąpi żadnej rejestracji</div>`}</td>` +
     `<td><code style="font-size:18px;letter-spacing:.08em">${esc(q.code)}</code></td>` +
     `<td class="n"><button class="primary" data-eg="${esc(q.id)}">Zatwierdź z grami</button> ` +
     `<button data-es="${esc(q.id)}">Bez gier</button> <button class="danger" data-en="${esc(q.id)}">Odrzuć</button></td></tr>`).join("");
@@ -823,6 +824,63 @@ Każdy plik zostanie skopiowany i sprawdzony; ` +
   migrPoll = setInterval(migrTick, 700);
 });
 
+/* ── zapisy sprzed 0.46 → paczki synchronizacji (emustart/savemigrate.py) ── */
+const SM_RES = { new: "przeniesione", history: "do historii (paczka już była)", same: "bez zmian", plan: "do przeniesienia", error: "błąd" };
+const SM_KIND = { saves: "zapisy", states: "stany", memcards: "karta pamięci" };
+let smPoll = null;
+async function smTick() {
+  const st = await admin("savesync_migrate_status").catch(() => null);
+  if (!st) return;
+  const busy = st.phase === "running";
+  $("bSmDry").disabled = $("bSmRun").disabled = busy;
+  if (busy) { $("smText").textContent = st.dry ? "Sprawdzam…" : "Przenoszę zapisy…"; return; }
+  if (smPoll) { clearInterval(smPoll); smPoll = null; }
+  if (st.phase === "error") { $("smText").textContent = "Nie udało się: " + st.error; return; }
+  const r = st.report;
+  if (!r) { $("smText").textContent = "Migracja jeszcze nie była uruchamiana."; return; }
+  const when = new Date(r.time * 1000).toLocaleString("pl-PL");
+  $("smText").textContent = (r.dry ? `Próba (${when}, bez zmian): ` : `Ostatnia migracja (${when}): `) +
+    `kont ${r.accounts}, gier ${r.games}, plików ${r.files}` +
+    (r.dry ? "" : ` — przeniesione ${r.new}, do historii ${r.history}, bez zmian ${r.same}, błędy ${r.errors}`) +
+    `; nie dopasowano ${r.unmatched_count}` + (r.folded ? `; wspólne zapisy rdzeni: ${r.folded} gier` : "") + ".";
+  $("smItems").innerHTML = (r.items.length ? `<details><summary>Paczki (${r.items.length})</summary><table>` +
+    r.items.map((it) => `<tr><td>${esc(it.account)}</td><td>${esc(it.game)} <span class="muted">${esc(it.es)}</span></td>` +
+      `<td>${esc(it.emulator)}${it.core ? " · " + esc(it.core) : ""} · ${esc(SM_KIND[it.kind] || it.kind)}</td>` +
+      `<td class="n">${it.files}</td><td>${esc(SM_RES[it.result] || it.result)}${it.error ? ": " + esc(it.error) : ""}</td></tr>`).join("") +
+    "</table></details>" : "") +
+    (r.unmatched.length ? `<details><summary>Nie dopasowano (${r.unmatched_count})</summary><table>` +
+      r.unmatched.map((u) => `<tr><td>${esc(u.file)}</td><td class="muted">${esc(u.reason)}</td></tr>`).join("") +
+      "</table></details>" : "");
+  const accs = [...new Set(r.items.filter((it) => it.result === "history").map((it) => it.account))];
+  let rows = [];
+  for (const a of accs) {
+    const l = await admin("savesync_legacy", { account: a }).catch(() => null);
+    rows = rows.concat(l?.items || []);
+  }
+  $("smLegacy").innerHTML = rows.length ? `<h3>Wersje sprzed 0.46 w historii (paczka z urządzeń była nowsza)</h3><table>` +
+    rows.map((x, i) => `<tr><td>${esc(x.account)}</td><td>${esc(x.game)}</td><td>${esc(x.emulator)}${x.core ? " · " + esc(x.core) : ""} · ` +
+      `${esc(SM_KIND[x.kind] || x.kind)}</td><td class="muted">${esc(x.note)}<br>teraz: wersja ${x.current_revision} z ${esc(x.current_device || "?")}</td>` +
+      `<td class="n"><button data-smr="${i}">Przywróć</button></td></tr>`).join("") + "</table>" : "";
+  $("smLegacy").querySelectorAll("[data-smr]").forEach((b) => b.addEventListener("click", async () => {
+    const x = rows[+b.dataset.smr];
+    if (!confirm(`Przywrócić zapisy sprzed 0.46 dla „${x.game}” (${x.account})?\n\nBieżąca wersja z urządzeń trafi do historii. ` +
+                 `Urządzenia pobiorą przywróconą przy następnej grze (albo zapytają, jeśli mają własne zmiany).`)) return;
+    const res = await admin("savesync_restore", { account: x.account, es: x.es, game_id: x.game_id, emulator: x.emulator,
+                                                 core: x.core, kind: x.kind, bundle_id: x.bundle_id }).catch(() => null);
+    msg(res?.ok ? `Przywrócono (wersja ${res.revision}).` : (res?.reason || "Serwer nie odpowiada."), res?.ok);
+  }));
+}
+async function smStart(confirmRun) {
+  if (confirmRun && !confirm("Przenieść zapisy sprzed 0.46 do synchronizacji zapisów?\n\nIstniejące paczki nie zostaną nadpisane, " +
+                             "stare foldery zostają. Najpierw warto zrobić próbę („Sprawdź”).")) return;
+  const r = await admin("savesync_migrate", confirmRun ? { confirm: true } : {}).catch(() => null);
+  if (!r?.ok) return ($("smText").textContent = r?.reason || "Serwer nie odpowiada.");
+  smPoll = setInterval(smTick, 1000);
+  smTick();
+}
+$("bSmDry").addEventListener("click", () => smStart(false));
+$("bSmRun").addEventListener("click", () => smStart(true));
+
 let startTab = "stan";
 try { startTab = localStorage.getItem("tab") || "stan"; } catch (e) { /* domyślna zakładka */ }
 showTab(document.querySelector(`#tabs button[data-tab="${startTab}"]`) ? startTab : "stan");
@@ -831,5 +889,6 @@ refreshDevices();
 refreshPublic();
 setInterval(refreshPublic, 5000);
 migrTick();
+smTick();
 setInterval(refresh, 2000);
 setInterval(refreshDevices, 4000);          // prośby o dołączenie pojawiają się od razu

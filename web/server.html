@@ -246,6 +246,18 @@
     <div id="migrBarBox" class="bar" hidden><div id="migrBar"></div></div>
   </section>
   <section data-in="konfig">
+    <h2>Zapisy sprzed 0.46 → synchronizacja zapisów</h2>
+    <div class="muted">EmuStart do 0.45 trzymał zapisy i stany w folderach profili; od 0.46 urządzenia
+      synchronizują je paczkami. Migracja przenosi stare zapisy do paczek (dopasowanie do gier biblioteki).
+      Paczki, które już są (z urządzeń z 0.46), <b>nie są nadpisywane</b> — stara wersja trafia do ich historii
+      i można ją przywrócić niżej. Ze starych folderów nic nie znika; ponowne uruchomienie niczego nie dubluje.</div>
+    <div class="actions" style="margin-top:8px"><button id="bSmDry">Sprawdź (bez zmian)</button>
+      <button id="bSmRun" class="primary">Przenieś zapisy</button></div>
+    <div id="smText" class="muted" style="margin-top:8px"></div>
+    <div id="smItems" style="margin-top:8px"></div>
+    <div id="smLegacy" style="margin-top:8px"></div>
+  </section>
+  <section data-in="konfig">
     <h2>Dostęp z internetu</h2>
     <div class="muted">Port publiczny (szyfrowany) otwierany na routerze przez UPnP — urządzenia poza domem
       i bez Tailscale pobierają gry prosto z serwera. Tylko dla sparowanych urządzeń (klucz).</div>

@@ -141,6 +141,18 @@ def _body(handler) -> dict:
     return d if isinstance(d, dict) else {}
 
 
+def _client_app(handler, d: dict) -> str:
+    """Program, który prosi o zalogowanie: pole „app” albo nazwa z User-Agent („Lumen/0.4.3”)
+    — dwa programy na jednym komputerze mają osobne rejestracje."""
+    app = str(d.get("app") or "").strip()
+    if app:
+        return app
+    ua = (handler.headers.get("User-Agent") or "").split(" ", 1)[0].split("/", 1)[0]
+    if ua.lower().startswith(("python", "java", "dalvik", "okhttp", "mozilla", "curl")):
+        return ""
+    return ua.replace("-Android", " Android").replace("-", " ")
+
+
 def enroll_flow(handler, op: str) -> None:
     """Zalogowanie urządzenia i logowanie podpisem (emustart/enroll.py):
     POST /v1/enroll/request {mode, account, password, name, class, version, pubkey[, login_code]}
@@ -154,7 +166,7 @@ def enroll_flow(handler, op: str) -> None:
         r = enroll.request(str(d.get("mode", "")), str(d.get("account", "")), str(d.get("name", "")),
                            str(d.get("class", "")), ip, str(d.get("version", "")), str(d.get("pubkey", "")),
                            profile_names(), str(d.get("hw", "")), str(d.get("password", "")),
-                           str(d.get("login_code", "")), create_account)
+                           str(d.get("login_code", "")), create_account, _client_app(handler, d))
         return _json(handler, r, 200 if r.get("ok") else 400)
     if op == "poll":
         r = enroll.poll(str(d.get("rid", "")))

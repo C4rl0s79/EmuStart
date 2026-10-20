@@ -326,12 +326,42 @@ def test_one_registration_per_hardware(srv):
                                                    "class": "phone", "pubkey": dev.pem, "hw": hw})
     reqs = _req(srv, "POST", "/v1/enroll/pending", admin_key, body={})[1]["requests"]
     mine = next(q for q in reqs if q["account"] == "Jezus")
-    assert mine["replaces"] == ["Telefon 25102PCBEG"]
+    assert len(mine["replaces"]) == 1 and mine["replaces"][0].startswith("Telefon 25102PCBEG (EmuStart Android")
+    assert mine["app"] == "EmuStart Android"
     assert next(q for q in reqs if q["account"] == "Ola")["replaces"] == []
     _req(srv, "POST", "/v1/enroll/decide", admin_key, body={"id": mine["id"], "allow": True})
     active = [d for d in devices.listing() if not d.get("revoked") and d["name"] == "Telefon 25102PCBEG"]
     assert len(active) == 1 and active[0]["hw"] == hw
     assert _req(srv, "GET", "/v1/info", old["key"])[0] == 401              # stara rejestracja nieważna
+
+
+def test_two_programs_on_one_computer_keep_both_registrations(srv):
+    """EmuStart i Lumen na jednym komputerze (ten sam sprzęt) — osobne rejestracje: zalogowanie
+    jednego nie wylogowuje drugiego (wcześniej 401 na zmianę)."""
+    hw = "c" * 32
+    admin_key, _ = _admin_key(srv)
+    ids = {}
+    for app in ("EmuStart", "Lumen"):
+        dev = Device(f"PC-{app}")
+        _req(srv, "POST", "/v1/enroll/request", body={"mode": "existing", "account": "Jezus", "password": PW,
+                                                       "name": dev.name, "class": "pc", "pubkey": dev.pem, "hw": hw,
+                                                       "app": app})
+        reqs = _req(srv, "POST", "/v1/enroll/pending", admin_key, body={})[1]["requests"]
+        q = next(q for q in reqs if q["name"] == dev.name)
+        assert q["app"] == app and q["replaces"] == []                   # nic nie zastąpi
+        _req(srv, "POST", "/v1/enroll/decide", admin_key, body={"id": q["id"], "allow": True})
+        ids[app] = next(d["id"] for d in devices.listing() if d["name"] == dev.name)
+    active = {d["id"] for d in devices.listing() if not d.get("revoked")}
+    assert set(ids.values()) <= active
+    # ponowne zalogowanie tego samego programu zastępuje tylko jego rejestrację
+    dev = Device("PC-Lumen-2")
+    _req(srv, "POST", "/v1/enroll/request", body={"mode": "existing", "account": "Jezus", "password": PW,
+                                                   "name": dev.name, "class": "pc", "pubkey": dev.pem, "hw": hw, "app": "Lumen"})
+    q = next(q for q in _req(srv, "POST", "/v1/enroll/pending", admin_key, body={})[1]["requests"] if q["name"] == dev.name)
+    assert [r.split(" (")[0] for r in q["replaces"]] == ["PC-Lumen"]
+    _req(srv, "POST", "/v1/enroll/decide", admin_key, body={"id": q["id"], "allow": True})
+    active = {d["id"] for d in devices.listing() if not d.get("revoked")}
+    assert ids["EmuStart"] in active and ids["Lumen"] not in active
 
 
 def test_account_profile_takes_the_account_name(monkeypatch):

@@ -36,6 +36,19 @@ Klient zna wyłącznie identyfikatory i dostaje krótkotrwałe, podpisane adresy
 Paczka to **pełny zestaw plików** gry dla danego emulatora / rdzenia / rodzaju — nie pliki
 zmienione w sesji. Zmiany wykrywa SHA-256 zestawu (nie czas modyfikacji).
 
+## Zapisy wspólne dla zgodnych rdzeni (0.47)
+
+`savebundles.SAVE_GROUPS` — jawna lista rdzeni o tym samym formacie zapisu w grze (surowy
+SRAM): `sram-snes` (Snes9x, bsnes, Mesen-S…), `sram-nes` (FCEUmm, Nestopia, Mesen, QuickNES).
+Rodzaj `saves` tych rdzeni ma `core_id` grupy; stany zostają per rdzeń. Serwer mapuje rdzeń z
+grupy na grupę także dla klientów 0.46 i pokazuje im paczkę grupy pod ich rdzeniem.
+
+## Migracja zapisów sprzed 0.46 (0.47)
+
+`emustart/savemigrate.py` — z panelu serwera, ręcznie; foldery profili → paczki. Istniejąca
+paczka nie jest nadpisywana: stara wersja idzie do historii (`imported`, `note`), przywracana
+przez `savesync.restore`. Idempotentna (porównanie zawartości), stare foldery zostają.
+
 ## API
 
 | Metoda i adres | Treść | Odpowiedź |

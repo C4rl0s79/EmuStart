@@ -855,6 +855,19 @@ class Api:
             learned = [r["prefix"] for r in library.db().execute(
                 "SELECT prefix FROM states WHERE game_id=? AND family=?", (g["id"], ad.family))]
             states = ingame.list_states(ad, g, meta, learned)
+            if ad.family == "retroarch":
+                # stany innych rdzeni tej gry (inne urządzenia) — widać je, ale nie wczytają się
+                from emustart import savebundles
+                core = savebundles.core_id(emu.get("args", ""))
+                try:
+                    for st in syncclient.other_core_states(self._cfg, self._profile, g, core):
+                        m = re.search(r"\.state(\d*)(\.auto)?$", st["path"])
+                        states.append({"path": st["path"], "time": st["time"], "other_core": st["core"],
+                                       "name": Path(st["path"]).name,
+                                       "label": ("Kontynuuj" if m and m.group(2) else f"Stan #{int(m.group(1) or 0) if m else 0}"),
+                                       "detail": f"rdzeń {st['core']} — nie wczyta się w {core or 'tym rdzeniu'}"})
+                except Exception:
+                    log.exception("stany innych rdzeni")
             launcher.resume_from_nas(self._cfg, self._profile, g)
             res = library.get_resume(self._profile, g["id"])
             if res and res["path"] and Path(res["path"]).is_file() and res["family"] == ad.family:
@@ -866,7 +879,7 @@ class Api:
             if th:
                 st["thumb"] = "/media/_stany/" + th
             self._state_label(st, desc)
-        states.sort(key=lambda x: (not x.get("resume"), not x.get("continue"), -x["time"]))
+        states.sort(key=lambda x: (not x.get("resume"), bool(x.get("other_core")), not x.get("continue"), -x["time"]))
         sc = (self._cfg.get("systems") or {}).get(g["es"]) or {}
         return {"id": g["id"], "title": g["title"], "emulator": emu, "options": opts,
                 "states": states, "es": g["es"], "system": systems.info(g["es"])["display"],
@@ -1564,7 +1577,7 @@ class Api:
                 log.exception("klucz urządzenia")
                 return {"ok": False, "reason": f"Nie udało się utworzyć klucza urządzenia: {ex}"}
         body = {"mode": mode, "account": account, "password": password, "name": socket.gethostname(),
-                "class": "pc", "version": __version__, "pubkey": pem, "hw": netsrc.hw_id(),
+                "class": "pc", "app": "EmuStart", "version": __version__, "pubkey": pem, "hw": netsrc.hw_id(),
                 "login_code": login.get("code", "")}
         r: dict = {"ok": False, "reason": "Serwer nie odpowiada."}
         fp = ""
