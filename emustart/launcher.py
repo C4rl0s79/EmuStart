@@ -443,9 +443,9 @@ class Session:
                 try:
                     if save_names:
                         self._resume_to_nas(g, started_at)
+                    self._learn_states(g, adapter, started_at)   # przedrostek stanów PS2 przed wysłaniem
                     self._sync_after(g)                       # zapisy tej gry → serwer
                     self._profile_finish(adapter, save_names)
-                    self._learn_states(g, adapter, started_at)
                     cache.enforce_limit(self.cfg, keep_ids=(g["id"],))
                 except Exception:
                     log.exception("po grze")
@@ -557,7 +557,7 @@ class Session:
     def _sync_before(self, g: dict, adapter, args: str, rom) -> None:
         self._sync_bundles, self._sync_skip = [], set()
         try:
-            bundles = savebundles.for_game(adapter, savebundles.core_id(args), Path(rom), g)
+            bundles = savebundles.for_game(adapter, savebundles.core_id(args), Path(rom), ps2_info(self.cfg, g))
             for b in bundles:
                 b.adopt_names()                     # nazwy od pliku, który uruchomi emulator
         except Exception:
@@ -601,6 +601,9 @@ class Session:
         bundles = getattr(self, "_sync_bundles", None)
         if not bundles:
             return
+        for b in bundles:                           # stan PS2 zapisany pierwszy raz — poznany przedrostek
+            if (b.emulator_id, b.kind) == ("pcsx2", "states"):
+                b.names = savebundles.ps2_prefixes(ps2_info(self.cfg, g))
         try:
             syncclient.after(self.cfg, self.profile_id, bundles, g, getattr(self, "_sync_skip", set()))
         except Exception:
@@ -718,6 +721,23 @@ def resume_from_nas(cfg: dict, pid: int, g: dict) -> None:
         return
     if not local or e["created"] > local["created"] + 1:
         library.set_resume(pid, g["id"], e["family"], e["path"], e["created"])
+
+
+def ps2_info(cfg: dict, g: dict) -> dict:
+    """Gra z numerem płyty (metadane) i przedrostkami stanów poznanymi po grze — do paczki
+    stanów PCSX2 (nazwy stanów są od numeru płyty, nie od nazwy gry)."""
+    out = dict(g)
+    try:
+        from emustart import metadata
+        out["serial"] = (metadata.ensure_local(cfg, g) or {}).get("serial", "") if g.get("id") else ""
+    except Exception:
+        out["serial"] = ""
+    try:
+        out["state_prefixes"] = [r["prefix"] for r in library.db().execute(
+            "SELECT prefix FROM states WHERE game_id=? AND family='pcsx2'", (g.get("id"),))]
+    except Exception:
+        out["state_prefixes"] = []
+    return out
 
 
 def content_guess(cfg: dict, g: dict, exe: str) -> Path:

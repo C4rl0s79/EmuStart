@@ -8,6 +8,14 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+Wersja 0.48.2 (niewydana).
+
+### Poprawione
+- **Stany PS2 synchronizują się jak stany RetroArcha** — jedna paczka `pcsx2/states` na grę,
+  wspólna dla PCSX2 (PC) i ArmSX2 / AetherSX2 (telefon), nazwy plików jak w emulatorze (numer
+  płyty i CRC). Stany z dwóch urządzeń się sumują (zajęty slot — starszy stan na pierwszy wolny
+  slot 00–09). Wcześniej telefon wysyłał je do osobnego folderu, a PC synchronizował folder stanów
+  — urządzenia nie widziały swoich stanów. Menedżer „Stany PS2” usunięty z telefonu.
 ## [0.48.1] — 2026-10-20
 
 Zakres: synchronizacja stanów (`syncclient.py`, `savebundles.py`, `savesync.py`, `savemigrate.py`,

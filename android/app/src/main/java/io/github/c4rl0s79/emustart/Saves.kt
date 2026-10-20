@@ -257,6 +257,7 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
             Kind.RA_STATES -> Triple("retroarch", core, "states")
             Kind.PS1_SRM -> Triple("duckstation", "", "memcards")
             Kind.PS2_CARDS -> Triple("pcsx2", "", "memcards")
+            Kind.PS2_STATES -> Triple("pcsx2", "", "states")              // wspólne z PCSX2 na komputerze
             else -> return null
         }
         if (emu == "retroarch" && c.isEmpty()) return null           // dane rdzeni są osobne
@@ -280,6 +281,10 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
             Kind.PS1_SRM -> if (name.endsWith(".srm", true) && norm(name.dropLast(4)) in stems && x.length() == CARD_SIZE)
                 "game_1.mcd" else null
             Kind.PS2_CARDS -> if (name.equals(PS2_SLOT, true)) "game.ps2" else null
+            // stany PS2: nazwa jak w emulatorze (numer płyty i CRC — ta sama na komputerze)
+            Kind.PS2_STATES -> if (!name.endsWith(".backup", true) && P2S.containsMatchIn(name) &&
+                (statePrefixes(f, g).any { name.startsWith("$it.") } ||
+                 (g.serialPrefix.isNotEmpty() && name.startsWith(g.serialPrefix)))) name else null
             else -> null
         }
     }
@@ -288,6 +293,7 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
     private fun localName(f: Fam, g: Game, arc: String): String? = when (f.kind) {
         Kind.PS1_SRM -> if (arc == "game_1.mcd") g.stem + ".srm" else null      // karta 2 — tylko na PC
         Kind.PS2_CARDS -> if (arc == "game.ps2") PS2_SLOT else null
+        Kind.PS2_STATES -> if (P2S.containsMatchIn(arc) && !arc.contains('/')) arc else null
         else -> if (arc.startsWith("game") && !arc.contains('/')) g.stem + arc.removePrefix("game") else null
     }
 
@@ -486,17 +492,14 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
                 Log.w(tag, "blokada profilu: $e")
                 msg = "Serwer niedostępny — gra na zapisach z telefonu; wyślą się później."
             }
-            for (f in fams.filter { it.kind == Kind.PS2_STATES }) {
-                val m = if (msg.isEmpty()) statesBefore(profile, f, g) else ""
-                if (msg.isEmpty()) msg = m
-            }
             val bundles = ArrayList<Pair<Fam, SaveSync.Bundle>>()
             val seeds = HashSet<String>()
             for (f in fams) {
                 val b = bundleOf(f, g) ?: continue
                 if (!f.ra && phoneDirs(f, g).isEmpty()) {
-                    if (msg.isEmpty()) msg = "Nie znaleziono folderu kart pamięci ${f.label} — zapisy zostaną " +
-                        "tylko w telefonie (Ustawienia → Zapisy gier)."
+                    if (msg.isEmpty() && f.kind == Kind.PS2_CARDS)
+                        msg = "Nie znaleziono folderu kart pamięci ${f.label} — zapisy zostaną " +
+                            "tylko w telefonie (Ustawienia → Zapisy gier)."
                     continue
                 }
                 if (swapOwner(ownerOf(profile, f, g), f, g, b.files())) seeds += b.key
@@ -624,7 +627,6 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
 
     /** Zmienione zapisy rodziny `f` na serwer (paczka albo — stany PS2 — folder na serwerze). */
     private fun upload(profile: String, f: Fam, g: Game, skip: Set<String> = emptySet()) {
-        if (f.kind == Kind.PS2_STATES) return statesPush(profile, f, g)
         val b = bundleOf(f, g) ?: return
         val res = sync.after(profile, g.es, g.name, listOf(b), skip)
         own(ownerOf(profile, f, g), b.files().values)
@@ -659,10 +661,8 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
                     }
                 }
             val known = statePrefixes(f, g).toSet()
-            if (found.isNotEmpty() && !known.containsAll(found)) {
+            if (found.isNotEmpty() && !known.containsAll(found))
                 mergePrefixes(f, JSONObject().put(g.es + "/" + g.name, JSONArray(found.toList())))
-                pendingIndex += f.id
-            }
             return
         }
         for (d in cands.filter { it.isDirectory }) {
@@ -692,8 +692,7 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
     /** Folder rdzenia tej gry (nazwa jak w RetroArchu: corename, np. „bsnes”, „Beetle PSX HW”). */
     private fun coreDir(g: Game): String = coreDirOf(g.core)
 
-    // ── stany PS2 (folder na serwerze, osobno od PC — menedżer zapisów) ──
-    private val pendingIndex = HashSet<String>()
+    // ── stany PS2: przedrostki nazw (numer płyty i CRC) poznane po grze ──
 
     // stany PS2 nazywają się od numeru płyty, nie od nazwy gry — przedrostki poznane po grze
     private fun prefixKey(f: Fam) = "prefixes-" + f.id + ".json"
@@ -711,91 +710,6 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
             o.put(k, cur)
         }
         writeJson(prefixKey(f), o)
-    }
-
-    private fun stateMatches(f: Fam, g: Game, name: String): Boolean =
-        !name.endsWith(".backup", true) && P2S.containsMatchIn(name) &&
-            (statePrefixes(f, g).any { name.startsWith("$it.") } ||
-             (g.serialPrefix.isNotEmpty() && name.startsWith(g.serialPrefix)))
-
-    private fun stateFiles(f: Fam, g: Game, dirs: List<File>): MutableMap<String, File> {
-        val out = HashMap<String, File>()
-        for (d in dirs) for (x in d.listFiles() ?: emptyArray()) {
-            if (!x.isFile || !stateMatches(f, g, x.name)) continue
-            val cur = out[x.name]
-            if (cur == null || x.lastModified() > cur.lastModified()) out[x.name] = x
-        }
-        return out
-    }
-
-    // manifest: stan plików z ostatniej synchronizacji (osobno telefon i serwer)
-    private fun manName(profile: String) = "stan-" + safe(profile) + ".json"
-    private fun sig(size: Long, sec: Double) = JSONArray().put(size).put(Math.round(sec))
-    private fun sig(x: File) = sig(x.length(), x.lastModified() / 1000.0)
-    private fun same(a: JSONArray?, b: JSONArray?): Boolean =
-        a != null && b != null && a.optLong(0) == b.optLong(0) && Math.abs(a.optLong(1) - b.optLong(1)) <= 2
-
-    /** Stany PS2 z serwera do telefonu: nowsze z serwera, gdy w telefonie bez zmian. */
-    private fun statesBefore(profile: String, f: Fam, g: Game): String {
-        try {
-            server.nasRead("$profile/${f.nas}/.emustart-index.json")?.let { mergePrefixes(f, JSONObject(String(it))) }
-        } catch (e: Exception) { }
-        val dirs = phoneDirs(f, g)
-        if (dirs.isEmpty()) return ""
-        val phone = stateFiles(f, g, dirs)
-        val man = readJson(manName(profile))
-        val nas = try { server.nasScan("$profile/${f.nas}") } catch (e: Exception) {
-            return "Serwer niedostępny — gra na zapisach z telefonu; wyślą się później."
-        }
-        var n = 0
-        for ((rel, v) in nas) {
-            val name = rel.substringAfterLast('/')
-            if (rel.contains('/') || !stateMatches(f, g, name)) continue
-            val nSig = sig(v[0].toLong(), v[1])
-            val key = "${f.id}/$name"
-            val m = man.optJSONObject(key)
-            val x = phone[name]
-            val download = when {
-                x == null -> true
-                m == null -> !same(nSig, sig(x)) && v[1] > x.lastModified() / 1000.0 + 2
-                same(m.optJSONArray("n"), nSig) -> false
-                same(m.optJSONArray("p"), sig(x)) -> true
-                else -> v[1] > x.lastModified() / 1000.0 + 2              // oba zmienione — nowszy stan
-            }
-            if (!download) {
-                if (x != null && m == null) man.put(key, JSONObject().put("n", nSig).put("p", sig(x)))
-                continue
-            }
-            val t = x ?: File(dirs.first(), name)
-            if (t.exists()) backupLocal(t, "przed-pobraniem")
-            if (server.nasGet("$profile/${f.nas}/$rel", t)) { n++; man.put(key, JSONObject().put("n", nSig).put("p", sig(t))) }
-        }
-        writeJson(manName(profile), man)
-        if (n > 0) Log.i(tag, "stany PS2 z serwera: $n plików (${f.id}, $profile)")
-        return ""
-    }
-
-    private fun statesPush(profile: String, f: Fam, g: Game) {
-        if (f.id in pendingIndex) {
-            server.nasPut("$profile/${f.nas}/.emustart-index.json", readJson(prefixKey(f)).toString().toByteArray(),
-                          System.currentTimeMillis() / 1000.0)
-            pendingIndex -= f.id
-        }
-        val phone = stateFiles(f, g, phoneDirs(f, g))
-        if (phone.isEmpty()) return
-        val man = readJson(manName(profile))
-        var n = 0
-        for ((name, x) in phone) {
-            val key = "${f.id}/$name"
-            val pSig = sig(x)
-            if (same(man.optJSONObject(key)?.optJSONArray("p"), pSig)) continue
-            val sec = x.lastModified() / 1000.0
-            server.nasPut("$profile/${f.nas}/$name", x.readBytes(), sec, "$profile/_backup/${stamp()}-${safe(device)}/${f.nas}/$name")
-            man.put(key, JSONObject().put("n", sig(x.length(), sec)).put("p", pSig))
-            n++
-        }
-        writeJson(manName(profile), man)
-        if (n > 0) Log.i(tag, "stany PS2 na serwer: $n plików (${f.id}, $profile)")
     }
 
     // ── kolejka: zapisy, które nie doszły (brak połączenia) ──

@@ -908,7 +908,8 @@ class Api:
         from emustart import savebundles
         core = savebundles.core_id(emu.get("args", ""))
         try:
-            bundles = savebundles.for_game(ad, core, launcher.content_guess(self._cfg, g, emu["exe"]), g)
+            bundles = savebundles.for_game(ad, core, launcher.content_guess(self._cfg, g, emu["exe"]),
+                                           launcher.ps2_info(self._cfg, g))
         except Exception:
             log.exception("paczki zapisów gry")
             return None

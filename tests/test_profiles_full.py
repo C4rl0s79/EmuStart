@@ -65,31 +65,31 @@ def test_ini_set_edits_adds_and_creates(tmp_path):
 def test_clean_reinstall_restores_saves_from_nas(prof_env):
     """Emulator zainstalowany od nowa (pusty plik założony przez emulator), lokalnego
     magazynu profili brak — stany wracają z folderu profilu na serwerze przy pierwszej grze.
-    (Karty pamięci PCSX2 synchronizują się paczkami z serwerem — syncclient, nie folderem.)"""
+    (Karty i stany PCSX2 synchronizują się paczkami z serwerem — syncclient, nie folderem.)"""
     cfg, tmp = prof_env
     pid = profiles.first_id()
-    nas_st = Path(cfg["profiles_nas"]) / "Gracz" / "save" / "pcsx2" / "sstates" / "SLUS-1.p2s"
+    nas_st = Path(cfg["profiles_nas"]) / "Gracz" / "save" / "duckstation" / "savestates" / "SLUS-1_1.sav"
     _write(nas_st, b"MOJE-ZAPISY")
-    ad = _pcsx2(tmp)
-    blank = ad.settings_base() / "sstates" / "SLUS-1.p2s"
+    ad = _duck(tmp)
+    blank = ad.settings_base() / "savestates" / "SLUS-1_1.sav"
     _write(blank, b"PUSTA")
     os.utime(blank, (1, 1))                                  # świeży plik starszy niż ten z NAS
 
     s = _session(cfg, pid)
     names = s._profile_prepare(ad)
-    assert "sstates" in names and "memcards" not in s._folder_names
-    ini = ad.settings_base() / "inis" / "PCSX2.ini"
-    st = profiles.local_dir(pid, "pcsx2", "sstates")
-    # bez junction: PCSX2 dostaje folder profilu w ustawieniach na czas gry
-    assert not os.path.isjunction(ad.settings_base() / "sstates")
-    assert ad.state_dirs() == [st] and ingame.ini_section(ini, "Folders")["Savestates"] == str(st)
-    assert (st / "SLUS-1.p2s").read_bytes() == b"MOJE-ZAPISY"
+    assert "savestates" in names and "memcards" not in s._folder_names
+    ini = ad.settings_base() / "settings.ini"
+    st = profiles.local_dir(pid, "duckstation", "savestates")
+    # bez junction: DuckStation dostaje folder profilu w ustawieniach na czas gry
+    assert not os.path.isjunction(ad.settings_base() / "savestates")
+    assert ad.state_dirs() == [st] and ingame.ini_section(ini, "Folders")["SaveStates"] == str(st)
+    assert (st / "SLUS-1_1.sav").read_bytes() == b"MOJE-ZAPISY"
     # pusty plik nie przepadł, ale nie zasłania zapisu — leży w kopii zapasowej
-    assert [p.read_bytes() for p in (profiles.LOCAL / str(pid) / "_backup").rglob("SLUS-1.p2s")] == [b"PUSTA"]
+    assert [p.read_bytes() for p in (profiles.LOCAL / str(pid) / "_backup").rglob("SLUS-1_1.sav")] == [b"PUSTA"]
 
-    _write(st / "SLUS-1.p2s", b"NOWY-ZAPIS")                # gra zapisała
+    _write(st / "SLUS-1_1.sav", b"NOWY-ZAPIS")              # gra zapisała
     s._release_dirs()
-    assert ingame.ini_section(ini, "Folders")["Savestates"] == "sstates"     # ustawienia sprzed gry
+    assert ingame.ini_section(ini, "Folders")["SaveStates"] == "savestates"  # ustawienia sprzed gry
     s._profile_finish(ad, names)
     assert nas_st.read_bytes() == b"NOWY-ZAPIS"
 

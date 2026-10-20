@@ -27,6 +27,8 @@ ARC = "game"                     # nazwa umowna pliku gry w paczce
 RA_SAVE_EXTS = {"srm", "sav", "rtc", "eep", "fla", "mpk", "sra", "nv", "mcr", "bkr", "bcr", "brm",
                 "dsv", "dsa", "ram", "ldci", "lcd"}
 _RA_STATE = re.compile(r"(.+?)(\.state\d*(?:\.auto)?(?:\.png)?)", re.I)
+# stan PCSX2 / ArmSX2: „SLUS-20851 (39B574F0).03.p2s”, wznowienie PCSX2 (.resume), autozapis ArmSX2
+_P2S = re.compile(r"^(?P<prefix>.+?)\.(?P<slot>\d{2}|resume|autosave(?:\.\d)?)\.p2s$", re.I)
 _CORE_ARG = re.compile(r'-L\s+"?([^"]*?)([\w.+-]+?)_libretro\.(?:dll|so|dylib)"?', re.I)
 SKIP = (".emustart-new", ".emustart-tmp", ".tmp", ".part")
 
@@ -46,8 +48,15 @@ class Bundle:
         return self.emulator_id, self.core_id, self.kind
 
     def local_path(self, arc: str) -> Path:
-        """Ścieżka na tym urządzeniu dla pliku paczki („game.state2” → „<plik gry>.state2”)."""
-        if not arc.startswith(ARC) or "/" in arc or "\\" in arc or ".." in arc:
+        """Ścieżka na tym urządzeniu dla pliku paczki („game.state2” → „<plik gry>.state2”;
+        stany PCSX2 — nazwa jak w paczce, od numeru płyty)."""
+        if "/" in arc or "\\" in arc or ".." in arc or ":" in arc:
+            raise ValueError(f"nieoczekiwana nazwa w paczce: {arc}")
+        if self.emulator_id == "pcsx2" and self.kind == "states":
+            if not _P2S.match(arc):
+                raise ValueError(f"nieoczekiwana nazwa w paczce: {arc}")
+            return self.folder / arc
+        if not arc.startswith(ARC):
             raise ValueError(f"nieoczekiwana nazwa w paczce: {arc}")
         return self.folder / (self.stem + arc[len(ARC):])
 
@@ -73,7 +82,8 @@ class Bundle:
         self.files = []
         if not self.folder.is_dir():
             return self
-        names = {norm(n) for n in self.names if n} | {norm(self.stem)}
+        names = ({n.lower() for n in self.names if n} if (self.emulator_id, self.kind) == ("pcsx2", "states")
+                 else {norm(n) for n in self.names if n} | {norm(self.stem)})
         mine = norm(self.stem)
         picked: dict = {}
         for f in sorted(self.folder.iterdir()):
@@ -116,6 +126,11 @@ def _match(emu: str, kind: str, name: str, names: set):
         m = re.fullmatch(r"(.+)(_[12])\.mcd", name, re.I)
         if m and norm(m.group(1)) in names:
             return m.group(1), f"{ARC}{m.group(2)}.mcd"
+    elif emu == "pcsx2" and kind == "states":
+        # nazwy stanów to przedrostki z numeru płyty („slus-20851 (”) — nie nazwy gry
+        m = _P2S.match(name)
+        if m and not name.lower().endswith(".backup") and any(name.lower().startswith(p) for p in names):
+            return m.group("prefix"), name
     elif emu == "pcsx2" and kind == "memcards":
         m = re.fullmatch(r"(.+)\.ps2", name, re.I)
         if m and norm(m.group(1)) in names:
@@ -188,10 +203,29 @@ def for_game(adapter, core: str, content: Path, game: dict) -> list:
     if adapter.family == "retroarch":
         names = sorted({Path(content).stem, game.get("name", ""), Path(game.get("rel", "")).stem} - {""})
         return retroarch(adapter, core, content, names) if core else []
+    out = []
     if adapter.family in ("duckstation", "pcsx2") and adapter.memcard_dir():
         card = card_stem(content, game)
-        return [Bundle(adapter.family, "", "memcards", adapter.memcard_dir(), card, [card]).collect()]
-    return []
+        out.append(Bundle(adapter.family, "", "memcards", adapter.memcard_dir(), card, [card]).collect())
+    if adapter.family == "pcsx2":
+        prefixes = ps2_prefixes(game)
+        if prefixes and adapter.state_dirs():
+            # stany wspólne z ArmSX2 na telefonie (ten sam format nazw: numer płyty i CRC)
+            out.append(Bundle("pcsx2", "", "states", adapter.state_dirs()[0], "", prefixes).collect())
+    return out
+
+
+def ps2_prefixes(game: dict) -> list:
+    """Przedrostki nazw stanów PS2 gry: z numeru płyty („SLUS-20851 (”) i poznane po grze
+    („SLUS-20851 (39B574F0).”); małe litery."""
+    out = set()
+    m = re.search(r"[A-Z]{4}-\d{3,5}", (game.get("serial") or "").upper())
+    if m:
+        out.add(m.group(0).lower() + " (")
+    for p in game.get("state_prefixes") or []:
+        if p:
+            out.add(p.lower())
+    return sorted(out)
 
 
 def card_stem(content: Path, game: dict) -> str:
@@ -208,8 +242,10 @@ def covered_dirs(adapter) -> list:
     profilu je pomija (jedna prawda: serwer)."""
     if adapter.family == "retroarch":
         return list(adapter.save_dirs())
-    if adapter.family in ("duckstation", "pcsx2"):
+    if adapter.family == "duckstation":
         return [adapter.memcard_dir()]
+    if adapter.family == "pcsx2":
+        return [adapter.memcard_dir()] + list(adapter.state_dirs()[:1])     # karty i stany — paczkami
     return []
 
 
@@ -237,7 +273,24 @@ _SLOT = re.compile(r"^game\.state(\d*)(\.auto)?$")
 
 def _slot_no(arc: str) -> int:
     m = _SLOT.match(arc)
-    return int(m.group(1) or 0) if m and not m.group(2) else -1
+    if m:
+        return int(m.group(1) or 0) if not m.group(2) else -1
+    m = _P2S.match(arc)
+    return int(m.group("slot")) if m and m.group("slot").isdigit() else -1
+
+
+def _free_slot(arc: str, used: set, nxt: int) -> tuple[str | None, int]:
+    """Nazwa dla starszego stanu z zajętego slotu: RetroArch — następny numer; PCSX2 —
+    pierwszy wolny slot 00–09 tej gry (None — brak wolnego: zostaje w historii serwera)."""
+    m = _P2S.match(arc)
+    if m:
+        for n in range(10):
+            cand = f"{m.group('prefix')}.{n:02d}.p2s"
+            if cand.lower() not in used:
+                used.add(cand.lower())
+                return cand, nxt
+        return None, nxt
+    return f"game.state{nxt}", nxt + 1
 
 
 def merge_states(mine: dict, other: dict) -> tuple[dict, list]:
@@ -247,8 +300,8 @@ def merge_states(mine: dict, other: dict) -> tuple[dict, list]:
     Zwraca (wynik {nazwa: ("mine"|"other", nazwa źródłowa)}, [(skąd, stara nazwa, nowa nazwa)])."""
     out = {a: ("mine", a) for a in mine}
     moves = []
-    used = {_slot_no(a) for a in list(mine) + list(other)}
-    nxt = max(used | {0}) + 1
+    nxt = max({_slot_no(a) for a in list(mine) + list(other) if _SLOT.match(a)} | {0}) + 1
+    used = {a.lower() for a in list(mine) + list(other)}
     for arc, (sha, t) in sorted(other.items()):
         if arc.endswith(".png"):
             continue
@@ -263,8 +316,12 @@ def merge_states(mine: dict, other: dict) -> tuple[dict, list]:
                 out[png] = ("other", png)
             continue
         # kolizja: nowszy w slocie, starszy — nowy numer
-        new = f"game.state{nxt}"
-        nxt += 1
+        new, nxt = _free_slot(arc, used, nxt)
+        if new is None:                         # PCSX2: wszystkie sloty gry zajęte
+            if t > mine[arc][1]:
+                out[arc] = ("other", arc)
+                out.pop(png, None)
+            continue
         if t > mine[arc][1]:
             moves.append(("mine", arc, new))
             out[new] = ("mine", arc)

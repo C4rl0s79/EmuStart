@@ -153,7 +153,6 @@ function goptItems() {
     { label: "Graj", act: () => { closeGopt(); launch(); } },
     ...variantItem(),
     { label: "Wczytaj zapis", value: "zapisy i stany z serwera (wszystkie urządzenia)", act: openRaStatesPhone },
-    { label: "Stany PS2", value: "komputer ↔ telefon", act: openSaveManager },
     { label: "Ustawienia emulatora", value: "tylko na tym telefonie", act: () => { closeGopt(); launch("", false, true); } },
     { label: "Metadane i opis", value: [det.meta?.developer, det.meta?.year].filter(Boolean).join(" · "), act: () => goPage("meta") },
     ...adminItems(),
