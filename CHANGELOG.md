@@ -17,6 +17,15 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
   RetroArchu na Androidzie; ocena „wyświetlania nad innymi aplikacjami” i usługi ułatwień
   dostępu dla pozostałych emulatorów na Androidzie.
 
+### Dodane
+- **Synchronizacja zapisów gier — serwer** (etap 1, `docs/SAVE_SYNC_DESIGN.md`): paczki
+  zapisów, stanów i kart pamięci per konto, gra, emulator i rdzeń RetroArcha (Snes9x i bsnes
+  osobno), jedna aktualna wersja jak w Steam Cloud — rozbieżne zmiany to konflikt (409) do
+  decyzji gracza, poprzednie wersje w historii na serwerze. Konto i urządzenie serwer ustala
+  z tokenu sesji, pliki przez krótkotrwałe podpisane adresy (bez ścieżek serwera), SHA-256
+  i poprawność ZIP-a sprawdzane przy wysyłce. Stały `game_id` w listach gier (ten sam na PC
+  i telefonie). Klient Windows i Android — następne etapy.
+
 ## [0.45.1] — 2026-10-14
 
 Zakres: „Wczytaj zapis” na telefonie (`web/options.js`, Android: `Bridge.kt`, `Saves.kt`),

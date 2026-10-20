@@ -322,7 +322,7 @@ def server_systems() -> list:
 def server_games(es: str, since: float = 0) -> list:
     """Gry systemu dla PC: kolumny biblioteki, czasy grafik (PC podmienia zmienione) i opisy.
     since — tylko gry zmienione później (grafika / opis, game_chg)."""
-    from emustart import art
+    from emustart import art, savesync
     cols = ", ".join(f"g.{c}" for c in COLS)
     out = []
     where, args = "WHERE g.es=?", [es]
@@ -339,6 +339,7 @@ def server_games(es: str, since: float = 0) -> list:
                 if t:
                     art_m[kind] = int(t)
         d["art_m"] = art_m
+        d["game_id"] = savesync.game_id(es, r["name"])     # stały identyfikator (zapisy gier)
         if r["m_data"] or r["m_edits"]:
             d["meta"] = {"data": json.loads(r["m_data"] or "{}"), "edits": json.loads(r["m_edits"] or "{}")}
         out.append(d)
