@@ -240,7 +240,18 @@ def _remap_sdl_ini(path: Path, section_fmt: str, order: list, players: int = 4):
     _remember_restore(path, old)
 
     def restore():
-        ini_edit(path, old)
+        # tylko numer pada wraca; przypisania zmienione w trakcie gry (np. inny przycisk) zostają —
+        # wcześniej całe wpisy sprzed gry nadpisywały zmiany gracza
+        back = {}
+        for (sec, key), was in old.items():
+            cur = ini_section(path, sec).get(key)
+            if cur is None or cur == changes[(sec, key)]:
+                back[(sec, key)] = was
+                continue
+            idx = re.search(r"\b(?:SDL|XInput)-(\d+)/", was)
+            if idx:
+                back[(sec, key)] = re.sub(r"\b(SDL|XInput)-\d+/", lambda m: f"{m.group(1)}-{idx.group(1)}/", cur)
+        ini_edit(path, back)
         _restore_file().unlink(missing_ok=True)
     return restore
 

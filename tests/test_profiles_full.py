@@ -167,10 +167,11 @@ def test_settings_per_profile_keep_machine_values(prof_env):
     s._profile_finish(ad, names)
     assert (Path(cfg["profiles_nas"]) / "Ola" / "settings" / "windows" / "duckstation" / "settings.ini").is_file()
 
-    # pierwszy profil zapisuje swoje (Vulkan) …
-    ingame.ini_set(ini, {("GPU", "Renderer"): "Vulkan"})
+    # pierwszy profil gra i zmienia renderer w trakcie gry (Vulkan) …
     s1 = _session(cfg, first)
-    s1._profile_finish(ad, s1._profile_prepare(ad))
+    n1 = s1._profile_prepare(ad)
+    ingame.ini_set(ini, {("GPU", "Renderer"): "Vulkan"})
+    s1._profile_finish(ad, n1)
 
     # … inny komputer: inna karta grafiki; Ola wraca — jej renderer, karta tego komputera
     ingame.ini_set(ini, {("GPU", "Adapter"): "GPU-B"})
@@ -905,3 +906,20 @@ def test_emulator_settings_history_and_restore(tmp_path, monkeypatch):
     assert profiles.settings_restore({}, 1, "retroarch", hist[1]["id"])["ok"]
     assert snap.read_bytes() == b""
     assert not profiles.settings_restore({}, 1, "retroarch", "../x")["ok"]
+
+
+def test_settings_changed_in_emulator_outside_emustart_are_kept(prof_env):
+    """Ustawienia zmienione w samym emulatorze (bez EmuStart) — nie nadpisane profilem przy
+    następnej grze, tylko przejęte przez profil, który grał ostatnio (z wpisem w historii)."""
+    cfg, tmp = prof_env
+    pid = profiles.first_id()
+    ad = _duck(tmp)
+    ini = ad.settings_base() / "settings.ini"
+    s = _session(cfg, pid)
+    s._profile_finish(ad, s._profile_prepare(ad))
+    ingame.ini_set(ini, {("Pad1", "Cross"): "SDL-0/X"})                   # zmiana w DuckStation, poza EmuStart
+    s = _session(cfg, pid)
+    names = s._profile_prepare(ad)
+    assert ingame.ini_section(ini, "Pad1")["Cross"] == "SDL-0/X"
+    s._profile_finish(ad, names)
+    assert any("poza EmuStart" in h.get("label", "") for h in profiles.settings_history(pid, "duckstation"))

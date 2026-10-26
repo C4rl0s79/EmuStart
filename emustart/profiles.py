@@ -26,6 +26,7 @@ na dwóch urządzeniach (dzierżawa odnawiana w trakcie gry, patrz lock()).
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -1178,13 +1179,62 @@ def _copy_file(src: Path, dst: Path) -> None:
     os.replace(tmp, dst)
 
 
+def _seen_file(family: str) -> Path:
+    return LOCAL / "_machine" / family / ".emustart-seen.json"
+
+
+def _fingerprint(adapter) -> dict:
+    """{plik: sha1} ustawień gracza w emulatorze (bez wartości tego komputera: ścieżki, karta
+    graficzna, dźwięk; bez sekretów) — do wykrycia zmian zrobionych poza EmuStart."""
+    from emustart import ingame
+    rules_by = {Path(k).as_posix(): v for k, v in _merge_rules(getattr(adapter, "machine_keys", dict)(),
+                                                                getattr(adapter, "secret_keys", dict)()).items()}
+    out = {}
+    for rel, f in _files_under(adapter.settings_base(), adapter.settings_files()):
+        try:
+            data = f.read_bytes()
+            rules = rules_by.get(Path(rel).as_posix())
+            if rules:
+                data = ingame.blank_secrets(data.decode("utf-8-sig", errors="replace"), rules).encode("utf-8")
+            out[Path(rel).as_posix()] = hashlib.sha1(data).hexdigest()
+        except OSError:
+            pass
+    return out
+
+
+def _remember_seen(adapter, pid: int) -> None:
+    try:
+        _write_atomic(_seen_file(adapter.family), json.dumps({"pid": pid, "files": _fingerprint(adapter)}))
+    except OSError as ex:
+        log.info("odcisk ustawień %s: %s", adapter.family, ex)
+
+
+def changed_outside(adapter) -> int | None:
+    """Profil, którego ustawienia ktoś zmienił w samym emulatorze (uruchomionym bez EmuStart)
+    od ostatniej gry przez EmuStart — ten, który grał ostatnio; None — bez zmian albo nie
+    wiadomo (brak zapamiętanego odcisku)."""
+    try:
+        seen = json.loads(_seen_file(adapter.family).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(seen, dict) or not isinstance(seen.get("files"), dict):
+        return None
+    return int(seen["pid"]) if seen["files"] != _fingerprint(adapter) and get(int(seen.get("pid") or 0)) else None
+
+
 def settings_load(cfg: dict, pid: int, adapter) -> int:
     """Przed grą: ustawienia profilu (NAS → lokalnie → emulator). Profil bez
-    zapisanych ustawień gra na bieżących (po grze staną się jego)."""
+    zapisanych ustawień gra na bieżących (po grze staną się jego). Ustawienia zmienione
+    w samym emulatorze (poza EmuStart) najpierw przechodzą do profilu — nie są nadpisywane."""
     from emustart import ingame
     family, base, rels = adapter.family, adapter.settings_base(), adapter.settings_files()
     if not rels:
         return 0
+    owner = changed_outside(adapter)
+    if owner is not None:
+        # w emulatorze są ustawienia profilu, który grał ostatnio — zmiany poza EmuStart są jego
+        n = settings_save(cfg, owner, adapter, "zmiany w emulatorze poza EmuStart")
+        log.info("ustawienia %s zmienione poza EmuStart → profil %s (%d plików)", family, owner, n)
     snap = _settings_local(pid, family)
     prof = get(pid)
     if prof and nas_online(cfg):
@@ -1213,6 +1263,7 @@ def settings_load(cfg: dict, pid: int, adapter) -> int:
                 ingame.ini_set(base / rel, {((s or None), k): v for (s, k), v in diff.items()})
     if n:
         log.info("ustawienia profilu %s → %s: %d plików", pid, family, n)
+    _remember_seen(adapter, pid)
     return n
 
 
@@ -1333,6 +1384,7 @@ def settings_save(cfg: dict, pid: int, adapter, label: str = "") -> int:
         _copy_file(f, dst)
         n += 1
     hist.close()
+    _remember_seen(adapter, pid)               # stan po grze — kolejna różnica = zmiana poza EmuStart
     prof = get(pid)
     if prof and nas_online(cfg):
         _sync(cfg, pid, "settings", family, ["-"], up=True)

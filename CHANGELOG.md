@@ -8,6 +8,18 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.48.3] — 2026-10-26
+
+Zakres: ustawienia emulatorów w profilu (`profiles.py`), przypisania pada (`ingame.py`). Zaktualizuj PC.
+
+### Poprawione
+- **Ustawienia zmienione w samym emulatorze (bez EmuStart) zostają** — przy następnej grze
+  EmuStart nadpisywał je ustawieniami z profilu (np. przypisania pada). Teraz wykrywa zmianę od
+  ostatniej gry i przejmuje ją do profilu, który grał ostatnio (wpis w historii zmian „zmiany w
+  emulatorze poza EmuStart”); wartości tego komputera (ścieżki, karta graficzna) się nie liczą.
+- **DuckStation / PCSX2: przypisania pada zmienione w trakcie gry zostają** — po grze wracał
+  cały wpis sprzed gry; teraz wraca tylko numer pada (kolejność kontrolerów).
+
 ## [0.48.2] — 2026-10-26
 
 Zakres: stany PS2 paczką wspólną dla PCSX2 i ArmSX2 (`savebundles.py`, `launcher.py`, Android:
