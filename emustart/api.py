@@ -1425,41 +1425,6 @@ class Api:
                     "reason": f"Nie ma konta „{str(name).strip()}”."}
         return {"ok": bool(prof), "reason": why, "profile": prof and self._public_profile(prof)}
 
-    # nowe konto z tego (zalogowanego) urządzenia — zatwierdza administrator (emustart/enroll.py)
-    def account_request(self, name: str, password: str) -> dict:
-        r = netsrc.authed_post(self._cfg, "/v1/enroll/account", {"account": str(name), "password": str(password)})
-        if not r.get("ok"):
-            return {"ok": False, "reason": r.get("reason") or r.get("error") or "Serwer nie przyjął prośby.",
-                    "exists": bool(r.get("exists"))}
-        if r.get("status") == "approved":
-            prof = profiles.account_profile(r["account"], r.get("token", ""))
-            return {"ok": True, "status": "approved", "profile": self._public_profile(prof)}
-        pend = [p for p in self._cfg.get("account_requests") or [] if p.get("account") != r["account"]]
-        self._cfg["account_requests"] = pend + [{"rid": r["rid"], "account": r["account"], "code": r.get("pretty", "")}]
-        config.save(self._cfg)
-        return {"ok": True, "status": "pending", "account": r["account"], "code": r.get("pretty", "")}
-
-    def account_requests_poll(self) -> dict:
-        """Prośby o nowe konto z tego urządzenia — zatwierdzone: konto na liście profili."""
-        pend = self._cfg.get("account_requests") or []
-        if not pend or not self._cfg.get("server_key"):
-            return {"ok": True, "done": []}
-        done, keep = [], []
-        for p in pend:
-            r = netsrc.authed_post(self._cfg, "/v1/enroll/account_poll", {"rid": p["rid"]})
-            st = r.get("status") if r.get("ok") else "error"
-            if st == "approved" and r.get("token"):
-                profiles.account_profile(r["account"], r["token"])
-                done.append({"account": p["account"], "status": "approved"})
-            elif st in ("denied", "expired"):
-                done.append({"account": p["account"], "status": st})
-            else:
-                keep.append(p)
-        if keep != pend:
-            self._cfg["account_requests"] = keep
-            config.save(self._cfg)
-        return {"ok": True, "done": done}
-
     # PIN — tylko to urządzenie
     def profile_unlock(self, pid: int, pin: str) -> dict:
         ok, why = profiles.local_pin_check(int(pid), str(pin))
@@ -1508,11 +1473,11 @@ class Api:
                 log.exception("zapisy z serwera")
         launcher.start_post(run, "zapisy z serwera")
 
-    def profile_create(self, name: str, password: str = "") -> dict:
-        """Nowy profil — z serwerem konto z hasłem. Nazwa zajęta (bez względu na wielkość
-        liter) → exists: UI prosi o hasło tego konta (profile_join) albo o inną nazwę."""
+    def profile_create(self, name: str) -> dict:
+        """Nowy profil lokalny (z serwerem nowe konto — zaproszenie albo panel). Nazwa zajęta
+        (bez względu na wielkość liter) → exists: UI prosi o hasło tego konta (profile_join)."""
         try:
-            p = profiles.create(name, cfg=self._cfg, password=str(password or ""))
+            p = profiles.create(name, cfg=self._cfg)
         except profiles.ProfileExists as ex:
             return {"ok": False, "exists": ex.name, "reason": str(ex)}
         except (ValueError, OSError) as ex:
@@ -1627,24 +1592,33 @@ class Api:
                 "systems": rows}
 
     # ── logowanie na serwerze: konto + hasło + klucz urządzenia (emustart/enroll.py) ──
-    def server_enroll(self, text: str, mode: str, account: str, password: str = "") -> dict:
-        """Ustawienia → Zaloguj: link z kodu QR panelu (adresy, odcisk certyfikatu, kod
-        jednorazowy — bez czekania na zatwierdzenie) albo adres tunelu (zatwierdza inne
-        urządzenie konta albo administrator). Klucz urządzenia: TPM, bez niego DPAPI. Hasło idzie
-        tylko w prośbie — program go nie zapisuje. Prośba czeka do 24 h (przetrwa restart)."""
+    def server_enroll(self, text: str, mode: str, account: str = "", password: str = "", code: str = "") -> dict:
+        """Ustawienia → Zaloguj (emustart/enroll.py):
+        - mode "code" — kod logowania ze strony serwera (albo z panelu): link / kod QR (adresy,
+          odcisk certyfikatu, kod, konto) albo adres serwera + `code` wpisany ręcznie. Konto
+          wynika z kodu, bez hasła i bez czekania na zatwierdzenie;
+        - mode "existing" — „Mam konto”: nazwa i hasło; zatwierdza inne urządzenie konta albo
+          administrator. Hasło idzie tylko w prośbie — program go nie zapisuje. Prośba czeka do 24 h.
+        Klucz urządzenia: TPM, bez niego DPAPI."""
         import secrets
         import socket
-        from emustart import accounts, keystore
+        from emustart import keystore
         account = (account or "").strip()
-        if not account or mode not in ("new", "existing"):
-            return {"ok": False, "reason": "Podaj nazwę konta."}
-        if mode == "new" and accounts.policy(password):
-            return {"ok": False, "reason": accounts.policy(password)}
-        if not password:
-            return {"ok": False, "reason": "Podaj hasło konta."}
         login = netsrc.parse_login(text)
         if not login.get("ok"):
             return login
+        if mode == "code":
+            login["code"] = login.get("code") or (code or "").strip()
+            if not login["code"]:
+                return {"ok": False, "reason": "Podaj kod logowania ze strony serwera."}
+            account = login.get("account") or account
+        elif mode == "existing":
+            if not account:
+                return {"ok": False, "reason": "Podaj nazwę konta."}
+            if not password:
+                return {"ok": False, "reason": "Podaj hasło konta."}
+        else:
+            return {"ok": False, "reason": "Nowe konto zakłada się z zaproszenia — zaloguj się na stronie serwera."}
         old = self._cfg.get("enroll_pending")
         if old and (old.get("account") != account or old.get("mode") != mode or login.get("code")):
             self.server_enroll_cancel()
@@ -1658,7 +1632,8 @@ class Api:
             except Exception as ex:
                 log.exception("klucz urządzenia")
                 return {"ok": False, "reason": f"Nie udało się utworzyć klucza urządzenia: {ex}"}
-        body = {"mode": mode, "account": account, "password": password, "name": socket.gethostname(),
+        body = {"mode": mode, "account": account if mode == "existing" else "",
+                "password": password if mode == "existing" else "", "name": socket.gethostname(),
                 "class": "pc", "app": "EmuStart", "version": __version__, "pubkey": pem, "hw": netsrc.hw_id(),
                 "login_code": login.get("code", "")}
         r: dict = {"ok": False, "reason": "Serwer nie odpowiada."}
@@ -1680,17 +1655,17 @@ class Api:
                                      "endpoints": [{"url": u, "kind": k, **({"ca": True} if c else {})}
                                                    for u, k, c in login["endpoints"]]}, trusted=True)
         config.save(self._cfg)
-        log.info("prośba o zalogowanie na %s (%s, konto %s, klucz: %s)%s", r["url"], mode, account, kind,
-                 " — kod z panelu" if login.get("code") else "")
+        log.info("prośba o zalogowanie na %s (%s, konto %s, klucz: %s)", r["url"], mode, account or "z kodu", kind)
         out = {"ok": True, "code": r["pretty"], "account": account, "url": r["url"], "key": kind,
                "expires_in": max(0, r["expires"] - time.time())}
-        if r.get("status") == "approved":                  # kod z panelu — od razu
-            out["status"] = self.server_enroll_poll().get("status")
+        if r.get("status") == "approved":                  # kod logowania — od razu
+            p = self.server_enroll_poll()
+            out.update(status=p.get("status"), account=p.get("account") or account)
         return out
 
     def server_scan(self) -> dict:
-        """Kod QR — tylko na telefonie (aparat); na komputerze: Zaloguj → link z panelu serwera."""
-        return {"ok": False, "reason": "Na komputerze: Zaloguj → wklej link z panelu serwera (Dodaj urządzenie)."}
+        """Kod QR — tylko na telefonie (aparat); na komputerze: Zaloguj → link ze strony serwera."""
+        return {"ok": False, "reason": "Na komputerze: Zaloguj → wklej link ze strony serwera (Pokaż kod logowania)."}
 
     def server_enroll_poll(self) -> dict:
         p = self._cfg.get("enroll_pending")
@@ -1722,7 +1697,8 @@ class Api:
                 threading.Thread(target=self._thin_sync, daemon=True, name="biblioteka-serwera").start()
         elif st in ("denied", "expired"):
             self.server_enroll_cancel()
-        return {"ok": True, "status": st, "account": p["account"], "code": p["code"], "reason": r.get("reason", "")}
+        return {"ok": True, "status": st, "account": r.get("account") or p["account"], "code": p["code"],
+                "reason": r.get("reason", "")}
 
     def server_logout(self, force: bool = False) -> dict:
         """Ustawienia → Wyloguj z serwera: serwer unieważnia to urządzenie, klucz urządzenia

@@ -828,39 +828,48 @@ function menuInput(a) {
   renderMenu();
 }
 
-/* ───────────── logowanie na serwerze: konto + hasło + klucz urządzenia (emustart/enroll.py) ───────────── */
+/* ───────────── logowanie na serwerze: kod logowania (albo konto + hasło) + klucz urządzenia (emustart/enroll.py) ───────────── */
 const DEFAULT_SERVER = "emustart.emucloud.org";
-/** Zaloguj: `text` — link z kodu QR panelu (adresy, odcisk certyfikatu, kod jednorazowy)
- *  albo adres tunelu. Dalej: Mam konto / Nowe konto → nazwa → hasło. */
+/** Zaloguj: `text` — link logowania (kod QR / link ze strony serwera: adresy, odcisk certyfikatu,
+ *  kod jednorazowy i konto) — od razu; albo adres serwera → kod ze strony serwera / konto i hasło.
+ *  Nowe konto zakłada się z zaproszenia (strona serwera), nie w aplikacji. */
 function loginStart(text) {
   text = (text || "").trim();
   if (!text) return;
-  S.menu = [["Mam konto", () => loginAccount(text, "existing")], ["Nowe konto", () => loginAccount(text, "new")],
+  if (text.startsWith("emustart://")) return loginCode(text, "");
+  S.menu = [["Mam kod logowania ze strony serwera", () => setTimeout(() =>
+              oskOpen(`Kod logowania (strona ${text} → Pokaż kod logowania)`, "", (c) => { if (c.trim()) loginCode(text, c.trim()); }), 50)],
+            ["Mam konto i hasło", () => loginAccount(text)],
             ["Anuluj", () => {}]];
   S.menuIdx = 0; S.modal = "menu";
-  $("menu").querySelector("h2").textContent = text.startsWith("emustart://") ? "Logowanie kodem z panelu serwera" : `Logowanie: ${text}`;
+  $("menu").querySelector("h2").textContent = `Logowanie: ${text} · nowe konto — zaproszenie od administratora, potem kod ze strony https://${text.replace(/^https?:\/\//, "")}`;
   $("menu").classList.remove("hidden");
   renderMenu();
 }
+async function loginCode(text, code) {
+  toast("Łączę z serwerem…", 10000);
+  const r = await api().server_enroll(text, "code", "", "", code);
+  if (!r.ok) return toast(r.reason, 7000);
+  if (r.status === "approved") return loginDone(r.account);
+  toast(r.reason || "Serwer nie przyjął kodu.", 7000);
+}
 function loginAddress() {
-  oskOpen("Adres serwera (albo link logowania z panelu)", DEFAULT_SERVER, (v) => loginStart(v));
+  oskOpen("Adres serwera (albo link logowania ze strony serwera)", DEFAULT_SERVER, (v) => loginStart(v));
 }
 async function loginQr() {
   const s = await api().server_scan();
   if (!s.ok) return toast(s.reason, 5000);
   loginStart(s.text);
 }
-function loginAccount(text, mode) {
-  oskOpen(mode === "new" ? "Nazwa nowego konta" : "Nazwa twojego konta", "", (acc) => {
+function loginAccount(text) {
+  oskOpen("Nazwa twojego konta", "", (acc) => {
     if (!acc.trim()) return;
-    // hasło konta: nowe konto je ustawia, „Mam konto” je sprawdza
-    setTimeout(() => askPassword(mode === "new" ? `Hasło nowego konta „${acc.trim()}”` : `Hasło konta „${acc.trim()}”`, async (pw) => {
+    setTimeout(() => askPassword(`Hasło konta „${acc.trim()}”`, async (pw) => {
       toast("Łączę z serwerem…", 10000);
-      const r = await api().server_enroll(text, mode, acc.trim(), pw);
+      const r = await api().server_enroll(text, "existing", acc.trim(), pw);
       if (!r.ok) return toast(r.reason, 7000);
-      if (r.status === "approved") return loginDone(r.account);          // kod z panelu — bez czekania
-      enrollWait(r.code, r.account, mode);
-    }, mode === "new"), 50);
+      enrollWait(r.code, r.account);
+    }), 50);
   });
 }
 async function loginDone(account) {
@@ -903,17 +912,17 @@ function serverRows(rows, c) {
   }
   const wait = c.enroll ? `czeka na zatwierdzenie na ${String(c.enroll.url || "").replace(/^https?:\/\//, "")} — kod ${c.enroll.code}` : "";
   if (S.platform === "android")
-    rows.push({ k: "Zaloguj (kod QR)", type: "action", fmt: () => wait || "panel serwera → Dodaj urządzenie → zeskanuj", run: () => loginQr() });
+    rows.push({ k: "Zaloguj (kod QR)", type: "action", fmt: () => wait || "strona serwera → Pokaż kod logowania → zeskanuj", run: () => loginQr() });
   rows.push({ k: S.platform === "android" ? "Zaloguj (adres serwera)" : "Zaloguj", type: "action",
-              fmt: () => wait || (S.platform === "android" ? DEFAULT_SERVER : `${DEFAULT_SERVER} albo link z panelu serwera`),
+              fmt: () => wait || (S.platform === "android" ? `${DEFAULT_SERVER} + kod ze strony` : `${DEFAULT_SERVER} albo link ze strony serwera`),
               run: () => loginAddress() });
 }
 let enrollTimer = null;
-function enrollWait(code, account, mode) {
-  $("join").querySelector("h2").textContent = mode === "new" ? `Nowe konto „${account}”` : `Konto „${account}” — nowe urządzenie`;
-  $("join").querySelector("p").innerHTML = mode === "new"
-    ? "Czeka na zatwierdzenie przez administratora serwera (aplikacja EmuStart albo panel serwera). Sprawdź, czy kod się zgadza."
-    : "Zatwierdź na innym urządzeniu tego konta (albo administrator). Sprawdź, czy kod się zgadza.";
+function enrollWait(code, account) {
+  $("join").querySelector("h2").textContent = `Konto „${account}” — nowe urządzenie`;
+  $("join").querySelector("p").innerHTML =
+    "Zatwierdź na innym urządzeniu tego konta (albo administrator). Sprawdź, czy kod się zgadza. " +
+    "Szybciej: kod logowania ze strony serwera — bez czekania.";
   $("joinCode").textContent = code;
   const srv = String(S.settings?.enroll?.url || "").replace(/^https?:\/\//, "");
   $("joinText").textContent = (srv ? `Serwer: ${srv}. ` : "") + "Możesz zamknąć to okno albo aplikację — prośba czeka do 24 godzin.";
@@ -938,18 +947,9 @@ async function enrollResume() {
   // prośba wysłana wcześniej (aplikacja była zamknięta) — sprawdzenie przy starcie
   const p = await api().server_enroll_poll().catch(() => null);
   if (!p || p.status === "none") return;
-  if (p.status === "pending") return enrollWait(p.code, p.account, "existing");
+  if (p.status === "pending") return enrollWait(p.code, p.account);
   if (p.status === "approved") { await refreshState(); toast(`Zatwierdzono — konto „${p.account}”.`, 6000); }
   else if (p.status === "denied") toast("Prośba o zalogowanie została odrzucona.", 6000);
-}
-/** Prośby o nowe konto z tego urządzenia (Inny użytkownik → nowa nazwa): wynik zatwierdzenia. */
-async function accountRequestsCheck() {
-  const r = await api().account_requests_poll().catch(() => null);
-  for (const d of r?.done || []) {
-    toast(d.status === "approved" ? `Zatwierdzono konto „${d.account}” — jest na liście profili.`
-      : d.status === "denied" ? `Administrator odrzucił konto „${d.account}”.` : `Prośba o konto „${d.account}” wygasła.`, 7000);
-    if (d.status === "approved" && S.screen === "profiles") openProfiles(PR.startup);
-  }
 }
 const enrollSeen = new Set();
 async function enrollCheck() {
@@ -970,7 +970,7 @@ async function enrollCheck() {
             ["Odrzuć", () => decide(false, false)], ["Później", () => {}]];
   S.menuIdx = 0; S.modal = "menu";
   $("menu").querySelector("h2").textContent =
-    `${q.mode === "new" ? "Nowe konto" : "Nowe urządzenie konta"} „${q.account}”: ${q.name} (${q.app || "EmuStart"}, ${kind}` +
+    `Nowe urządzenie konta „${q.account}”: ${q.name} (${q.app || "EmuStart"}, ${kind}` +
     `${q.from_account ? `, konto ${q.from_account}` : ""}) · ${q.ip} · ${when} · kod ${q.code}` +
     ((q.replaces || []).length ? ` · zastąpi wcześniejszą rejestrację tego programu na tym sprzęcie (${q.replaces.join(", ")})` : "");
   $("menu").classList.remove("hidden");
@@ -1366,8 +1366,6 @@ window.addEventListener("pywebviewready", async () => {
   enrollResume();
   setTimeout(enrollCheck, 4000);
   setInterval(() => { if (!S.modal) enrollCheck(); }, 60000);
-  accountRequestsCheck();
-  setInterval(accountRequestsCheck, 30000);
   // profil zablokowany na tym urządzeniu (PIN zmieniony gdzie indziej / wylogowany)
   api().profile_pin_check().then((pc) => {
     if (pc && pc.state && pc.state !== "ok" && S.screen === "systems") {

@@ -68,6 +68,10 @@ def _isolated_app(tmp_path_factory, monkeypatch):
     _enroll.reset()
     from emustart import accounts as _accounts
     _accounts.reset()
+    from emustart import invites, public, webportal
+    invites.reset()
+    webportal.reset()
+    monkeypatch.setitem(public.TUNNEL, "url", "")
     monkeypatch.setattr(_accounts, "N", 2 ** 10)          # szybki scrypt w testach
     netsrc._learned.clear()
     netsrc.forget_best()

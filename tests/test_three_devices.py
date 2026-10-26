@@ -64,15 +64,13 @@ def test_login_code_gives_each_device_its_own_key(srv):
     pc_key, pc_id, _ = _pair(srv, "Komputer", "pc")
     ph_key, ph_id, _ = _pair(srv, "Telefon", "phone")
     assert pc_key != ph_key and pc_id != ph_id
-    # kod z panelu jednorazowy
-    code = enroll.new_login_code()["code"]
+    # kod logowania jednorazowy
+    code = enroll.new_login_code("Test")["code"]
     host, port, _n = srv
     first = keyhelp.post(host, port, "/v1/enroll/request", {
-        "mode": "existing", "account": "Test", "password": keyhelp.PW, "name": "A", "class": "pc",
-        "pubkey": keyhelp.new_key()[1], "login_code": code})[1]
+        "mode": "code", "name": "A", "class": "pc", "pubkey": keyhelp.new_key()[1], "login_code": code})[1]
     again = keyhelp.post(host, port, "/v1/enroll/request", {
-        "mode": "existing", "account": "Test", "password": keyhelp.PW, "name": "B", "class": "pc",
-        "pubkey": keyhelp.new_key()[1], "login_code": code})[1]
+        "mode": "code", "name": "B", "class": "pc", "pubkey": keyhelp.new_key()[1], "login_code": code})[1]
     assert first["status"] == "approved" and not again["ok"] and "wygasł" in again["reason"]
     # oba tokeny działają, zły nie; wspólny klucz serwera — tylko z tego komputera
     for key in (pc_key, ph_key, MASTER):
@@ -106,11 +104,10 @@ def test_wrong_login_codes_are_rate_limited(srv):
     import keyhelp
     from emustart import enroll
     host, port, _n = srv
-    body = {"mode": "new", "account": "Ania", "password": keyhelp.PW, "name": "x", "class": "pc",
-            "pubkey": keyhelp.new_key()[1]}
+    body = {"mode": "code", "name": "x", "class": "pc", "pubkey": keyhelp.new_key()[1]}
     for _ in range(enroll.CODE_FAILS_MAX):
         assert not keyhelp.post(host, port, "/v1/enroll/request", {**body, "login_code": "ZZZZZZZZ"})[1]["ok"]
-    good = enroll.new_login_code()["code"]
+    good = enroll.new_login_code("Ania", create=True)["code"]
     d = keyhelp.post(host, port, "/v1/enroll/request", {**body, "login_code": good})[1]
     assert not d["ok"] and "Za dużo" in d["reason"]               # nawet dobry kod — przerwa
 
@@ -139,6 +136,11 @@ def test_save_written_by_pc_is_read_by_phone(srv, monkeypatch):
     cfg = {"server_url": url, "server_fp": fp, "server_key": pc_key, "profiles_nas": str(paths.APP / "brak-smb")}
     fs = nasfs.backend(cfg)
     assert isinstance(fs, nasfs.RemoteFs)
+    # zapis nie zakłada konta — nawet urządzenie administratora (0.49: zaproszenie albo panel)
+    with pytest.raises(OSError, match="404"):
+        fs.write("Ania/save/retroarch/saves/Gra (USA).srm", b"zapis z PC", 1000.0)
+    assert not (nas / "Ania").exists()
+    (nas / "Ania").mkdir()                                 # konto założone na serwerze
     fs.write("Ania/save/retroarch/saves/Gra (USA).srm", b"zapis z PC", 1000.0)
     # telefon: aplikacja na Androida — te same zapytania co Saves.kt, własnym kluczem
     st, d = _req(srv, "GET", "/v1/nas/scan?p=Ania/save/retroarch/saves", ph_key)
@@ -210,10 +212,11 @@ def _qr_ready(monkeypatch):
 def test_login_qr_carries_addresses_fingerprint_and_code(monkeypatch):
     pytest.importorskip("segno")
     _qr_ready(monkeypatch)
-    r = srvadmin.login_code(None)
+    assert not srvadmin.login_code(None, {"account": "Nikt"})["ok"]          # nie ma konta, bez „nowe”
+    r = srvadmin.login_code(None, {"account": "Test", "create": True})
     assert r["svg"].lstrip().startswith("<svg") and r["uri"].startswith("emustart://login?d=")
     login = netsrc.parse_login(r["uri"])
-    assert login["ok"] and login["fp"] == "ab" * 32 and login["code"] == r["code"]
+    assert login["ok"] and login["fp"] == "ab" * 32 and login["code"] == r["code"] and login["account"] == "Test"
     assert [u for u, _k, _c in login["endpoints"]] == ["https://192.168.1.130:8741", "https://100.85.254.31:8741"]
     # adres bez kodu QR: tylko domena (prawdziwy certyfikat), nigdy zwykłe http ani adres IP
     assert netsrc.parse_login("emustart.emucloud.org")["endpoints"] == [("https://emustart.emucloud.org", "tunnel", True)]
@@ -229,7 +232,7 @@ def test_panel_works_without_segno(monkeypatch):
                         lambda n, *a, **k: (_ for _ in ()).throw(ImportError(n)) if n == "segno" else real(n, *a, **k))
     _qr_ready(monkeypatch)
     assert qr.svg("x") == ""                                   # bez biblioteki: sam kod, bez obrazka
-    assert srvadmin.login_code(None)["code"]
+    assert srvadmin.login_code(None, {"account": "Test", "create": True})["code"]
 
 
 def test_login_waits_for_approval_by_device_of_the_account(srv):
@@ -257,7 +260,7 @@ def test_denied_request_and_panel_approval(srv):
     host, port, _n = srv
     a = keyhelp.enroll_device(host, port, "Obcy", "pc", account="Obcy", pem=keyhelp.new_key()[1], code=False)
     req = srvadmin.devices_list(None)["enroll"][0]
-    assert req["name"] == "Obcy" and req["mode"] == "new"
+    assert req["name"] == "Obcy" and req["mode"] == "existing"
     assert srvadmin.enroll_decide(None, {"id": req["id"], "allow": False})["status"] == "denied"
     assert keyhelp.post(host, port, "/v1/enroll/poll", {"rid": a["rid"]})[1]["status"] == "denied"
     bk, bpem = keyhelp.new_key()
@@ -285,10 +288,11 @@ def test_pc_logs_in_with_qr_link_and_logs_out(srv, monkeypatch):
     a = api_mod.Api.__new__(api_mod.Api)
     a._cfg, a._profile = {}, 0
     monkeypatch.setattr(a, "_adopt_account", lambda acc: None, raising=False)
-    link = srvadmin.login_code(None)["uri"]
-    assert not a.server_enroll("100.85.254.31", "new", "Ania", keyhelp.PW)["ok"]      # IP bez kodu QR
-    r = a.server_enroll(link, "new", "Ania", keyhelp.PW)
-    assert r["ok"] and r["status"] == "approved", r
+    link = srvadmin.login_code(None, {"account": "Ania", "create": True})["uri"]
+    assert not a.server_enroll("100.85.254.31", "code", code="ABCDEFGH")["ok"]          # IP bez kodu QR
+    assert "zaproszenia" in a.server_enroll(link, "new", "Ania", keyhelp.PW)["reason"]  # nowe konto — nie z aplikacji
+    r = a.server_enroll(link, "code")
+    assert r["ok"] and r["status"] == "approved" and r["account"] == "Ania", r
     assert saved["server_url"] == url and saved["server_key"].startswith("dev:") and saved["server_keyname"]
     assert netsrc.server_fp(a._cfg) == fp
     assert netsrc.info(a._cfg, fresh=True)["ok"]

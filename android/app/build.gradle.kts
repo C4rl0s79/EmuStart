@@ -64,7 +64,7 @@ android {
 }
 
 val copyWeb by tasks.registering(Copy::class) {
-    from(rootDir.resolve("../web"))
+    from(rootDir.resolve("../web")) { exclude("portal/**") }   // strona serwera (webportal) — nie w aplikacji
     into(layout.buildDirectory.dir("generated/webassets/web"))
 }
 tasks.named("preBuild") { dependsOn(copyWeb) }

@@ -60,11 +60,6 @@ class Prefs(ctx: Context) {
         get() = sp.getLong("look_t", 0L)
         set(v) = sp.edit().putLong("look_t", v).apply()
 
-    /** Prośby o nowe konto z tego telefonu (JSON: [{rid, account, code}]) — czekają na administratora. */
-    var accountRequests: String
-        get() = sp.getString("account_requests", "[]") ?: "[]"
-        set(v) = sp.edit().putString("account_requests", v).apply()
-
     /** Profil grający na telefonie (nazwa folderu profilu na serwerze); '' = nie wybrano. */
     var profile: String
         get() = sp.getString("profile", "") ?: ""

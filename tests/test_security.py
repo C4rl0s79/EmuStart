@@ -118,10 +118,13 @@ def test_plain_response_cannot_replace_pinned_certificate():
 
 def test_enroll_requests_capped_overall(monkeypatch):
     monkeypatch.setattr(enroll, "MAX_PENDING", 3)
+    from emustart import accounts
+    for i in range(4):
+        accounts.set_password(f"Konto{i}", "Haslo-testowe1")
     for i in range(3):
-        assert enroll.request("new", f"Konto{i}", "x", "phone", f"10.0.0.{i}", "0.41", keyhelp.new_key()[1],
+        assert enroll.request("existing", f"Konto{i}", "x", "phone", f"10.0.0.{i}", "0.41", keyhelp.new_key()[1],
                               [], password="Haslo-testowe1")["ok"]
-    r = enroll.request("new", "Konto9", "x", "phone", "10.0.0.9", "0.41", keyhelp.new_key()[1], [],
+    r = enroll.request("existing", "Konto3", "x", "phone", "10.0.0.9", "0.41", keyhelp.new_key()[1], [],
                        password="Haslo-testowe1")
     assert not r["ok"] and "za dużo" in r["reason"].lower()
 

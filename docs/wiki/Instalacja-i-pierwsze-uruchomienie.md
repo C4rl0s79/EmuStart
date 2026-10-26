@@ -34,8 +34,8 @@ podmiana plików i ponowne uruchomienie). Dane zostają.
 
 Otwierają się **Ustawienia**:
 
-1. **Zaloguj** — link z panelu serwera (Dodaj urządzenie → *Kopiuj link*) albo adres
-   tunelu, potem konto i hasło ([logowanie urządzeń](EmuStart-Server#logowanie-urządzeń)).
+1. **Zaloguj** — link ze strony serwera (*Pokaż kod logowania* → *Kopiuj link*) albo adres
+   serwera i kod ze strony ([logowanie urządzeń](EmuStart-Server#logowanie-urządzeń)).
    Biblioteka pobiera się z serwera.
 2. **Emulatory** — folder, w którym są (albo mają się zainstalować) emulatory,
    np. `D:\emu\emulatory`.

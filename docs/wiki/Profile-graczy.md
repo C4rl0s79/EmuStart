@@ -55,13 +55,14 @@ Nowy profil zaczyna od bieżących ustawień.
 (scrypt z losową solą, w danych serwera — nie w folderze profili) i nigdy go nie wydaje.
 Hasło jest potrzebne:
 
-- przy dołączaniu nowego urządzenia — **Nowe konto** ustawia hasło, **Mam konto** je
-  sprawdza (prośba i tak czeka na zatwierdzenie na innym urządzeniu konta albo przez
-  administratora),
+- przy dołączaniu nowego urządzenia przez **Mam konto** (prośba i tak czeka na zatwierdzenie
+  na innym urządzeniu konta albo przez administratora) — bez hasła: kod logowania ze strony
+  serwera,
 - gdy na urządzeniu gra **inny użytkownik** — karta **Inny użytkownik** → nazwa konta i jego
-  hasło; urządzenie pamięta logowanie do **Wyloguj konto z tego urządzenia**. Gdy takiego
-  konta nie ma: **Utwórz konto** → nowe hasło → prośba czeka na administratora (jego
-  urządzenie albo panel serwera); po zatwierdzeniu konto samo pojawia się na liście.
+  hasło; urządzenie pamięta logowanie do **Wyloguj konto z tego urządzenia**.
+
+Od 0.49 hasło jest opcjonalne (konto z zaproszenia go nie ma — ustawia się je na stronie
+serwera), a **nowe konto** powstaje tylko z zaproszenia administratora albo w panelu serwera.
 
 Urządzenie przypisane do konta nie pyta o hasło swojego konta — loguje się kluczem
 urządzenia. Konta sprzed 0.40 przy pierwszym wyborze proszą o ustawienie hasła; zapomniane

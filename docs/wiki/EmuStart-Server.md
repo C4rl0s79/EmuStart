@@ -30,8 +30,9 @@ serwera** — okna na tym samym komputerze.
    panel; gdy serwer nie działa, panel go uruchamia.
 4. Panel → **Konfiguracja → Foldery**: foldery z grami, BIOS-y i pozostałe (niżej).
 5. Panel → **Grafiki i opisy**: baza LaunchBox, potem **Brakujące grafiki i opisy**.
-6. Panel → **Urządzenia i konta → Dodaj urządzenie**: kod QR dla telefonu, link dla PC
-   ([logowanie urządzeń](#logowanie-urządzeń)).
+6. Panel → **Urządzenia i konta → Dodaj urządzenie** (wybierz konto albo wpisz nowe): kod QR dla
+   telefonu, link dla PC ([logowanie urządzeń](#logowanie-urządzeń)). Dla innych osób:
+   [strona serwera i zaproszenia](#strona-serwera-i-zaproszenia).
 
 Dane serwera (ustawienia, biblioteka, grafiki, konta, profile, kopie) są w folderze
 `server\` obok `EmuStartServer.exe` — skopiowanie folderu programu przenosi serwer. Grafiki
@@ -113,9 +114,13 @@ postępu), **Restart serwera**, **Folder logów**.
 Szczegóły: [Grafiki i metadane](Grafiki-i-metadane).
 
 ### Urządzenia i konta
-- **Urządzenia**: lista z kontem, wersją i ostatnim kontaktem; **Dodaj urządzenie**,
-  prośby o zalogowanie do zatwierdzenia, **Unieważnij**, nazwa, *Z grami / Bez gier*.
-- **Konta**: hasło, **Administrator**, liczba urządzeń, **Pliki i kopie**:
+- **Urządzenia**: lista z kontem, wersją i ostatnim kontaktem; **Dodaj urządzenie** (kod
+  logowania wybranego konta — istniejącego albo nowego), prośby „Mam konto” do zatwierdzenia,
+  **Unieważnij**, nazwa, *Z grami / Bez gier*.
+- **Zaproszenia**: adres Google + konto (nowe albo istniejące) → link do strony serwera;
+  stan (czeka / wykorzystane / wygasło), **Usuń**.
+- **Konta**: hasło (opcjonalne), konto Google (**Odłącz**), **Administrator**, liczba urządzeń,
+  **Pliki i kopie**:
   - co jest w profilu konta (zapisy, stany, ustawienia — pliki, rozmiar, ostatnia zmiana)
     i ostatnio zmienione pliki,
   - **Zrób kopię teraz** — jeden ZIP (profil + wpis konta z hasłem) w folderze kopii,
@@ -132,7 +137,18 @@ dostaje dla każdego systemu biblioteki zalecany emulator i wszystkie pasujące 
 trzyma każdą wersję jako archiwum; nowe systemy i rdzenie dociąga co godzinę. Serwer sprawdza nowe wydania raz dziennie;
 **Sprawdź i pobierz teraz** — od razu, **Pobierz ponownie** — jeden emulator jeszcze raz.
 Tabela: systemy, wersja na serwerze (i poprzednia — zostaje na wszelki wypadek), rozmiar,
-ostatni błąd pobierania. Komputery doinstalowują i aktualizują emulatory same
+ostatni błąd pobierania.
+
+**PCSX2 a wspólne stany PS2 (0.49).** Stany PS2 są wspólne dla PCSX2 (PC) i ArmSX2 (telefon), a
+nowa wersja PCSX2 zwykle zmienia format stanów. Serwer czyta format stanów z paczek zapisów —
+osobno ostatni z PC i z telefonu. Gdy konta mają stany z obu, **nowa wersja PCSX2 nie rozchodzi
+się sama**: w tabeli jest „nowa wersja … wstrzymana” z powodem —
+- *formaty się rozjechały* (PC nowszy niż telefon) — stany z PC nie wczytują się na telefonie;
+  przycisk **Zaktualizuj mimo to**;
+- *formaty zgodne* albo *telefon nowszy* — aktualizacja możliwa, ale stany zapisane w obecnej
+  wersji mogą przestać się wczytywać; przycisk **Zaktualizuj**.
+
+Przed aktualizacją panel ostrzega; karty pamięci działają we wszystkich wersjach. Komputery doinstalowują i aktualizują emulatory same
 (zob. [[Emulatory]]). Wersja to pliki z sumami SHA-256 i jedno archiwum ZIP: komputer pobiera
 archiwum jednym strumieniem (przerwane pobieranie wznawia się) i rozpakowuje u siebie tylko
 brakujące albo zmienione pliki.
@@ -152,26 +168,52 @@ przycisk skrótów, **Select + RB** — przyspieszenie (wł./wył.), **Select + 
 sprawdzenie skrótu SHA-256 i podpisu wydania, podmiana plików po zamknięciu serwera,
 ponowny start; panel wraca sam. Przebieg: `logs\update.log`.
 
+## Strona serwera i zaproszenia
+
+Pod adresem tunelu (np. `https://emustart.emucloud.org`) działa **strona serwera**: animowane
+logo, grafika retro i **Zaloguj przez Google**. Wchodzą tylko zaproszeni.
+
+1. Panel → **Konfiguracja → Strona serwera — logowanie Google**: w Google Cloud Console
+   utwórz klienta OAuth typu „Web application”, w „Authorized redirect URIs” wklej adres
+   z panelu (`<adres tunelu>/auth/google/callback`), a identyfikator i sekret klienta wpisz
+   w panelu. Ekran zgody: „External”, zakresy `openid`, `email`, `profile`.
+2. Panel → **Urządzenia i konta → Zaproszenia**: adres Google + konto (nowe albo istniejące)
+   → **Zaproś** → skopiuj link i wyślij go sam (SMS, komunikator, e-mail).
+3. Zaproszony otwiera link, loguje się kontem Google **o tym adresie** (link przekazany komuś
+   innemu nic nie da) — serwer zakłada konto albo łączy istniejące i od tej chwili rozpoznaje
+   je po koncie Google. Zaproszenie ważne 30 dni, jednorazowe.
+
+Po zalogowaniu strona daje:
+- **programy do pobrania** z opisem i zrzutem ekranu: EmuStart (Windows), EmuStart na
+  Androida, Lumen. Serwer pobiera najnowsze wydania z GitHuba co 6 godzin, sprawdza podpis
+  wydania i trzyma kopie u siebie (panel → **Programy do pobrania**);
+- **Pokaż kod logowania** — kod QR, link i 8-znakowy kod (jednorazowy, 10 minut) do
+  zalogowania urządzenia tego konta;
+- **hasło konta** (opcjonalne) — do „Mam konto” i do dodania konta na wspólnym urządzeniu.
+
 ## Logowanie urządzeń
 
-Urządzenie łączy się z serwerem **kontem i hasłem** oraz **kluczem urządzenia** (para kluczy
-tworzona na urządzeniu: Windows — TPM, bez niego DPAPI; Android — Android Keystore; klucz
-prywatny nie opuszcza urządzenia). W Ustawieniach EmuStart:
+Urządzenie łączy się z serwerem **kodem logowania** (albo kontem i hasłem) oraz **kluczem
+urządzenia** (para kluczy tworzona na urządzeniu: Windows — TPM, bez niego DPAPI; Android —
+Android Keystore; klucz prywatny nie opuszcza urządzenia). W Ustawieniach EmuStart (i w Lumen):
 
-- **Zaloguj (kod QR)** (telefon) — panel → **Dodaj urządzenie** → zeskanuj kod. Kod niesie
-  adresy serwera, odcisk certyfikatu i jednorazowy kod (10 minut) — bez czekania na
-  zatwierdzenie. PC bez aparatu: w panelu **Kopiuj link** i wklej go w **Zaloguj**.
-- **Zaloguj (adres serwera)** — adres tunelu (prawdziwy certyfikat); prośba czeka na
-  zatwierdzenie.
+- **Zaloguj (kod QR)** (telefon) — strona serwera → **Pokaż kod logowania** (albo panel →
+  **Dodaj urządzenie**) → zeskanuj kod. Kod niesie adresy serwera, odcisk certyfikatu,
+  jednorazowy kod i konto — bez hasła i bez czekania na zatwierdzenie. PC: **Kopiuj link**
+  i wklej go w **Zaloguj**.
+- **Zaloguj (adres serwera)** — adres tunelu (prawdziwy certyfikat), potem:
+  - **Mam kod logowania ze strony serwera** — 8 znaków ze strony; od razu;
+  - **Mam konto i hasło** — tylko konto z hasłem; prośba czeka na zatwierdzenie na innym
+    urządzeniu konta albo w panelu (kod weryfikacyjny musi się zgadzać).
 
-Potem **Mam konto** / **Nowe konto** → nazwa → hasło (co najmniej 10 znaków, wielka litera,
-cyfra, znak specjalny). Prośbę bez kodu QR zatwierdza inne urządzenie konta albo panel
-(kod weryfikacyjny musi się zgadzać); nowe konto — administrator.
+**Nowe konto** nie powstaje w aplikacji (0.49): tylko z zaproszenia (strona serwera) albo
+w panelu (**Dodaj urządzenie** → *nowe konto*).
 
-**Administrator** to cecha konta (panel → Konta). Urządzenia administratora zatwierdzają
-nowe konta, widzą wszystkie konta i **zmieniają grafiki, opisy i logo systemów z PC i
-telefonu** (opcje gry i opcje systemu) — zmiana idzie na serwer i trafia do wszystkich
-urządzeń. Pierwsze konto zalogowane kodem QR z panelu zostaje administratorem samo.
+**Administrator** to cecha konta (panel → Konta). Urządzenia administratora widzą wszystkie
+konta, zatwierdzają „Mam konto” kont bez urządzeń i **zmieniają grafiki, opisy i logo systemów
+z PC i telefonu** (opcje gry i opcje systemu) — zmiana idzie na serwer i trafia do wszystkich
+urządzeń. Pierwsze konto zalogowane kodem logowania, gdy żadne nie jest administratorem,
+zostaje nim samo.
 
 ## Biblioteka na urządzeniach
 

@@ -532,7 +532,6 @@ def _merge_into(account: str, platform: str, game: str, m: dict, b: dict, gdir: 
                 device: str, note: str) -> str:
     """Stany z `src` dołączone do bieżącej paczki stanów (savebundles.merge_states; bieżące
     wygrywają sloty, dołączane dostają wolne numery). Wołający trzyma blokadę gry."""
-    import shutil
     import tempfile
     from emustart import savebundles
     cur = gdir / "bundles" / f"{b['bundle_id']}.zip"

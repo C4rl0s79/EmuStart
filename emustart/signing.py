@@ -21,10 +21,14 @@ import hashlib
 
 # klucz publiczny wydań (Ed25519, 32 bajty, base64); prywatny — tylko w sekrecie CI i kopii właściciela
 RELEASE_PUBKEY = "jySJqARQgXYZI5p3ir/SxLoBkcAhBhAPZEJ2QusFvl8="
+# Lumen (C4rl0s79/Launcher, scripts/sign-release.mjs) — własny klucz i przedrostek wiadomości;
+# serwer sprawdza nim instalator Lumen, zanim da go do pobrania (emustart/clientdist.py)
+LUMEN_PUBKEY = "gis/vRWXJshCMlZp3OuqsZdZsMddRf4ugNsV4v6E9g8="
+PREFIX, LUMEN_PREFIX = "emustart-release-v1", "lumen-release-v1"
 
 
-def message(name: str, sha256_hex: str) -> bytes:
-    return f"emustart-release-v1\n{name}\n{sha256_hex.lower()}".encode("utf-8")
+def message(name: str, sha256_hex: str, prefix: str = PREFIX) -> bytes:
+    return f"{prefix}\n{name}\n{sha256_hex.lower()}".encode("utf-8")
 
 
 def file_sha256(path) -> str:
@@ -42,13 +46,13 @@ def sign(private_b64: str, name: str, sha256_hex: str) -> str:
     return base64.b64encode(key.sign(message(name, sha256_hex))).decode("ascii")
 
 
-def verify(name: str, sha256_hex: str, sig_b64: str, public_b64: str = "") -> bool:
+def verify(name: str, sha256_hex: str, sig_b64: str, public_b64: str = "", prefix: str = PREFIX) -> bool:
     """Czy podpis pliku `name` o skrócie `sha256_hex` pochodzi z klucza wydań."""
     from cryptography.exceptions import InvalidSignature
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
     try:
         pub = Ed25519PublicKey.from_public_bytes(base64.b64decode(public_b64 or RELEASE_PUBKEY))
-        pub.verify(base64.b64decode(sig_b64.strip()), message(name, sha256_hex))
+        pub.verify(base64.b64decode(sig_b64.strip()), message(name, sha256_hex, prefix))
         return True
     except (InvalidSignature, ValueError, TypeError):
         return False

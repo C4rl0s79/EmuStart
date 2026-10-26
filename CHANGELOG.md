@@ -8,6 +8,62 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.49.0] — 2026-10-27
+
+Zakres: strona serwera (`webportal.py`, `web/portal/`), zaproszenia (`invites.py`), konta
+(`accounts.py`), logowanie urządzeń (`enroll.py`, `remote.py`, `public.py`, `server.py`),
+programy do pobrania (`clientdist.py`, `signing.py`), wstrzymanie PCSX2 (`ps2states.py`,
+`emustore.py`), panel (`srvadmin.py`, `web/server.*`), klienci (`api.py`, `netsrc.py`,
+`web/app.js`, `web/options.js`, Android: `Bridge.kt`, `Prefs.kt`), CI (podpis APK).
+Zaktualizuj serwer, PC i telefon (stare aplikacje nie zalogują nowego urządzenia kodem ze
+strony; zalogowane działają dalej).
+
+### Dodane
+- **Strona serwera pod adresem tunelu** (np. `https://emustart.emucloud.org`): animowane logo
+  z pikseli, niebo synthwave z siatką, ekran CRT i **Zaloguj przez Google**. Po zalogowaniu:
+  - **programy do pobrania** z opisem i zrzutem ekranu — EmuStart (Windows), EmuStart na
+    Androida, Lumen;
+  - **Pokaż kod logowania** — kod QR, link i 8 znaków (jednorazowy, 10 minut) do zalogowania
+    urządzenia tego konta, bez hasła i bez czekania;
+  - **hasło konta** (opcjonalne).
+- **Zaproszenia** (panel → Urządzenia i konta → Zaproszenia): adres Google + konto (nowe albo
+  istniejące) → link do wysłania. Wchodzi tylko konto Google o zaproszonym adresie; serwer
+  zakłada albo łączy konto i potem rozpoznaje je po koncie Google. Ważne 30 dni, jednorazowe.
+- **Logowanie Google** (panel → Konfiguracja → Strona serwera): identyfikator i sekret klienta
+  OAuth z Google Cloud; panel pokazuje adres przekierowania do wklejenia w Google.
+- **Programy do pobrania** (panel → Konfiguracja): serwer co 6 godzin pobiera najnowsze wydania
+  EmuStart i Lumen z GitHuba, sprawdza podpis wydania (Lumen — kluczem Lumen) i trzyma kopie
+  u siebie; plik bez poprawnego podpisu nie trafia na stronę. APK ma teraz podpis wydania (`.sig`).
+- **Aplikacja: logowanie kodem** — Zaloguj → link / kod QR ze strony (od razu) albo adres serwera
+  → **Mam kod logowania ze strony serwera** (8 znaków padem) / **Mam konto i hasło**.
+- **Dodaj urządzenie w panelu wybiera konto** (istniejące albo nowe) — kod jest przypisany do
+  konta.
+- **PCSX2: aktualizacja wstrzymana, gdy stany PS2 są wspólne dla PC i telefonu.** Serwer czyta
+  format stanów z paczek zapisów (ostatni z PC i z telefonu). Nowa wersja PCSX2 nie rozchodzi się
+  sama: panel → Emulatory pokazuje „nowa wersja … wstrzymana” z powodem (formaty rozjechane — PC
+  nowszy niż ArmSX2; zgodne albo telefon nowszy — aktualizacja możliwa, ale stany z obecnej
+  wersji mogą przestać działać) i przycisk **Zaktualizuj mimo to** / **Zaktualizuj**
+  z ostrzeżeniem. „Pobierz ponownie” wstrzymania nie omija.
+
+### Poprawione
+- Programy do pobrania: plik poprzedniej wersji pobierany właśnie ze strony (Windows nie pozwala
+  go usunąć) nie psuje aktualizacji — nowa wersja trafia na stronę, stary plik znika później.
+- Serwer bez folderu profili nie traktuje folderów bieżącego katalogu jako kont.
+
+### Zmienione
+- Kod logowania (strona serwera i panel) jest przypisany do konta — urządzenie nie wybiera
+  konta ani nie podaje hasła.
+- Hasło konta jest opcjonalne; „Mam konto” działa tylko dla konta z hasłem.
+
+### Usunięte (bezpieczeństwo)
+- **Nowe konto z aplikacji** — wszystkie drogi: prośba „Nowe konto” przy logowaniu, „Inny
+  użytkownik → Utwórz konto” (`/v1/enroll/account`, `/v1/enroll/account_poll`), „Nowy profil”
+  z hasłem (`PUT /v1/profiles/create`) i zapis pliku do nieistniejącego folderu konta (urządzenie
+  administratora zakładało tak konto bez hasła). Nowe konto: zaproszenie albo panel. Bez serwera
+  „Nowy profil” tworzy profil lokalny jak dotąd. Prośby o nowe konto zapisane przez starszy
+  serwer znikają przy starcie.
+- „Mam konto” dla konta bez hasła (ustawiało hasło przy zatwierdzeniu) — teraz kod ze strony.
+
 ## [0.48.3] — 2026-10-26
 
 Zakres: ustawienia emulatorów w profilu (`profiles.py`), przypisania pada (`ingame.py`). Zaktualizuj PC.

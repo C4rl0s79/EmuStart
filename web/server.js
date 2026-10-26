@@ -99,9 +99,20 @@ async function refreshEmu() {
     `<tr><td>${esc(r.label)}</td><td class="muted">${esc(r.systems.join(", ") || "— (nieużywany)")}</td>` +
     `<td>${esc(r.version || "—")}${r.previous ? `<div class="muted">poprzednia: ${esc(r.previous)}</div>` : ""}` +
     `${r.error ? `<div style="color:var(--err)">${esc(r.error)}</div>` : ""}</td>` +
+    `${r.held ? `<div style="color:var(--warn)">nowa wersja ${esc(r.held.version)} wstrzymana — ${esc(r.held.text)}</div>` : ""}</td>` +
     `<td class="n">${r.size ? fmtBytes(r.size) : ""}</td><td class="muted">${r.updated ? ago(r.updated) : ""}</td>` +
-    `<td class="n"><button data-emu="${esc(r.item)}" ${j.running ? "disabled" : ""}>Pobierz ponownie</button></td></tr>`).join("")
+    `<td class="n">${r.held ? `<button class="danger" data-held="${esc(r.item)}" ${j.running ? "disabled" : ""}>` +
+      `${r.held.kind === "diverged" ? "Zaktualizuj mimo to" : "Zaktualizuj"}</button> ` : ""}` +
+    `<button data-emu="${esc(r.item)}" ${j.running ? "disabled" : ""}>Pobierz ponownie</button></td></tr>`).join("")
     : `<tr><td colspan="6" class="muted">Biblioteka nie ma jeszcze systemów — najpierw foldery z grami (Konfiguracja).</td></tr>`;
+  $("emuRows").querySelectorAll("[data-held]").forEach((b) => b.addEventListener("click", async () => {
+    const row = d.items.find((x) => x.item === b.dataset.held);
+    if (!confirm(`Zaktualizować ${row.label} do ${row.held.version}?\n\n${row.held.text}\n\n` +
+                 "Stany zapisane w obecnej wersji mogą przestać się wczytywać. Karty pamięci działają we wszystkich wersjach.")) return;
+    const r = await admin("emu_update", { items: [row.item], allow_held: [row.item] }).catch(() => null);
+    msg(r?.ok ? `Aktualizuję ${row.label}…` : r?.reason || "Serwer nie odpowiada.", r?.ok);
+    refreshEmu();
+  }));
   $("emuRows").querySelectorAll("[data-emu]").forEach((b) => b.addEventListener("click", async () => {
     const r = await admin("emu_update", { items: [b.dataset.emu], force: true }).catch(() => null);
     msg(r?.ok ? "Pobieram ponownie…" : r?.reason || "Serwer nie odpowiada.", r?.ok);
@@ -633,11 +644,24 @@ async function refreshAccounts() {
   if (!r) return;
   $("accounts").innerHTML = r.accounts.length ? r.accounts.map((a) =>
     `<tr><td>${esc(a.name)}${a.admin ? ' <span class="muted">· administrator</span>' : ""}</td>` +
-    `<td>${a.password ? `ustawione <span class="muted">${a.set ? ago(a.set) : ""}</span>` : "<b>brak</b>"}</td>` +
+    `<td>${a.password ? `ustawione <span class="muted">${a.set ? ago(a.set) : ""}</span>` : '<span class="muted">brak</span>'}</td>` +
+    `<td>${a.google ? `${esc(a.google)} <button data-gun="${esc(a.name)}">Odłącz</button>` : '<span class="muted">—</span>'}</td>` +
     `<td class="n">${a.devices}</td><td class="n"><button data-pw="${esc(a.name)}">${a.password ? "Nowe hasło" : "Ustaw hasło"}</button> ` +
     `<button data-adm="${esc(a.name)}" data-on="${a.admin ? 1 : 0}">${a.admin ? "Odbierz admina" : "Administrator"}</button> ` +
     `<button data-files="${esc(a.name)}">Pliki i kopie</button></td></tr>`).join("")
-    : `<tr><td colspan="4" class="muted">Brak kont.</td></tr>`;
+    : `<tr><td colspan="5" class="muted">Brak kont.</td></tr>`;
+  lastAccounts = r.accounts.map((a) => a.name);
+  const sel = $("pairAcct"), was = sel.value;
+  sel.innerHTML = lastAccounts.map((n) => `<option value="${esc(n)}">${esc(n)}</option>`).join("") +
+    '<option value="">— nowe konto —</option>';
+  sel.value = sel.dataset.touched && (was === "" || lastAccounts.includes(was)) ? was : (lastAccounts[0] ?? "");
+  $("pairNew").hidden = sel.value !== "";
+  $("invAccts").innerHTML = lastAccounts.map((n) => `<option value="${esc(n)}">`).join("");
+  $("accounts").querySelectorAll("[data-gun]").forEach((b) => b.addEventListener("click", async () => {
+    if (!confirm(`Odłączyć konto Google od konta „${b.dataset.gun}”? Nie zaloguje się nim na stronie serwera (urządzenia konta działają dalej).`)) return;
+    await admin("account_google_unlink", { name: b.dataset.gun }).catch(() => null);
+    refreshAccounts();
+  }));
   $("accounts").querySelectorAll("[data-pw]").forEach((b) => b.addEventListener("click", () => askAccountPassword(b.dataset.pw)));
   $("accounts").querySelectorAll("[data-files]").forEach((b) => b.addEventListener("click", () => openAccount(b.dataset.files)));
   $("accounts").querySelectorAll("[data-adm]").forEach((b) => b.addEventListener("click", async () => {
@@ -711,10 +735,18 @@ $("bBakSave").addEventListener("click", async () => {
   msg(r?.ok ? "Ustawienia kopii zapisane." : r?.reason || "Serwer nie odpowiada.", r?.ok);
 });
 
-let pairTimer = null;
+let pairTimer = null, lastAccounts = [];
+$("pairAcct").addEventListener("change", () => {
+  $("pairAcct").dataset.touched = "1";
+  $("pairNew").hidden = $("pairAcct").value !== "";
+});
 $("bPair").addEventListener("click", async () => {
-  const r = await admin("login_code").catch(() => null);
+  const fresh = $("pairAcct").value === "";
+  const account = fresh ? $("pairNew").value.trim() : $("pairAcct").value;
+  if (!account) return msg("Wybierz konto albo wpisz nazwę nowego.");
+  const r = await admin("login_code", { account, create: fresh }).catch(() => null);
   if (!r?.ok) return msg(r?.reason || "Serwer nie odpowiada.");
+  $("pairFor").textContent = `„${r.account}”` + (fresh ? " (nowe — powstanie przy zalogowaniu)" : "");
   $("pairQr").innerHTML = r.svg || "";
   $("pairQr").hidden = !r.svg;
   $("pairCode").textContent = r.pretty;
@@ -739,6 +771,65 @@ $("bPairCopy").addEventListener("click", async () => {
   try { await navigator.clipboard.writeText($("pairLink").value); msg("Link skopiowany — wklej go w EmuStart na komputerze: Ustawienia → Zaloguj.", true); }
   catch (e) { $("pairLink").select(); }
 });
+
+/* ── strona serwera: zaproszenia, Google, programy (emustart/webportal.py, invites.py, clientdist.py) ── */
+const APP_NAMES = { "emustart-windows": "EmuStart (Windows)", "emustart-android": "EmuStart (Android)", "lumen-windows": "Lumen (Windows)" };
+async function refreshInvites() {
+  const r = await admin("invites").catch(() => null);
+  if (!r?.ok) return;
+  const g = r.google;
+  $("gRedirect").textContent = g.redirect_uri || "— (najpierw adres tunelu)";
+  $("gState").textContent = g.ready ? "działa — zaproszeni mogą się logować" :
+    !g.redirect_uri ? "brak adresu tunelu" : !g.client_id ? "nie skonfigurowane" : "brak sekretu klienta";
+  if (document.activeElement !== $("gId")) $("gId").value = g.client_id || "";
+  $("gSecret").placeholder = g.secret ? "Client secret (zapisany — wpisz, żeby zmienić)" : "Client secret";
+  $("invWarn").textContent = g.ready ? "" : "Logowanie Google nie jest jeszcze skonfigurowane (Konfiguracja → Strona serwera) — zaproszeni nie wejdą.";
+  $("invites").innerHTML = r.invites.length ? r.invites.map((i) =>
+    `<tr><td>${esc(i.email)}</td><td>${esc(i.used_account || i.account)}</td>` +
+    `<td class="muted">${i.used ? `wykorzystane ${ago(i.used)}` : i.expired ? "wygasło" : `czeka (wysłane ${ago(i.created)})`}</td>` +
+    `<td class="n"><button class="danger" data-inv="${esc(i.id)}">Usuń</button></td></tr>`).join("")
+    : `<tr><td colspan="4" class="muted">Brak zaproszeń.</td></tr>`;
+  $("invites").querySelectorAll("[data-inv]").forEach((b) => b.addEventListener("click", async () => {
+    await admin("invite_delete", { id: b.dataset.inv }).catch(() => null);
+    refreshInvites();
+  }));
+}
+$("bInvite").addEventListener("click", async () => {
+  const r = await admin("invite_create", { email: $("invEmail").value, account: $("invAcct").value }).catch(() => null);
+  if (!r?.ok) return msg(r?.reason || "Serwer nie odpowiada.");
+  $("invLink").value = r.link;
+  $("invLinkBox").hidden = false;
+  $("invEmail").value = ""; $("invAcct").value = "";
+  msg(`Zaproszenie dla ${r.invite.email} → konto „${r.invite.account}”. Skopiuj link i wyślij go zaproszonemu.`, true);
+  refreshInvites();
+});
+$("bInvCopy").addEventListener("click", async () => {
+  try { await navigator.clipboard.writeText($("invLink").value); msg("Link zaproszenia skopiowany.", true); }
+  catch (e) { $("invLink").select(); }
+});
+$("bGoogle").addEventListener("click", async () => {
+  const r = await admin("google_set", { client_id: $("gId").value, client_secret: $("gSecret").value }).catch(() => null);
+  msg(r?.ok ? (r.ready ? "Logowanie Google zapisane — działa." : "Zapisane.") : r?.reason || "Serwer nie odpowiada.", r?.ok);
+  $("gSecret").value = "";
+  refreshInvites();
+});
+async function refreshClients() {
+  const r = await admin("clients_status").catch(() => null);
+  if (!r?.ok) return;
+  $("clientRows").innerHTML = Object.entries(r.apps).map(([id, a]) =>
+    `<tr><td>${esc(APP_NAMES[id] || id)}</td><td>${esc(a.version || "—")}` +
+    `${a.error ? `<div style="color:var(--err)">${esc(a.error)}</div>` : ""}</td>` +
+    `<td class="n">${a.size ? fmtBytes(a.size) : ""}</td><td class="muted">${a.updated ? ago(a.updated) : (a.ready ? "" : "jeszcze nie")}</td></tr>`).join("");
+  $("bClients").disabled = r.job.running;
+  $("clientJob").textContent = r.job.running ? "sprawdzam…" : r.job.log.join(" · ");
+}
+$("bClients").addEventListener("click", async () => {
+  const r = await admin("clients_refresh").catch(() => null);
+  msg(r?.ok ? "Sprawdzam wydania programów…" : r?.reason || "Serwer nie odpowiada.", r?.ok);
+  setTimeout(refreshClients, 1500);
+});
+refreshInvites(); refreshClients();
+setInterval(refreshInvites, 30000); setInterval(refreshClients, 15000);
 
 /* ── dostęp z internetu: port publiczny przez UPnP (emustart/public.py) ── */
 let pubOn = false;

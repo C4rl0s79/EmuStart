@@ -86,30 +86,26 @@ class ProfileExists(ValueError):
         self.name = name
 
 
-def create(name: str, color: str = "", cfg: dict | None = None, password: str = "") -> dict:
-    """Nowy profil = konto na serwerze z hasłem (emustart/accounts.py); serwer niedostępny —
-    profil lokalny, konto powstanie z pierwszym zapisem. Nazwa zajęta → ProfileExists."""
+def create(name: str, color: str = "", cfg: dict | None = None) -> dict:
+    """Nowy profil lokalny (bez serwera EmuStart). Z serwerem konto nie powstaje na
+    urządzeniu (0.49): nowe konto — zaproszenie administratora (strona serwera) albo panel;
+    istniejące konto innego użytkownika — jego hasło (account_join). Nazwa zajęta → ProfileExists."""
     from emustart import pinauth
     _ensure_columns()
     name = name.strip()[:32]
     if not name:
         raise ValueError("Pusta nazwa profilu.")
     local = pinauth.find([p["name"] for p in all_profiles()] + [p["nas_name"] for p in all_profiles()], name)
-    online = cfg is not None and nas_online(cfg)
-    nas_name, token = _safe_name(name), ""
-    if online:
-        fs = nasfs.backend(cfg)
-        taken = pinauth.find(_nas_profiles(fs), name)
+    if cfg is not None and cfg.get("server_key"):
+        fs = nasfs.backend(cfg) if nas_online(cfg) else None
+        taken = pinauth.find(_nas_profiles(fs), name) if fs else ""
         if taken or local:
-            raise ProfileExists(taken or local)
-        r = fs.profile_op("create", {"name": name, "password": password})
-        if r.get("exists"):
-            raise ProfileExists(r.get("name") or name)
-        if not r.get("ok"):
-            raise ValueError(r.get("error") or "Serwer nie założył konta.")
-        nas_name, token = r["name"], r["token"]
-    elif local:
+            raise ProfileExists(taken or local)        # istniejące konto — jego hasło
+        raise ValueError("Nowe konto zakłada się z zaproszenia administratora (strona serwera) albo w panelu "
+                         "serwera — potem dodaj je tutaj (Inny użytkownik → nazwa i hasło).")
+    if local:
         raise ProfileExists(local)
+    nas_name, token = _safe_name(name), ""
     with library.db() as c:
         cur = c.execute("INSERT INTO profiles(name, nas_name, color, pin_token, unlocked) VALUES(?,?,?,?,?)",
                         (name, nas_name, color, token, 0))

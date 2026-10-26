@@ -94,7 +94,8 @@ class Bridge(private val act: MainActivity) {
         "save_settings" -> { saveSettings(a.getJSONObject(0)); JSONObject().put("ok", true) }
         "server_scan" -> scanQr()
         "server_logout" -> logout(a.optBoolean(0, false))
-        "server_enroll" -> enrollStart(a.optString(0, ""), a.optString(1, ""), a.optString(2, ""), a.optString(3, ""))
+        "server_enroll" -> enrollStart(a.optString(0, ""), a.optString(1, ""), a.optString(2, ""), a.optString(3, ""),
+                                       a.optString(4, ""))
         "server_enroll_poll" -> enrollPoll()
         "server_enroll_cancel" -> { enrollCancel(); JSONObject().put("ok", true) }
         "enroll_pending" -> enrollPending()
@@ -139,8 +140,6 @@ class Bridge(private val act: MainActivity) {
             pool.execute { pushLook() }             // wygląd na koncie — inne telefony tego konta też
             JSONObject().put("ok", true)
         }
-        "account_request" -> accountRequest(a.getString(0), a.getString(1))
-        "account_requests_poll" -> accountRequestsPoll()
         "quit" -> { act.runOnUiThread { act.finishAndRemoveTask() }; null }
         "copy_status" -> JSONArray()
         "post_status" -> saves.busy
@@ -149,7 +148,7 @@ class Bridge(private val act: MainActivity) {
         "system_info" -> systemInfo(a.optString(0, ""))
         "profiles_list" -> profilesList()
         "profile_select", "profile_setup" -> selectProfile(a.getInt(0))
-        "profile_create" -> createProfile(a.getString(0), a.optString(1, ""))
+        "profile_create" -> createProfile(a.getString(0))
         "profile_join" -> joinProfile(a.getString(0), a.getString(1))
         "profile_login" -> loginProfile(a.getInt(0), a.getString(1))
         "profile_set_password" -> setPassword(a.getInt(0), a.getString(1), a.optString(2, ""))
@@ -367,52 +366,6 @@ class Bridge(private val act: MainActivity) {
                 prefs.lookTime > t -> pushLook()
             }
         } catch (e: Exception) { Log.w(tag, "wygląd z serwera: $e") }
-    }
-
-    // ── nowe konto z tego telefonu (Inny użytkownik → nazwa, której nie ma) — zatwierdza administrator ──
-    private fun accountRequest(name: String, password: String): JSONObject {
-        val r = try { server.postAuthed("/v1/enroll/account", JSONObject().put("account", name).put("password", password)) }
-            catch (e: Exception) { return JSONObject().put("ok", false).put("reason", explain(e)) }
-        if (!r.optBoolean("ok")) return JSONObject().put("ok", false)
-            .put("reason", r.optString("reason", r.optString("error", "Serwer nie przyjął prośby."))).put("exists", r.optBoolean("exists"))
-        val acc = r.optString("account", name)
-        if (r.optString("status") == "approved") {
-            prefs.setToken(acc, r.optString("token"))
-            try { loadProfiles() } catch (e: Exception) { }
-            return JSONObject().put("ok", true).put("status", "approved")
-                .put("profile", JSONObject().put("id", profList.indexOf(acc) + 1).put("name", acc))
-        }
-        val pend = try { JSONArray(prefs.accountRequests) } catch (e: Exception) { JSONArray() }
-        val keep = JSONArray()
-        for (i in 0 until pend.length()) pend.optJSONObject(i)?.takeIf { it.optString("account") != acc }?.let { keep.put(it) }
-        keep.put(JSONObject().put("rid", r.optString("rid")).put("account", acc).put("code", r.optString("pretty")))
-        prefs.accountRequests = keep.toString()
-        return JSONObject().put("ok", true).put("status", "pending").put("account", acc).put("code", r.optString("pretty"))
-    }
-
-    private fun accountRequestsPoll(): JSONObject {
-        val done = JSONArray()
-        val pend = try { JSONArray(prefs.accountRequests) } catch (e: Exception) { JSONArray() }
-        if (pend.length() == 0 || !prefs.configured) return JSONObject().put("ok", true).put("done", done)
-        val keep = JSONArray()
-        for (i in 0 until pend.length()) {
-            val p = pend.optJSONObject(i) ?: continue
-            val r = try { server.postAuthed("/v1/enroll/account_poll", JSONObject().put("rid", p.optString("rid"))) }
-                catch (e: Exception) { JSONObject() }
-            when (if (r.optBoolean("ok")) r.optString("status") else "error") {
-                "approved" -> if (r.optString("token").isNotEmpty()) {
-                    prefs.setToken(r.optString("account", p.optString("account")), r.optString("token"))
-                    done.put(JSONObject().put("account", p.optString("account")).put("status", "approved"))
-                } else keep.put(p)
-                "denied", "expired" -> done.put(JSONObject().put("account", p.optString("account")).put("status", r.optString("status")))
-                else -> keep.put(p)
-            }
-        }
-        if (keep.length() != pend.length()) {
-            prefs.accountRequests = keep.toString()
-            try { loadProfiles() } catch (e: Exception) { }
-        }
-        return JSONObject().put("ok", true).put("done", done)
     }
 
     /** Opis platformy do karuzeli (producent, lata, nośnik, opis) — z serwera, jak na komputerze. */
@@ -832,11 +785,13 @@ class Bridge(private val act: MainActivity) {
         return out
     }
 
-    // ── logowanie na serwerze (emustart/enroll.py): konto + hasło + klucz urządzenia ──
-    private data class Login(val eps: List<Triple<String, String, Boolean>>, val fp: String, val code: String)
+    // ── logowanie na serwerze (emustart/enroll.py): kod logowania (albo konto + hasło) + klucz urządzenia ──
+    private data class Login(val eps: List<Triple<String, String, Boolean>>, val fp: String, val code: String,
+                             val account: String = "")
 
-    /** Link z kodu QR panelu (adresy, odcisk certyfikatu, kod jednorazowy) albo adres tunelu.
-     *  Adres IP bez kodu QR nie ma czym sprawdzić certyfikatu — tylko domena z prawdziwym. */
+    /** Link logowania — kod QR ze strony serwera / z panelu (adresy, odcisk certyfikatu, kod
+     *  jednorazowy, konto) — albo adres tunelu. Adres IP bez kodu QR nie ma czym sprawdzić
+     *  certyfikatu — tylko domena z prawdziwym. */
     private fun parseLogin(text0: String): Pair<Login?, String> {
         val text = text0.trim()
         if (text.lowercase().startsWith("emustart://login")) {
@@ -850,10 +805,10 @@ class Bridge(private val act: MainActivity) {
                     .map { Triple(it.getString("u").trimEnd('/'), it.optString("k"), it.optInt("ca", 0) == 1) }
                 val fp = d.optString("f").lowercase()
                 if (eps.isEmpty() || !Regex("[0-9a-f]{64}").matches(fp)) throw IllegalArgumentException("brak adresów")
-                Pair(Login(eps, fp, d.optString("c")), "")
+                Pair(Login(eps, fp, d.optString("c"), d.optString("a")), "")
             } catch (e: Exception) { Pair(null, "To nie jest kod logowania EmuStart.") }
         }
-        if (text.isBlank()) return Pair(null, "Podaj adres serwera albo zeskanuj kod QR z panelu.")
+        if (text.isBlank()) return Pair(null, "Podaj adres serwera albo zeskanuj kod QR ze strony serwera.")
         if (text.lowercase().startsWith("http://"))
             return Pair(null, "Tylko połączenie szyfrowane — podaj adres https (tunel) albo użyj kodu QR z panelu.")
         val u = (if (text.lowercase().startsWith("https://")) text else "https://$text").trimEnd('/')
@@ -864,13 +819,28 @@ class Bridge(private val act: MainActivity) {
         return Pair(Login(listOf(Triple(u, "tunnel", true)), "", ""), "")
     }
 
-    private fun enrollStart(text: String, mode: String, account: String, password: String): JSONObject {
-        if (account.isBlank() || mode !in setOf("new", "existing"))
-            return JSONObject().put("ok", false).put("reason", "Podaj nazwę konta.")
-        // hasło konta (emustart/accounts.py) idzie tylko w prośbie — telefon go nie zapisuje
-        if (password.isEmpty()) return JSONObject().put("ok", false).put("reason", "Podaj hasło konta.")
-        val (login, why) = parseLogin(text)
-        if (login == null) return JSONObject().put("ok", false).put("reason", why)
+    /** mode "code" — kod logowania (z linku / kodu QR albo wpisany: `code`), konto z kodu, bez
+     *  czekania; "existing" — „Mam konto”: nazwa i hasło (hasło idzie tylko w prośbie — telefon
+     *  go nie zapisuje), zatwierdza urządzenie konta albo administrator. */
+    private fun enrollStart(text: String, mode: String, account0: String, password: String, code0: String): JSONObject {
+        val (login0, why) = parseLogin(text)
+        if (login0 == null) return JSONObject().put("ok", false).put("reason", why)
+        var account = account0.trim()
+        val login: Login
+        when (mode) {
+            "code" -> {
+                login = login0.copy(code = login0.code.ifEmpty { code0.trim() })
+                if (login.code.isEmpty()) return JSONObject().put("ok", false).put("reason", "Podaj kod logowania ze strony serwera.")
+                account = login.account.ifEmpty { account }
+            }
+            "existing" -> {
+                if (account.isBlank()) return JSONObject().put("ok", false).put("reason", "Podaj nazwę konta.")
+                if (password.isEmpty()) return JSONObject().put("ok", false).put("reason", "Podaj hasło konta.")
+                login = login0
+            }
+            else -> return JSONObject().put("ok", false)
+                .put("reason", "Nowe konto zakłada się z zaproszenia — zaloguj się na stronie serwera.")
+        }
         val old = prefs.enrollPending.takeIf { it.isNotEmpty() }?.let { JSONObject(it) }
         if (old != null && (old.optString("account") != account || old.optString("mode") != mode || login.code.isNotEmpty())) enrollCancel()
         val keep = old != null && prefs.enrollPending.isNotEmpty()
@@ -880,7 +850,8 @@ class Bridge(private val act: MainActivity) {
         } catch (e: Exception) {
             return JSONObject().put("ok", false).put("reason", "Nie udało się utworzyć klucza urządzenia: ${e.message}")
         }
-        val body = JSONObject().put("mode", mode).put("account", account).put("password", password)
+        val body = JSONObject().put("mode", mode).put("account", if (mode == "existing") account else "")
+            .put("password", if (mode == "existing") password else "")
             .put("name", saves.device).put("class", "phone").put("app", "EmuStart Android").put("version", BuildConfig.VERSION_NAME)
             .put("pubkey", pem).put("hw", server.hwId).put("login_code", login.code)
         var r = JSONObject().put("ok", false).put("reason", "Serwer nie odpowiada.")
@@ -901,7 +872,10 @@ class Bridge(private val act: MainActivity) {
         Log.i(tag, "prośba o zalogowanie na ${used.first} ($mode, konto $account, klucz: $kind)")
         val out = JSONObject().put("ok", true).put("code", r.getString("pretty")).put("account", account)
             .put("url", used.first).put("key", kind)
-        if (r.optString("status") == "approved") out.put("status", enrollPoll().optString("status"))   // kod z panelu
+        if (r.optString("status") == "approved") {                  // kod logowania — od razu
+            val p = enrollPoll()
+            out.put("status", p.optString("status")).put("account", p.optString("account").ifEmpty { account })
+        }
         return out
     }
 
@@ -939,7 +913,7 @@ class Bridge(private val act: MainActivity) {
             }
             "denied", "expired" -> enrollCancel()
         }
-        return JSONObject().put("ok", true).put("status", st).put("account", p.optString("account"))
+        return JSONObject().put("ok", true).put("status", st).put("account", r.optString("account", p.optString("account")))
             .put("code", p.optString("code")).put("reason", r.optString("reason"))
     }
 
@@ -1273,15 +1247,13 @@ class Bridge(private val act: MainActivity) {
         return JSONObject().put("ok", true).put("profile", JSONObject().put("id", profList.indexOf(name) + 1).put("name", name))
     }
 
-    private fun createProfile(name: String, password: String): JSONObject = try {
-        if (profPin.isEmpty() && server.profiles() == null) {
-            // starszy serwer: profil bez hasła, jak dotąd
-            val n = saves.createProfile(name)
-            profList = saves.profiles()
-            JSONObject().put("ok", true).put("profile", JSONObject().put("id", profList.indexOf(n) + 1).put("name", n))
-        } else opResult(name, server.profileOp("create", JSONObject().put("name", name).put("password", password)))
-    } catch (e: Exception) {
-        JSONObject().put("ok", false).put("reason", if (e is IllegalArgumentException) e.message else explain(e))
+    /** Nowe konto nie powstaje na telefonie (0.49) — zaproszenie albo panel serwera; nazwa
+     *  istniejącego konta → hasło tego konta (joinProfile). */
+    private fun createProfile(name: String): JSONObject {
+        val taken = try { saves.profiles().firstOrNull { it.equals(name.trim(), true) } } catch (e: Exception) { null }
+        if (taken != null) return JSONObject().put("ok", false).put("exists", taken).put("reason", "Profil „$taken” już istnieje.")
+        return JSONObject().put("ok", false).put("reason", "Nowe konto zakłada się z zaproszenia administratora (strona " +
+            "serwera) albo w panelu serwera — potem dodaj je tutaj (Inny użytkownik → nazwa i hasło).")
     }
 
     /** Konto innego użytkownika na tym telefonie — z jego hasłem. */
@@ -1298,12 +1270,7 @@ class Bridge(private val act: MainActivity) {
         val n = profList.getOrNull(id - 1) ?: return JSONObject().put("ok", false).put("reason", "Nie ma takiego profilu.")
         return try {
             val body = JSONObject().put("name", n).put("password", password).put("old", old)
-            var r = server.profileOp("password", body)
-            if (r.optString("error").contains("Nie ma konta")) {
-                saves.createProfile(n)               // konto jeszcze bez folderu
-                r = server.profileOp("password", body)
-            }
-            opResult(n, r)
+            opResult(n, server.profileOp("password", body))
         } catch (e: Exception) { JSONObject().put("ok", false).put("reason", explain(e)) }
     }
 

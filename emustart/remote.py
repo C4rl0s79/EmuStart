@@ -102,6 +102,22 @@ def _trust() -> dict:
     return {"endpoints": endpoints(), "tls": {"port": TLS["port"], "fp": TLS["fp"]} if TLS else None}
 
 
+def login_link(code: str, account: str, internet_only: bool = False) -> str:
+    """Link logowania aplikacji (kod QR / do wklejenia): adresy serwera, odcisk certyfikatu
+    (urządzenie od razu łączy się szyfrowanym, przypiętym połączeniem), jednorazowy kod i konto,
+    do którego kod jest przypisany (emustart/enroll.py). `internet_only` — strona serwera:
+    bez adresów sieci lokalnej i Tailscale (te urządzenie pozna po zalogowaniu). '' — brak
+    adresów albo certyfikatu."""
+    import base64
+    eps = [e for e in endpoints() if not internet_only or e.get("kind") in ("public", "tunnel")]
+    if not eps or not TLS:
+        return ""
+    data = {"v": 1, "n": socket.gethostname(), "f": TLS["fp"], "c": code, "a": account,
+            "e": [{"u": e["url"], "k": e.get("kind", ""), **({"ca": 1} if e.get("ca") else {})} for e in eps]}
+    raw = base64.urlsafe_b64encode(json.dumps(data, separators=(",", ":"), ensure_ascii=False).encode()).decode()
+    return "emustart://login?d=" + raw.rstrip("=")
+
+
 def kind_of(host: str) -> str:
     """lan / tailscale / public — rodzaj adresu (kolejność wyboru w klientach)."""
     import ipaddress
@@ -155,7 +171,7 @@ def _client_app(handler, d: dict) -> str:
 
 def enroll_flow(handler, op: str) -> None:
     """Zalogowanie urządzenia i logowanie podpisem (emustart/enroll.py):
-    POST /v1/enroll/request {mode, account, password, name, class, version, pubkey[, login_code]}
+    POST /v1/enroll/request {mode: code|existing, login_code | account + password, name, class, version, pubkey}
     POST /v1/enroll/poll {rid}                                               — bez klucza
     POST /v1/auth/challenge {device}, /v1/auth/token {device, nonce, sig}    — bez klucza
     POST /v1/enroll/pending, /v1/enroll/decide {id, allow, games}            — z kluczem"""
@@ -184,20 +200,6 @@ def enroll_flow(handler, op: str) -> None:
     if not authorized(handler):
         return _json(handler, {"ok": False, "reason": "brak lub zły klucz"}, 401)
     viewer = getattr(handler, "device", "")
-    if op == "account":                     # nowe konto z zalogowanego urządzenia (inny użytkownik)
-        from emustart import public as _pub
-        r = enroll.request_account(viewer, str(d.get("account", "")), str(d.get("password", "")),
-                                   _pub.client_ip(handler), profile_names(), create_account)
-        if r.get("status") == "approved":
-            from emustart import accounts
-            r["token"] = accounts.token(_secret(), r["account"])
-        return _json(handler, r, 200 if r.get("ok") else 400)
-    if op == "account_poll":
-        r = enroll.poll_account(str(d.get("rid", "")), viewer)
-        if r.get("status") == "approved":
-            from emustart import accounts
-            r["token"] = accounts.token(_secret(), r["account"])     # dostęp tego urządzenia do konta
-        return _json(handler, r)
     if op == "logout":                      # urządzenie wylogowuje się samo (unieważnienie)
         from emustart import devices
         return _json(handler, {"ok": bool(viewer) and devices.revoke(viewer)})
@@ -478,6 +480,12 @@ def _nas(handler, method: str, parts: list) -> None:
         if r and not (_scope_ok(handler, r.replace("\\", "/").split("/")[0])
                       and _profile_ok(handler, r.replace("\\", "/").split("/")[0])):
             return _json(handler, {"error": "konto wymaga hasła", "pin": True}, 403)
+    # zapis nie zakłada konta (0.49): nowe konto — zaproszenie albo panel serwera; folder konta
+    # zakłada tylko serwer (emustart/remote.py: create_account)
+    if method == "PUT" and rel and getattr(handler, "device", "") and \
+            not (NAS_ROOT / rel.replace("\\", "/").split("/")[0]).is_dir():
+        return _json(handler, {"error": "Nie ma takiego konta — nowe konto: zaproszenie albo panel serwera.",
+                               "missing": True}, 404)
     if method == "GET" and op == "scan":
         files = {k: list(v) for k, v in nasfs.scan_dir(target).items() if not _is_auth(k)}
         return _json(handler, {"files": files})
@@ -675,6 +683,8 @@ def _profile_ok(handler, profile: str) -> bool:
 
 def profile_names() -> list:
     """Profile w folderze profili (bez przeniesionych po zmianie nazwy)."""
+    if NAS_ROOT is None:
+        return []                            # os.scandir(None) czytałby bieżący folder procesu
     try:
         ents = [e for e in os.scandir(NAS_ROOT) if e.is_dir() and not e.name.startswith((".", "_"))]
     except OSError:
@@ -701,33 +711,16 @@ def _profiles_put(handler, op: str) -> None:
 
     login    — hasło konta → token konta (inny użytkownik na tym urządzeniu);
                konto bez hasła: needs_password
-    create   — nowe konto z hasłem (urządzenie administratora); nazwa zajęta → 409
     password — ustawienie hasła (konto bez hasła: urządzenie tego konta albo administrator)
                albo zmiana (z dotychczasowym `old`)
     """
-    from emustart import accounts, nasfs, public
+    from emustart import accounts, public
     d = _body(handler)
     if NAS_ROOT is None:
         return _json(handler, {"error": "serwer nie ma folderu profili"}, 404)
-    fs = nasfs.DirFs(NAS_ROOT)
     wanted, pw = str(d.get("name") or "").strip(), str(d.get("password") or "")
     ip = public.client_ip(handler)
     existing = _find_account(wanted)
-    if op == "create":
-        if _scope(handler):
-            return _json(handler, {"error": "To urządzenie ma dostęp tylko do swojego konta."}, 403)
-        if existing:
-            return _json(handler, {"error": f"Profil „{existing}” już istnieje.", "exists": True,
-                                   "name": existing}, 409)
-        name = _safe_profile_name(wanted)
-        if not name:
-            return _json(handler, {"error": "Zła nazwa profilu."}, 400)
-        why = accounts.set_password(name, pw, by=_who(handler))
-        if why:
-            return _json(handler, {"error": why}, 400)
-        fs.write(f"{name}/emustart.json", b"{}")
-        log.info("nowe konto %s (z hasłem)", name)
-        return _json(handler, {"ok": True, "name": name, "token": accounts.token(_secret(), name)})
     if not existing:
         return _json(handler, {"error": f"Nie ma konta „{wanted}”.", "missing": True}, 404)
     if op == "login":

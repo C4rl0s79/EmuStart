@@ -350,8 +350,53 @@ def accounts_list(_api) -> dict:
     for low, name in sorted(names.items()):
         rec = accounts.record(name) or {}
         out.append({"name": name, "password": bool(rec.get("hash")), "set": rec.get("set", 0),
-                    "admin": bool(rec.get("admin")), "devices": len(devices.of_account(name))})
+                    "admin": bool(rec.get("admin")), "devices": len(devices.of_account(name)),
+                    "google": rec.get("google_email", "")})
     return {"ok": True, "accounts": out, "rules": accounts.RULES}
+
+
+def account_google_unlink(_api, args: dict) -> dict:
+    """Panel: konto przestaje logować się na stronie serwera tym kontem Google."""
+    from emustart import accounts
+    return {"ok": accounts.unlink_google(str(args.get("name", "")), "panel serwera")}
+
+
+# ── strona serwera: zaproszenia, logowanie Google, programy (emustart/webportal.py) ──
+def invites_list(_api) -> dict:
+    from emustart import invites, webportal
+    return {"ok": True, "invites": invites.listing(), "google": webportal.google_status()}
+
+
+def invite_create(_api, args: dict) -> dict:
+    """Zaproszenie adresu Google do konta → link do strony serwera (administrator wysyła go sam)."""
+    from emustart import invites, webportal
+    base = webportal.base_url()
+    if not base:
+        return {"ok": False, "reason": "Najpierw ustaw adres tunelu (Konfiguracja → Dostęp z internetu)."}
+    r = invites.create(str(args.get("email", "")), str(args.get("account", "")))
+    if not r.get("ok"):
+        return r
+    return {"ok": True, "invite": r["invite"], "link": f"{base}/?zaproszenie={r['token']}"}
+
+
+def invite_delete(_api, args: dict) -> dict:
+    from emustart import invites
+    return {"ok": invites.delete(str(args.get("id", "")))}
+
+
+def google_set(_api, args: dict) -> dict:
+    from emustart import webportal
+    return webportal.set_google(str(args.get("client_id", "")), str(args.get("client_secret", "")))
+
+
+def clients_status(_api) -> dict:
+    from emustart import clientdist
+    return clientdist.status()
+
+
+def clients_refresh(_api) -> dict:
+    from emustart import clientdist
+    return clientdist.start_refresh()
 
 
 def account_password(_api, args: dict) -> dict:
@@ -414,21 +459,27 @@ def tunnel_set(api, args: dict) -> dict:
     return {"ok": True, "url": url}
 
 
-def login_code(_api) -> dict:
-    """Kod QR „Zaloguj” (aplikacja: Ustawienia → Zaloguj (kod QR)): adresy serwera, odcisk
-    certyfikatu (urządzenie od razu łączy się szyfrowanym, przypiętym połączeniem) i
-    jednorazowy kod — zalogowanie nim nie czeka na zatwierdzenie (emustart/enroll.py)."""
-    import base64
-    import json as _json
-    from emustart import enroll, qr, remote
-    eps = remote.endpoints()
-    if not eps or not remote.TLS:
+def login_code(_api, args: dict | None = None) -> dict:
+    """Kod logowania konta (aplikacja: Zaloguj → kod QR / link / adres + kod): jednorazowy,
+    przypisany do konta — zalogowanie nim nie czeka na zatwierdzenie (emustart/enroll.py).
+    Konto istniejące albo nowe (`create` — powstanie przy zalogowaniu)."""
+    from emustart import accounts, enroll, qr, remote
+    args = args or {}
+    name = str(args.get("account", "")).strip()
+    names = remote.profile_names()
+    match = next((a for a in names if a.lower() == name.lower()), "") or (accounts.record(name) or {}).get("name", "")
+    if not name:
+        return {"ok": False, "reason": "Wybierz konto albo wpisz nazwę nowego."}
+    if not match and not args.get("create"):
+        return {"ok": False, "reason": f"Nie ma konta „{name}”."}
+    try:
+        c = enroll.new_login_code(match or name, create=not match)
+    except ValueError as ex:
+        return {"ok": False, "reason": str(ex)}
+    uri = remote.login_link(c["code"], c["account"])
+    if not uri:
         return {"ok": False, "reason": "Port szyfrowany serwera nie działa — sprawdź logi serwera."}
-    c = enroll.new_login_code()
-    data = {"v": 1, "n": socket.gethostname(), "f": remote.TLS["fp"], "c": c["code"],
-            "e": [{"u": e["url"], "k": e.get("kind", ""), **({"ca": 1} if e.get("ca") else {})} for e in eps]}
-    raw = base64.urlsafe_b64encode(_json.dumps(data, separators=(",", ":")).encode()).decode().rstrip("=")
-    uri = "emustart://login?d=" + raw
+    eps = remote.endpoints()
     return {"ok": True, **c, "uri": uri, "svg": qr.svg(uri, scale=4),
             "tunnel": next((e["url"] for e in eps if e.get("kind") == "tunnel"), "")}
 
@@ -678,7 +729,10 @@ def emu_update(api, args: dict) -> dict:
     items = args.get("items")
     if items is not None:
         items = [str(i) for i in items if emucatalog.valid_item(str(i))]
-    return emustore.start_update(api._cfg, items, bool(args.get("force")))
+    allow = [str(i) for i in args.get("allow_held") or [] if emucatalog.valid_item(str(i))]
+    if allow:
+        log.info("panel: zatwierdzona wstrzymana aktualizacja %s (stany PS2)", ", ".join(allow))
+    return emustore.start_update(api._cfg, items, bool(args.get("force")), allow)
 
 
 def emu_policy_get(api) -> dict:
@@ -714,8 +768,11 @@ ACTIONS["emu_status"] = emu_status
 ACTIONS_ARGS["emu_update"] = emu_update
 ACTIONS["emu_policy"] = emu_policy_get
 ACTIONS_ARGS["emu_policy_set"] = emu_policy_set
-ACTIONS.update({"config": config_get, "public_status": public_status, "devices": devices_list, "login_code": login_code, "profiles_migrate_status": profiles_migrate_status,
-                "accounts": accounts_list})
+ACTIONS.update({"config": config_get, "public_status": public_status, "devices": devices_list, "profiles_migrate_status": profiles_migrate_status,
+                "accounts": accounts_list, "invites": invites_list, "clients_status": clients_status,
+                "clients_refresh": clients_refresh})
+ACTIONS_ARGS.update({"login_code": login_code, "account_google_unlink": account_google_unlink,
+                     "invite_create": invite_create, "invite_delete": invite_delete, "google_set": google_set})
 
 
 # ── po stronie panelu (osobny proces) ──

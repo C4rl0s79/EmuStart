@@ -462,7 +462,6 @@ class Server(private val prefs: Prefs) {
 
     // ── profile z PIN-em (/v1/profiles) ──
 
-    /** [(nazwa, czy ma PIN)]; null — serwer bez PIN-ów profili (starszy niż 0.27). */
     /** Konta (nazwa, czy ma hasło) — urządzenie konta widzi swoje; null = starszy serwer. */
     fun profiles(): List<Pair<String, Boolean>>? = try {
         val a = JSONObject(text("/v1/profiles")).optJSONArray("profiles") ?: JSONArray()
