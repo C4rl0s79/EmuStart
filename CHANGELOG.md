@@ -8,7 +8,10 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
-Wersja 0.48.2 (niewydana).
+## [0.48.2] — 2026-10-26
+
+Zakres: stany PS2 paczką wspólną dla PCSX2 i ArmSX2 (`savebundles.py`, `launcher.py`, Android:
+`Saves.kt`, `SaveSync.kt`), „Wczytaj zapis” w RetroArchu (`ingame.py`). Zaktualizuj PC i telefon.
 
 ### Poprawione
 - **„Wczytaj zapis” w RetroArchu nie nadpisuje następnego stanu** — po wczytaniu np. stanu 4
