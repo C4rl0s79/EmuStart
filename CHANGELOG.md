@@ -8,9 +8,16 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
-Wersja 0.48.2 (niewydana).
+## [0.48.2] — 2026-10-26
+
+Zakres: stany PS2 paczką wspólną dla PCSX2 i ArmSX2 (`savebundles.py`, `launcher.py`, Android:
+`Saves.kt`, `SaveSync.kt`), „Wczytaj zapis” w RetroArchu (`ingame.py`). Zaktualizuj PC i telefon.
 
 ### Poprawione
+- **„Wczytaj zapis” w RetroArchu nie nadpisuje następnego stanu** — po wczytaniu np. stanu 4
+  kolejny zapis szedł do slotu 5 (nadpisując istniejący), a nie do 11. Wybrany stan wczytuje się
+  teraz jako autozapis przy starcie (bez `--entryslot`), więc RetroArch numeruje dalej od
+  najwyższego stanu (jak na telefonie).
 - **Stany PS2 synchronizują się jak stany RetroArcha** — jedna paczka `pcsx2/states` na grę,
   wspólna dla PCSX2 (PC) i ArmSX2 / AetherSX2 (telefon), nazwy plików jak w emulatorze (numer
   płyty i CRC). Stany z dwóch urządzeń się sumują (zajęty slot — starszy stan na pierwszy wolny
