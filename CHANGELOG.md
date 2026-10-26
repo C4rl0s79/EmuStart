@@ -8,7 +8,9 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
-Wersja 0.48.3 (niewydana).
+## [0.48.3] — 2026-10-26
+
+Zakres: ustawienia emulatorów w profilu (`profiles.py`), przypisania pada (`ingame.py`). Zaktualizuj PC.
 
 ### Poprawione
 - **Ustawienia zmienione w samym emulatorze (bez EmuStart) zostają** — przy następnej grze
