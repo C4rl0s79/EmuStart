@@ -13,6 +13,11 @@ Komputery porównują swoje pliki z manifestem; gdy czegoś brakuje albo się r�
 archiwum wersji jednym strumieniem (wznawianym) i rozpakowują u siebie tylko te pliki —
 przesyłanie tysięcy małych plików było wolne (emustart/installer.py, /v1/emulators).
 Zostaje bieżąca i poprzednia wersja pozycji.
+
+PCSX2 (0.49): nowa wersja zwykle zmienia format stanów, a stany PS2 są wspólne z ArmSX2 na
+telefonie. Gdy konta mają stany z PC i z telefonu (emustart/ps2states.py), nowa wersja PCSX2
+nie jest rozsyłana sama — czeka w `held` z powodem, aż administrator ją zatwierdzi w panelu
+(„Zaktualizuj mimo to” / „Zaktualizuj”, z ostrzeżeniem o stanach).
 """
 
 from __future__ import annotations
@@ -259,9 +264,24 @@ def _prune(cfg: dict, item: str, keep: list) -> None:
             shutil.rmtree(sub, ignore_errors=True)
 
 
-def update(cfg: dict, items: list | None = None, force: bool = False) -> dict:
+HOLD_ITEMS = ("pcsx2",)
+
+
+def _hold(item: str) -> dict | None:
+    if item not in HOLD_ITEMS:
+        return None
+    from emustart import ps2states
+    try:
+        return ps2states.hold_reason()
+    except Exception as ex:                  # nie wiadomo — lepiej poczekać niż zepsuć stany
+        log.warning("emulatory: formaty stanów PS2: %s", ex)
+        return {"kind": "unknown", "text": f"Nie udało się odczytać formatu stanów PS2 ({ex})."}
+
+
+def update(cfg: dict, items: list | None = None, force: bool = False, allow_held: list | None = None) -> dict:
     """Sprawdza i pobiera nowe wersje (w tym wątku). items=None — wszystko, czego potrzebuje
-    biblioteka. Zwraca {updated: [...], errors: {...}}."""
+    biblioteka; `allow_held` — pozycje wstrzymane, które administrator zatwierdził.
+    Zwraca {updated: [...], errors: {...}, held: {...}}."""
     if not _lock.acquire(blocking=False):
         return {"ok": False, "reason": "Aktualizacja emulatorów już trwa."}
     try:
@@ -275,6 +295,7 @@ def update(cfg: dict, items: list | None = None, force: bool = False) -> dict:
             _job["steps"] = len(want)         # z rdzeniami dopiero co pobranymi z buildbota
         idx = load_index(cfg)
         updated, errors = [], {}
+        held = idx.setdefault("held", {})
         for item in want:
             _job["step"] += 1
             _job["item"] = emucatalog.item_info(item)["label"]
@@ -283,7 +304,19 @@ def update(cfg: dict, items: list | None = None, force: bool = False) -> dict:
             try:
                 rel = emucatalog.latest(item)
                 if not force and cur.get("version") == rel["version"] and manifest(cfg, item, rel["version"]):
+                    held.pop(item, None)
                     continue
+                if cur.get("version") and cur["version"] != rel["version"] and item not in (allow_held or []):
+                    why = _hold(item)
+                    if why:
+                        if (held.get(item) or {}).get("version") != rel["version"]:
+                            log.info("emulatory: %s %s wstrzymany — %s", item, rel["version"], why["text"])
+                        held[item] = {"version": rel["version"], "since": (held.get(item) or {}).get("since")
+                                      or time.time(), **why}
+                        _save_index(cfg, idx)
+                        _job["log"].append(f"{_job['item']}: {rel['version']} wstrzymana — {why['text']}")
+                        continue
+                held.pop(item, None)
                 entry = _build(cfg, item, rel, lambda d, t: _job.update(done=d, total=t))
                 prev = cur.get("version", "")
                 entry["previous"] = prev if prev != entry["version"] else cur.get("previous", "")
@@ -334,10 +367,10 @@ def missing(cfg: dict) -> list:
     return sorted(i for i in needed(cfg) if i not in idx["items"] and i not in idx["errors"])
 
 
-def start_update(cfg: dict, items: list | None = None, force: bool = False) -> dict:
+def start_update(cfg: dict, items: list | None = None, force: bool = False, allow_held: list | None = None) -> dict:
     if _job["running"]:
         return {"ok": False, "reason": "Aktualizacja emulatorów już trwa."}
-    threading.Thread(target=update, args=(cfg, items, force), daemon=True, name="emulatory").start()
+    threading.Thread(target=update, args=(cfg, items, force, allow_held), daemon=True, name="emulatory").start()
     return {"ok": True}
 
 
@@ -353,7 +386,8 @@ def status(cfg: dict) -> dict:
         rows.append({"item": item, "label": emucatalog.item_info(item)["label"],
                      "systems": need.get(item, []), "version": meta.get("version", ""),
                      "previous": meta.get("previous", ""), "updated": meta.get("updated", 0),
-                     "size": meta.get("size", 0), "error": idx["errors"].get(item, "")})
+                     "size": meta.get("size", 0), "error": idx["errors"].get(item, ""),
+                     "held": (idx.get("held") or {}).get(item)})
     return {"ok": True, "items": rows, "checked": idx.get("checked", 0), "dir": str(store_dir(cfg)),
             "job": dict(_job, log=list(_job["log"][-30:]))}
 

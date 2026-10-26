@@ -771,24 +771,10 @@ function joinExisting(name, asked = false) {
     openProfiles(PR.startup);
   }), 50);
 }
-/** Nie ma takiego konta: prośba o nowe konto z tego urządzenia — zatwierdza administrator
- *  (urządzenie administratora zakłada je od razu). Po zatwierdzeniu konto jest na tym urządzeniu. */
+/** Nie ma takiego konta: nowe konto zakłada się z zaproszenia administratora (strona serwera). */
 function askNewAccount(name) {
-  S.menu = [[`Utwórz konto „${name}” — zatwierdzi administrator`, () => setTimeout(() =>
-    askPassword(`Hasło nowego konta „${name}”`, async (pw) => {
-      const r = await api().account_request(name, pw);
-      if (!r.ok) return toast(r.reason, 6000);
-      if (r.status === "approved") {
-        toast(`Utworzono konto „${name}” — jest na tym urządzeniu.`, 6000);
-        return openProfiles(PR.startup);
-      }
-      toast(`Prośba o konto „${name}” czeka na zatwierdzenie administratora (kod ${r.code}). ` +
-            "Konto pojawi się tu samo po zatwierdzeniu.", 8000);
-    }, true), 50)], ["Anuluj", () => {}]];
-  S.menuIdx = 0; S.modal = "menu";
-  $("menu").querySelector("h2").textContent = `Nie ma konta „${name}”`;
-  $("menu").classList.remove("hidden");
-  renderMenu();
+  toast(`Nie ma konta „${name}”. Nowe konto: poproś administratora o zaproszenie, zaloguj się na stronie ` +
+        "serwera i ustaw tam hasło konta — potem dodasz je tutaj.", 9000);
 }
 
 // opcje profilu (Start na karcie): RetroAchievements

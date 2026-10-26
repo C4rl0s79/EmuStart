@@ -107,6 +107,8 @@ def _server_mode() -> None:
     acctbackup.start_auto(lambda: api._cfg)   # kopie kont raz dziennie
     from emustart import emustore
     emustore.scheduler(lambda: api._cfg)      # nowe wersje emulatorów raz dziennie
+    from emustart import clientdist
+    clientdist.scheduler()                    # programy do pobrania ze strony serwera
     from emustart import srvadmin
     srvadmin.ENABLED = True
     srvadmin.import_keys_file(api)          # server\art_keys.json — klucze źródeł grafik (plik usuwany)

@@ -47,14 +47,19 @@ def login(host, port, did, key) -> str:
 
 
 def enroll_device(host, port, name, cls="pc", hw="", account=ACCOUNT, pem="", code=True, password=PW) -> dict:
-    """Prośba o zalogowanie (konto istnieje → „mam konto”); `code` — kod z panelu (od razu
-    zatwierdzona). → odpowiedź serwera (rid, status)."""
+    """Prośba o zalogowanie. `code` — kod logowania konta (jak ze strony serwera / panelu: konto
+    z kodu, nowe powstaje przy zalogowaniu, od razu zatwierdzona); bez kodu — „Mam konto”
+    (nazwa i hasło; konto bez hasła dostaje je tu, jak ze strony serwera). → odpowiedź serwera."""
     from emustart import accounts, enroll, remote
     exists = accounts.record(account) is not None or account.lower() in (n.lower() for n in remote.profile_names()) \
         if remote.NAS_ROOT else accounts.record(account) is not None
-    body = {"mode": "existing" if exists else "new", "account": account, "password": password, "name": name,
-            "class": cls, "version": "test", "pubkey": pem, "hw": hw,
-            "login_code": enroll.new_login_code()["code"] if code else ""}
+    if code:
+        body = {"mode": "code", "login_code": enroll.new_login_code(account, create=not exists)["code"]}
+    else:
+        if not accounts.has_password(account):
+            accounts.set_password(account, password)
+        body = {"mode": "existing", "account": account, "password": password}
+    body.update(name=name, **{"class": cls}, version="test", pubkey=pem, hw=hw)
     st, d = post(host, port, "/v1/enroll/request", body)
     assert st == 200 and d["ok"], d
     return d

@@ -9,13 +9,14 @@ w emulatorze zainstalowanym w telefonie.
 ## Instalacja
 
 1. Na komputerze z grami uruchom [EmuStart Server](EmuStart-Server).
-2. Pobierz `EmuStart-<wersja>-android.apk` z
+2. Pobierz `EmuStart-<wersja>-android.apk` ze strony serwera (np. `https://emustart.emucloud.org`,
+   po zalogowaniu kontem Google z zaproszenia) albo z
    [Releases](https://github.com/C4rl0s79/EmuStart/releases) i zainstaluj (zgoda na
    instalację z nieznanych źródeł).
 3. Przy pierwszym uruchomieniu zezwól na **dostęp do wszystkich plików** — gry trafiają
    do `/storage/emulated/0/EmuStart/games`, skąd czytają je emulatory.
-4. Ustawienia → **Zaloguj (kod QR)** (panel serwera → Dodaj urządzenie) albo **Zaloguj (adres
-   serwera)** (np. `emustart.emucloud.org`) → konto i hasło — patrz
+4. Ustawienia → **Zaloguj (kod QR)** (strona serwera → *Pokaż kod logowania* → zeskanuj) albo
+   **Zaloguj (adres serwera)** (np. `emustart.emucloud.org`) → kod ze strony — patrz
    [Logowanie urządzeń](EmuStart-Server#logowanie-urządzeń).
 5. Wybierz emulator dla systemów (←/→ w Ustawieniach → Emulatory).
 

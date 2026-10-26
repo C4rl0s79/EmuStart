@@ -226,22 +226,19 @@ def test_account_device_other_user_needs_their_password(monkeypatch):
     assert st == 403 and accounts.verify("Ola", PW)[0]
 
 
-def test_enroll_password_new_and_existing(monkeypatch):
-    from emustart import enroll, srvadmin
+def test_enroll_existing_needs_the_account_password(monkeypatch):
+    from emustart import enroll
     from test_enroll import Device
     srv = _keyed_server(monkeypatch)
-    # nowe konto: hasło musi spełniać wymagania; w prośbie tylko skrót
-    assert "Hasło musi mieć" in Device("A").ask(srv, "new", "Ania", password="slabe")["reason"]
-    assert Device("B").ask(srv, "new", "Ania", password=PW)["ok"]
-    assert PW not in (paths.SERVER / "enroll.json").read_text(encoding="utf-8")
-    q = enroll.pending("")[0]
-    assert srvadmin.enroll_decide(None, {"id": q["id"], "allow": True})["ok"]
-    assert accounts.verify("Ania", PW)[0]
-    assert '"pw"' not in (paths.SERVER / "enroll.json").read_text(encoding="utf-8")   # skrót usunięty z prośby
+    _write(srv[2] / "Ania" / "emustart.json", b"{}")
+    # konto bez hasła (np. z zaproszenia) — „Mam konto” odmawia, zostaje kod logowania
+    assert "nie ma hasła" in Device("A").ask(srv, "existing", "Ania", password=PW)["reason"]
+    accounts.set_password("Ania", PW)
     # „mam konto”: złe hasło — bez prośby; dobre — prośba czeka na zatwierdzenie
     assert Device("C").ask(srv, "existing", "ania", password="Zle-haslo-12")["reason"] == "Złe hasło."
     r = Device("D").ask(srv, "existing", "ania", password=PW)
     assert r["ok"] and enroll.poll(r["rid"])["status"] == "pending"
+    assert PW not in (paths.SERVER / "enroll.json").read_text(encoding="utf-8")
 
 
 def test_panel_lists_accounts_and_resets_password(env, monkeypatch):
@@ -259,38 +256,17 @@ def test_panel_lists_accounts_and_resets_password(env, monkeypatch):
     assert not srvadmin.account_password(None, {"name": "Nikt", "password": PW})["ok"]
 
 
-def test_logged_device_asks_for_new_account_admin_approves(monkeypatch):
-    """Inny użytkownik → nazwa, której nie ma: prośba z zalogowanego urządzenia; konto powstaje
-    po zatwierdzeniu przez administratora, a to urządzenie dostaje do niego dostęp."""
+def test_logged_device_cannot_create_accounts(monkeypatch):
+    """0.49: zalogowane urządzenie nie zakłada nowych kont (wcześniej prośba „Inny użytkownik →
+    nowa nazwa” do administratora) — nowe konto tylko z zaproszenia albo w panelu."""
     import keyhelp
-    from emustart import enroll, srvadmin
     from test_three_devices import _req
     srv = _keyed_server(monkeypatch)
     _write(srv[2] / "Jezus" / "emustart.json", b"{}")
-    _p, phone = keyhelp.device("Jezus", name="Telefon")            # zwykłe konto
     _a, admin = keyhelp.device("Admin", admin=True, name="PC admina")
-    st, r = _req(srv, "POST", "/v1/enroll/account", phone, body={"account": "Ola", "password": PW})
-    assert st == 200 and r["status"] == "pending" and "token" not in r
-    assert not accounts.has_password("Ola")                         # przed zatwierdzeniem — nic
-    # istniejące konto, słabe hasło, bez tokenu — odmowa
-    assert _req(srv, "POST", "/v1/enroll/account", phone, body={"account": "jezus", "password": PW})[1]["exists"]
-    assert not _req(srv, "POST", "/v1/enroll/account", phone, body={"account": "Ewa", "password": "slabe"})[1]["ok"]
-    assert _req(srv, "POST", "/v1/enroll/account", "", body={"account": "Ewa", "password": PW})[0] == 401
-    # prośbę widzi administrator (nie telefon zwykłego konta); poll — tylko urządzenie, które prosiło
-    assert _req(srv, "POST", "/v1/enroll/pending", phone, body={})[1]["requests"] == []
-    q = _req(srv, "POST", "/v1/enroll/pending", admin, body={})[1]["requests"][0]
-    assert q["account"] == "Ola" and q["from_account"] == "Jezus" and q["mode"] == "new"
-    assert _req(srv, "POST", "/v1/enroll/account_poll", admin, body={"rid": r["rid"]})[1]["status"] == "expired"
-    assert srvadmin.enroll_decide(None, {"id": q["id"], "allow": True})["ok"]
-    got = _req(srv, "POST", "/v1/enroll/account_poll", phone, body={"rid": r["rid"]})[1]
-    assert got["status"] == "approved" and got["token"]
-    assert accounts.verify("Ola", PW)[0] and (srv[2] / "Ola" / "emustart.json").is_file()
-    st, _f = _req(srv, "GET", "/v1/nas/file?p=Ola/emustart.json", phone, headers={"X-Profile-Token": got["token"]})
-    assert st == 200
-    assert len(enroll.pending("")) == 0                              # bez nowego urządzenia w rejestrze
-    # urządzenie administratora zakłada konto od razu
-    st, r2 = _req(srv, "POST", "/v1/enroll/account", admin, body={"account": "Ewa", "password": PW})
-    assert r2["status"] == "approved" and r2["token"] and accounts.has_password("Ewa")
+    for path in ("/v1/enroll/account", "/v1/enroll/account_poll"):
+        assert _req(srv, "POST", path, admin, body={"account": "Ola", "password": PW})[0] == 404
+    assert accounts.record("Ola") is None and not (srv[2] / "Ola").exists()
 
 
 def test_account_device_lists_exactly_what_the_server_gives(penv):

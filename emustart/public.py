@@ -10,7 +10,8 @@ Włączany w panelu serwera („Dostęp z internetu”, config: `server_public`)
 
 Port publiczny jest węższy niż pozostałe: tylko API /v1 i grafiki (/media, /assets, /local), każde zapytanie
 z tokenem urządzenia (bez tokenu tylko logowanie: prośba, stan prośby, podpis), bez panelu
-i interfejsu. Seria złych kluczy z jednego adresu = przerwa
+i interfejsu — oraz strona serwera (0.49, emustart/webportal.py: logowanie Google na
+zaproszenie, programy do pobrania; własna sesja, bez tokenu urządzenia). Seria złych kluczy z jednego adresu = przerwa
 dla tego adresu; ograniczona liczba połączeń naraz z jednego adresu.
 """
 
@@ -117,6 +118,9 @@ def gate(handler) -> bool:
     if _banned.get(ip, 0) > time.time():
         refuse(handler, 403)
         return False
+    from emustart import webportal
+    if webportal.handles(path):
+        return True                  # strona serwera — własna sesja (logowanie Google)
     if not path.startswith(ALLOWED):
         refuse(handler, 404)
         return False

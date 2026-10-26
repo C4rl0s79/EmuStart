@@ -38,6 +38,9 @@ def srv(monkeypatch):
     monkeypatch.setattr(remote, "NAS_ID", nasfs.root_id(nas, create=True))
     monkeypatch.setattr(srvadmin, "ENABLED", True)
     enroll.reset()
+    from emustart import accounts
+    accounts.set_password("Jezus", PW)                 # „Mam konto” — tylko konto z hasłem
+    accounts.set_password("Ania", PW)
     url = server.start(0, bind="127.0.0.1")
     netsrc._info.clear()
     host, port = url.removeprefix("http://").split(":")
@@ -76,6 +79,16 @@ class Device:
                                                                "password": PW if password is None else password})
         return r
 
+    def code(self, srv, account, create=False, hw="", app=""):
+        """Kod logowania konta (strona serwera / panel) — konto z kodu, od razu zatwierdzona."""
+        c = enroll.new_login_code(account, create=create)["code"]
+        st, r = _req(srv, "POST", "/v1/enroll/request", body={"mode": "code", "login_code": c, "name": self.name,
+                                                               "class": "phone", "version": "0.49", "pubkey": self.pem,
+                                                               "hw": hw, "app": app})
+        if r.get("ok") and r.get("status") == "approved":
+            self.did = _req(srv, "POST", "/v1/enroll/poll", body={"rid": r["rid"]})[1]["device"]
+        return r
+
     def login(self, srv, key=None):
         st, ch = _req(srv, "POST", "/v1/auth/challenge", body={"device": self.did})
         sig = (key or self.key).sign(enroll.message(self.did, ch["nonce"]), ec.ECDSA(hashes.SHA256()))
@@ -104,22 +117,25 @@ def _admin_key(srv):
     return tok, did
 
 
-def test_new_account_needs_admin_and_scopes_device(srv):
+def test_new_account_only_from_login_code_and_scopes_device(srv):
     admin_key, admin_id = _admin_key(srv)
     assert devices.is_admin(admin_id)
     phone = Device("Telefon Oli")
-    r = phone.ask(srv, "new", "Ola")
-    assert r["ok"] and len(r["code"]) == 8 and r["code"] == enroll.verify_code(phone.pem)
-    # do zatwierdzenia nic nie przechodzi
-    assert _req(srv, "POST", "/v1/enroll/poll", body={"rid": r["rid"]})[1]["status"] == "pending"
-    # administrator widzi prośbę z kodem, adresem i nazwą
-    st, p = _req(srv, "POST", "/v1/enroll/pending", admin_key, body={})
-    q = p["requests"][0]
-    assert q["name"] == "Telefon Oli" and q["account"] == "Ola" and q["code"] == enroll.pretty(r["code"]) and q["ip"]
-    st, ok = _req(srv, "POST", "/v1/enroll/decide", admin_key, body={"id": q["id"], "allow": True, "games": False})
-    assert ok["ok"] and ok["status"] == "approved"
-    phone.did = _req(srv, "POST", "/v1/enroll/poll", body={"rid": r["rid"]})[1]["device"]
+    # urządzenie samo konta nie zakłada (0.49) — ani prośbą „nowe konto”, ani „Mam konto” bez konta
+    assert "zaproszenia" in phone.ask(srv, "new", "Ola")["reason"]
+    assert not phone.ask(srv, "existing", "Ola")["ok"]
+    assert enroll.pending("") == []
+    # kod logowania dla nowego konta (panel) — konto powstaje przy zalogowaniu, bez czekania
+    r = phone.code(srv, "Ola", create=True)
+    assert r["ok"] and r["status"] == "approved" and len(r["code"]) == 8 and r["code"] == enroll.verify_code(phone.pem)
     assert (srv[2] / "Ola" / "emustart.json").is_file()                  # konto założone
+    # kod jest jednorazowy i przypisany do konta — urządzenie nie wybiera konta
+    c = enroll.new_login_code("Ola")["code"]
+    body = {"mode": "code", "login_code": c, "account": "Jezus", "name": "x", "class": "pc", "pubkey": Device("x").pem}
+    r2 = _req(srv, "POST", "/v1/enroll/request", body=body)[1]
+    assert enroll.poll(r2["rid"])["account"] == "Ola"
+    body["pubkey"] = Device("y").pem
+    assert not _req(srv, "POST", "/v1/enroll/request", body=body)[1]["ok"]
     tok, _ = phone.login(srv)
     assert tok and _req(srv, "GET", "/v1/info", tok)[0] == 200
     # tylko swoje konto
@@ -128,8 +144,6 @@ def test_new_account_needs_admin_and_scopes_device(srv):
     assert _req(srv, "GET", "/v1/nas/file?p=Ania/save/a.srm", tok)[0] == 403
     assert _req(srv, "PUT", "/v1/nas/file?p=Ola/save/b.srm&mtime=1", tok, body={"x": 1})[0] == 200
     assert _req(srv, "GET", "/v1/nas/file?p=Ola/save/b.srm", tok)[0] == 200
-    # bez uprawnienia do gier
-    assert _req(srv, "GET", "/v1/find?es=snes&rel=x.sfc", tok)[0] == 403
     # nie zmienia ustawień serwera
     assert _req(srv, "PUT", "/v1/roots", tok, body={"roots": []})[0] == 404     # foldery — tylko panel
 
@@ -151,16 +165,10 @@ def test_existing_account_approved_by_own_device_not_by_other_user(srv):
     assert [x["name"] for x in reqs] == ["Laptop Ani"]
     # urządzenie innego konta tego nie widzi i nie zatwierdzi
     ola = Device("Telefon Oli")
-    ro = ola.ask(srv, "new", "Ola")
-    qo = next(x for x in _req(srv, "POST", "/v1/enroll/pending", admin_key, body={})[1]["requests"] if x["account"] == "Ola")
-    _req(srv, "POST", "/v1/enroll/decide", admin_key, body={"id": qo["id"], "allow": True, "games": False})
-    ola.did = _req(srv, "POST", "/v1/enroll/poll", body={"rid": ro["rid"]})[1]["device"]
+    assert ola.code(srv, "Ola", create=True)["status"] == "approved"
     tok_o, _ = ola.login(srv)
     assert _req(srv, "POST", "/v1/enroll/pending", tok_o, body={})[1]["requests"] == []
     assert not _req(srv, "POST", "/v1/enroll/decide", tok_o, body={"id": reqs[0]["id"], "allow": True})[1]["ok"]
-    # zwykły użytkownik nie zatwierdza nowych kont
-    nowe = Device("Obcy").ask(srv, "new", "Obcy")
-    assert nowe["ok"]
     assert all(x["mode"] == "existing" for x in _req(srv, "POST", "/v1/enroll/pending", tok_a, body={})[1]["requests"])
     assert _req(srv, "POST", "/v1/enroll/decide", tok_a, body={"id": reqs[0]["id"], "allow": True, "games": True})[1]["ok"]
     second.did = _req(srv, "POST", "/v1/enroll/poll", body={"rid": r2["rid"]})[1]["device"]
@@ -170,10 +178,7 @@ def test_existing_account_approved_by_own_device_not_by_other_user(srv):
 def test_spoofing_needs_the_private_key(srv):
     admin_key, _ = _admin_key(srv)
     dev = Device("Telefon")
-    r = dev.ask(srv, "new", "Ola")
-    q = _req(srv, "POST", "/v1/enroll/pending", admin_key, body={})[1]["requests"][0]
-    _req(srv, "POST", "/v1/enroll/decide", admin_key, body={"id": q["id"], "allow": True})
-    dev.did = _req(srv, "POST", "/v1/enroll/poll", body={"rid": r["rid"]})[1]["device"]
+    dev.code(srv, "Ola", create=True)
     # ktoś zna id urządzenia i klucz publiczny, ale nie ma klucza prywatnego
     obcy = ec.generate_private_key(ec.SECP256R1())
     tok, res = dev.login(srv, key=obcy)
@@ -193,16 +198,26 @@ def test_spoofing_needs_the_private_key(srv):
 def test_requests_survive_restart_and_deny(srv):
     admin_key, _ = _admin_key(srv)
     dev = Device("Telefon")
-    r = dev.ask(srv, "new", "Ola")
-    assert dev.ask(srv, "new", "Ola")["rid"] == r["rid"]                  # ta sama prośba po restarcie aplikacji
+    r = dev.ask(srv, "existing", "Ania")
+    assert dev.ask(srv, "existing", "Ania")["rid"] == r["rid"]            # ta sama prośba po restarcie aplikacji
     enroll._reqs = None                                                    # restart serwera — z dysku
     q = _req(srv, "POST", "/v1/enroll/pending", admin_key, body={})[1]["requests"][0]
     assert q["name"] == "Telefon" and q["expires"] - q["created"] == enroll.ENROLL_TTL
     _req(srv, "POST", "/v1/enroll/decide", admin_key, body={"id": q["id"], "allow": False})
     assert _req(srv, "POST", "/v1/enroll/poll", body={"rid": r["rid"]})[1]["status"] == "denied"
-    assert not (srv[2] / "Ola").exists()
-    # istniejące konto nie da się założyć drugi raz
-    assert "już istnieje" in Device("x").ask(srv, "new", "jezus")["reason"]
+    assert not any(d["name"] == "Telefon" for d in devices.listing())
+
+
+def test_old_new_account_requests_dropped_on_upgrade(srv):
+    """0.49: prośby o nowe konto zapisane przez starszy serwer nie zostają do zatwierdzenia."""
+    import json as _json
+    enroll._load()["stare"] = {"id": "ab12", "mode": "new", "account": "Obcy", "status": "pending", "pubkey": "",
+                               "code": "AAAAAAAA", "created": 1, "expires": 9e12, "ip": "1.2.3.4", "name": "x",
+                               "class": "pc", "pw": {"hash": "x"}}
+    enroll._save()
+    enroll._reqs = None
+    assert enroll.pending("") == []
+    assert "stare" not in _json.loads((paths.SERVER / "enroll.json").read_text(encoding="utf-8"))
 
 
 def test_new_pc_with_only_server_address(srv, monkeypatch):
@@ -318,7 +333,7 @@ def test_one_registration_per_hardware(srv):
     assert devices._load()[old["id"]]["hw"] == hw
     # inny telefon tego samego modelu — osobna rejestracja
     other = Device("Telefon 25102PCBEG")
-    _req(srv, "POST", "/v1/enroll/request", body={"mode": "new", "account": "Ola", "password": PW, "name": other.name,
+    _req(srv, "POST", "/v1/enroll/request", body={"mode": "existing", "account": "Ania", "password": PW, "name": other.name,
                                                    "class": "phone", "pubkey": other.pem, "hw": "b" * 32})
     # ten sam telefon dołącza przez internet — prośba mówi, co zastąpi; po zatwierdzeniu stara znika
     dev = Device("Telefon 25102PCBEG")
@@ -328,7 +343,7 @@ def test_one_registration_per_hardware(srv):
     mine = next(q for q in reqs if q["account"] == "Jezus")
     assert len(mine["replaces"]) == 1 and mine["replaces"][0].startswith("Telefon 25102PCBEG (EmuStart Android")
     assert mine["app"] == "EmuStart Android"
-    assert next(q for q in reqs if q["account"] == "Ola")["replaces"] == []
+    assert next(q for q in reqs if q["account"] == "Ania")["replaces"] == []
     _req(srv, "POST", "/v1/enroll/decide", admin_key, body={"id": mine["id"], "allow": True})
     active = [d for d in devices.listing() if not d.get("revoked") and d["name"] == "Telefon 25102PCBEG"]
     assert len(active) == 1 and active[0]["hw"] == hw

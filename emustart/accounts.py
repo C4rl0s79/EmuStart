@@ -1,8 +1,10 @@
 """accounts — hasła kont na serwerze EmuStart (0.40).
 
-Konto = profil gracza w folderze profili. Hasło konta potwierdza użytkownika na serwerze:
-przy dołączaniu nowego urządzenia („Nowe konto” ustawia hasło, „Mam konto” je sprawdza —
-i nadal czeka na zatwierdzenie) i gdy na urządzeniu gra inny użytkownik niż właściciel.
+Konto = profil gracza w folderze profili. Nowe konto powstaje tylko z zaproszenia (0.49:
+logowanie Google na stronie serwera — emustart/webportal.py) albo w panelu serwera. Hasło
+konta (opcjonalne — ustawiane na stronie serwera albo w aplikacji) potwierdza użytkownika:
+„Mam konto” przy dołączaniu nowego urządzenia (nadal czeka na zatwierdzenie) i gdy na
+urządzeniu gra inny użytkownik niż właściciel.
 Urządzenie przypisane do konta nie podaje hasła przy każdym zapytaniu — loguje się kluczem
 urządzenia (emustart/enroll.py). PIN jest tylko lokalną blokadą profilu na urządzeniu.
 
@@ -174,6 +176,46 @@ def set_password(name: str, pw: str, by: str = "") -> str:
         return str(ex)
     set_record(name, rec, by)
     return ""
+
+
+def create(name: str, by: str = "") -> None:
+    """Rekord konta bez hasła (konto z zaproszenia — logowanie Google, kod ze strony)."""
+    with _lock:
+        _load().setdefault(name.lower(), {"name": name})
+        _save()
+    log.info("konto %s założone%s", name, f" — {by}" if by else "")
+
+
+# ── konto Google (emustart/webportal.py) ──
+def link_google(name: str, sub: str, email: str) -> None:
+    """Konto ↔ konto Google: stały identyfikator Google (`sub`), e-mail tylko do wyświetlenia."""
+    with _lock:
+        for r in _load().values():
+            if r.get("google_sub") == sub and r.get("name", "").lower() != name.lower():
+                for k in ("google_sub", "google_email", "google_at"):
+                    r.pop(k, None)
+        rec = _load().setdefault(name.lower(), {"name": name})
+        rec.update(google_sub=sub, google_email=email.lower(), google_at=time.time())
+        _save()
+    log.info("konto %s połączone z kontem Google %s", name, email)
+
+
+def by_google(sub: str) -> str:
+    """Nazwa konta połączonego z kontem Google `sub` ('' — żadne)."""
+    with _lock:
+        return next((r.get("name", k) for k, r in _load().items() if sub and r.get("google_sub") == sub), "")
+
+
+def unlink_google(name: str, by: str = "") -> bool:
+    with _lock:
+        rec = _load().get((name or "").lower())
+        if not rec or not rec.get("google_sub"):
+            return False
+        for k in ("google_sub", "google_email", "google_at"):
+            rec.pop(k, None)
+        _save()
+    log.info("konto %s odłączone od konta Google%s", name, f" — {by}" if by else "")
+    return True
 
 
 def rename(old: str, new: str) -> None:

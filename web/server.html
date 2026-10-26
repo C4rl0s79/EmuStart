@@ -271,16 +271,42 @@
       <button id="bTunnel">Zapisz adres tunelu</button></div>
     <div id="tunInfo" class="muted" style="margin-top:6px"></div>
   </section>
+  <section data-in="konfig">
+    <h2>Strona serwera — logowanie Google</h2>
+    <div class="muted">Pod adresem tunelu działa strona serwera: zaproszeni (Urządzenia i konta → Zaproszenia) logują się
+      kontem Google, pobierają programy i biorą kod logowania urządzenia. Klient OAuth: Google Cloud Console →
+      APIs &amp; Services → Credentials → <b>Create credentials → OAuth client ID</b> → typ „Web application”,
+      w „Authorized redirect URIs” wklej adres niżej. Ekran zgody: typ „External”, zakresy <code>openid</code>,
+      <code>email</code>, <code>profile</code>.</div>
+    <dl style="margin-top:8px"><dt>Adres przekierowania</dt><dd><code id="gRedirect">—</code></dd>
+      <dt>Stan</dt><dd id="gState">—</dd></dl>
+    <div class="actions" style="margin-top:6px">
+      <input id="gId" placeholder="Client ID (….apps.googleusercontent.com)" style="flex:2;min-width:260px">
+      <input id="gSecret" type="password" autocomplete="off" placeholder="Client secret" style="flex:1;min-width:180px">
+      <button id="bGoogle">Zapisz</button></div>
+  </section>
+  <section data-in="konfig">
+    <h2>Programy do pobrania</h2>
+    <div class="muted">Serwer trzyma najnowsze wydania EmuStart (Windows, Android) i Lumen — sprawdzone podpisem
+      wydania — i daje je zalogowanym na stronie serwera. Sprawdza nowe wersje co 6 godzin.</div>
+    <table style="margin-top:8px"><thead><tr><th>Program</th><th>Wersja</th><th class="n">Rozmiar</th><th>Pobrano</th></tr></thead>
+      <tbody id="clientRows"></tbody></table>
+    <div class="actions" style="margin-top:6px"><button id="bClients">Sprawdź teraz</button>
+      <span id="clientJob" class="muted"></span></div>
+  </section>
   <section data-in="urz">
     <h2>Urządzenia</h2>
-    <div class="actions"><button id="bPair" class="primary">Dodaj urządzenie</button></div>
+    <div class="actions"><select id="pairAcct"></select>
+      <input id="pairNew" placeholder="nazwa nowego konta" hidden style="min-width:180px">
+      <button id="bPair" class="primary">Dodaj urządzenie</button></div>
     <div id="pairBox" hidden style="margin-top:10px">
       <div style="display:flex;gap:18px;align-items:center;flex-wrap:wrap">
         <div id="pairQr" style="background:#fff;border-radius:8px;line-height:0"></div>
         <div style="flex:1;min-width:260px">
-          <div class="muted">Telefon: EmuStart → Ustawienia → <b>Zaloguj (kod QR)</b> → zeskanuj kod.<br>
-            Komputer: Ustawienia → <b>Zaloguj</b> → wklej link (przycisk niżej). Potem konto i hasło —
-            bez czekania na zatwierdzenie. Kod jednorazowy, ważny <span id="pairLeft"></span>.</div>
+          <div class="muted">Kod logowania konta <b id="pairFor"></b> — bez hasła i bez czekania na zatwierdzenie.<br>
+            Telefon: EmuStart → Ustawienia → <b>Zaloguj (kod QR)</b> → zeskanuj kod.<br>
+            Komputer: Ustawienia → <b>Zaloguj</b> → wklej link (przycisk niżej) albo adres serwera i kod.
+            Kod jednorazowy, ważny <span id="pairLeft"></span>.</div>
           <div style="font-size:26px;letter-spacing:.12em;margin:8px 0"><code id="pairCode"></code>
             <span class="muted" style="font-size:13px;letter-spacing:0">· <span id="pairUrl"></span></span></div>
           <div style="display:flex;gap:8px"><input id="pairLink" readonly style="flex:1;min-width:0">
@@ -290,7 +316,7 @@
     </div>
     <div id="enrBox" hidden style="margin-top:10px">
       <h3 style="margin:0 0 6px">Proszą o zalogowanie</h3>
-      <div class="muted">Kod musi się zgadzać z kodem na ekranie nowego urządzenia. Nowe konta zatwierdza administrator.</div>
+      <div class="muted">„Mam konto” (nazwa i hasło konta): kod musi się zgadzać z kodem na ekranie nowego urządzenia.</div>
       <table><tbody id="enroll"></tbody></table>
     </div>
     <table style="margin-top:10px"><thead><tr><th>Urządzenie</th><th>Rodzaj</th><th>Konto</th><th>Wersja</th><th class="n">Ostatnio</th><th></th></tr></thead>
@@ -298,10 +324,11 @@
   </section>
   <section data-in="urz">
     <h2>Konta</h2>
-    <div class="muted">Hasło konta (co najmniej 10 znaków, wielka litera, cyfra i znak specjalny) potwierdza
-      użytkownika przy dołączaniu nowego urządzenia i gdy gra na cudzym urządzeniu. Serwer trzyma tylko
-      skrót hasła. PIN jest blokadą profilu na jednym urządzeniu — serwer go nie zna.</div>
-    <table style="margin-top:10px"><thead><tr><th>Konto</th><th>Hasło</th><th class="n">Urządzenia</th><th></th></tr></thead>
+    <div class="muted">Nowe konto powstaje z zaproszenia (niżej) albo z kodu „Dodaj urządzenie” dla nowej nazwy.
+      Hasło konta (opcjonalne; co najmniej 10 znaków, wielka litera, cyfra i znak specjalny) — do „Mam konto”
+      na nowym urządzeniu i gdy gra na cudzym urządzeniu; serwer trzyma tylko skrót. PIN jest blokadą profilu
+      na jednym urządzeniu — serwer go nie zna.</div>
+    <table style="margin-top:10px"><thead><tr><th>Konto</th><th>Hasło</th><th>Google</th><th class="n">Urządzenia</th><th></th></tr></thead>
       <tbody id="accounts"></tbody></table>
     <dialog id="pwDlg">
       <form method="dialog">
@@ -313,6 +340,22 @@
           <button value="cancel" formnovalidate>Anuluj</button></div>
       </form>
     </dialog>
+  </section>
+  <section data-in="urz">
+    <h2>Zaproszenia (strona serwera)</h2>
+    <div class="muted">Zaproś adres Google do konta — nowego albo istniejącego. Dostaniesz link do strony serwera:
+      wyślij go sam (SMS, komunikator, e-mail). Zaproszony loguje się tam kontem Google o tym adresie, pobiera
+      programy i bierze kod logowania. Inny adres Google z tym linkiem nie wejdzie. Zaproszenie ważne 30 dni.</div>
+    <div class="actions" style="margin-top:8px">
+      <input id="invEmail" type="email" placeholder="adres Gmail / Google" style="flex:1;min-width:220px">
+      <input id="invAcct" list="invAccts" placeholder="konto (nowe albo istniejące)" style="min-width:200px">
+      <datalist id="invAccts"></datalist>
+      <button id="bInvite" class="primary">Zaproś</button></div>
+    <div id="invLinkBox" hidden style="margin-top:8px"><div style="display:flex;gap:8px">
+      <input id="invLink" readonly style="flex:1;min-width:0"><button id="bInvCopy">Kopiuj link</button></div></div>
+    <div id="invWarn" class="muted" style="margin-top:6px"></div>
+    <table style="margin-top:8px"><thead><tr><th>Adres</th><th>Konto</th><th>Stan</th><th></th></tr></thead>
+      <tbody id="invites"></tbody></table>
   </section>
   <section data-in="urz" id="acctBox" data-show="0" hidden>
     <h2>Konto <span id="acctName"></span> — pliki i kopie</h2>

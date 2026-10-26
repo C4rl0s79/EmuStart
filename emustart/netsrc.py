@@ -697,8 +697,9 @@ def find(cfg: dict, g: dict) -> tuple[dict, list]:
 
 
 def parse_login(text: str) -> dict:
-    """Wpis „Zaloguj”: link z kodu QR panelu (emustart://login?d=…) albo adres tunelu.
-    → {"ok", "endpoints": [(url, kind, ca)], "fp", "code", "name"} albo {"ok": False, "reason"}.
+    """Wpis „Zaloguj”: link logowania (emustart://login?d=… — kod QR / link ze strony serwera
+    albo z panelu) albo adres tunelu.
+    → {"ok", "endpoints": [(url, kind, ca)], "fp", "code", "account", "name"} albo {"ok": False, "reason"}.
     Kod QR niesie adresy i odcisk certyfikatu serwera — połączenie od pierwszego zapytania
     szyfrowane i przypięte. Sam adres: tylko domena z prawdziwym certyfikatem (tunel); adres
     IP nie ma czym zweryfikować — wtedy kod QR / link z panelu."""
@@ -714,7 +715,8 @@ def parse_login(text: str) -> dict:
             fp = str(d.get("f") or "")
             if not eps or not re.fullmatch(r"[0-9a-f]{64}", fp):
                 raise ValueError("brak adresów albo odcisku")
-            return {"ok": True, "endpoints": eps, "fp": fp, "code": str(d.get("c") or ""), "name": str(d.get("n") or "")}
+            return {"ok": True, "endpoints": eps, "fp": fp, "code": str(d.get("c") or ""), "name": str(d.get("n") or ""),
+                    "account": str(d.get("a") or "")}
         except (ValueError, KeyError, TypeError, AttributeError) as ex:
             return {"ok": False, "reason": f"To nie jest kod logowania EmuStart ({ex})."}
     if not text:
@@ -726,7 +728,7 @@ def parse_login(text: str) -> dict:
         return {"ok": False, "reason": "Adres IP albo nazwę komputera da się sprawdzić tylko kodem QR z panelu serwera "
                                        "(Dodaj urządzenie) — wpisz adres tunelu (np. emustart.emucloud.org)."}
     url = f"https://{sp[1]}" + ("" if sp[2] == 443 else f":{sp[2]}")
-    return {"ok": True, "endpoints": [(url, "tunnel", True)], "fp": "", "code": "", "name": ""}
+    return {"ok": True, "endpoints": [(url, "tunnel", True)], "fp": "", "code": "", "name": "", "account": ""}
 
 
 def _post(url: str, path: str, data: dict, key: str = "", fp: str = "", timeout: float = 15) -> dict:

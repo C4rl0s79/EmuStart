@@ -102,6 +102,22 @@ def _trust() -> dict:
     return {"endpoints": endpoints(), "tls": {"port": TLS["port"], "fp": TLS["fp"]} if TLS else None}
 
 
+def login_link(code: str, account: str, internet_only: bool = False) -> str:
+    """Link logowania aplikacji (kod QR / do wklejenia): adresy serwera, odcisk certyfikatu
+    (urządzenie od razu łączy się szyfrowanym, przypiętym połączeniem), jednorazowy kod i konto,
+    do którego kod jest przypisany (emustart/enroll.py). `internet_only` — strona serwera:
+    bez adresów sieci lokalnej i Tailscale (te urządzenie pozna po zalogowaniu). '' — brak
+    adresów albo certyfikatu."""
+    import base64
+    eps = [e for e in endpoints() if not internet_only or e.get("kind") in ("public", "tunnel")]
+    if not eps or not TLS:
+        return ""
+    data = {"v": 1, "n": socket.gethostname(), "f": TLS["fp"], "c": code, "a": account,
+            "e": [{"u": e["url"], "k": e.get("kind", ""), **({"ca": 1} if e.get("ca") else {})} for e in eps]}
+    raw = base64.urlsafe_b64encode(json.dumps(data, separators=(",", ":"), ensure_ascii=False).encode()).decode()
+    return "emustart://login?d=" + raw.rstrip("=")
+
+
 def kind_of(host: str) -> str:
     """lan / tailscale / public — rodzaj adresu (kolejność wyboru w klientach)."""
     import ipaddress
@@ -155,7 +171,7 @@ def _client_app(handler, d: dict) -> str:
 
 def enroll_flow(handler, op: str) -> None:
     """Zalogowanie urządzenia i logowanie podpisem (emustart/enroll.py):
-    POST /v1/enroll/request {mode, account, password, name, class, version, pubkey[, login_code]}
+    POST /v1/enroll/request {mode: code|existing, login_code | account + password, name, class, version, pubkey}
     POST /v1/enroll/poll {rid}                                               — bez klucza
     POST /v1/auth/challenge {device}, /v1/auth/token {device, nonce, sig}    — bez klucza
     POST /v1/enroll/pending, /v1/enroll/decide {id, allow, games}            — z kluczem"""
@@ -184,20 +200,6 @@ def enroll_flow(handler, op: str) -> None:
     if not authorized(handler):
         return _json(handler, {"ok": False, "reason": "brak lub zły klucz"}, 401)
     viewer = getattr(handler, "device", "")
-    if op == "account":                     # nowe konto z zalogowanego urządzenia (inny użytkownik)
-        from emustart import public as _pub
-        r = enroll.request_account(viewer, str(d.get("account", "")), str(d.get("password", "")),
-                                   _pub.client_ip(handler), profile_names(), create_account)
-        if r.get("status") == "approved":
-            from emustart import accounts
-            r["token"] = accounts.token(_secret(), r["account"])
-        return _json(handler, r, 200 if r.get("ok") else 400)
-    if op == "account_poll":
-        r = enroll.poll_account(str(d.get("rid", "")), viewer)
-        if r.get("status") == "approved":
-            from emustart import accounts
-            r["token"] = accounts.token(_secret(), r["account"])     # dostęp tego urządzenia do konta
-        return _json(handler, r)
     if op == "logout":                      # urządzenie wylogowuje się samo (unieważnienie)
         from emustart import devices
         return _json(handler, {"ok": bool(viewer) and devices.revoke(viewer)})

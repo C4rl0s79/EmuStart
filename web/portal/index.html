@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<meta name="color-scheme" content="dark">
+<title>EmuStart</title>
+<link rel="icon" href="/favicon.ico" type="image/svg+xml">
+<link rel="stylesheet" href="/portal/portal.css">
+</head>
+<body>
+<canvas id="sky" aria-hidden="true"></canvas>
+<div class="crt" aria-hidden="true"></div>
+
+<main id="start" class="view" hidden>
+  <div class="sprites" aria-hidden="true">
+    <svg class="sprite s1" data-sprite="invader" viewBox="0 0 11 8"></svg>
+    <svg class="sprite s2" data-sprite="pad" viewBox="0 0 15 8"></svg>
+    <svg class="sprite s3" data-sprite="coin" viewBox="0 0 6 7"></svg>
+    <svg class="sprite s4" data-sprite="heart" viewBox="0 0 7 6"></svg>
+    <svg class="sprite s5" data-sprite="invader2" viewBox="0 0 11 8"></svg>
+  </div>
+  <h1 class="logo-wrap"><svg id="logo" class="logo" role="img" aria-label="EmuStart"></svg></h1>
+  <p class="tagline"><span id="typed"></span><span class="cursor">_</span></p>
+  <div id="invite" class="note ok" hidden>Masz zaproszenie. Zaloguj się kontem Google, na które je dostałeś.</div>
+  <div id="error" class="note bad" hidden></div>
+  <a id="login" class="arcade" href="/auth/google">
+    <svg class="g" viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
+    <span>Zaloguj przez Google</span>
+  </a>
+  <p class="coin">INSERT COIN</p>
+  <p class="small">Serwer prywatny — wejście tylko na zaproszenie.</p>
+</main>
+
+<main id="home" class="view" hidden>
+  <header class="top">
+    <svg id="logoSmall" class="logo small-logo" role="img" aria-label="EmuStart"></svg>
+    <div class="who"><b id="acct"></b><span id="email"></span>
+      <button id="logout" class="link">Wyloguj</button></div>
+  </header>
+
+  <section class="card connect">
+    <div class="connect-text">
+      <h2>Połącz urządzenie</h2>
+      <p>Zainstaluj program (niżej), a potem zaloguj go swoim kontem — bez hasła:</p>
+      <ul>
+        <li><b>Telefon:</b> EmuStart → Ustawienia → <i>Zaloguj (kod QR)</i> → zeskanuj kod.</li>
+        <li><b>Komputer:</b> EmuStart albo Lumen → <i>Zaloguj</i> → wklej link (przycisk „Kopiuj link”)
+          albo wpisz adres serwera i kod.</li>
+      </ul>
+      <button id="newCode" class="btn">Pokaż kod logowania</button>
+    </div>
+    <div id="codeBox" class="code-box" hidden>
+      <div id="qr" class="qr"></div>
+      <div class="code-side">
+        <div class="label">Serwer</div><div id="codeServer" class="mono"></div>
+        <div class="label">Kod</div><div id="code" class="code"></div>
+        <div id="codeLeft" class="muted"></div>
+        <button id="copyLink" class="btn ghost">Kopiuj link</button>
+      </div>
+    </div>
+  </section>
+
+  <h2 class="section-title">Programy</h2>
+  <div id="apps" class="apps"></div>
+
+  <section class="card">
+    <h2>Hasło konta <span class="muted">(opcjonalne)</span></h2>
+    <p id="pwState" class="muted"></p>
+    <form id="pwForm" class="pw">
+      <input id="pw1" type="password" autocomplete="new-password" placeholder="Nowe hasło" required>
+      <input id="pw2" type="password" autocomplete="new-password" placeholder="Powtórz hasło" required>
+      <button class="btn" type="submit">Ustaw hasło</button>
+    </form>
+    <p id="pwMsg" class="muted"></p>
+  </section>
+  <footer class="foot">EmuStart · serwer prywatny</footer>
+</main>
+
+<template id="appTpl">
+  <article class="app card">
+    <div class="shot"><img alt="" loading="lazy"><div class="shot-ph" hidden></div></div>
+    <div class="app-body">
+      <h3></h3><div class="platform"></div><p class="desc"></p>
+      <div class="dl"><a class="btn" download></a><span class="muted meta"></span></div>
+    </div>
+  </article>
+</template>
+<script src="/portal/portal.js"></script>
+</body>
+</html>
