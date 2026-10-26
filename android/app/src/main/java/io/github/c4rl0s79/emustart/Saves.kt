@@ -350,13 +350,6 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
         .filter { server.nasRead("$it/moved.json") == null }
         .sortedBy { it.lowercase() }
 
-    fun createProfile(name: String): String {
-        val n = safe(name.trim().take(32))
-        if (profiles().any { it.equals(n, true) }) throw IllegalArgumentException("Profil „$n” już istnieje.")
-        server.nasPut("$n/emustart.json", "{}".toByteArray(), System.currentTimeMillis() / 1000.0)
-        return n
-    }
-
     // ── blokada: ten sam profil nie gra na dwóch urządzeniach naraz (serwer: emustart/plock.py) ──
     // Atomowa blokada po stronie serwera; urządzenie rozpoznawane po tokenie sesji, nie po nazwie.
     @Volatile private var beat: Thread? = null

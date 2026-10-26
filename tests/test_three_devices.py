@@ -136,6 +136,11 @@ def test_save_written_by_pc_is_read_by_phone(srv, monkeypatch):
     cfg = {"server_url": url, "server_fp": fp, "server_key": pc_key, "profiles_nas": str(paths.APP / "brak-smb")}
     fs = nasfs.backend(cfg)
     assert isinstance(fs, nasfs.RemoteFs)
+    # zapis nie zakłada konta — nawet urządzenie administratora (0.49: zaproszenie albo panel)
+    with pytest.raises(OSError, match="404"):
+        fs.write("Ania/save/retroarch/saves/Gra (USA).srm", b"zapis z PC", 1000.0)
+    assert not (nas / "Ania").exists()
+    (nas / "Ania").mkdir()                                 # konto założone na serwerze
     fs.write("Ania/save/retroarch/saves/Gra (USA).srm", b"zapis z PC", 1000.0)
     # telefon: aplikacja na Androida — te same zapytania co Saves.kt, własnym kluczem
     st, d = _req(srv, "GET", "/v1/nas/scan?p=Ania/save/retroarch/saves", ph_key)

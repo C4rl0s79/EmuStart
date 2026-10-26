@@ -74,20 +74,25 @@ def penv(env, monkeypatch, request, tmp_path):
     nasfs.TOKENS.clear()
 
 
-def test_create_unique_name_and_join(penv):
+def _account(tmp, name):
+    """Konto założone na serwerze (zaproszenie / panel) z hasłem."""
+    _write(tmp / "nas" / name / "emustart.json", b"{}")
+    accounts.set_password(name, PW)
+
+
+def test_new_account_not_from_the_device_and_join(penv):
     cfg, tmp, mode = penv
-    if mode == "serwer":
-        with pytest.raises(ValueError):
-            profiles.create("Jan", cfg=cfg, password="slabe")            # serwer pilnuje wymagań
-    jan = profiles.create("Jan", cfg=cfg, password=PW if mode == "serwer" else "")
-    assert not (tmp / "nas" / "Jan" / pinauth.AUTH).exists()             # nic o haśle w folderze profilu
-    assert profiles.pin_state(cfg, jan["id"], fresh=True) == "ok"
+    # 0.49: z serwerem nowy profil nie zakłada konta — zaproszenie albo panel
+    with pytest.raises(ValueError, match="zaproszenia"):
+        profiles.create("Jan", cfg=cfg)
+    assert not (tmp / "nas" / "Jan").exists() and not accounts.has_password("Jan")
+    _account(tmp, "Jan")
     with pytest.raises(profiles.ProfileExists) as ex:
-        profiles.create("JAN", cfg=cfg, password=PW)                   # zajęta bez względu na wielkość liter
+        profiles.create("JAN", cfg=cfg)                                # istniejące konto — jego hasło
     assert ex.value.name == "Jan"
-    if mode == "nas":
-        return                                                        # bez serwera: kont z hasłem nie ma
-    assert accounts.has_password("Jan")
+    jan, why = profiles.account_join(cfg, "jan", PW)
+    assert jan and not why and profiles.pin_state(cfg, jan["id"], fresh=True) == "ok"
+    assert not (tmp / "nas" / "Jan" / pinauth.AUTH).exists()             # nic o haśle w folderze profilu
     # drugie urządzenie / wylogowanie: konto innego użytkownika — tylko z hasłem
     profiles.account_logout(jan["id"])
     assert profiles.pin_state(cfg, jan["id"], fresh=True) == "need_password"
@@ -118,7 +123,8 @@ def test_old_account_gets_password_on_first_use(penv):
 
 def test_local_pin_only_on_this_device(penv):
     cfg, tmp, mode = penv
-    jan = profiles.create("Jan", cfg=cfg, password=PW if mode == "serwer" else "")
+    _account(tmp, "Jan")
+    jan, _why = profiles.account_join(cfg, "Jan", PW)
     assert profiles.local_pin_set(jan["id"], "12a4")[0] is False
     assert profiles.local_pin_set(jan["id"], "1234") == (True, "")
     raw = profiles.get(jan["id"])["pin_hash"]
@@ -155,11 +161,13 @@ def test_server_account_files_need_password_token(env, monkeypatch, tmp_path):
         c.close()
         return out
 
-    assert req("/v1/profiles/create", "PUT", body={"name": "Jan", "password": "slabe"})[0] == 400
-    st, r = req("/v1/profiles/create", "PUT", body={"name": "Jan", "password": PW})
+    # zakładanie kont z urządzenia nie istnieje (0.49)
+    assert req("/v1/profiles/create", "PUT", body={"name": "Jan", "password": PW})[0] == 404
+    _write(nas / "Jan" / "emustart.json", b"{}")
+    accounts.set_password("Jan", PW)
+    st, r = req("/v1/profiles/login", "PUT", body={"name": "Jan", "password": PW})
     assert st == 200 and r["token"]
     tok = r["token"]
-    assert req("/v1/profiles/create", "PUT", body={"name": "jan", "password": PW})[0] == 409
     assert req("/v1/profiles")[1]["profiles"] == [{"name": "Jan", "password": True, "pin": True}]
     # pliki konta: bez tokenu 403, z tokenem OK
     assert req("/v1/nas/file?p=Jan/emustart.json")[0] == 403
@@ -212,8 +220,8 @@ def test_account_device_other_user_needs_their_password(monkeypatch):
     assert _req(srv, "GET", "/v1/nas/file?p=Jezus/emustart.json", "sesja")[0] == 200
     st, r = _req(srv, "GET", "/v1/nas/file?p=Ola/emustart.json", "sesja")
     assert st == 403 and r["pin"]
-    # zakładanie kont — tylko administrator
-    assert _req(srv, "PUT", "/v1/profiles/create", "sesja", body={"name": "Nowy", "password": PW})[0] == 403
+    # zakładanie kont z urządzenia — nie istnieje (0.49)
+    assert _req(srv, "PUT", "/v1/profiles/create", "sesja", body={"name": "Nowy", "password": PW})[0] == 404
     # hasło Oli → token konta → dostęp
     st, r = _req(srv, "PUT", "/v1/profiles/login", "sesja", body={"name": "ola", "password": PW})
     assert st == 200 and r["token"]

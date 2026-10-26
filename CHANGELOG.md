@@ -51,9 +51,12 @@ strony; zalogowane działają dalej).
 - Hasło konta jest opcjonalne; „Mam konto” działa tylko dla konta z hasłem.
 
 ### Usunięte (bezpieczeństwo)
-- **Nowe konto z aplikacji** — prośba „Nowe konto” przy logowaniu i „Inny użytkownik → Utwórz
-  konto” (`/v1/enroll/account`, `/v1/enroll/account_poll`) nie istnieją. Nowe konto: zaproszenie
-  albo panel. Prośby o nowe konto zapisane przez starszy serwer znikają przy starcie.
+- **Nowe konto z aplikacji** — wszystkie drogi: prośba „Nowe konto” przy logowaniu, „Inny
+  użytkownik → Utwórz konto” (`/v1/enroll/account`, `/v1/enroll/account_poll`), „Nowy profil”
+  z hasłem (`PUT /v1/profiles/create`) i zapis pliku do nieistniejącego folderu konta (urządzenie
+  administratora zakładało tak konto bez hasła). Nowe konto: zaproszenie albo panel. Bez serwera
+  „Nowy profil” tworzy profil lokalny jak dotąd. Prośby o nowe konto zapisane przez starszy
+  serwer znikają przy starcie.
 - „Mam konto” dla konta bez hasła (ustawiało hasło przy zatwierdzeniu) — teraz kod ze strony.
 
 ## [0.48.3] — 2026-10-26

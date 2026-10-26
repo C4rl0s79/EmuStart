@@ -148,7 +148,7 @@ class Bridge(private val act: MainActivity) {
         "system_info" -> systemInfo(a.optString(0, ""))
         "profiles_list" -> profilesList()
         "profile_select", "profile_setup" -> selectProfile(a.getInt(0))
-        "profile_create" -> createProfile(a.getString(0), a.optString(1, ""))
+        "profile_create" -> createProfile(a.getString(0))
         "profile_join" -> joinProfile(a.getString(0), a.getString(1))
         "profile_login" -> loginProfile(a.getInt(0), a.getString(1))
         "profile_set_password" -> setPassword(a.getInt(0), a.getString(1), a.optString(2, ""))
@@ -1247,15 +1247,13 @@ class Bridge(private val act: MainActivity) {
         return JSONObject().put("ok", true).put("profile", JSONObject().put("id", profList.indexOf(name) + 1).put("name", name))
     }
 
-    private fun createProfile(name: String, password: String): JSONObject = try {
-        if (profPin.isEmpty() && server.profiles() == null) {
-            // starszy serwer: profil bez hasła, jak dotąd
-            val n = saves.createProfile(name)
-            profList = saves.profiles()
-            JSONObject().put("ok", true).put("profile", JSONObject().put("id", profList.indexOf(n) + 1).put("name", n))
-        } else opResult(name, server.profileOp("create", JSONObject().put("name", name).put("password", password)))
-    } catch (e: Exception) {
-        JSONObject().put("ok", false).put("reason", if (e is IllegalArgumentException) e.message else explain(e))
+    /** Nowe konto nie powstaje na telefonie (0.49) — zaproszenie albo panel serwera; nazwa
+     *  istniejącego konta → hasło tego konta (joinProfile). */
+    private fun createProfile(name: String): JSONObject {
+        val taken = try { saves.profiles().firstOrNull { it.equals(name.trim(), true) } } catch (e: Exception) { null }
+        if (taken != null) return JSONObject().put("ok", false).put("exists", taken).put("reason", "Profil „$taken” już istnieje.")
+        return JSONObject().put("ok", false).put("reason", "Nowe konto zakłada się z zaproszenia administratora (strona " +
+            "serwera) albo w panelu serwera — potem dodaj je tutaj (Inny użytkownik → nazwa i hasło).")
     }
 
     /** Konto innego użytkownika na tym telefonie — z jego hasłem. */
@@ -1272,12 +1270,7 @@ class Bridge(private val act: MainActivity) {
         val n = profList.getOrNull(id - 1) ?: return JSONObject().put("ok", false).put("reason", "Nie ma takiego profilu.")
         return try {
             val body = JSONObject().put("name", n).put("password", password).put("old", old)
-            var r = server.profileOp("password", body)
-            if (r.optString("error").contains("Nie ma konta")) {
-                saves.createProfile(n)               // konto jeszcze bez folderu
-                r = server.profileOp("password", body)
-            }
-            opResult(n, r)
+            opResult(n, server.profileOp("password", body))
         } catch (e: Exception) { JSONObject().put("ok", false).put("reason", explain(e)) }
     }
 

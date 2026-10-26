@@ -657,16 +657,14 @@ async function profilesInput(a) {
   } else if (a === "a" && !p) {
     return oskOpen("Nazwa nowego profilu", "", (name) => {
       if (!name.trim()) return;
-      const create = async (pw) => {
-        const r = await api().profile_create(name, pw);
+      // profil lokalny; z serwerem nowe konto — zaproszenie albo panel (serwer mówi, co zrobić)
+      (async () => {
+        const r = await api().profile_create(name);
         if (r.exists) return joinExisting(r.exists);
-        if (!r.ok) return toast(r.reason, 6000);
-        toast(`Utworzono profil: ${r.profile.name}.` + (pw ? " Zapamiętaj hasło — będzie potrzebne na innych urządzeniach." : ""), 6000);
+        if (!r.ok) return toast(r.reason, 8000);
+        toast(`Utworzono profil: ${r.profile.name}.`, 6000);
         openProfiles(PR.startup);
-      };
-      // konto z hasłem na serwerze (emustart/accounts.py); serwer niedostępny — profil lokalny
-      if (!S.state?.server) return create("");
-      setTimeout(() => askPassword(`Hasło nowego konta „${name.trim()}”`, create, true), 50);
+      })();
     });
   } else if (a === "a") {
     const r0 = await api().profile_select(p.id);

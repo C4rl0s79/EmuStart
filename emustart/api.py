@@ -1473,11 +1473,11 @@ class Api:
                 log.exception("zapisy z serwera")
         launcher.start_post(run, "zapisy z serwera")
 
-    def profile_create(self, name: str, password: str = "") -> dict:
-        """Nowy profil — z serwerem konto z hasłem. Nazwa zajęta (bez względu na wielkość
-        liter) → exists: UI prosi o hasło tego konta (profile_join) albo o inną nazwę."""
+    def profile_create(self, name: str) -> dict:
+        """Nowy profil lokalny (z serwerem nowe konto — zaproszenie albo panel). Nazwa zajęta
+        (bez względu na wielkość liter) → exists: UI prosi o hasło tego konta (profile_join)."""
         try:
-            p = profiles.create(name, cfg=self._cfg, password=str(password or ""))
+            p = profiles.create(name, cfg=self._cfg)
         except profiles.ProfileExists as ex:
             return {"ok": False, "exists": ex.name, "reason": str(ex)}
         except (ValueError, OSError) as ex:
