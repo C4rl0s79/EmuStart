@@ -663,9 +663,20 @@ class RetroArch(Adapter):
         name = state.name
         if name.endswith(".auto"):
             return self.launch_args(run_dir, True, pad_order)
-        m = re.search(r"\.state(\d*)$", name)
-        slot = int(m.group(1)) if m and m.group(1) else 0
-        return self.launch_args(run_dir, False, pad_order) + [f"--entryslot={slot}"]
+        # Wybrany stan jako autozapis wczytywany przy starcie — bez --entryslot: ten ustawiał
+        # bieżący slot na wybrany (np. 4), więc następny zapis szedł do 5 i nadpisywał istniejący
+        # stan. Bez niego savestate_auto_index ustawia slot na najwyższy, nowy zapis = kolejny numer.
+        m = re.match(r"^(.+)\.state\d*$", name)
+        if not m:
+            return self.launch_args(run_dir, False, pad_order)
+        auto = state.with_name(m.group(1) + ".state.auto")
+        if auto.exists():                       # poprzedni autozapis — kopia obok (RetroArch i tak go nadpisze przy wyjściu)
+            shutil.copy2(auto, auto.with_name(auto.name + ".emustart-bak"))
+        shutil.copy2(state, auto)
+        png = state.with_name(name + ".png")
+        if png.is_file():
+            shutil.copy2(png, auto.with_name(auto.name + ".png"))
+        return self.launch_args(run_dir, True, pad_order)
 
     def quit(self, proc) -> None:
         self._cmd("QUIT")

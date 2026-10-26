@@ -277,3 +277,19 @@ def test_clean_look_keeps_only_simple_values():
     assert clean_look(None) == {}
 
 
+
+
+def test_retroarch_chosen_state_loads_as_auto_without_entryslot(tmp_path):
+    """„Wczytaj zapis” stanu 4: bez --entryslot (ustawiał slot 4 — następny zapis nadpisywał 5);
+    stan wczytywany jako autozapis, następny zapis — kolejny numer (savestate_auto_index)."""
+    _write(tmp_path / "retroarch.cfg", b"")
+    st = tmp_path / "states"
+    _write(st / "Gra.state4", b"S4")
+    _write(st / "Gra.state4.png", b"P4")
+    _write(st / "Gra.state.auto", b"OLD-AUTO")
+    ra = ingame.RetroArch(str(tmp_path / "retroarch.exe"))
+    args = ra.start_state_args(tmp_path / "run", st / "Gra.state4")
+    assert not any("entryslot" in a for a in args)
+    assert (st / "Gra.state.auto").read_bytes() == b"S4" and (st / "Gra.state.auto.png").read_bytes() == b"P4"
+    assert (st / "Gra.state.auto.emustart-bak").read_bytes() == b"OLD-AUTO"
+    assert 'savestate_auto_load = "true"' in (tmp_path / "run" / "emustart_ra.cfg").read_text(encoding="utf-8")
