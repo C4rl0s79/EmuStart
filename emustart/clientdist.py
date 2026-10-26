@@ -108,7 +108,10 @@ def _fetch(app: str, rel: dict) -> dict:
     os.replace(part, d / rel["name"])
     for old in d.iterdir():
         if old.name != rel["name"]:
-            old.unlink(missing_ok=True)
+            try:
+                old.unlink(missing_ok=True)
+            except OSError:                   # właśnie pobierany ze strony (Windows) — zniknie następnym razem
+                log.info("programy do pobrania: %s zostaje na razie (w użyciu)", old.name)
     return {"version": rel["version"], "file": rel["name"], "size": size, "sha256": sha,
             "published": rel["published"], "updated": time.time()}
 

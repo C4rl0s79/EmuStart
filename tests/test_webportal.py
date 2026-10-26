@@ -287,6 +287,39 @@ def test_client_downloads_need_a_valid_release_signature(monkeypatch):
     assert not st["emustart-android"]["ready"] and "podpis" in st["emustart-android"]["error"]
 
 
+def test_old_client_file_in_use_does_not_fail_the_update(monkeypatch):
+    """Windows: plik poprzedniej wersji właśnie pobierany ze strony — nowa wersja i tak trafia
+    do indeksu (wcześniej błąd usuwania starego pliku psuł całą aktualizację)."""
+    import hashlib
+    from pathlib import Path
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    key = Ed25519PrivateKey.generate()
+    monkeypatch.setitem(clientdist.APPS["emustart-windows"], "key",
+                        base64.b64encode(key.public_key().public_bytes_raw()).decode())
+    d = paths.SERVER / "clients" / "emustart-windows"
+    d.mkdir(parents=True)
+    (d / "EmuStart-0.48.3-win64.zip").write_bytes(b"stary")
+    files = {"EmuStart-0.49.0-win64.zip": b"nowy"}
+    sig = base64.b64encode(key.sign(signing.message("EmuStart-0.49.0-win64.zip",
+                                                    hashlib.sha256(b"nowy").hexdigest()))).decode()
+    _release(monkeypatch, files, {"EmuStart-0.49.0-win64.zip": sig})
+    real = Path.unlink
+
+    def busy(self, missing_ok=False):
+        if self.name.startswith("EmuStart-0.48.3"):
+            raise PermissionError("w użyciu")
+        return real(self, missing_ok=missing_ok)
+    monkeypatch.setattr(Path, "unlink", busy)
+    clientdist.refresh(["emustart-windows"])
+    st = clientdist.status()["apps"]["emustart-windows"]
+    assert st["version"] == "0.49.0" and st["ready"] and not st["error"]
+
+
+def test_profile_names_without_profiles_folder(monkeypatch):
+    monkeypatch.setattr(remote, "NAS_ROOT", None)
+    assert remote.profile_names() == []
+
+
 # ── PCSX2: format stanów PS2 i wstrzymanie aktualizacji ──
 def _p2s(version: int) -> bytes:
     b = io.BytesIO()

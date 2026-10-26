@@ -21,7 +21,6 @@ import os
 import re
 import shutil
 import subprocess
-import tempfile
 import threading
 import urllib.request
 import zipfile

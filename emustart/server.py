@@ -13,7 +13,6 @@ import ssl
 import threading
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
 
 from emustart import paths
 

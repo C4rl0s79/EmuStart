@@ -1664,7 +1664,7 @@ class Api:
         return out
 
     def server_scan(self) -> dict:
-        """Kod QR — tylko na telefonie (aparat); na komputerze: Zaloguj → link z panelu serwera."""
+        """Kod QR — tylko na telefonie (aparat); na komputerze: Zaloguj → link ze strony serwera."""
         return {"ok": False, "reason": "Na komputerze: Zaloguj → wklej link ze strony serwera (Pokaż kod logowania)."}
 
     def server_enroll_poll(self) -> dict:

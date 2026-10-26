@@ -45,6 +45,11 @@ strony; zalogowane działają dalej).
   wersji mogą przestać działać) i przycisk **Zaktualizuj mimo to** / **Zaktualizuj**
   z ostrzeżeniem. „Pobierz ponownie” wstrzymania nie omija.
 
+### Poprawione
+- Programy do pobrania: plik poprzedniej wersji pobierany właśnie ze strony (Windows nie pozwala
+  go usunąć) nie psuje aktualizacji — nowa wersja trafia na stronę, stary plik znika później.
+- Serwer bez folderu profili nie traktuje folderów bieżącego katalogu jako kont.
+
 ### Zmienione
 - Kod logowania (strona serwera i panel) jest przypisany do konta — urządzenie nie wybiera
   konta ani nie podaje hasła.

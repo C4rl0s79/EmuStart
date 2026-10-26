@@ -683,6 +683,8 @@ def _profile_ok(handler, profile: str) -> bool:
 
 def profile_names() -> list:
     """Profile w folderze profili (bez przeniesionych po zmianie nazwy)."""
+    if NAS_ROOT is None:
+        return []                            # os.scandir(None) czytałby bieżący folder procesu
     try:
         ents = [e for e in os.scandir(NAS_ROOT) if e.is_dir() and not e.name.startswith((".", "_"))]
     except OSError:
@@ -712,11 +714,10 @@ def _profiles_put(handler, op: str) -> None:
     password — ustawienie hasła (konto bez hasła: urządzenie tego konta albo administrator)
                albo zmiana (z dotychczasowym `old`)
     """
-    from emustart import accounts, nasfs, public
+    from emustart import accounts, public
     d = _body(handler)
     if NAS_ROOT is None:
         return _json(handler, {"error": "serwer nie ma folderu profili"}, 404)
-    fs = nasfs.DirFs(NAS_ROOT)
     wanted, pw = str(d.get("name") or "").strip(), str(d.get("password") or "")
     ip = public.client_ip(handler)
     existing = _find_account(wanted)
