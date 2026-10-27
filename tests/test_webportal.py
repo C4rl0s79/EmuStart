@@ -182,6 +182,24 @@ def test_login_code_from_the_site_logs_in_a_device(site, monkeypatch):
     assert devices.account_raw(did) == "Ola"
 
 
+def test_keep_alive_after_posts_with_body(site, monkeypatch):
+    """Przeglądarka wysyła kolejne zapytania tym samym połączeniem: po „Wyloguj” (i po odmowie)
+    następne GET musi działać (wcześniej nieprzeczytane „{}” → „{}GET” → 501)."""
+    port, _nas = site
+    _google(monkeypatch)
+    invites.create(EMAIL, "Ola")
+    _loc, sess = _login(port)
+    c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+    for headers in ({"X-EmuStart-Web": "1", "Cookie": sess}, {"Cookie": sess}, {"X-EmuStart-Web": "1"}):
+        c.request("POST", "/web/logout" if "Cookie" in headers and "X-EmuStart-Web" in headers else "/web/code",
+                  body=b"{}", headers={"Content-Type": "application/json", **headers})
+        c.getresponse().read()
+        c.request("GET", "/web/me")
+        r = c.getresponse()
+        assert r.status == 200 and json.loads(r.read())["ok"]
+    c.close()
+
+
 def test_site_password_and_logout(site, monkeypatch):
     port, _nas = site
     _google(monkeypatch)
