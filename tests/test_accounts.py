@@ -128,7 +128,8 @@ def test_local_pin_only_on_this_device(penv):
     assert profiles.local_pin_set(jan["id"], "12a4")[0] is False
     assert profiles.local_pin_set(jan["id"], "1234") == (True, "")
     raw = profiles.get(jan["id"])["pin_hash"]
-    assert raw and "1234" not in raw
+    # PIN nie leży jawnie w żadnym polu (podciąg „1234” może się trafić w losowym skrócie hex)
+    assert raw and "1234" not in json.loads(raw).values()
     assert not any(f.name == pinauth.AUTH for f in (tmp / "nas").rglob("*"))   # nic na serwerze / NAS-ie
     assert profiles.pin_state(cfg, jan["id"]) == "ok"                    # ustawiony tu — odblokowany
     profiles.local_lock(jan["id"])
