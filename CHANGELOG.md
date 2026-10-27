@@ -8,6 +8,16 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.49.1] — 2026-10-27
+
+Zakres: strona serwera (`webportal.py`). Zaktualizuj serwer.
+
+### Poprawione
+- **Strona serwera: „Wyloguj” dawało „Error code: 501, Unsupported method ('{}GET')”.** Serwer
+  odpowiadał, zanim przeczytał treść zapytania; połączenie zostaje otwarte, więc nieprzeczytane
+  `{}` doklejało się do następnego zapytania przeglądarki. To samo po odmowie (wygasła sesja).
+  Teraz treść jest czytana zawsze przed odpowiedzią.
+
 ## [0.49.0] — 2026-10-27
 
 Zakres: strona serwera (`webportal.py`, `web/portal/`), zaproszenia (`invites.py`), konta

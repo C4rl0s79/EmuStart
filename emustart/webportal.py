@@ -190,7 +190,10 @@ def _body(h) -> dict:
         n = int(h.headers.get("Content-Length") or 0)
     except ValueError:
         n = 0
-    if n <= 0 or n > 16384:
+    if n > 16384:
+        h.close_connection = True            # nieprzeczytana treść zepsułaby następne zapytanie
+        return {}
+    if n <= 0:
         return {}
     try:
         d = json.loads(h.rfile.read(n) or b"{}")
@@ -224,6 +227,9 @@ def get(h) -> None:
 
 def post(h) -> None:
     path = urllib.parse.urlsplit(h.path).path
+    # treść zawsze przeczytana przed odpowiedzią: połączenie zostaje otwarte (HTTP/1.1), więc
+    # nieprzeczytane „{}” doklejało się do następnego zapytania („{}GET” → 501 po „Wyloguj”)
+    d = _body(h)
     if h.headers.get("X-EmuStart-Web") != "1":
         return _json(h, {"ok": False, "reason": "brak nagłówka"}, 403)
     if path == "/web/logout":
@@ -234,7 +240,6 @@ def post(h) -> None:
     s = _session(h)
     if not s:
         return _json(h, {"ok": False, "reason": "Zaloguj się ponownie."}, 401)
-    d = _body(h)
     if path == "/web/code":
         return _json(h, _new_code(s))
     if path == "/web/password":
