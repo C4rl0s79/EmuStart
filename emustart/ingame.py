@@ -552,8 +552,11 @@ class RetroArch(Adapter):
             f'savestate_auto_load = "{"true" if resume else "false"}"',
             'savestate_thumbnail_enable = "true"',      # obrazek stanu (podgląd w EmuStart)
             # log sesji do pliku: po grze EmuStart sprawdza, czy stan wczytał się przy starcie
+            # (bez trybu szczegółowego i poziomu INFO RetroArch nie tworzy pliku logu)
             'log_to_file = "true"',
             'log_to_file_timestamp = "false"',
+            'log_verbosity = "true"',
+            'frontend_log_level = "1"',
             f'log_dir = "{run_dir}"',
             # save'y zawsze w folderze profilu — także gdy retroarch.cfg każe trzymać
             # je obok gry (gra bywa w RAM-ie albo w pamięci podręcznej); tylko na czas

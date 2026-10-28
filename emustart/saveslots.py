@@ -520,6 +520,52 @@ class Editor:
         return {**self._push([(self.st, self.slot), (tb, self.slot)]), "arc": target}
 
 
+# ── stany innych rdzeni RetroArcha (lista „Wczytaj zapis”) ──
+
+_CORE = re.compile(r"^[\w.+-]+$")
+
+
+def other_core_bundle(pid: int, plat: str, gid: str, core: str, slot: int) -> savebundles.Bundle:
+    """Stany innego rdzenia RetroArcha w pamięci podręcznej profilu (z serwera —
+    syncclient.other_core_states), nazwy umowne paczki („game.state3”)."""
+    from emustart import profiles
+    if not _CORE.match(core or ""):
+        raise EditError("Nieznany rdzeń.")
+    folder = profiles.LOCAL / str(pid) / "_inne_rdzenie" / plat / gid / (core if slot == 1 else f"{core}@{slot}")
+    return savebundles.Bundle("retroarch", core, "states", folder, savebundles.ARC, [savebundles.ARC]).collect()
+
+
+class OtherCore(Editor):
+    """Stany innego rdzenia RetroArcha tej gry w aktywnym slocie: usuń (do kosza tego rdzenia)
+    i przywróć. Najpierw aktualne paczki tego rdzenia z serwera (bez połączenia — odmowa),
+    zmiana od razu na serwer; usunięty stan nie wraca przy synchronizacji urządzenia z tym rdzeniem."""
+
+    def __init__(self, cfg: dict, pid: int, game: dict, core: str):
+        from emustart import syncclient
+        self.cfg, self.pid, self.game = cfg, pid, game
+        self.plat, self.gid = syncclient.game_ids(game)
+        self.bundles, self._items = [], []
+        self.slot = here(pid, self.plat, self.gid)
+        self.st = other_core_bundle(pid, self.plat, self.gid, core, self.slot)
+        tb = trash_bundle(pid, self.plat, self.gid, self.slot, self.st)
+        r = syncclient.push_edit(cfg, pid, game, [(self.st, self.slot), (tb, self.slot)])   # tu: pobranie
+        if r.offline:
+            raise EditError("Brak połączenia z serwerem — stany innego rdzenia zmienisz po połączeniu.")
+        self.st.collect()
+
+    def settle(self, out: dict) -> dict:
+        """Po zmianie (albo samym podglądzie kosza): pamięć podręczna = wersja z serwera."""
+        from emustart import syncclient
+        syncclient.settle_other(self.pid, self.plat, self.gid, self.st, self.slot)
+        return out
+
+    def delete(self, arc: str) -> dict:
+        return self.settle(super().delete(arc))
+
+    def restore(self, name: str) -> dict:
+        return self.settle(super().restore(name))
+
+
 def summary(pid: int, plat: str, gid: str, bundles: list) -> list:
     """Sloty gry dla opcji gry: [{slot, active, states, saves, time, trash}] — z plików na tym urządzeniu
     (po synchronizacji wszystkie sloty są tutaj)."""
