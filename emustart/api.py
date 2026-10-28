@@ -1018,10 +1018,25 @@ class Api:
                     "retroarch": ed.st.emulator_id == "retroarch"}
         return self._slot_call(run)
 
-    def state_edit(self, game_id: int, op: str, arc: str, arg=None) -> dict:
+    def _other_core_ctx(self, game_id: int, core: str):
+        """Stany innego rdzenia RetroArcha (lista „Wczytaj zapis” → `other_core`)."""
+        if self._game_running():
+            raise saveslots.EditError("Najpierw zamknij grę — zapisy są teraz w użyciu.")
+        g = library.game(int(game_id))
+        if not g:
+            raise saveslots.EditError("Nie ma takiej gry.")
+        return saveslots.OtherCore(self._cfg, self._profile, g, str(core))
+
+    def state_edit(self, game_id: int, op: str, arc: str, arg=None, core: str = "") -> dict:
         """Zmiana stanu aktywnego slotu: renumber (arg: numer), copy_new, copy_slot / move_slot
-        (arg: slot), continue, delete; restore (arc: nazwa w koszu)."""
+        (arg: slot), continue, delete; restore (arc: nazwa w koszu). `core` — stan innego rdzenia
+        RetroArcha (`other_core` z listy stanów): tylko delete i restore."""
         def run():
+            if core:
+                if op not in ("delete", "restore"):
+                    raise saveslots.EditError("Stan innego rdzenia można tylko usunąć albo przywrócić.")
+                ed = self._other_core_ctx(game_id, core)
+                return ed.delete(arc) if op == "delete" else ed.restore(arc)
             g, bundles = self._slot_ctx(game_id)
             ed = saveslots.Editor(self._cfg, self._profile, g, bundles)
             fn = {"renumber": lambda: ed.renumber(arc, int(arg)), "copy_new": lambda: ed.copy_new(arc),
@@ -1033,11 +1048,17 @@ class Api:
             return fn()
         return self._slot_call(run)
 
-    def state_trash(self, game_id: int) -> dict:
-        """Kosz aktywnego slotu: [{name, arc, time, label, thumb}]."""
+    def state_trash(self, game_id: int, core: str = "") -> dict:
+        """Kosz aktywnego slotu: [{name, arc, time, label, thumb}]; `core` — kosz innego rdzenia
+        RetroArcha (przywrócenie: state_edit(…, "restore", name, core=core))."""
         def run():
-            g, bundles = self._slot_ctx(game_id)
-            items = saveslots.Editor(self._cfg, self._profile, g, bundles).trash()
+            if core:
+                ed = self._other_core_ctx(game_id, core)
+                items = ed.trash()
+                ed.settle({})
+            else:
+                g, bundles = self._slot_ctx(game_id)
+                items = saveslots.Editor(self._cfg, self._profile, g, bundles).trash()
             for it in items:
                 n = saveslots.state_no(it["arc"])
                 it["label"] = "Kontynuuj" if it["arc"] == saveslots.AUTO else (f"Stan #{n}" if n is not None else it["arc"])

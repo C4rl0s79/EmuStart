@@ -195,6 +195,31 @@ def respec(pid: int, plat: str, gid: str, slot: int, b) -> None:
                   "AND core=? AND kind=?", (json.dumps(b.spec()), pid, plat, gid, int(slot), *b.key))
 
 
+OTHER = "_inne_rdzenie"               # pamięć podręczna stanów innych rdzeni (saveslots.other_core_bundle)
+
+
+def _other_cache(st: dict) -> bool:
+    """Wiersz paczki stanów innego rdzenia z pamięci podręcznej (zmiana gracza: usuń / przywróć)."""
+    try:
+        return OTHER in Path(json.loads(st.get("spec") or "{}").get("folder") or "").parts
+    except (ValueError, AttributeError):
+        return False
+
+
+def settle_other(pid: int, plat: str, gid: str, b, slot: int) -> None:
+    """Stany innego rdzenia po wysłaniu zmiany: pamięć podręczna = ta wersja z serwera (znacznik
+    `.revision`), wiersz synchronizacji usunięty — ten sam klucz paczki ma urządzenie grające tym
+    rdzeniem (foldery emulatora). Niewysłana zmiana (dirty) zostaje do wysłania."""
+    st = _state(pid, plat, gid, b, slot)
+    if st is None or st["dirty"] or any(pending_ops(pid, plat, gid, b, slot).values()):
+        return
+    b.folder.mkdir(parents=True, exist_ok=True)
+    (b.folder / ".revision").write_text(str(st["revision"]), encoding="utf-8")
+    with _db() as c:
+        c.execute("DELETE FROM save_sync WHERE profile_id=? AND platform=? AND game=? AND slot=? AND emu=? "
+                  "AND core=? AND kind=?", (pid, plat, gid, int(slot), *b.key))
+
+
 def game_ids(game: dict) -> tuple[str, str]:
     from emustart import savesync
     return str(game.get("es") or "").lower(), savesync.game_id(game.get("es", ""), game.get("name", ""))
@@ -548,6 +573,8 @@ def _before_one(cl, pid, plat, gid, b, srv: dict, res: Result, slot: int = 1) ->
     rev_s = int(srv.get("revision") or 0)
     local = savebundles.content_hash(b.files)
     st = _state(pid, plat, gid, b, slot)
+    if st is not None and _other_cache(st) and Path(json.loads(st["spec"])["folder"]) != b.folder:
+        st = None                        # niewysłana zmiana stanów tego rdzenia z listy innych rdzeni — jak pierwsza synchronizacja
     if st is None:
         if not rev_s:
             if local:
@@ -723,6 +750,8 @@ def retry(cfg: dict) -> int:
                 out = _upload(cl, r["platform"], r["game"], b, r["revision"], r["slot"], ops)
             _remember(r["profile_id"], r["platform"], r["game"], b, out["revision"], local, account=cl.account,
                       slot=r["slot"], removed={})
+            if _other_cache(r):
+                settle_other(r["profile_id"], r["platform"], r["game"], b, r["slot"])
             sent += 1
         except ConflictError:
             continue                     # decyzja gracza / sumowanie przy następnej grze
@@ -739,8 +768,8 @@ def retry(cfg: dict) -> int:
 def other_core_states(cfg: dict, pid: int, game: dict, core: str) -> list:
     """Stany tej gry z innych rdzeni RetroArcha (z serwera) — do listy „Wczytaj zapis” z
     oznaczeniem, że w bieżącym rdzeniu się nie wczytają (slot w folderach emulatora). Paczki
-    rozpakowane do pamięci podręcznej profilu (pobierane, gdy na serwerze jest nowsza wersja).
-    [{core, path, time}]."""
+    rozpakowane do pamięci podręcznej profilu (pobierane, gdy na serwerze jest nowsza wersja;
+    zmiana gracza tutaj — saveslots.OtherCore — czeka w niej do wysłania). [{core, path, time}]."""
     from emustart import saveslots
     plat, gid = game_ids(game)
     slot = saveslots.here(pid, plat, gid)
@@ -749,7 +778,6 @@ def other_core_states(cfg: dict, pid: int, game: dict, core: str) -> list:
         man = cl.json("GET", f"/v1/savesync/{plat}/{gid}/manifest")
     except (Offline, ConflictError):
         return []
-    from emustart import profiles
     out = []
     emus = man.get("emulators") if slot == 1 else ((man.get("slots") or {}).get(str(slot)) or {}).get("emulators")
     cores = ((emus or {}).get("retroarch") or {}).get("cores") or {}
@@ -757,13 +785,25 @@ def other_core_states(cfg: dict, pid: int, game: dict, core: str) -> list:
         b = (node.get("bundles") or {}).get("states") or {}
         if c == core or not b.get("download_url"):
             continue
-        d = profiles.LOCAL / str(pid) / "_inne_rdzenie" / plat / gid / (c if slot == 1 else f"{c}@{slot}")
+        try:
+            ob = saveslots.other_core_bundle(pid, plat, gid, c, slot)
+        except saveslots.EditError:
+            continue
+        d = ob.folder
         mark = d / ".revision"
         try:
             have = mark.read_text(encoding="utf-8").strip()
         except OSError:
             have = ""
-        if have != str(b.get("revision")):
+        if _state(pid, plat, gid, ob, slot) is not None:
+            # niewysłana zmiana gracza (usuń / przywróć) — wysłanie, w razie potrzeby suma z serwerem
+            try:
+                with _lock:
+                    _before_one(cl, pid, plat, gid, ob, b, Result(), slot)
+                settle_other(pid, plat, gid, ob, slot)
+            except (Offline, OSError, ValueError, zipfile.BadZipFile) as ex:
+                log.info("stany rdzenia %s: %s", c, ex)
+        elif have != str(b.get("revision")):
             try:
                 zp = _fetch(cl, b)
             except Offline as ex:

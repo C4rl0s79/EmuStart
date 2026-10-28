@@ -280,11 +280,15 @@ def test_retroarch_state_slot_not_kept(tmp_path):
     args = ra.launch_args(run, True, [])
     appended = Path(args[args.index("--appendconfig") + 1]).read_text(encoding="utf-8")
     assert 'log_to_file = "true"' in appended and str(run) in appended
-    Path(args[1]).write_text('state_slot = "-1"\nvideo_scale_integer = "true"\n')
+    # bez trybu szczegółowego i poziomu INFO RetroArch nie tworzy logu
+    assert 'log_verbosity = "true"' in appended and 'frontend_log_level = "1"' in appended
+    Path(args[1]).write_text('state_slot = "-1"\nvideo_scale_integer = "true"\n'
+                             'log_verbosity = "true"\nfrontend_log_level = "1"\nlog_to_file = "true"\n')
     (run / "retroarch.log").write_text("[INFO] [State] Loading state \"x.state.auto\", 100 bytes.\n[INFO] [Video] ok\n")
     assert ra.after_session() == 1
     cfg = (home / "retroarch.cfg").read_text()
     assert 'state_slot = "0"' in cfg and 'video_scale_integer = "true"' in cfg
+    assert "log_verbosity" not in cfg and "frontend_log_level" not in cfg and "log_to_file" not in cfg
 
 
 def _slot_files(pid, tmp, who, slot):
@@ -418,3 +422,101 @@ def test_edit_waits_for_running_sync(net):
     t.join(10)
     assert out["r"]["ok"] and local_states(tmp, PC) == {}
     assert server_slot(1)["file_count"] == 0                          # wysłane po zwolnieniu blokady
+
+
+# ── stany innych rdzeni RetroArcha ──
+
+def bsnes_bundles(tmp, who):
+    base = tmp / f"dev{who}"
+    names = sorted({STEM, GAME["name"], Path(GAME["rel"]).stem})
+    return [savebundles.Bundle("retroarch", "bsnes", "saves", base / "saves", STEM, names).collect(),
+            savebundles.Bundle("retroarch", "bsnes", "states", base / "states", STEM, names).collect()]
+
+
+def other_states(cfgs, who) -> list:
+    return sorted(Path(s["path"]).name for s in syncclient.other_core_states(cfgs[who], who, GAME, "snes9x"))
+
+
+def bsnes_server(kind="states"):
+    m = savesync.manifest("Jezus", "pc", PLAT, GID, urls=False)
+    return m["emulators"]["retroarch"]["cores"]["bsnes"]["bundles"].get(kind) or {}
+
+
+def test_other_core_state_delete_and_restore(net):
+    """PC (snes9x) usuwa stan rdzenia bsnes z listy „Wczytaj zapis”: znika z serwera (nowa
+    wersja paczki), z listy na PC (bez starej pamięci podręcznej) i z telefonu (bsnes) — także gdy
+    telefon w tym czasie zapisał inny stan. Przywrócenie z kosza wraca wszędzie."""
+    cfgs, tmp = net
+    put_state(tmp, TEL, 1, b"BSNES-1", png=b"PNG1")
+    put_state(tmp, TEL, 2, b"BSNES-2")
+    syncclient.before(cfgs[TEL], TEL, bsnes_bundles(tmp, TEL), GAME)
+    assert other_states(cfgs, PC) == ["game.state1", "game.state2"]
+    rev = bsnes_server()["revision"]
+
+    ed = saveslots.OtherCore(cfgs[PC], PC, GAME, "bsnes")
+    assert ed.delete("game.state1") == {"ok": True, "offline": ""}
+    srv = bsnes_server()
+    assert srv["revision"] > rev and srv["file_count"] == 1
+    assert [r["name"] for r in srv["removed"]] == ["game.state1"]
+    assert other_states(cfgs, PC) == ["game.state2"]
+    # pamięć podręczna = wersja z serwera; bez wiersza synchronizacji (ten klucz ma urządzenie z bsnes)
+    ob = saveslots.other_core_bundle(PC, PLAT, GID, "bsnes", 1)
+    assert (ob.folder / ".revision").read_text() == str(srv["revision"])
+    assert syncclient._state(PC, PLAT, GID, ob, 1) is None
+
+    put_state(tmp, TEL, 3, b"BSNES-3")               # telefon: nowy stan, serwer też się zmienił
+    r = syncclient.before(cfgs[TEL], TEL, bsnes_bundles(tmp, TEL), GAME)
+    assert not r.conflicts
+    assert local_states(tmp, TEL) == {"game.state2": b"BSNES-2", "game.state3": b"BSNES-3"}
+    assert other_states(cfgs, PC) == ["game.state2", "game.state3"]
+
+    ed = saveslots.OtherCore(cfgs[PC], PC, GAME, "bsnes")
+    item = ed.trash()[0]
+    assert item["arc"] == "game.state1"
+    assert ed.restore(item["name"])["arc"] == "game.state1"
+    assert other_states(cfgs, PC) == ["game.state1", "game.state2", "game.state3"]
+    syncclient.before(cfgs[TEL], TEL, bsnes_bundles(tmp, TEL), GAME)
+    assert local_states(tmp, TEL)["game.state1"] == b"BSNES-1"
+    assert local_states(tmp, TEL)["game.state1.png"] == b"PNG1"
+    assert saveslots.Editor(cfgs[TEL], TEL, GAME, bsnes_bundles(tmp, TEL)).trash() == []
+
+
+def test_other_core_edit_offline(net, monkeypatch):
+    """Bez połączenia: odmowa, nic się nie zmienia. Przerwana wysyłka po zmianie czeka i idzie przy
+    następnym otwarciu listy; potem pamięć podręczna znów bez wiersza synchronizacji."""
+    cfgs, tmp = net
+    put_state(tmp, TEL, 1, b"BSNES-1")
+    put_state(tmp, TEL, 2, b"BSNES-2")
+    syncclient.before(cfgs[TEL], TEL, bsnes_bundles(tmp, TEL), GAME)
+    assert other_states(cfgs, PC) == ["game.state1", "game.state2"]
+    real = syncclient._Client.json
+
+    def down(self, *a, **k):
+        raise syncclient.Offline("brak sieci")
+    monkeypatch.setattr(syncclient._Client, "json", down)
+    with pytest.raises(saveslots.EditError):
+        saveslots.OtherCore(cfgs[PC], PC, GAME, "bsnes")
+    monkeypatch.setattr(syncclient._Client, "json", real)
+
+    ed = saveslots.OtherCore(cfgs[PC], PC, GAME, "bsnes")
+    push = syncclient.push_edit
+
+    def lost(cfg, pid, game, items):                 # połączenie zerwane po zmianie
+        for b, slot in items:
+            syncclient._mark_dirty(pid, PLAT, GID, b, slot)
+        return syncclient.Result(offline="brak sieci")
+    monkeypatch.setattr(syncclient, "push_edit", lost)
+    assert ed.delete("game.state1")["offline"]
+    monkeypatch.setattr(syncclient, "push_edit", push)
+    assert bsnes_server()["file_count"] == 2
+    assert other_states(cfgs, PC) == ["game.state2"]           # wysłane przy otwarciu listy
+    assert bsnes_server()["file_count"] == 1
+    ob = saveslots.other_core_bundle(PC, PLAT, GID, "bsnes", 1)
+    assert syncclient._state(PC, PLAT, GID, ob, 1) is None
+    syncclient.before(cfgs[TEL], TEL, bsnes_bundles(tmp, TEL), GAME)
+    assert local_states(tmp, TEL) == {"game.state2": b"BSNES-2"}
+
+
+def test_other_core_bad_name(tmp_path):
+    with pytest.raises(saveslots.EditError):
+        saveslots.other_core_bundle(1, "snes", "g", "../x", 1)

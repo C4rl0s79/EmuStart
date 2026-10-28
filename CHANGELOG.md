@@ -8,6 +8,30 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.50.3] — 2026-10-28
+
+Zakres: klient (`ingame.py`, `saveslots.py`, `syncclient.py`, `api.py`). Serwer bez zmian (już
+przechowuje usunięte stany paczki — `removed_add` / `removed_drop`). Interfejs `web/` bez zmian.
+
+### Poprawione
+- **Log RetroArcha z sesji naprawdę powstaje.** W ustawieniach sesji (`emustart_ra.cfg`) dochodzą
+  `log_verbosity = "true"` i `frontend_log_level = "1"` (INFO — w RetroArch 1.22.2 `RARCH_LOG`
+  pisze tylko przy włączonym trybie szczegółowym i poziomie ≤ 1). Wcześniej RetroArch nie tworzył
+  `retroarch.log` i po grze w logu EmuStart zawsze było „brak logu sesji”. Teraz widać, czy stan
+  z „Wczytaj zapis” wczytał się przy starcie. Oba klucze są tylko na czas sesji — nie wracają do
+  `retroarch.cfg`.
+
+### Dodane
+- **Usuwanie i przywracanie stanów innych rdzeni (API).** `state_edit(gra, "delete"|"restore", arc,
+  core=<rdzeń>)` i `state_trash(gra, core=<rdzeń>)` — stan innego rdzenia RetroArcha z listy
+  „Wczytaj zapis” do kosza tego rdzenia (aktywny slot) i z powrotem; dotychczasowe wywołania bez
+  zmian. Najpierw aktualna paczka stanów i kosza tego rdzenia z serwera, potem zmiana i od razu
+  nowa wersja na serwer. Usunięty stan jest zapisany na serwerze jako usunięty — urządzenie
+  grające tym rdzeniem go nie przywróci. Wymaga połączenia (bez niego nic się nie zmienia);
+  przerwana wysyłka idzie przy następnym otwarciu listy zapisów tej gry. Pamięć podręczna
+  `_inne_rdzenie` po zmianie = nowa wersja z serwera (lista bez usuniętego stanu). Interfejs —
+  w Lumen.
+
 ## [0.50.2] — 2026-10-28
 
 Zakres: klient (`saveslots.py`, `api.py`). Serwer bez zmian.
