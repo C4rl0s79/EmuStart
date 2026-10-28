@@ -26,6 +26,7 @@ slotu „Auto” w RetroArchu (slot −1 → 0 → 1…) niczego nie nadpisze.
 
 from __future__ import annotations
 
+import functools
 import json
 import logging
 import os
@@ -353,6 +354,22 @@ def _move_with_png(b_from, arc_from: str, b_to, arc_to: str, copy: bool = False)
 
 # ── edycja stanów (opcje gry) ──
 
+def _edit(fn):
+    """Zmiana plików stanów pod blokadą synchronizacji (pobieranie w tle — pull_all, before — nie
+    wchodzi w jej środek), wysyłka zmienionych paczek na serwer dopiero po niej."""
+    @functools.wraps(fn)
+    def run(self, *a, **k):
+        from emustart import syncclient
+        self._items = []
+        with syncclient._lock:
+            out = fn(self, *a, **k)
+        if not self._items:
+            return out
+        r = syncclient.push_edit(self.cfg, self.pid, self.game, self._items)
+        return {**out, "ok": True, "offline": r.offline}
+    return run
+
+
 class Editor:
     """Zmiany stanów aktywnego slotu gry; każda od razu na serwer (syncclient.push_edit)."""
 
@@ -361,7 +378,9 @@ class Editor:
         self.cfg, self.pid, self.game = cfg, pid, game
         self.plat, self.gid = syncclient.game_ids(game)
         self.bundles = bundles
-        self.slot = finish_swap(pid, self.plat, self.gid, bundles)
+        self._items: list = []
+        with syncclient._lock:
+            self.slot = finish_swap(pid, self.plat, self.gid, bundles)
         self.st = next((b for b in bundles if b.kind == "states"), None)
         if self.st is None:
             raise EditError("Ten emulator nie ma stanów tej gry w zapisach.")
@@ -375,9 +394,9 @@ class Editor:
         syncclient.add_ops(self.pid, self.plat, self.gid, b, slot, add, drop)
 
     def _push(self, items: list) -> dict:
-        from emustart import syncclient
-        r = syncclient.push_edit(self.cfg, self.pid, self.game, items)
-        return {"ok": True, "offline": r.offline}
+        """Paczki do wysłania po zmianie (wysyła `_edit`, już bez blokady)."""
+        self._items += items
+        return {"ok": True, "offline": ""}
 
     def _need(self, arc: str) -> None:
         if arc not in _states(self.st):
@@ -389,6 +408,7 @@ class Editor:
     def slots(self) -> list:
         return [n for n in SLOTS if n != self.slot]
 
+    @_edit
     def renumber(self, arc: str, n: int) -> dict:
         self._need(arc)
         if arc == AUTO:
@@ -402,12 +422,14 @@ class Editor:
         log.info("stany %s/%s slot %d: %s → %s", self.plat, self.gid, self.slot, arc, new)
         return {**self._push([(self.st, self.slot)]), "arc": new}
 
+    @_edit
     def copy_new(self, arc: str) -> dict:
         self._need(arc)
         new = next_free(self.st, arc)
         _move_with_png(self.st, arc, self.st, new, copy=True)
         return {**self._push([(self.st, self.slot)]), "arc": new}
 
+    @_edit
     def to_slot(self, arc: str, slot: int, move: bool = False) -> dict:
         self._need(arc)
         slot = int(slot)
@@ -431,6 +453,7 @@ class Editor:
         p.unlink(missing_ok=True)
         p.with_name(p.name + ".png").unlink(missing_ok=True)
 
+    @_edit
     def set_continue(self, arc: str) -> dict:
         """Stan jako „Kontynuuj” (autozapis wczytywany przy „Graj”): kopia; dotychczasowy
         „Kontynuuj” dostaje nowy numer (nic nie ginie)."""
@@ -452,6 +475,7 @@ class Editor:
         self._ops(self.st, self.slot, add=add, drop=[{"sha256": sha, "name": AUTO}])
         return {**self._push([(self.st, self.slot)]), "arc": AUTO}
 
+    @_edit
     def delete(self, arc: str) -> dict:
         """Stan do kosza slotu (synchronizowany — cofnięcie także na innym urządzeniu)."""
         self._need(arc)
@@ -481,6 +505,7 @@ class Editor:
         out = [{"name": n, "arc": n[13:], "time": p.stat().st_mtime, "path": str(p)} for n, p in _states(tb).items()]
         return sorted(out, key=lambda x: -x["time"])
 
+    @_edit
     def restore(self, name: str) -> dict:
         tb = trash_bundle(self.pid, self.plat, self.gid, self.slot, self.st)
         if name not in _states(tb):
