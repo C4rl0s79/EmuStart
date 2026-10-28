@@ -21,6 +21,8 @@ WINDOWS_ONLY = {
     "emu_settings_history", "emu_settings_restore", "set_shader_off",
     # opcje gier i systemów (openGameOptions / openSystemOptions zablokowane na Androidzie)
     "game_options",
+    # sloty zapisów i edycja stanów — strony opcji gry z game_options (APK: później, osobno)
+    "save_slot_set", "state_edit", "state_edit_info", "state_trash",
 
     # menu w grze i pady Windows (XInput), RetroAchievements w emulatorach na komputerze
     "ingame_action", "pads_set", "pads_state", "ui_pad_poll",

@@ -281,7 +281,7 @@ def handle(handler) -> None:
     parts = [p for p in path.split("/") if p][1:]           # bez „v1”
     try:
         if parts == ["info"]:
-            feats = ["find", "system", "bios", "media", "library", "emulators", "savesync", "lock"] + (["nas", "savemgr", "profiles"] if NAS_ROOT else [])
+            feats = ["find", "system", "bios", "media", "library", "emulators", "savesync", "saveslots", "lock"] + (["nas", "savemgr", "profiles"] if NAS_ROOT else [])
             return _json(handler, {"name": socket.gethostname(), "version": __version__, "api": 1,
                                    "features": feats + ["admin"], "nas_id": NAS_ID, "endpoints": endpoints(),
                                    "admin": _admin(handler),
@@ -1011,7 +1011,7 @@ def savesync_get(handler, platform: str, game: str, urls: bool) -> None:
 
 
 def savesync_post(handler) -> None:
-    """POST /v1/savesync/upload/init | upload/commit | <platforma>/<gra>/resolve."""
+    """POST /v1/savesync/upload/init | upload/commit | <platforma>/<gra>/resolve | <platforma>/<gra>/slot."""
     from emustart import savesync
     if not authorized(handler):
         return _json(handler, {"error": "brak lub zły klucz serwera"}, 401)
@@ -1032,6 +1032,8 @@ def savesync_post(handler) -> None:
             return savesync.upload_commit(acc, dev, d)
         if len(parts) == 3 and parts[2] == "resolve":
             return savesync.resolve(acc, dev, parts[0], parts[1], d)
+        if len(parts) == 3 and parts[2] == "slot":
+            return savesync.set_active(acc, dev, parts[0], parts[1], d)
         raise savesync.SyncError("nieznany adres")
     return _sync_errors(handler, run)
 

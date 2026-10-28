@@ -857,7 +857,7 @@ def savesync_restore(_api, args: dict) -> dict:
     from emustart import savesync
     return savesync.restore(str(args.get("account", "")), str(args.get("es", "")).lower(), str(args.get("game_id", "")),
                             str(args.get("emulator", "")), str(args.get("core", "")), str(args.get("kind", "")),
-                            str(args.get("bundle_id", "")), "panel")
+                            str(args.get("bundle_id", "")), "panel", args.get("slot") or 1)
 
 
 ACTIONS["savesync_migrate_status"] = savesync_migrate_status

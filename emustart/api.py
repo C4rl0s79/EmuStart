@@ -24,7 +24,7 @@ import urllib.parse
 from pathlib import Path
 
 from emustart import (__version__, art, bios, cache, catalog, ingame, installer, logos, sysinfo, metadata, pads, profiles, translations, uipad, config, emulators, launcher, library,
-                      nasfs, netsrc, paths, syncclient, systems, winutil)
+                      nasfs, netsrc, paths, saveslots, syncclient, systems, winutil)
 
 log = logging.getLogger("emustart.api")
 KEEP_LIST = 60                     # stanów na liście „Wczytaj zapis”
@@ -76,6 +76,7 @@ class Api:
         self._menu = {"open": False, "items": [], "message": "", "title": "", "seq": 0}
         self._menu_inputs: collections.deque = collections.deque()
         self._menu_lock = threading.Lock()
+        self._slot_lock = threading.Lock()        # zmiany slotów / stanów jedna po drugiej
 
     def _uipad_active(self) -> bool:
         if not self._window:
@@ -857,7 +858,7 @@ class Api:
             return {}
         emu = self._effective_emu(g)
         opts = emulators.options_for(systems.info(g["es"]), self._cfg.get("emu_root", ""))
-        states = []
+        states, slots = [], []
         desc: dict = {}
         if emu["exe"]:
             ad = ingame.adapter_for(emu["exe"])
@@ -870,6 +871,7 @@ class Api:
                 "SELECT prefix FROM states WHERE game_id=? AND family=?", (g["id"], ad.family))]
             bundled = self._bundle_states(g, emu, ad)
             states = bundled if bundled is not None else ingame.list_states(ad, g, meta, learned)
+            slots = self._slots_brief(g, emu, ad)
             if ad.family == "retroarch":
                 # stany innych rdzeni tej gry (inne urządzenia) — wczytanie przełącza rdzeń gry
                 from emustart import savebundles
@@ -900,20 +902,37 @@ class Api:
                 "states": states, "es": g["es"], "system": systems.info(g["es"])["display"],
                 "retroarch": bool(emu["exe"]) and ingame.adapter_for(emu["exe"]).family == "retroarch",
                 "shader_off": bool(sc.get("shader_off")),
-                "sync": self._sync_status(g)}
+                "sync": self._sync_status(g), "slots": slots}
+
+    def _slots_brief(self, g: dict, emu: dict, ad) -> list:
+        """Sloty zapisów gry do opcji gry (po synchronizacji w game_options; `ad` — emulator
+        z folderami profilu); [] — emulator bez paczek zapisów."""
+        try:
+            bundles = self._game_bundles(g, emu, ad)
+            if not bundles:
+                return []
+            plat, gid = syncclient.game_ids(g)
+            return saveslots.summary(self._profile, plat, gid, bundles)
+        except Exception:
+            log.exception("sloty zapisów")
+            return []
+
+    def _game_bundles(self, g: dict, emu: dict, ad) -> list | None:
+        """Paczki zapisów gry na tym komputerze (savebundles) — None: błąd."""
+        from emustart import savebundles
+        core = savebundles.core_id(emu.get("args", ""))
+        try:
+            return savebundles.for_game(ad, core, launcher.content_guess(self._cfg, g, emu["exe"]),
+                                        launcher.ps2_info(self._cfg, g))
+        except Exception:
+            log.exception("paczki zapisów gry")
+            return None
 
     def _bundle_states(self, g: dict, emu: dict, ad) -> list | None:
         """Stany gry z paczki — po synchronizacji z serwerem (serwer jest jedyną prawdą: lista
         to dokładnie paczka, bez lokalnych plików spoza niej). None — emulator bez paczek stanów."""
-        from emustart import savebundles
-        core = savebundles.core_id(emu.get("args", ""))
-        try:
-            bundles = savebundles.for_game(ad, core, launcher.content_guess(self._cfg, g, emu["exe"]),
-                                           launcher.ps2_info(self._cfg, g))
-        except Exception:
-            log.exception("paczki zapisów gry")
-            return None
-        st = next((b for b in bundles if b.kind == "states"), None)
+        bundles = self._game_bundles(g, emu, ad)
+        st = next((b for b in bundles or [] if b.kind == "states"), None)
         if st is None:
             return None
         if launcher.post_busy():
@@ -927,6 +946,93 @@ class Api:
         st.collect()
         return [{"path": str(p), "arc": arc, "name": Path(p).name, "time": Path(p).stat().st_mtime}
                 for p, arc in st.files if not arc.endswith(".png")]
+
+    # ── sloty zapisów i edycja stanów (emustart/saveslots.py) ──
+    def _slot_ctx(self, game_id: int):
+        """(gra, paczki gry) dla slotów — paczki w folderach profilu gracza."""
+        g = library.game(int(game_id))
+        if not g:
+            raise saveslots.EditError("Nie ma takiej gry.")
+        emu = self._effective_emu(g)
+        if not emu["exe"]:
+            raise saveslots.EditError("Ta gra nie ma emulatora.")
+        ad = ingame.adapter_for(emu["exe"])
+        profiles.bind(ad, self._profile)
+        bundles = self._game_bundles(g, emu, ad)
+        if not bundles:
+            raise saveslots.EditError("Ten emulator nie ma jeszcze synchronizacji zapisów tej gry.")
+        if launcher.post_busy():
+            launcher.wait_post(30)               # zapisy po ostatniej grze jeszcze idą na serwer
+            if launcher.post_busy():
+                # pliki tej gry właśnie idą na serwer — zamiana slotu / zmiana stanu by się z nimi minęła
+                raise saveslots.EditError("Zapisy po ostatniej grze jeszcze idą na serwer — spróbuj za chwilę.")
+        return g, bundles
+
+    def _slot_call(self, fn) -> dict:
+        try:
+            with self._slot_lock:
+                return fn()
+        except saveslots.EditError as ex:
+            return {"ok": False, "reason": str(ex)}
+        except Exception as ex:
+            log.exception("sloty zapisów")
+            return {"ok": False, "reason": f"Nie udało się ({ex})."}
+
+    def save_slots(self, game_id: int) -> dict:
+        """Sloty zapisów gry: [{slot, active, states, saves, time}]."""
+        def run():
+            g, bundles = self._slot_ctx(game_id)
+            plat, gid = syncclient.game_ids(g)
+            saveslots.finish_swap(self._profile, plat, gid, bundles)
+            return {"ok": True, "slots": saveslots.summary(self._profile, plat, gid, bundles)}
+        return self._slot_call(run)
+
+    def save_slot_set(self, game_id: int, slot: int) -> dict:
+        """Aktywny slot gry (zamiana plików od razu, wybór na serwer)."""
+        def run():
+            g, bundles = self._slot_ctx(game_id)
+            r = saveslots.set_active(self._cfg, self._profile, g, bundles, int(slot))
+            log.info("sloty: %s → slot %d", g["title"], int(slot))
+            return r
+        return self._slot_call(run)
+
+    def state_edit_info(self, game_id: int) -> dict:
+        """Do edycji stanu: wolne numery i pozostałe sloty."""
+        def run():
+            g, bundles = self._slot_ctx(game_id)
+            ed = saveslots.Editor(self._cfg, self._profile, g, bundles)
+            return {"ok": True, "numbers": ed.numbers(), "slots": ed.slots(), "slot": ed.slot,
+                    "retroarch": ed.st.emulator_id == "retroarch"}
+        return self._slot_call(run)
+
+    def state_edit(self, game_id: int, op: str, arc: str, arg=None) -> dict:
+        """Zmiana stanu aktywnego slotu: renumber (arg: numer), copy_new, copy_slot / move_slot
+        (arg: slot), continue, delete; restore (arc: nazwa w koszu)."""
+        def run():
+            g, bundles = self._slot_ctx(game_id)
+            ed = saveslots.Editor(self._cfg, self._profile, g, bundles)
+            fn = {"renumber": lambda: ed.renumber(arc, int(arg)), "copy_new": lambda: ed.copy_new(arc),
+                  "copy_slot": lambda: ed.to_slot(arc, int(arg)), "move_slot": lambda: ed.to_slot(arc, int(arg), True),
+                  "continue": lambda: ed.set_continue(arc), "delete": lambda: ed.delete(arc),
+                  "restore": lambda: ed.restore(arc)}.get(str(op))
+            if not fn:
+                raise saveslots.EditError("Nieznana zmiana stanu.")
+            return fn()
+        return self._slot_call(run)
+
+    def state_trash(self, game_id: int) -> dict:
+        """Kosz aktywnego slotu: [{name, arc, time, label, thumb}]."""
+        def run():
+            g, bundles = self._slot_ctx(game_id)
+            items = saveslots.Editor(self._cfg, self._profile, g, bundles).trash()
+            for it in items:
+                n = saveslots.state_no(it["arc"])
+                it["label"] = "Kontynuuj" if it["arc"] == saveslots.AUTO else (f"Stan #{n}" if n is not None else it["arc"])
+                th = ingame.state_thumb(Path(it.pop("path")))
+                if th:
+                    it["thumb"] = "/media/_stany/" + th
+            return {"ok": True, "items": items}
+        return self._slot_call(run)
 
     def play_other_core(self, game_id: int, core: str) -> dict:
         """„Wczytaj zapis” — stan innego rdzenia: ta gra przechodzi na RetroArch z tym rdzeniem

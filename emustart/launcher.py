@@ -23,7 +23,7 @@ import time
 import zipfile
 from pathlib import Path
 
-from emustart import (bios, cache, emulators, hotkey, ingame, library, pads, savebundles,
+from emustart import (bios, cache, emulators, hotkey, ingame, library, pads, savebundles, saveslots,
                       paths, profiles, syncclient, systems, winutil)
 
 log = logging.getLogger("emustart.launcher")
@@ -423,6 +423,12 @@ class Session:
             if save_names:
                 profiles.unlock(self.cfg, self.profile_id)
             raise
+        guard = None
+        if getattr(self, "_sync_bundles", None):
+            try:   # stany o istniejących numerach — po grze nic nie może ich nadpisać
+                guard = saveslots.Guard(self._sync_bundles, self.run_dir)
+            except Exception:
+                log.exception("straż numerów stanów")
         started_at = time.time()
         try:
             self._run_process(g, exe, cmd, adapter)
@@ -431,6 +437,8 @@ class Session:
                 adapter.after_session()          # ustawienia zmienione w trakcie gry zostają
             except Exception:
                 log.exception("ustawienia po sesji")
+            if guard and guard.finish():
+                self.notice = "Zapis stanu trafiłby na istniejący numer — dostał nowy, poprzedni stan został."
             self._release_dirs()
             if restore_pads:
                 try:

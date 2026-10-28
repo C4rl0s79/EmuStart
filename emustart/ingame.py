@@ -539,6 +539,8 @@ class RetroArch(Adapter):
 
     def launch_args(self, run_dir: Path, resume: bool, pad_order: list | None = None) -> list:
         run_dir.mkdir(parents=True, exist_ok=True)
+        self._log_file = run_dir / "retroarch.log"
+        self._log_file.unlink(missing_ok=True)
         cfg = run_dir / "emustart_ra.cfg"
         # najpierw wymagane ustawienia z serwera — niżej ustawienia sesji EmuStart (wygrywają);
         # „bez shadera” tylko na czas gry: własne ustawienia shadera RetroArcha zostają
@@ -549,6 +551,10 @@ class RetroArch(Adapter):
             'savestate_auto_save = "true"',
             f'savestate_auto_load = "{"true" if resume else "false"}"',
             'savestate_thumbnail_enable = "true"',      # obrazek stanu (podgląd w EmuStart)
+            # log sesji do pliku: po grze EmuStart sprawdza, czy stan wczytał się przy starcie
+            'log_to_file = "true"',
+            'log_to_file_timestamp = "false"',
+            f'log_dir = "{run_dir}"',
             # save'y zawsze w folderze profilu — także gdy retroarch.cfg każe trzymać
             # je obok gry (gra bywa w RAM-ie albo w pamięci podręcznej); tylko na czas
             # sesji, retroarch.cfg wskazuje dalej własne foldery RetroArcha
@@ -595,7 +601,9 @@ class RetroArch(Adapter):
     # zmienione wartości wracają do prawdziwego retroarch.cfg — bez ustawień sesji
     # EmuStart (komendy sieciowe, foldery profilu, konto RA, kolejność padów).
     # Wcześniej (config_save_on_exit=false) zmiany ginęły przy każdym wyjściu.
-    _SESSION_KEYS = re.compile(r"config_save_on_exit|cheevos_.*|input_player\d+_joypad_index")
+    # state_slot: numer slotu wybrany w menu RetroArcha (np. „Auto” = −1 do wczytania autozapisu)
+    # dotyczy tylko tej sesji — w retroarch.cfg następna gra zaczynałaby od tego slotu
+    _SESSION_KEYS = re.compile(r"config_save_on_exit|cheevos_.*|input_player\d+_joypad_index|state_slot")
 
     def _session_config(self, run_dir: Path, lines: list) -> list:
         self._session = None
@@ -618,6 +626,7 @@ class RetroArch(Adapter):
         return ["--config", str(sess)]
 
     def after_session(self) -> int:
+        self._state_log()
         st = getattr(self, "_session", None)
         self._session = None
         if not st:
@@ -632,6 +641,26 @@ class RetroArch(Adapter):
             log.info("RetroArch: %d ustawień zmienionych w trakcie sesji → retroarch.cfg (%s)",
                      len(changes), ", ".join(sorted(k for _s, k in changes))[:300])
         return len(changes)
+
+    _STATE_LOG = re.compile(r"state|savestate|stan", re.I)
+    _STATE_SKIP = re.compile(r"thumbnail|\[Config\]|_state_|state_slot =", re.I)
+
+    def _state_log(self) -> None:
+        """Wczytanie / zapis stanów w tej sesji — z logu RetroArcha do logu EmuStart (diagnoza:
+        stan wybrany w „Wczytaj zapis” nie wczytał się przy starcie)."""
+        f, self._log_file = getattr(self, "_log_file", None), None
+        if not f:
+            return
+        try:
+            lines = f.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            log.info("RetroArch: brak logu sesji (%s)", f.name)
+            return
+        hits = [ln.strip() for ln in lines if self._STATE_LOG.search(ln) and not self._STATE_SKIP.search(ln)]
+        for ln in hits[:30]:
+            log.info("RetroArch (stany): %s", ln[:300])
+        if not hits:
+            log.info("RetroArch: w logu sesji brak wpisów o stanach (%d linii)", len(lines))
 
     def _cfg_dir(self, key: str, default: str) -> Path:
         d = _ini_value(self.home / "retroarch.cfg", key)

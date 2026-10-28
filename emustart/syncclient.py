@@ -57,10 +57,11 @@ class Conflict:
     bundle: savebundles.Bundle
     server: dict                     # revision, updated_at, updated_by_device_id, file_count
     local_time: float = 0.0
+    slot: int = 1
 
     def describe(self) -> dict:
         b = self.bundle
-        return {"emulator": b.emulator_id, "core": b.core_id, "kind": b.kind,
+        return {"emulator": b.emulator_id, "core": b.core_id, "kind": b.kind, "slot": self.slot,
                 "server_revision": self.server.get("revision") or 0,
                 "server_time": self.server.get("updated_at") or 0,
                 "server_device": self.server.get("updated_by_device_name") or self.server.get("updated_by_device_id") or "",
@@ -73,23 +74,52 @@ class Result:
     downloaded: int = 0
     uploaded: int = 0
     conflicts: list = field(default_factory=list)
+    slot: int = 1                                       # slot w folderach emulatora po synchronizacji
 
 
 # ── stan lokalny ──
 
-def _db():
-    c = library.db()
-    c.execute("""CREATE TABLE IF NOT EXISTS save_sync(
+_TABLE = """CREATE TABLE IF NOT EXISTS {name}(
         profile_id INTEGER NOT NULL, platform TEXT NOT NULL, game TEXT NOT NULL,
         emu TEXT NOT NULL, core TEXT NOT NULL, kind TEXT NOT NULL,
         revision INTEGER NOT NULL DEFAULT 0, content TEXT NOT NULL DEFAULT '',
         dirty INTEGER NOT NULL DEFAULT 0, spec TEXT NOT NULL DEFAULT '', updated REAL NOT NULL DEFAULT 0,
-        PRIMARY KEY(profile_id, platform, game, emu, core, kind))""")
-    # konto, na które paczka należy: niewysłane zapisy poprzedniego konta nie trafią na nowe
+        account TEXT NOT NULL DEFAULT '', slot INTEGER NOT NULL DEFAULT 1, removed TEXT NOT NULL DEFAULT '',
+        PRIMARY KEY(profile_id, platform, game, slot, emu, core, kind))"""
+
+
+def _db():
+    c = library.db()
     if _schema.get(id(c)) is not c:
+        c.execute(_TABLE.format(name="save_sync"))
+        # konto, na które paczka należy: niewysłane zapisy poprzedniego konta nie trafią na nowe
         library.add_columns(c, "save_sync", [("account", "TEXT NOT NULL DEFAULT ''")])
+        _slots_schema(c)
         _schema[id(c)] = c
     return c
+
+
+def _slots_schema(c) -> None:
+    """Baza sprzed slotów zapisów: slot w kluczu paczki (SQLite nie zmienia klucza tabeli —
+    nowa tabela, wiersze jako slot 1) i oczekujące usunięcia stanów (`removed`)."""
+    with library._migrate_lock:
+        if "slot" in {r[1] for r in c.execute("PRAGMA table_info(save_sync)")}:
+            return
+        if c.in_transaction:
+            c.commit()
+        c.execute("BEGIN IMMEDIATE")
+        try:
+            if "slot" not in {r[1] for r in c.execute("PRAGMA table_info(save_sync)")}:
+                c.execute(_TABLE.format(name="save_sync_new"))
+                c.execute("INSERT INTO save_sync_new(profile_id, platform, game, emu, core, kind, revision, content, "
+                          "dirty, spec, updated, account) SELECT profile_id, platform, game, emu, core, kind, revision, "
+                          "content, dirty, spec, updated, account FROM save_sync")
+                c.execute("DROP TABLE save_sync")
+                c.execute("ALTER TABLE save_sync_new RENAME TO save_sync")
+            c.commit()
+        except BaseException:
+            c.rollback()
+            raise
 
 
 _schema: dict = {}
@@ -101,26 +131,68 @@ def _account_of(pid: int) -> str:
     return prof.get("nas_name") or prof.get("name") or ""
 
 
-def _state(pid: int, plat: str, gid: str, b) -> dict | None:
-    r = _db().execute("SELECT * FROM save_sync WHERE profile_id=? AND platform=? AND game=? AND emu=? "
-                      "AND core=? AND kind=?", (pid, plat, gid, *b.key)).fetchone()
+def _state(pid: int, plat: str, gid: str, b, slot: int = 1) -> dict | None:
+    r = _db().execute("SELECT * FROM save_sync WHERE profile_id=? AND platform=? AND game=? AND slot=? AND emu=? "
+                      "AND core=? AND kind=?", (pid, plat, gid, int(slot), *b.key)).fetchone()
     return dict(r) if r else None
 
 
 def _remember(pid: int, plat: str, gid: str, b, revision: int, content: str, dirty: bool = False,
-              account: str = "") -> None:
-    st = _state(pid, plat, gid, b)
+              account: str = "", slot: int = 1, removed: dict | None = None) -> None:
+    """Stan paczki po synchronizacji. `removed` — oczekujące (niewysłane) usunięcia stanów
+    {"add": [{sha256, name}], "drop": [sha256]}; None — bez zmian, {} — wysłane."""
+    st = _state(pid, plat, gid, b, slot)
     account = account or (st or {}).get("account") or _account_of(pid)
+    ops = (st or {}).get("removed", "") if removed is None else (json.dumps(removed) if removed else "")
     with _db() as c:
-        c.execute("INSERT OR REPLACE INTO save_sync(profile_id, platform, game, emu, core, kind, revision, content, "
-                  "dirty, spec, updated, account) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
-                  (pid, plat, gid, *b.key, int(revision), content, int(dirty), json.dumps(b.spec()), time.time(),
-                   account))
+        c.execute("INSERT OR REPLACE INTO save_sync(profile_id, platform, game, slot, emu, core, kind, revision, "
+                  "content, dirty, spec, updated, account, removed) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                  (pid, plat, gid, int(slot), *b.key, int(revision), content, int(dirty), json.dumps(b.spec()),
+                   time.time(), account, ops))
 
 
-def _mark_dirty(pid: int, plat: str, gid: str, b) -> None:
-    st = _state(pid, plat, gid, b)
-    _remember(pid, plat, gid, b, (st or {}).get("revision", 0), (st or {}).get("content", ""), True)
+def _mark_dirty(pid: int, plat: str, gid: str, b, slot: int = 1) -> None:
+    st = _state(pid, plat, gid, b, slot)
+    _remember(pid, plat, gid, b, (st or {}).get("revision", 0), (st or {}).get("content", ""), True, slot=slot)
+
+
+def pending_ops(pid: int, plat: str, gid: str, b, slot: int = 1) -> dict:
+    """Niewysłane usunięcia stanów paczki: {"add": [...], "drop": [...]}."""
+    try:
+        d = json.loads((_state(pid, plat, gid, b, slot) or {}).get("removed") or "{}")
+    except ValueError:
+        d = {}
+    return {"add": list(d.get("add") or []), "drop": list(d.get("drop") or [])}
+
+
+def add_ops(pid: int, plat: str, gid: str, b, slot: int, add=(), drop=()) -> None:
+    """Usunięcia stanów do wysłania z najbliższą wersją paczki (gracz: usuń / zmień numer /
+    przenieś) — `add`, i treści, które wracają pod nazwą (cofnięcie, powrót do numeru) — `drop`;
+    jedno i drugie [{sha256, name}]."""
+    ops = pending_ops(pid, plat, gid, b, slot)
+    gone = {(d["name"], d["sha256"]) for d in drop}
+    ops["add"] = [a for a in ops["add"] if (a.get("name"), a.get("sha256")) not in gone] +         [{"sha256": a["sha256"], "name": a["name"]} for a in add]
+    ops["drop"] = [d for d in ops["drop"] if (d.get("name"), d.get("sha256")) not in
+                   {(a["name"], a["sha256"]) for a in add}] + [{"sha256": d["sha256"], "name": d["name"]} for d in drop]
+    st = _state(pid, plat, gid, b, slot) or {}
+    _remember(pid, plat, gid, b, st.get("revision", 0), st.get("content", ""), bool(st.get("dirty")), slot=slot,
+              removed=ops if (ops["add"] or ops["drop"]) else {})
+
+
+def _removed_pairs(srv: dict, ops: dict) -> set:
+    """Pary (nazwa, sha256) stanów, które nie mogą wrócić przy sumowaniu: z serwera i własne
+    niewysłane (cofnięcia — `drop` — zdejmują je)."""
+    drop = {(d.get("name"), d.get("sha256")) for d in ops.get("drop") or []}
+    pairs = {(r.get("name"), r.get("sha256")) for r in srv.get("removed") or []} - drop
+    return pairs | {(a.get("name"), a.get("sha256")) for a in ops.get("add") or []}
+
+
+def respec(pid: int, plat: str, gid: str, slot: int, b) -> None:
+    """Pliki paczki slotu w innym miejscu (zamiana slotu: foldery emulatora ↔ folder profilu) —
+    ta sama treść, bez nowej synchronizacji."""
+    with _db() as c:
+        c.execute("UPDATE save_sync SET spec=? WHERE profile_id=? AND platform=? AND game=? AND slot=? AND emu=? "
+                  "AND core=? AND kind=?", (json.dumps(b.spec()), pid, plat, gid, int(slot), *b.key))
 
 
 def game_ids(game: dict) -> tuple[str, str]:
@@ -178,6 +250,19 @@ class _Client:
             return r.status, data
         return 401, b""
 
+    _slots: bool | None = None
+
+    def manifest(self, plat: str, gid: str) -> dict:
+        man = self.json("GET", f"/v1/savesync/{plat}/{gid}/manifest")
+        self._slots = has_slots(man)
+        return man
+
+    def slots_ok(self, plat: str, gid: str) -> bool:
+        """Serwer zna sloty (raz na połączenie; stary serwer zapisałby inny slot w slocie 1)."""
+        if self._slots is None:
+            self._slots = has_slots(self.json("GET", f"/v1/savesync/{plat}/{gid}/status"))
+        return self._slots
+
     def json(self, method: str, path: str, d: dict | None = None) -> dict:
         st, data = self.call(method, path, json.dumps(d).encode("utf-8") if d is not None else None,
                              {"Content-Type": "application/json"} if d is not None else None)
@@ -196,8 +281,20 @@ class _Client:
         return out
 
 
-def _server_bundle(man: dict, b) -> dict:
-    e = (man.get("emulators") or {}).get(b.emulator_id) or {}
+def has_slots(man: dict) -> bool:
+    """Serwer zna sloty zapisów (bez tego — tylko slot 1; paczki innych slotów nie wychodzą,
+    bo stary serwer zapisałby je w slocie 1)."""
+    return isinstance(man.get("slots"), dict)
+
+
+def _server_bundle(man: dict, b, slot: int = 1) -> dict:
+    if slot == 1:
+        emus = man.get("emulators")
+    elif has_slots(man):
+        emus = (man["slots"].get(str(slot)) or {}).get("emulators")
+    else:
+        return {}
+    e = (emus or {}).get(b.emulator_id) or {}
     if b.emulator_id == "retroarch":
         e = (e.get("cores") or {}).get(b.core_id) or {}
     return (e.get("bundles") or {}).get(b.kind) or {}
@@ -219,22 +316,28 @@ def _sha(p: Path) -> str:
     return savebundles.file_sha(p)
 
 
-def _upload(cl: _Client, plat: str, gid: str, b, base: int) -> dict:
+def _upload(cl: _Client, plat: str, gid: str, b, base: int, slot: int = 1, ops: dict | None = None) -> dict:
+    if slot != 1 and not cl.slots_ok(plat, gid):
+        raise Offline("serwer bez slotów zapisów (starsza wersja) — slot czeka na aktualizację serwera")
     zp = _pack(b)
     try:
         sha, size = _sha(zp), zp.stat().st_size
         d = {"platform_id": plat, "game_id": gid, "emulator_id": b.emulator_id, "core_id": b.core_id,
              "bundle_kind": b.kind, "base_revision": int(base), "sha256": sha, "size": size}
+        if slot != 1:
+            d["slot"] = int(slot)
         init = cl.json("POST", "/v1/savesync/upload/init", d)
         with open(zp, "rb") as f:
             st, data = cl.call("PUT", init["upload_url"], f, {"Content-Length": str(size),
                                                               "Content-Type": "application/zip"}, timeout=120)
         if st != 200:
             raise Offline(f"wysyłanie paczki: serwer odpowiedział {st}")
-        r = cl.json("POST", "/v1/savesync/upload/commit",
-                    {"upload_id": init["upload_id"], "base_revision": int(base), "sha256": sha, "size": size})
-        log.info("zapisy → serwer: %s/%s %s %s %s rev %s (%d plików, %d B)", plat, gid, *b.key,
-                 r.get("revision"), len(b.files), size)
+        commit = {"upload_id": init["upload_id"], "base_revision": int(base), "sha256": sha, "size": size}
+        if ops and (ops.get("add") or ops.get("drop")):
+            commit.update(removed_add=ops.get("add") or [], removed_drop=ops.get("drop") or [])
+        r = cl.json("POST", "/v1/savesync/upload/commit", commit)
+        log.info("zapisy → serwer: %s/%s%s %s %s %s rev %s (%d plików, %d B)", plat, gid,
+                 f" slot {slot}" if slot != 1 else "", *b.key, r.get("revision"), len(b.files), size)
         return r
     finally:
         zp.unlink(missing_ok=True)
@@ -313,21 +416,25 @@ def _prune_backups(pid: int) -> None:
         shutil.rmtree(d, ignore_errors=True)
 
 
-def _download(cl, pid, plat, gid, b, srv: dict) -> None:
+def _download(cl, pid, plat, gid, b, srv: dict, slot: int = 1) -> None:
     zp = _fetch(cl, srv)
     try:
         h = _zip_hash(zp)
         _apply(pid, b, zp)
-        _remember(pid, plat, gid, b, srv.get("revision") or 0, h)
-        log.info("zapisy ← serwer: %s/%s %s %s %s rev %s (%d plików)", plat, gid, *b.key,
-                 srv.get("revision"), len(b.files))
+        _remember(pid, plat, gid, b, srv.get("revision") or 0, h, slot=slot)
+        log.info("zapisy ← serwer: %s/%s%s %s %s %s rev %s (%d plików)", plat, gid,
+                 f" slot {slot}" if slot != 1 else "", *b.key, srv.get("revision"), len(b.files))
     finally:
         zp.unlink(missing_ok=True)
 
 
-def _merge_states(cl, pid, plat, gid, b, srv: dict, res: Result) -> None:
+MERGED = ("states", "trash")         # rodzaje paczek, które się sumują (bez pytania gracza)
+
+
+def _merge_states(cl, pid, plat, gid, b, srv: dict, res: Result, slot: int = 1) -> None:
     """Stany zmienione tu i na innym urządzeniu: suma slotów (savebundles.merge_states) —
-    nic nie znika, kolizja tego samego slotu: starszy stan dostaje nowy numer. Wynik na
+    nic nie znika, kolizja tego samego slotu: starszy stan dostaje nowy numer. Stany świadomie
+    usunięte / przenumerowane przez gracza (tu albo na innym urządzeniu) nie wracają. Wynik na
     urządzenie i na serwer (bez pytania gracza — stany się sumują, nie wykluczają)."""
     zp = _fetch(cl, srv)
     try:
@@ -337,7 +444,8 @@ def _merge_states(cl, pid, plat, gid, b, srv: dict, res: Result) -> None:
                 if not i.is_dir():
                     other[i.filename] = (hashlib.sha256(z.read(i)).hexdigest(), time.mktime(i.date_time + (0, 0, -1)))
             mine = {arc: (savebundles.file_sha(Path(p)), Path(p).stat().st_mtime) for p, arc in b.files}
-            merged, moves = savebundles.merge_states(mine, other)
+            removed = _removed_pairs(srv, pending_ops(pid, plat, gid, b, slot))
+            merged, moves = savebundles.merge_states(mine, other, removed)
             paths = {arc: Path(p) for p, arc in b.files}
             tmp = Path(tempfile.mkdtemp(prefix="emustart-stany-"))
             try:
@@ -377,10 +485,10 @@ def _merge_states(cl, pid, plat, gid, b, srv: dict, res: Result) -> None:
     res.downloaded += 1
     if moves:
         log.info("stany %s/%s %s: połączone z serwerem, %d przeniesione na nowe sloty", plat, gid, b.key, len(moves))
-    if local == server_content:
-        _remember(pid, plat, gid, b, int(srv.get("revision") or 0), local)
+    if local == server_content and not any(pending_ops(pid, plat, gid, b, slot).values()):
+        _remember(pid, plat, gid, b, int(srv.get("revision") or 0), local, slot=slot)
     else:
-        _push(cl, pid, plat, gid, b, int(srv.get("revision") or 0), local, res)
+        _push(cl, pid, plat, gid, b, int(srv.get("revision") or 0), local, res, slot)
 
 
 def _newest(b) -> float:
@@ -390,42 +498,63 @@ def _newest(b) -> float:
 # ── przed grą / po grze ──
 
 def before(cfg: dict, pid: int, bundles: list, game: dict) -> Result:
-    """Synchronizacja przed grą. Konflikty zwraca (decyzja gracza → resolve)."""
+    """Synchronizacja przed grą: paczki aktywnego slotu (foldery emulatora), pozostałe sloty
+    i kosze slotów (folder profilu); potem aktywny slot jak na serwerze (zamiana plików).
+    Konflikty zwraca (decyzja gracza → resolve)."""
+    from emustart import saveslots
     res = Result()
     if not bundles:
         return res
     plat, gid = game_ids(game)
+    with _lock:
+        here = saveslots.finish_swap(pid, plat, gid, bundles)
+    res.slot = here
     try:
         cl = _Client(cfg, pid)
-        man = cl.json("GET", f"/v1/savesync/{plat}/{gid}/manifest")
+        man = cl.manifest(plat, gid)
     except Offline as ex:
         res.offline = str(ex)
         log.info("zapisy %s/%s bez synchronizacji: %s", plat, gid, ex)
         return res
+    slots = has_slots(man)
+    if here != 1 and not slots:
+        res.offline = "serwer bez slotów zapisów (starsza wersja) — zapisy slotu %d zostają tutaj" % here
+        log.info("zapisy %s/%s: %s", plat, gid, res.offline)
+        return res
+    todo = [(b, here) for b in bundles] + (saveslots.other_bundles(pid, plat, gid, bundles, here) if slots else [])
     with _lock:
-        for b in bundles:
+        for b, slot in todo:
             try:
-                _before_one(cl, pid, plat, gid, b, _server_bundle(man, b), res)
+                _before_one(cl, pid, plat, gid, b, _server_bundle(man, b, slot), res, slot)
             except Offline as ex:
                 res.offline = str(ex)
-                log.info("zapisy %s/%s %s: %s", plat, gid, b.key, ex)
+                log.info("zapisy %s/%s slot %d %s: %s", plat, gid, slot, b.key, ex)
             except (OSError, ValueError, zipfile.BadZipFile) as ex:
-                log.exception("zapisy %s/%s %s", plat, gid, b.key)
+                log.exception("zapisy %s/%s slot %d %s", plat, gid, slot, b.key)
                 res.offline = f"błąd synchronizacji ({ex})"
+        if slots:
+            want = saveslots.reconcile_active(cl, pid, plat, gid, man)
+            if want != here and not any(c.slot == here for c in res.conflicts) and not res.offline:
+                try:
+                    saveslots.swap(pid, plat, gid, bundles, want)
+                    res.slot = want
+                except OSError as ex:            # kopia niezgodna / dysk — gra na dotychczasowym slocie
+                    log.warning("sloty %s/%s: zamiana %d → %d wstrzymana: %s", plat, gid, here, want, ex)
+                    res.slot = saveslots.here(pid, plat, gid)
     return res
 
 
-def _before_one(cl, pid, plat, gid, b, srv: dict, res: Result) -> None:
+def _before_one(cl, pid, plat, gid, b, srv: dict, res: Result, slot: int = 1) -> None:
     rev_s = int(srv.get("revision") or 0)
     local = savebundles.content_hash(b.files)
-    st = _state(pid, plat, gid, b)
+    st = _state(pid, plat, gid, b, slot)
     if st is None:
         if not rev_s:
             if local:
-                _push(cl, pid, plat, gid, b, 0, local, res)
+                _push(cl, pid, plat, gid, b, 0, local, res, slot)
             return
         if not local:
-            _download(cl, pid, plat, gid, b, srv)
+            _download(cl, pid, plat, gid, b, srv, slot)
             res.downloaded += 1
             return
         zp = _fetch(cl, srv)
@@ -434,39 +563,67 @@ def _before_one(cl, pid, plat, gid, b, srv: dict, res: Result) -> None:
         finally:
             zp.unlink(missing_ok=True)
         if same:
-            _remember(pid, plat, gid, b, rev_s, local)
-        elif b.kind == "states":
-            _merge_states(cl, pid, plat, gid, b, srv, res)      # stany się sumują
+            _remember(pid, plat, gid, b, rev_s, local, slot=slot)
+        elif b.kind in MERGED:
+            _merge_states(cl, pid, plat, gid, b, srv, res, slot)      # stany się sumują
         else:
-            res.conflicts.append(Conflict(b, srv, _newest(b)))
+            res.conflicts.append(Conflict(b, srv, _newest(b), slot))
         return
     changed_here = local != st["content"]
     changed_there = rev_s != st["revision"]
     if changed_there and not changed_here:
         if rev_s:
-            _download(cl, pid, plat, gid, b, srv)
+            _download(cl, pid, plat, gid, b, srv, slot)
             res.downloaded += 1
     elif changed_here and not changed_there:
-        _push(cl, pid, plat, gid, b, rev_s, local, res)
+        _push(cl, pid, plat, gid, b, rev_s, local, res, slot)
     elif changed_here and changed_there:
-        if b.kind == "states":
-            _merge_states(cl, pid, plat, gid, b, srv, res)      # stany się sumują
+        if b.kind in MERGED:
+            _merge_states(cl, pid, plat, gid, b, srv, res, slot)      # stany się sumują
         else:
-            res.conflicts.append(Conflict(b, srv, _newest(b)))
+            res.conflicts.append(Conflict(b, srv, _newest(b), slot))
     elif st["dirty"]:
-        _remember(pid, plat, gid, b, rev_s, local)
+        _remember(pid, plat, gid, b, rev_s, local, slot=slot)
 
 
-def _push(cl, pid, plat, gid, b, base: int, local: str, res: Result) -> None:
-    if not local:
-        return                           # pusty zestaw nie kasuje zapisów na serwerze
+def _push(cl, pid, plat, gid, b, base: int, local: str, res: Result, slot: int = 1) -> None:
+    ops = pending_ops(pid, plat, gid, b, slot)
+    if not local and b.kind != "trash" and not (ops["add"] or ops["drop"]):
+        return                           # pusty zestaw nie kasuje zapisów na serwerze (chyba że gracz usunął stany)
     try:
-        r = _upload(cl, plat, gid, b, base)
+        r = _upload(cl, plat, gid, b, base, slot, ops)
     except ConflictError as ex:
-        res.conflicts.append(Conflict(b, ex.current, _newest(b)))
+        res.conflicts.append(Conflict(b, ex.current, _newest(b), slot))
         return
-    _remember(pid, plat, gid, b, r["revision"], local)
+    _remember(pid, plat, gid, b, r["revision"], local, slot=slot, removed={})
     res.uploaded += 1
+
+
+def push_edit(cfg: dict, pid: int, game: dict, items: list) -> Result:
+    """Po zmianie stanów przez gracza (saveslots: usuń, zmień numer, przenieś…): paczki
+    [(paczka, slot)] od razu na serwer — zmienione w międzyczasie na innym urządzeniu sumują
+    się (bez usuniętych tu stanów). Bez połączenia — do wysłania później (retry)."""
+    res = Result()
+    plat, gid = game_ids(game)
+    try:
+        cl = _Client(cfg, pid)
+        man = cl.manifest(plat, gid)
+    except Offline as ex:
+        res.offline = str(ex)
+    with _lock:
+        for b, slot in items:
+            b.collect()
+            if res.offline or (slot != 1 and not has_slots(man)):
+                _mark_dirty(pid, plat, gid, b, slot)
+                continue
+            try:
+                _before_one(cl, pid, plat, gid, b, _server_bundle(man, b, slot), res, slot)
+            except Offline as ex:
+                res.offline = str(ex)
+                _mark_dirty(pid, plat, gid, b, slot)
+    if res.offline:
+        log.info("zmiana stanów %s/%s czeka na wysłanie: %s", plat, gid, res.offline)
+    return res
 
 
 def resolve(cfg: dict, pid: int, game: dict, conflicts: list, choice: str) -> Result:
@@ -478,32 +635,37 @@ def resolve(cfg: dict, pid: int, game: dict, conflicts: list, choice: str) -> Re
     if choice == "skip" or not conflicts:
         return res
     cl = _Client(cfg, pid)
-    man = cl.json("GET", f"/v1/savesync/{plat}/{gid}/manifest")
+    man = cl.manifest(plat, gid)
     with _lock:
         for c in conflicts:
             b = c.bundle.collect()
-            srv = _server_bundle(man, b)
+            srv = _server_bundle(man, b, c.slot)
             if choice == "local":
-                _push(cl, pid, plat, gid, b, int(srv.get("revision") or 0), savebundles.content_hash(b.files), res)
+                _push(cl, pid, plat, gid, b, int(srv.get("revision") or 0), savebundles.content_hash(b.files), res,
+                      c.slot)
             elif choice == "remote" and srv.get("download_url"):
-                _download(cl, pid, plat, gid, b, srv)
+                _download(cl, pid, plat, gid, b, srv, c.slot)
                 res.downloaded += 1
     log.info("zapisy %s/%s: konflikt rozstrzygnięty — %s", plat, gid, choice)
     return res
 
 
 def after(cfg: dict, pid: int, bundles: list, game: dict, skip: set | None = None) -> Result:
-    """Po grze: zmienione paczki na serwer. Bez połączenia — oznaczone do wysłania (retry).
-    Serwer ma nowszą wersję (inne urządzenie w międzyczasie) — konflikt przy następnej grze."""
+    """Po grze: zmienione paczki (aktywny slot) na serwer. Bez połączenia — oznaczone do
+    wysłania (retry). Serwer ma nowszą wersję (inne urządzenie w międzyczasie) — konflikt przy
+    następnej grze."""
+    from emustart import saveslots
     res = Result()
     plat, gid = game_ids(game)
+    slot = saveslots.here(pid, plat, gid)
+    res.slot = slot
     todo = []
     for b in bundles:
         if b.key in (skip or set()):
             continue
         b.collect()
         local = savebundles.content_hash(b.files)
-        st = _state(pid, plat, gid, b)
+        st = _state(pid, plat, gid, b, slot)
         if local and local != (st or {}).get("content"):
             todo.append((b, local, (st or {}).get("revision", 0)))
     if not todo:
@@ -513,23 +675,23 @@ def after(cfg: dict, pid: int, bundles: list, game: dict, skip: set | None = Non
     except Offline as ex:
         res.offline = str(ex)
         for b, _l, _r in todo:
-            _mark_dirty(pid, plat, gid, b)
+            _mark_dirty(pid, plat, gid, b, slot)
         return res
     with _lock:
         for b, local, base in todo:
             try:
-                _push(cl, pid, plat, gid, b, base, local, res)
+                _push(cl, pid, plat, gid, b, base, local, res, slot)
             except Offline as ex:
                 res.offline = str(ex)
-                _mark_dirty(pid, plat, gid, b)
-    states = [c for c in res.conflicts if c.bundle.kind == "states"]
+                _mark_dirty(pid, plat, gid, b, slot)
+    states = [c for c in res.conflicts if c.bundle.kind in MERGED]
     if states:
         try:
-            man = cl.json("GET", f"/v1/savesync/{plat}/{gid}/manifest")
+            man = cl.manifest(plat, gid)
             with _lock:
                 for c in states:
                     res.conflicts.remove(c)
-                    _merge_states(cl, pid, plat, gid, c.bundle, _server_bundle(man, c.bundle), res)
+                    _merge_states(cl, pid, plat, gid, c.bundle, _server_bundle(man, c.bundle, c.slot), res, c.slot)
         except (Offline, ConflictError, OSError, ValueError, zipfile.BadZipFile) as ex:
             log.info("stany %s/%s: połączenie odłożone (%s)", plat, gid, ex)
     for c in res.conflicts:
@@ -539,7 +701,9 @@ def after(cfg: dict, pid: int, bundles: list, game: dict, skip: set | None = Non
 
 
 def retry(cfg: dict) -> int:
-    """Niewysłane zmiany (gra bez połączenia) → serwer. Liczba wysłanych paczek."""
+    """Niewysłane zmiany (gra bez połączenia, zmiany stanów i slotów) → serwer. Liczba
+    wysłanych paczek."""
+    from emustart import saveslots
     rows = [dict(r) for r in _db().execute("SELECT * FROM save_sync WHERE dirty=1")]
     sent = 0
     for r in rows:
@@ -548,27 +712,38 @@ def retry(cfg: dict) -> int:
         except (ValueError, KeyError, OSError):
             continue
         local = savebundles.content_hash(b.files)
-        if not local or local == r["content"]:
+        ops = pending_ops(r["profile_id"], r["platform"], r["game"], b, r["slot"])
+        if local == r["content"] and not (ops["add"] or ops["drop"]):
+            continue
+        if not local and b.kind != "trash" and not (ops["add"] or ops["drop"]):
             continue
         try:
             cl = _Client(cfg, r["profile_id"], r.get("account") or "")
             with _lock:
-                out = _upload(cl, r["platform"], r["game"], b, r["revision"])
-            _remember(r["profile_id"], r["platform"], r["game"], b, out["revision"], local, account=cl.account)
+                out = _upload(cl, r["platform"], r["game"], b, r["revision"], r["slot"], ops)
+            _remember(r["profile_id"], r["platform"], r["game"], b, out["revision"], local, account=cl.account,
+                      slot=r["slot"], removed={})
             sent += 1
         except ConflictError:
-            continue                     # decyzja gracza przy następnej grze
+            continue                     # decyzja gracza / sumowanie przy następnej grze
         except Offline as ex:
             log.info("zapisy do wysłania czekają: %s", ex)
             break
+    try:
+        saveslots.retry_active(cfg)
+    except Exception:
+        log.exception("aktywny slot do wysłania")
     return sent
 
 
 def other_core_states(cfg: dict, pid: int, game: dict, core: str) -> list:
     """Stany tej gry z innych rdzeni RetroArcha (z serwera) — do listy „Wczytaj zapis” z
-    oznaczeniem, że w bieżącym rdzeniu się nie wczytają. Paczki rozpakowane do pamięci
-    podręcznej profilu (pobierane, gdy na serwerze jest nowsza wersja). [{core, path, time}]."""
+    oznaczeniem, że w bieżącym rdzeniu się nie wczytają (slot w folderach emulatora). Paczki
+    rozpakowane do pamięci podręcznej profilu (pobierane, gdy na serwerze jest nowsza wersja).
+    [{core, path, time}]."""
+    from emustart import saveslots
     plat, gid = game_ids(game)
+    slot = saveslots.here(pid, plat, gid)
     try:
         cl = _Client(cfg, pid)
         man = cl.json("GET", f"/v1/savesync/{plat}/{gid}/manifest")
@@ -576,12 +751,13 @@ def other_core_states(cfg: dict, pid: int, game: dict, core: str) -> list:
         return []
     from emustart import profiles
     out = []
-    cores = ((man.get("emulators") or {}).get("retroarch") or {}).get("cores") or {}
+    emus = man.get("emulators") if slot == 1 else ((man.get("slots") or {}).get(str(slot)) or {}).get("emulators")
+    cores = ((emus or {}).get("retroarch") or {}).get("cores") or {}
     for c, node in sorted(cores.items()):
         b = (node.get("bundles") or {}).get("states") or {}
         if c == core or not b.get("download_url"):
             continue
-        d = profiles.LOCAL / str(pid) / "_inne_rdzenie" / plat / gid / c
+        d = profiles.LOCAL / str(pid) / "_inne_rdzenie" / plat / gid / (c if slot == 1 else f"{c}@{slot}")
         mark = d / ".revision"
         try:
             have = mark.read_text(encoding="utf-8").strip()
@@ -679,7 +855,7 @@ def pull_all(cfg: dict, pid: int, skip: set | None = None) -> dict:
                     b = savebundles.from_spec(json.loads(r["spec"]))
                 except (ValueError, KeyError, OSError):
                     continue
-                srv = _server_bundle(man, b)
+                srv = _server_bundle(man, b, r["slot"])
                 rev_s = int(srv.get("revision") or 0)
                 if not rev_s or rev_s == r["revision"]:
                     continue
@@ -687,7 +863,7 @@ def pull_all(cfg: dict, pid: int, skip: set | None = None) -> dict:
                     out["conflicts"] += 1          # zmiany tu i tam — decyzja przy uruchomieniu gry
                     continue
                 try:
-                    _download(cl, pid, plat, gid, b, srv)
+                    _download(cl, pid, plat, gid, b, srv, r["slot"])
                     out["downloaded"] += 1
                 except (Offline, OSError, ValueError, zipfile.BadZipFile) as ex:
                     log.info("zapisy %s/%s %s: %s", plat, gid, b.key, ex)

@@ -8,6 +8,63 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.50.0] — 2026-10-28
+
+Zakres: synchronizacja zapisów — serwer (`savesync.py`, `remote.py`, `srvadmin.py`) i klient
+Windows (`saveslots.py` — nowy, `syncclient.py`, `savebundles.py`, `launcher.py`, `api.py`,
+`ingame.py`, `web/options.js`, `web/app.js`). **Najpierw zaktualizuj serwer**, potem PC. Telefon
+(APK) i Lumen bez zmian — widzą slot 1 (dostosowanie później).
+
+Nie zmienia się: lista gier, sterowanie poza listą „Wczytaj zapis”, menu (Tab), ekran
+uruchamiania, menedżer „Zapisy i stany” (PS2), synchronizacja folderów profilu, okno konfliktu
+zapisów w grze, panel serwera.
+
+### Dodane
+- **Sloty zapisów gry** — 4 osobne „przejścia” każdej gry w profilu gracza. Slot to komplet
+  zapisów gry na platformie: stany, zapisy w grze (`.srm` itd.), karty pamięci. Gra startuje na
+  aktywnym slocie. Opcje gry → **Slot zapisów** (np. „Slot 2 · 3 stany · 27.10 20:31”) → A —
+  ustaw aktywny.
+  - Aktywny slot leży w folderach emulatora (jak dotąd), pozostałe w folderze profilu
+    (`_sloty/<platforma>/<gra>/<slot>/`). Wszystkie sloty i kosze synchronizują się z serwerem;
+    aktywny slot jest wspólny dla urządzeń konta (wygrywa późniejsza zmiana).
+  - Zamiana slotu nic nie kasuje przed sprawdzoną kopią: (1) pliki emulatora → folder starego
+    slotu, kopia porównana z oryginałem; (2) pliki nowego slotu → emulator, wynik porównany;
+    (3) czyszczenie folderu nowego slotu. Krok zapisany w bazie — przerwana zamiana kończy się
+    od właściwego kroku. Niezgodna kopia — zamiana wstrzymana, pliki bez zmian. Bez zamiany
+    w trakcie wysyłki zapisów po grze.
+- **Edycja stanów** — „Wczytaj zapis” → **przytrzymane A** (przytrzymany Enter, prawy przycisk
+  myszy) na stanie: Wczytaj · Zmień numer · Kopiuj jako nowy numer · Kopiuj do slotu… ·
+  Przenieś do slotu… · Ustaw jako „Kontynuuj” (dotychczasowy dostaje nowy numer) · Usuń (do
+  kosza). Krótkie A — jak dotąd, gra od stanu. PCSX2: numery 0–9, bez „Kontynuuj”.
+- **Kosz** na końcu „Wczytaj zapis” (gdy niepusty): 10 najnowszych usuniętych stanów na slot,
+  A — przywróć (także na innym urządzeniu).
+- Serwer: `slots` i `active_slot` w manifeście (stare `emulators` = slot 1), pole `slot` w
+  `upload/init`, `POST …/<gra>/slot`, rodzaj paczki `trash`, cecha `saveslots` w `/v1/info`.
+  Klient nie wysyła slotów 2–4 do serwera bez slotów (stary zapisałby je w slocie 1).
+- Usunięte / przenumerowane / przeniesione stany zapisane przy paczce jako para (nazwa, SHA-256)
+  (`removed`, ostatnie 500) — sumowanie stanów z drugiego urządzenia (`merge_states`) ich nie
+  przywraca; kopia pod innym numerem zostaje.
+
+### Poprawione
+- **RetroArch: zapis po wczytaniu slotu „Auto” nadpisywał istniejące stany** (Chrono Trigger
+  MSU1: wczytany ręcznie autozapis → slot −1, następny zapis → 0, kolejny → 1 = istniejący stan).
+  Po każdej sesji straż numerów: stan o istniejącym numerze z inną treścią dostaje kolejny wolny
+  numer, poprzedni wraca na swój (z kopii sprzed sesji).
+- RetroArch: numer slotu wybrany w menu w trakcie gry (`state_slot`) nie trafia już do
+  `retroarch.cfg`.
+- RetroArch: log sesji do folderu sesji; po grze linie o stanach trafiają do logu EmuStart
+  („RetroArch (stany): …”). Przyczyna nieudanego wczytania stanu przy starcie (Chrono Trigger)
+  nie jest ustalona — log ją pokaże przy następnym wystąpieniu.
+
+### Sprawdzone / niesprawdzone
+- `python -m pytest -q`: 379 zaliczonych (`main`: 361) — m.in. dwa urządzenia i zamiana slotów,
+  przerwanie zamiany w krokach 2 i 3, niezgodna kopia, usunięte i przenumerowane stany nie
+  wracają, kosz, edycja offline, stary serwer bez slotów, straż numerów, `state_slot`.
+- UI w Chromium (kopia programu bez serwera): opcje gry → Slot zapisów → zmiana i powrót;
+  Wczytaj zapis → przytrzymane A → Zmień numer; prawy przycisk → Usuń → Kosz → przywróć; krótkie
+  A uruchamia grę od stanu; lista gier bez zmian.
+- Niesprawdzone: prawdziwy RetroArch z grą MSU1, okno WebView2, pad, prawdziwy serwer.
+
 ## [0.49.1] — 2026-10-27
 
 Zakres: strona serwera (`webportal.py`). Zaktualizuj serwer.

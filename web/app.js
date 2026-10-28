@@ -228,8 +228,9 @@ let aHold = null;
 function release(a) {
   if (a === "a" && aHold) {
     clearTimeout(aHold.timer);
-    const fired = aHold.fired;
+    const fired = aHold.fired, gopt = aHold.gopt;
     aHold = null;
+    if (!fired && S.modal === "gopt" && gopt) return gopt.act();      // krótkie A w opcjach gry (edycja: przytrzymane)
     if (!fired && S.screen === "games" && !S.modal) launch();
     if (!fired && S.screen === "systems" && !S.modal) openSystem();
   }
