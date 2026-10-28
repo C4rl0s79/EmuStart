@@ -938,9 +938,13 @@ class Api:
         if launcher.post_busy():
             launcher.wait_post(30)               # zapisy po ostatniej grze jeszcze idą na serwer
         try:
-            for b in bundles:
-                b.adopt_names()
-            syncclient.before(self._cfg, self._profile, bundles, g)   # konflikty zapisów — przy uruchomieniu
+            # gra działa (Lumen pozwala przeglądać bibliotekę w trakcie gry): bez synchronizacji —
+            # pliki są w użyciu, a zmiana aktywnego slotu z innego urządzenia podmieniłaby je pod
+            # emulatorem; lista z plików na dysku, synchronizacja po grze
+            if not self._game_running():
+                for b in bundles:
+                    b.adopt_names()
+                syncclient.before(self._cfg, self._profile, bundles, g)   # konflikty zapisów — przy uruchomieniu
         except Exception:
             log.exception("zapisy gry z serwera")
         st.collect()
@@ -948,8 +952,16 @@ class Api:
                 for p, arc in st.files if not arc.endswith(".png")]
 
     # ── sloty zapisów i edycja stanów (emustart/saveslots.py) ──
+    def _game_running(self) -> bool:
+        """Gra uruchamia się albo działa — pliki zapisów w folderach emulatora są w użyciu."""
+        return bool(self._session and self._session.phase not in ("finished", "error", "cancelled"))
+
     def _slot_ctx(self, game_id: int):
         """(gra, paczki gry) dla slotów — paczki w folderach profilu gracza."""
+        if self._game_running():
+            # zamiana slotu / zmiana stanu pod działającym emulatorem: jego autozapis przy wyjściu
+            # trafiłby do innego slotu
+            raise saveslots.EditError("Najpierw zamknij grę — zapisy są teraz w użyciu.")
         g = library.game(int(game_id))
         if not g:
             raise saveslots.EditError("Nie ma takiej gry.")
