@@ -206,3 +206,86 @@ def test_server_keeps_limited_history(srv, monkeypatch):
 def test_game_id_is_stable_across_devices():
     assert savesync.game_id("snes", "Chrono Trigger (USA)") == savesync.game_id("SNES", "chrono_trigger (usa)")
     assert savesync.game_id("snes", "A") != savesync.game_id("nes", "A")
+
+
+# ── sloty zapisów (osobne „przejścia” gry) ──
+
+def _node(m, slot, core="snes9x", kind="states"):
+    emus = m["slots"][str(slot)]["emulators"]
+    return ((emus.get("retroarch") or {}).get("cores") or {}).get(core, {}).get("bundles", {}).get(kind) or {}
+
+
+def test_slots_are_separate_and_old_clients_see_slot_1(srv):
+    """Paczka slotu 2 nie rusza slotu 1; zapytanie bez `slot` (aplikacja sprzed slotów) = slot 1,
+    a stare pole `emulators` w manifeście to slot 1."""
+    assert upload(srv, {"game.state1": b"przejscie-1"}, 0, kind="states")[0] == 200
+    st, r = upload(srv, {"game.state1": b"przejscie-2"}, 0, kind="states", slot=2)
+    assert st == 200, r
+    st, m = req(srv, "GET", "/v1/savesync/snes/g1/manifest")
+    assert m["active_slot"] == 1 and set(m["slots"]) == {"1", "2", "3", "4"}
+    old = m["emulators"]["retroarch"]["cores"]["snes9x"]["bundles"]["states"]
+    assert old["revision"] == 1 and _node(m, 1)["revision"] == 1 and _node(m, 2)["revision"] == 2
+    assert _node(m, 3) == {}
+    with zipfile.ZipFile(io.BytesIO(req(srv, "GET", _node(m, 2)["download_url"])[1])) as z:
+        assert z.read("game.state1") == b"przejscie-2"
+    # konflikt liczony w obrębie slotu: base 0 w slocie 3 jest aktualne mimo wersji w 1 i 2
+    assert upload(srv, {"game.state1": b"przejscie-3"}, 0, kind="states", slot=3)[0] == 200
+    assert upload(srv, {"game.state1": b"x"}, 0, kind="states", slot=2)[0] == 409
+    for bad in (0, 5, "abc"):
+        assert upload(srv, {"game.state1": b"x"}, 0, kind="states", slot=bad)[0] == 400
+    hist = savesync.history("Jezus", "snes", "g1")
+    assert sorted(h["slot"] for h in hist) == [1, 2, 3]
+
+
+def test_active_slot_later_change_wins(srv):
+    st, r = req(srv, "POST", "/v1/savesync/snes/g1/slot", "pc", {"slot": 3, "at": time.time() - 10})
+    assert st == 200 and r["active_slot"] == 3
+    # zmiana zrobiona wcześniej (np. telefon offline) nie wygrywa
+    st, r = req(srv, "POST", "/v1/savesync/snes/g1/slot", "tel", {"slot": 2, "at": time.time() - 100})
+    assert st == 200 and r["active_slot"] == 3
+    st, r = req(srv, "POST", "/v1/savesync/snes/g1/slot", "tel", {"slot": 2})
+    assert r["active_slot"] == 2
+    assert req(srv, "GET", "/v1/savesync/snes/g1/manifest")[1]["active_slot"] == 2
+    assert req(srv, "POST", "/v1/savesync/snes/g1/slot", "tel", {"slot": 7})[0] == 400
+    # inne konto nie widzi zmiany
+    assert req(srv, "GET", "/v1/savesync/snes/g1/manifest", "ola-pc")[1]["active_slot"] == 1
+
+
+def test_removed_states_are_kept_and_not_merged_back(srv):
+    """Usunięcie stanu (tombstone) zostaje przy paczce w kolejnych wersjach; import / sumowanie
+    stanów nie przywraca usuniętej treści; „cofnij” zdejmuje wpis."""
+    gone = hashlib.sha256(b"stary-stan").hexdigest()
+    assert upload(srv, {"game.state1": b"stary-stan", "game.state1.png": b"P", "game.state2": b"inny"}, 0,
+                  kind="states")[0] == 200
+    st, r = upload(srv, {"game.state2": b"inny"}, 1, kind="states",
+                   removed_add=[{"sha256": gone, "name": "game.state1"}])
+    assert st == 200
+    assert upload(srv, {"game.state2": b"inny", "game.state3": b"nowy"}, 2, kind="states")[0] == 200
+    m = req(srv, "GET", "/v1/savesync/snes/g1/manifest")[1]
+    node = _node(m, 1)
+    assert [x["sha256"] for x in node["removed"]] == [gone] and node["removed"][0]["device"] == "pc"
+    # stany sprzed 0.46 (migracja) z usuniętym stanem — nie wraca
+    import tempfile
+    from pathlib import Path
+    zp = Path(tempfile.mkdtemp()) / "stare.zip"
+    zp.write_bytes(bundle({"game.state1": b"stary-stan", "game.state1.png": b"P", "game.state5": b"z-migracji"}))
+    assert savesync.import_bundle("Jezus", "snes", "g1", "retroarch", "snes9x", "states", zp, "pc", "", 1.0) == "merged"
+    m = req(srv, "GET", "/v1/savesync/snes/g1/manifest")[1]
+    with zipfile.ZipFile(io.BytesIO(req(srv, "GET", _node(m, 1)["download_url"])[1])) as z:
+        names = {n: z.read(n) for n in z.namelist()}
+    assert b"stary-stan" not in names.values() and "game.state1.png" not in names
+    assert b"z-migracji" in names.values() and names["game.state3"] == b"nowy"
+    # cofnięcie usunięcia
+    rev = _node(m, 1)["revision"]
+    assert upload(srv, {"game.state1": b"stary-stan", "game.state2": b"inny"}, rev, kind="states",
+                  removed_drop=[gone])[0] == 200
+    assert not _node(req(srv, "GET", "/v1/savesync/snes/g1/manifest")[1], 1).get("removed")
+    assert upload(srv, {"x": b"y"}, rev + 1, kind="states", removed_add=[{"sha256": "zly", "name": "x"}])[0] == 400
+    assert upload(srv, {"x": b"y"}, rev + 1, kind="states", removed_add=[{"sha256": gone}])[0] == 400
+
+
+def test_trash_bundle_kind(srv):
+    """Kosz slotu — osobna paczka (wersjonowana jak inne), stany per rdzeń."""
+    assert upload(srv, {"game.state4": b"usuniety"}, 0, kind="trash", slot=2)[0] == 200
+    m = req(srv, "GET", "/v1/savesync/snes/g1/manifest")[1]
+    assert _node(m, 2, kind="trash")["file_count"] == 1 and _node(m, 1, kind="trash") == {}

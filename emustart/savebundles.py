@@ -7,6 +7,9 @@ Paczka to pełny zestaw plików jednej gry dla emulatora (i rdzenia RetroArcha) 
     DuckStation  memcards  <memcards>/<gra>_1.mcd, _2.mcd    (karta osobna dla gry)
     PCSX2        memcards  <memcards>/<gra>.ps2              (karta osobna dla gry)
 
+Kosz slotu (rodzaj „trash”, emustart/saveslots.py): stany usunięte przez gracza, w folderze
+profilu, nazwy „<12 znaków SHA-256>.<nazwa w paczce>” — bez nazwy gry.
+
 Nic poza tym: bez konfiguracji, cache, shaderów i plików innych gier. W paczce pliki mają
 nazwy umowne („game.srm”, „game.state3.png”, „game_1.mcd”, „game.ps2”) — urządzenia nazywają
 grę różnie (plik w ZIP-ie, rozpakowany, .m3u), przy pobraniu dostają nazwę od pliku gry na
@@ -29,6 +32,7 @@ RA_SAVE_EXTS = {"srm", "sav", "rtc", "eep", "fla", "mpk", "sra", "nv", "mcr", "b
 _RA_STATE = re.compile(r"(.+?)(\.state\d*(?:\.auto)?(?:\.png)?)", re.I)
 # stan PCSX2 / ArmSX2: „SLUS-20851 (39B574F0).03.p2s”, wznowienie PCSX2 (.resume), autozapis ArmSX2
 _P2S = re.compile(r"^(?P<prefix>.+?)\.(?P<slot>\d{2}|resume|autosave(?:\.\d)?)\.p2s$", re.I)
+_TRASH = re.compile(r"^[0-9a-f]{12}\.[^/\\:]+$")
 _CORE_ARG = re.compile(r'-L\s+"?([^"]*?)([\w.+-]+?)_libretro\.(?:dll|so|dylib)"?', re.I)
 SKIP = (".emustart-new", ".emustart-tmp", ".tmp", ".part")
 
@@ -52,6 +56,10 @@ class Bundle:
         stany PCSX2 — nazwa jak w paczce, od numeru płyty)."""
         if "/" in arc or "\\" in arc or ".." in arc or ":" in arc:
             raise ValueError(f"nieoczekiwana nazwa w paczce: {arc}")
+        if self.kind == "trash":
+            if not _TRASH.match(arc):
+                raise ValueError(f"nieoczekiwana nazwa w paczce: {arc}")
+            return self.folder / arc
         if self.emulator_id == "pcsx2" and self.kind == "states":
             if not _P2S.match(arc):
                 raise ValueError(f"nieoczekiwana nazwa w paczce: {arc}")
@@ -114,6 +122,8 @@ def norm(s: str) -> str:
 
 def _match(emu: str, kind: str, name: str, names: set):
     """(nazwa gry w pliku, nazwa w paczce) albo None — plik nie należy do paczki tej gry."""
+    if kind == "trash":                      # kosz — folder tylko tej gry i slotu
+        return (name, name) if _TRASH.match(name) else None
     if emu == "retroarch" and kind == "saves":
         base, _, ext = name.rpartition(".")
         if base and ext.lower() in RA_SAVE_EXTS and norm(base) in names:
@@ -293,11 +303,21 @@ def _free_slot(arc: str, used: set, nxt: int) -> tuple[str | None, int]:
     return f"game.state{nxt}", nxt + 1
 
 
-def merge_states(mine: dict, other: dict) -> tuple[dict, list]:
+def merge_states(mine: dict, other: dict, removed=()) -> tuple[dict, list]:
     """Stany z dwóch miejsc → suma slotów (nic nie znika). `mine` / `other`:
     {nazwa w paczce: (sha256, czas)} — stan i jego miniatura „.png” razem. Ten sam slot z inną
     zawartością: nowszy zostaje w slocie, starszy dostaje następny wolny numer (z miniaturą).
+    `removed` — {(nazwa w paczce, sha256)} stanów świadomie usuniętych / przenumerowanych /
+    przeniesionych przez gracza: ta treść pod tą nazwą nie wraca (ani z `other`, ani z `mine`),
+    znika razem z miniaturą. Ta sama treść pod inną nazwą (kopia) zostaje.
     Zwraca (wynik {nazwa: ("mine"|"other", nazwa źródłowa)}, [(skąd, stara nazwa, nowa nazwa)])."""
+    if removed:
+        removed = set(removed)
+
+        def keep(side: dict) -> dict:
+            gone = {a for a, (sha, _t) in side.items() if not a.endswith(".png") and (a, sha) in removed}
+            return {a: v for a, v in side.items() if a not in gone and a[:-4] not in gone}
+        mine, other = keep(mine), keep(other)
     out = {a: ("mine", a) for a in mine}
     moves = []
     nxt = max({_slot_no(a) for a in list(mine) + list(other) if _SLOT.match(a)} | {0}) + 1

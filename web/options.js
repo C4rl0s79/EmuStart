@@ -166,8 +166,10 @@ function goptItems() {
     { label: "Emulator", value: d.emulator.label + (d.emulator.own ? "  (tylko ta gra)" : ""), act: () => goPage("emus") },
     { label: "Ustawienia emulatora", value: "obraz, dźwięk, sterowanie — w Twoim profilu",
       act: openEmuSettings },
-    { label: "Wczytaj zapis", value: d.states.length ? `${d.states.length} ${plural(d.states.length, "zapis", "zapisy", "zapisów")}` : "brak zapisów",
-      act: () => d.states.length ? goPage("states") : toast("Ten emulator nie ma zapisów tej gry.") },
+    ...slotItem(d),
+    { label: "Wczytaj zapis", value: (d.states.length ? `${d.states.length} ${plural(d.states.length, "zapis", "zapisy", "zapisów")}` : "brak zapisów") +
+        (activeSlot(d) ? ` (slot ${activeSlot(d).slot})` : ""),
+      act: () => d.states.length || activeSlot(d)?.trash ? goPage("states") : toast("Ten emulator nie ma zapisów tej gry.") },
     syncItem(d),
     { label: "Zapisy i stany", value: "z komputera i telefonu", act: openSaveManager },
     { label: "Metadane i opis", value: [det.meta.developer, det.meta.year].filter(Boolean).join(" · "), act: () => goPage("meta") },
@@ -202,9 +204,11 @@ function goptItems() {
     }))];
   }
   // stany ze wszystkich urządzeń (koncepcja 2.0 §5.5): „Kontynuuj”, „Stan #N”, urządzenie, data
-  if (GO.page === "states") return d.states.map((st) => ({
+  if (GO.page === "states") return [...d.states.map((st) => ({
     label: st.resume ? "★ " + st.name : (st.other_core ? "✗ " : st.continue ? "▶ " : "") + (st.label || st.name),
     value: fmtDate(st.time) + (st.detail ? " · " + st.detail : ""), thumb: st.thumb || "",
+    // przytrzymane A (Enter, prawy przycisk myszy): edycja stanu aktywnego slotu
+    hold: st.arc && !st.other_core && !st.resume && activeSlot(d) ? () => openStateEdit(st) : null,
     // stan innego rdzenia (inny format): gra przechodzi na ten rdzeń i startuje z tego stanu
     act: async () => {
       if (!st.other_core) { closeGopt(); return launch(st.arc ? "arc:" + st.arc : st.path); }
@@ -214,7 +218,13 @@ function goptItems() {
       closeGopt();
       launch("arc:" + st.arc);
     },
-  }));
+  })), ...(activeSlot(d)?.trash ? [{ label: "Kosz", value: `${activeSlot(d).trash} ${plural(activeSlot(d).trash, "usunięty", "usunięte", "usuniętych")}`,
+                                     act: openTrash }] : [])];
+  if (GO.page === "slots") return slotItems();
+  if (GO.page === "stEdit") return stateEditItems();
+  if (GO.page === "stNum") return stateNumItems();
+  if (GO.page === "stSlot") return stateSlotItems();
+  if (GO.page === "trash") return trashItems();
   if (GO.page === "saves") return saveManagerItems();
   if (GO.page === "emuset") return emuSettingsItems();
   if (GO.page === "stateAct") return stateActItems();
@@ -397,6 +407,8 @@ function goPage(page) { GO.page = page; GO.idx = 0; renderGopt(); }
 function renderGopt() {
   const titles = { main: "Opcje gry", variants: "Wersja gry", emus: "Emulator dla tej gry", states: "Wczytaj zapis", meta: "Metadane",
                    saves: "Zapisy i stany", stateAct: "Stan gry", emuset: "Ustawienia emulatora",
+                   slots: "Slot zapisów", stEdit: GO.cur?.label || GO.cur?.name || "Stan gry", stNum: "Zmień numer",
+                   stSlot: GO.slotMove ? "Przenieś do slotu" : "Kopiuj do slotu", trash: "Kosz",
                    art: { snap: "Zrzut ekranu", logo: "Logo gry", box: "Okładka" }[GO.art?.kind] || "Okładka" };
   $("goTitle").textContent = GO.detail?.title || "";
   $("goPage").textContent = titles[GO.page];
@@ -410,9 +422,13 @@ function renderGopt() {
     `<li class="${i === GO.idx ? "sel" : ""}${it.thumb ? " withthumb" : ""}" data-i="${i}">` +
     (it.thumb ? `<img class="gothumb" src="${esc(it.thumb)}" alt="">` : "") +
     `<span>${esc(it.label)}</span><span class="gv">${esc(it.value || "")}</span></li>`).join("");
-  $("goItems").querySelectorAll("li").forEach((li) => li.addEventListener("click", () => { GO.idx = +li.dataset.i; goptInput("a"); }));
+  $("goItems").querySelectorAll("li").forEach((li) => {
+    li.addEventListener("click", () => { GO.idx = +li.dataset.i; GO.items[GO.idx]?.act(); });
+    li.addEventListener("contextmenu", (ev) => { ev.preventDefault(); GO.idx = +li.dataset.i; GO.items[GO.idx]?.hold?.(); });
+  });
   $("goItems").querySelector("li.sel")?.scrollIntoView({ block: "nearest" });
-  setHints([["a", "Wybierz"], ["b", GO.page === "main" ? "Zamknij" : "Wstecz"]], $("goHints"));
+  setHints([["a", GO.page === "states" && GO.items.some((it) => it.hold) ? "Graj (przytrzymaj: edytuj)" : "Wybierz"],
+            ["b", GO.page === "main" ? "Zamknij" : "Wstecz"]], $("goHints"));
 }
 function goptInput(a) {
   if (GO.page === "art") return artPickInput(a);
@@ -424,9 +440,125 @@ function goptInput(a) {
   else if (a === "rb") GO.idx = Math.min(n - 1, GO.idx + 8);
   else if (a === "b" && GO.confirmDel) GO.confirmDel = false;
   else if (a === "b" && GO.page === "stateAct") return goPage("saves");
+  else if (a === "b" && GOPT_BACK[GO.page]) return goPage(GOPT_BACK[GO.page]);
   else if (a === "b") return GO.page === "main" ? closeGopt() : goPage("main");
+  else if (a === "a" && GO.items[GO.idx]?.hold) {
+    // krótko = jak dotąd (graj od stanu), ≥ LONG_PRESS = edycja — jak przytrzymanie A na liście gier
+    const it = GO.items[GO.idx];
+    aHold = { fired: false, gopt: it, timer: setTimeout(() => { if (aHold) { aHold.fired = true; it.hold(); } }, LONG_PRESS) };
+    return;
+  }
   else if (a === "a") return GO.items[GO.idx]?.act();
   renderGopt();
+}
+const GOPT_BACK = { slots: "main", stEdit: "states", stNum: "stEdit", stSlot: "stEdit", trash: "states" };
+
+/* ── sloty zapisów gry (emustart/saveslots.py) ── */
+function activeSlot(d) { return (d?.slots || []).find((s) => s.active) || null; }
+function slotDesc(s) {
+  if (!s.states && !s.saves) return "pusty";
+  const parts = [];
+  if (s.states) parts.push(`${s.states} ${plural(s.states, "stan", "stany", "stanów")}`);
+  if (s.saves) parts.push("zapis w grze");
+  return parts.join(" + ") + (s.time ? " · " + fmtDate(s.time) : "");
+}
+function slotItem(d) {
+  const cur = activeSlot(d);
+  if (!cur) return [];
+  return [{ label: "Slot zapisów", value: `Slot ${cur.slot} · ${slotDesc(cur)}`, act: () => goPage("slots") }];
+}
+function slotItems() {
+  return (GO.data?.slots || []).map((s) => ({
+    label: `Slot ${s.slot}` + (s.active ? "  ✓ aktywny" : ""), value: slotDesc(s),
+    act: async () => {
+      if (s.active) return toast("To jest aktywny slot — gra startuje na jego zapisach.");
+      toast(`Przełączam na slot ${s.slot}…`, 3000);
+      const r = await api().save_slot_set(GO.pid, s.slot);
+      if (!r?.ok) return toast(r?.reason || "Nie udało się zmienić slotu.", 6000);
+      toast(`Aktywny slot ${s.slot}` + (r.sent ? "." : " — serwer dostanie wybór, gdy wróci połączenie."), 5000);
+      reloadGo("slots");
+    },
+  }));
+}
+
+/* edycja stanu: przytrzymane A na „Wczytaj zapis” */
+async function openStateEdit(st) {
+  GO.cur = st;
+  GO.edit = null;
+  goPage("stEdit");
+  const r = await api().state_edit_info(GO.pid);
+  if (!r?.ok) { toast(r?.reason || "Nie można edytować tego stanu.", 5000); return goPage("states"); }
+  GO.edit = r;
+  if (GO.page === "stEdit") renderGopt();
+}
+async function stateOp(op, arg, done) {
+  const r = await api().state_edit(GO.pid, op, GO.cur.arc, arg ?? null);
+  if (!r?.ok) { toast(r?.reason || "Nie udało się.", 6000); return renderGopt(); }
+  toast(done(r) + (r.offline ? " Na serwer — gdy wróci połączenie." : ""), 5000);
+  GO.confirmDel = false;
+  reloadGo("states");
+}
+function stNo(arc) { const m = /\.state(\d*)$/.exec(arc || "") || /\.(\d{2})\.p2s$/i.exec(arc || ""); return m ? +(m[1] || 0) : null; }
+function stateEditItems() {
+  const st = GO.cur, e = GO.edit;
+  if (!st) return [];
+  if (!e) return [{ label: "Wczytuję…", value: "", act: () => {} }];
+  const auto = !!st.continue;
+  const items = [
+    { label: "Wczytaj", value: "graj od tego stanu", act: () => { closeGopt(); launch("arc:" + st.arc); } },
+  ];
+  if (!auto) items.push({ label: "Zmień numer", value: stNo(st.arc) !== null ? `teraz #${stNo(st.arc)}` : "", act: () => goPage("stNum") });
+  items.push({ label: "Kopiuj jako nowy numer", value: "", act: () => stateOp("copy_new", null, (r) => `Skopiowano jako stan #${stNo(r.arc)}.`) });
+  if (e.slots.length) {
+    items.push({ label: "Kopiuj do slotu…", value: "", act: () => { GO.slotMove = false; goPage("stSlot"); } });
+    items.push({ label: "Przenieś do slotu…", value: "", act: () => { GO.slotMove = true; goPage("stSlot"); } });
+  }
+  if (e.retroarch && !auto) items.push({ label: "Ustaw jako „Kontynuuj”", value: "dotychczasowy dostanie nowy numer",
+    act: () => stateOp("continue", null, () => "Ten stan jest teraz „Kontynuuj”.") });
+  items.push({
+    label: GO.confirmDel ? "Na pewno usunąć? A — tak" : "Usuń", value: GO.confirmDel ? "B — nie" : "do kosza (można przywrócić)",
+    act: () => {
+      if (!GO.confirmDel) { GO.confirmDel = true; return renderGopt(); }
+      stateOp("delete", null, () => "Stan w koszu — przywrócisz go z listy „Wczytaj zapis” → Kosz.");
+    },
+  });
+  return items;
+}
+function stateNumItems() {
+  const nums = GO.edit?.numbers || [];
+  if (!nums.length) return [{ label: "Brak wolnych numerów", value: "", act: () => {} }];
+  return nums.map((n) => ({ label: `Stan #${n}`, value: "wolny",
+    act: () => stateOp("renumber", n, () => `Teraz stan #${n}.`) }));
+}
+function stateSlotItems() {
+  const move = !!GO.slotMove;
+  return (GO.edit?.slots || []).map((n) => {
+    const s = (GO.data?.slots || []).find((x) => x.slot === n) || { slot: n };
+    return { label: `Slot ${n}`, value: slotDesc(s),
+      act: () => stateOp(move ? "move_slot" : "copy_slot", n, (r) => `${move ? "Przeniesiono" : "Skopiowano"} do slotu ${n} (stan #${stNo(r.arc)}).`) };
+  });
+}
+async function openTrash() {
+  GO.trash = null;
+  goPage("trash");
+  const r = await api().state_trash(GO.pid);
+  if (!r?.ok) { toast(r?.reason || "Nie udało się otworzyć kosza.", 5000); return goPage("states"); }
+  GO.trash = r.items;
+  if (GO.page === "trash") renderGopt();
+}
+function trashItems() {
+  if (!GO.trash) return [{ label: "Wczytuję…", value: "", act: () => {} }];
+  if (!GO.trash.length) return [{ label: "Kosz jest pusty", value: "", act: () => {} }];
+  return GO.trash.map((it) => ({
+    label: it.label, value: "zapisany " + fmtDate(it.time) + " · A — przywróć", thumb: it.thumb || "",
+    act: async () => {
+      const r = await api().state_edit(GO.pid, "restore", it.name, null);
+      if (!r?.ok) return toast(r?.reason || "Nie udało się przywrócić.", 6000);
+      toast(`Przywrócono (stan ${r.arc.endsWith(".auto") ? "„Kontynuuj”" : "#" + stNo(r.arc)}).` + (r.offline ? " Na serwer — gdy wróci połączenie." : ""), 5000);
+      GO.data = await api().game_options(GO.pid);
+      openTrash();
+    },
+  }));
 }
 
 /* ── wybór grafiki ── */
