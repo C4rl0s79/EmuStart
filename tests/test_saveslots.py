@@ -398,3 +398,23 @@ def test_no_slot_changes_or_sync_while_game_runs(net, monkeypatch):
     monkeypatch.setattr(syncclient, "before", lambda *x, **k: called.append(1))
     a._bundle_states(GAME, {"args": ""}, None)
     assert called == [1]
+
+
+def test_edit_waits_for_running_sync(net):
+    """Zmiana stanu czeka na synchronizację tej gry w tle (pull_all / before trzymają blokadę) —
+    pliki nie zmieniają się w trakcie pobierania."""
+    import threading
+    import time
+    cfgs, tmp = net
+    put_state(tmp, PC, 1, b"S1")
+    sync(cfgs, tmp, PC)
+    ed = editor(cfgs, tmp, PC)
+    out = {}
+    with syncclient._lock:
+        t = threading.Thread(target=lambda: out.setdefault("r", ed.delete("game.state1")))
+        t.start()
+        time.sleep(0.3)
+        assert local_states(tmp, PC) == {"game.state1": b"S1"}        # czeka
+    t.join(10)
+    assert out["r"]["ok"] and local_states(tmp, PC) == {}
+    assert server_slot(1)["file_count"] == 0                          # wysłane po zwolnieniu blokady

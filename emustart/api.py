@@ -995,7 +995,8 @@ class Api:
         def run():
             g, bundles = self._slot_ctx(game_id)
             plat, gid = syncclient.game_ids(g)
-            saveslots.finish_swap(self._profile, plat, gid, bundles)
+            with syncclient._lock:               # dokończenie przerwanej zamiany — nie w trakcie synchronizacji
+                saveslots.finish_swap(self._profile, plat, gid, bundles)
             return {"ok": True, "slots": saveslots.summary(self._profile, plat, gid, bundles)}
         return self._slot_call(run)
 

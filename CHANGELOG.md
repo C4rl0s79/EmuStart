@@ -8,6 +8,17 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.50.2] — 2026-10-28
+
+Zakres: klient (`saveslots.py`, `api.py`). Serwer bez zmian.
+
+### Poprawione
+- **Zmiany stanów (zmień numer, kopiuj, przenieś, „Kontynuuj”, usuń, przywróć) czekają na
+  synchronizację tej gry w tle.** Pliki zmieniają się pod tą samą blokadą co pobieranie z serwera
+  (przy starcie / logowaniu, przed grą), wysyłka na serwer — po niej. Wcześniej zmiana mogła trafić
+  w środek pobierania tej samej gry (wynik poprawiała dopiero następna synchronizacja). Dokończenie
+  przerwanej zamiany slotów — też pod blokadą.
+
 ## [0.50.1] — 2026-10-28
 
 Zakres: klient (`api.py`). Serwer bez zmian.
