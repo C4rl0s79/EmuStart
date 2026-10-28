@@ -1,45 +1,74 @@
 # EmuStart
 
-**Frontend do gier na emulatorach dla Windows, sterowany padem, w stylu EmulationStation.**
-Zbudowany pod kolekcję ROM-ów na NAS-ie: biblioteka i grafiki leżą lokalnie, gry
-na serwerze, a ostatnio grane trafiają do lokalnej pamięci podręcznej. Działa tak
-samo w domu (LAN) i zdalnie (np. przez Tailscale), na kilku komputerach naraz.
+**Frontend do gier na emulatorach sterowany padem, w stylu EmulationStation — dla Windows
+i Androida.** Kolekcję gier, grafiki, opisy, konta graczy i ich zapisy trzyma
+**EmuStart Server** na komputerze z grami. EmuStart na PC, aplikacja na telefonie
+i [Lumen](https://github.com/C4rl0s79/Launcher) biorą wszystko od serwera, pobierają gry na
+urządzenie i synchronizują zapisy — zaczynasz na PC, kończysz na telefonie. Działa tak samo
+w domu i zdalnie (Tailscale, port publiczny, tunel Cloudflare).
 
 📖 **Pełna dokumentacja: [Wiki](../../wiki)** · 📦 **Pobieranie: [Releases](../../releases)** · 📝 **Zmiany: [CHANGELOG.md](CHANGELOG.md)**
+
+## Programy
+
+| Program | Gdzie | Plik w [Releases](../../releases) |
+|---|---|---|
+| **EmuStart Server** | komputer z grami (Windows) — biblioteka, grafiki, konta, zapisy, emulatory, panel | `EmuStart-Server-<wersja>-win64.zip` |
+| **EmuStart** | komputer, na którym się gra (Windows 10/11) | `EmuStart-<wersja>-win64.zip` |
+| **EmuStart na Androida** | telefon, tablet, TV | `EmuStart-<wersja>-android.apk` |
+| **Lumen** | launcher na kanapę: Steam + gry EmuStart w jednej bibliotece | [C4rl0s79/Launcher](https://github.com/C4rl0s79/Launcher/releases) |
+
+Każdy plik wydania ma podpis (`.sig`); programy aktualizują się same i instalują tylko
+wydanie z poprawnym podpisem. Zaproszeni gracze pobierają programy prosto ze
+[strony serwera](../../wiki/EmuStart-Server#strona-serwera-i-zaproszenia).
 
 ## Co potrafi
 
 - **Karuzela systemów i lista gier** z okładkami, zrzutami, logo tytułów (Clear Logo),
-  opisami i metadanymi (LaunchBox, baza RetroArcha, Wikipedia, IGDB…).
-- **Gry prosto z NAS-a**: w LAN gra płytowa startuje od razu, zdalnie najpierw się
-  pobiera (z postępem i czasem do końca). Ostatnie gry + przypięte trzymane lokalnie.
-- **Pobieranie emulatorów jednym przyciskiem** (samodzielne albo RetroArch + rdzeń).
-- **Menu w grze** (A + Y przez 2 s): zapis/wczytanie stanu, „quicksave i wyjdź”.
-- **Profile graczy**: osobne save'y, ustawienia emulatorów i EmuStart, konto
-  RetroAchievements — zsynchronizowane przez NAS na wszystkich komputerach.
+  opisami i metadanymi (LaunchBox, baza RetroArcha, Wikipedia, IGDB…). Grafiki i opisy
+  ustawia serwer — zmiana dociera do wszystkich urządzeń.
+- **Gry z serwera**: pobierane na urządzenie (z postępem; przerwane pobieranie wznawia się),
+  ostatnio grane i przypięte zostają lokalnie i działają bez serwera. Gry wielopłytowe jako
+  jedna pozycja, tłumaczenia jako wersje gier.
+- **Emulatory z serwera**: serwer trzyma emulatory i wszystkie rdzenie RetroArcha,
+  urządzenia instalują i aktualizują je same; wymagane ustawienia emulatorów ustala serwer.
+  Aktualizacja PCSX2 czeka na zgodę administratora, gdy stany PS2 są wspólne z telefonem.
+- **Zapisy jak w Steam Cloud**: zapisy w grze, stany i karty pamięci synchronizują się
+  z serwerem przed grą i po niej; rozbieżne zmiany z dwóch urządzeń rozstrzyga gracz,
+  poprzednie wersje zostają na serwerze. Jedna gra naraz na profil (blokada na serwerze).
+- **Sloty zapisów i stany**: 4 osobne „przejścia” każdej gry, „Wczytaj zapis” z podglądem
+  stanu, zmiana numeru, kopiowanie i przenoszenie stanów między slotami, kosz.
+- **Menu w grze** (A + Y przez 2 s): zapis / wczytanie stanu, „quicksave i wyjdź”, reset
+  gry, shader ekranu.
+- **Konta graczy** na serwerze: zapisy, ustawienia emulatorów (z historią zmian), wygląd
+  i konto RetroAchievements — te same na każdym urządzeniu konta.
 - **Kolejność padów** niezależna od tego, jak wykrył je Windows.
 - **Edytor wyglądu** na żywo: wielkość logo, czcionek, układ, kolory.
 - **Filtry i ukrywanie** wersji Beta/Proto/Demo/pirackich, ujednolicone gatunki.
-- **Aplikacja na Androida** (ten sam interfejs, pad) i **tryb serwera** na komputerze
-  z grami — zob. [Aplikacja na Androida](../../wiki/Aplikacja-na-Androida).
 
 Obsługiwane wprost (zapisy, stany, pady, RetroAchievements): **RetroArch, DuckStation,
-PCSX2**; zapisy i stany także Dolphin i PPSSPP, zapisy RPCS3. Pozostałe emulatory
-uruchamia jak zwykły frontend.
+PCSX2**; zapisy i stany także Dolphin i PPSSPP, zapisy RPCS3; na telefonie RetroArch i ArmSX2.
+Pozostałe emulatory uruchamia jak zwykły frontend.
 
 ## Szybki start
 
-1. Pobierz `EmuStart-<wersja>-win64.zip` z [Releases](../../releases) i rozpakuj
-   w dowolne miejsce, np. `D:\emustart`.
-2. Uruchom `EmuStart.exe` (wymaga Microsoft Edge WebView2 Runtime — jest w Windows 10/11).
-3. Przy pierwszym starcie otworzą się **Ustawienia**:
-   - dodaj **foldery z grami** (np. `Z:\ROMS\No-Intro`, `Z:\ROMS\REDUMP`) —
-     podfoldery rozpoznawane są po nazwach EmulationStation, No-Intro/Redump i libretro,
-   - wskaż **folder emulatorów** (np. `D:\emu\emulatory`),
-   - wybierz **Wykryj emulatory i skanuj**, a potem **Pobierz brakujące emulatory**.
-4. Wybierz, **kto gra na tym komputerze** (profil), i graj.
+1. **Serwer** — na komputerze z grami pobierz `EmuStart-Server-<wersja>-win64.zip`,
+   rozpakuj (np. `E:\EmuStart`) i jako administrator uruchom `EmuStartServer.exe --install`.
+   W panelu serwera dodaj foldery z grami (Konfiguracja → Foldery) — podfoldery rozpoznawane
+   są po nazwach EmulationStation, No-Intro/Redump i libretro. Szczegóły:
+   [EmuStart Server](../../wiki/EmuStart-Server).
+2. **Gracze** — panel → Urządzenia i konta → **Zaproszenia**: adres Google i konto → link
+   do strony serwera. Zaproszony loguje się kontem Google, pobiera programy i bierze **kod
+   logowania**. Bez strony serwera: panel → **Dodaj urządzenie** (kod dla wybranego konta).
+3. **EmuStart na PC** — rozpakuj `EmuStart-<wersja>-win64.zip` (np. `D:\emustart`), uruchom
+   `EmuStart.exe` (wymaga Microsoft Edge WebView2 — jest w Windows 10/11) → **Zaloguj** →
+   wklej link ze strony serwera albo wpisz adres serwera i kod. Biblioteka i emulatory
+   przychodzą z serwera.
+4. **Telefon** — zainstaluj APK → Ustawienia → **Zaloguj (kod QR)** → zeskanuj kod ze strony
+   serwera.
 
-Szczegóły: [Instalacja i pierwsze uruchomienie](../../wiki/Instalacja-i-pierwsze-uruchomienie).
+Szczegóły: [Instalacja i pierwsze uruchomienie](../../wiki/Instalacja-i-pierwsze-uruchomienie),
+[Aplikacja na Androida](../../wiki/Aplikacja-na-Androida).
 
 ## Sterowanie (skrót)
 
@@ -56,25 +85,31 @@ Szczegóły: [Instalacja i pierwsze uruchomienie](../../wiki/Instalacja-i-pierws
 
 Pełna tabela: [Sterowanie](../../wiki/Sterowanie).
 
-## Dane i prywatność
+## Bezpieczeństwo i dane
 
-Wszystko, co dotyczy użytkownika (`config.json`, `data\`, `cache\`, `profiles\`,
-`logs\`), powstaje obok programu i **nie jest częścią repozytorium**. Klucze API
-są szyfrowane (TPM/DPAPI), hasło RetroAchievements nie jest nigdzie zapisywane,
-a kopie ustawień emulatorów na NAS-ie nie zawierają haseł ani tokenów. Więcej:
-[Bezpieczeństwo i prywatność](../../wiki/Bezpieczeństwo-i-prywatność).
+- Urządzenie łączy się z serwerem tylko szyfrowanym połączeniem i loguje **kluczem
+  urządzenia** (TPM / DPAPI na Windows, Android Keystore) — klucz prywatny nie opuszcza
+  urządzenia. Nowe konto powstaje tylko z zaproszenia albo w panelu serwera; hasło konta
+  jest opcjonalne, serwer trzyma tylko jego skrót.
+- Dane użytkownika (`config.json`, `data\`, `cache\`, `profiles\`, `logs\`; na serwerze
+  `server\`) powstają obok programu i **nie są częścią repozytorium**. Klucze API są
+  szyfrowane, hasło RetroAchievements nie jest nigdzie zapisywane, a kopie ustawień
+  emulatorów nie zawierają haseł ani tokenów.
+
+Więcej: [Bezpieczeństwo i prywatność](../../wiki/Bezpieczeństwo-i-prywatność).
 
 ## Uruchomienie ze źródeł
 
 ```bash
 pip install -r requirements.txt
-python main.py              # pełny ekran (wg ustawień)
+python main.py              # EmuStart: pełny ekran (wg ustawień)
 python main.py --window     # w oknie
 python main.py --debug      # w oknie + DevTools
+python server_main.py       # EmuStart Server: panel (uruchamia serwer, gdy nie działa)
 python -m pytest -q tests   # testy
-powershell -ExecutionPolicy Bypass -File build.ps1   # → dist\EmuStart-<wersja>-win64.zip
+powershell -ExecutionPolicy Bypass -File build.ps1   # → dist\EmuStart-<wersja>-win64.zip i dist\EmuStart-Server-<wersja>-win64.zip
 ```
 
-Program jest dystrybuowany jako katalog, nie jeden exe — jednoplikowa wersja
-PyInstallera była błędnie oznaczana przez Windows Defender. Więcej:
-[Budowa ze źródeł](../../wiki/Budowa-ze-źródeł).
+Aplikacja na Androida: `android/` (Gradle; APK buduje CI). Programy są dystrybuowane jako
+katalogi, nie pojedyncze exe — jednoplikowa wersja PyInstallera była błędnie oznaczana przez
+Windows Defender. Więcej: [Budowa ze źródeł](../../wiki/Budowa-ze-źródeł).
