@@ -374,3 +374,27 @@ def test_swap_with_bad_copy_touches_nothing(net):
     assert saveslots.here(PC, PLAT, GID) == 1 and not saveslots.info(PC, PLAT, GID)["swap"]
     assert local_states(tmp, PC) == {"game.state1": b"S1-A"}
     assert _slot_files(PC, tmp, PC, 2) == {"game.state1": b"S2-A"}
+
+
+def test_no_slot_changes_or_sync_while_game_runs(net, monkeypatch):
+    """Gra działa (Lumen pozwala wtedy otworzyć zapisy): zamiana slotu i zmiany stanów odmawiają,
+    lista stanów bez synchronizacji — nic nie podmienia plików pod emulatorem."""
+    import threading
+    from emustart import api as api_mod
+    cfgs, tmp = net
+    put_state(tmp, PC, 1, b"S1")
+    a = api_mod.Api.__new__(api_mod.Api)
+    a._cfg, a._profile, a._slot_lock = cfgs[PC], PC, threading.Lock()
+    a._session = type("S", (), {"phase": "running"})()
+    assert a.save_slot_set(1, 2) == {"ok": False, "reason": "Najpierw zamknij grę — zapisy są teraz w użyciu."}
+    assert a.state_edit(1, "delete", "game.state1")["ok"] is False
+    monkeypatch.setattr(a, "_game_bundles", lambda g, emu, ad: ra_bundles(tmp, PC, STEM))
+    monkeypatch.setattr(syncclient, "before", lambda *x, **k: pytest.fail("synchronizacja w trakcie gry"))
+    got = a._bundle_states(GAME, {"args": ""}, None)
+    assert [s["arc"] for s in got] == ["game.state1"]
+    assert local_states(tmp, PC) == {"game.state1": b"S1"} and saveslots.here(PC, PLAT, GID) == 1
+    a._session.phase = "finished"
+    called = []
+    monkeypatch.setattr(syncclient, "before", lambda *x, **k: called.append(1))
+    a._bundle_states(GAME, {"args": ""}, None)
+    assert called == [1]

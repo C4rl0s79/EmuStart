@@ -8,6 +8,19 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.50.1] — 2026-10-28
+
+Zakres: klient (`api.py`). Serwer bez zmian.
+
+### Poprawione
+- **Sloty zapisów: nic nie zmienia plików zapisów pod działającą grą.** W trakcie gry (od
+  przygotowania do zamknięcia emulatora) zmiana slotu i zmiany stanów odmawiają („Najpierw zamknij
+  grę”), a otwarcie listy zapisów nie synchronizuje gry z serwerem (lista z plików na dysku;
+  synchronizacja jak dotąd przed grą i po niej). Inaczej zmiana aktywnego slotu — ręczna albo
+  z innego urządzenia — podmieniłaby pliki pod emulatorem, a jego autozapis przy wyjściu trafiłby
+  do innego slotu. Dotyczy zwłaszcza Lumen, w którym bibliotekę i zapisy da się przeglądać w trakcie
+  gry.
+
 ## [0.50.0] — 2026-10-28
 
 Zakres: synchronizacja zapisów — serwer (`savesync.py`, `remote.py`, `srvadmin.py`) i klient
