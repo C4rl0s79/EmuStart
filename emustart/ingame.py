@@ -585,26 +585,8 @@ class RetroArch(Adapter):
             # sesji, retroarch.cfg wskazuje dalej własne foldery RetroArcha
             f'savefile_directory = "{self._cfg_dir("savefile_directory", "saves")}"',
             f'savestate_directory = "{self._cfg_dir("savestate_directory", "states")}"',
-            # skróty pada jak w pozostałych emulatorach (hotkey.py): przytrzymany LB +
-            # A menu, Y zapis (kolejny numer), ↑/↓ slot, RB przyspieszenie, R3 zrzut, L3 nagrywanie
-            # (XInput w RetroArchu: A=0, Y=3, LB=4, RB=5, L3=8, R3=9)
-            'input_enable_hotkey_btn = "4"',
-            'input_menu_toggle_btn = "0"',
-            'input_save_state_btn = "3"',
-            'savestate_auto_index = "true"',
-            'input_state_slot_increase_btn = "h0up"',
-            'input_state_slot_decrease_btn = "h0down"',
-            'input_toggle_fast_forward_btn = "5"',
-            'input_screenshot_btn = "9"',
-            'input_recording_toggle_btn = "8"',
         ]
-        # inne skróty RetroArcha na tych samych przyciskach (np. input_exit_emulator_btn = "0" — LB + A
-        # wychodziło z gry zamiast otworzyć menu) — na czas gry wyłączone; retroarch.cfg bez zmian
-        ours = {ln.split("=", 1)[0].strip(): ln.split('"')[1] for ln in session if "_btn" in ln}
-        for k, v in _cfg_map(self.home / "retroarch.cfg").items() if (self.home / "retroarch.cfg").is_file() else ():
-            if (k.endswith("_btn") and not k.startswith("input_player") and k not in ours
-                    and v.strip('"') in set(ours.values()) - {"4"}):
-                session.append(f'{k} = "nul"')
+        self._pad_hotkeys()
         mine = {ln.split("=", 1)[0].strip() for ln in session}
         lines = [f'{k} = "{v}"' for k, v in self.policy.items() if k not in mine] + session
         if self.keyboard_game:
@@ -633,9 +615,39 @@ class RetroArch(Adapter):
         cfg.write_text("\n".join(lines) + "\n", encoding="utf-8")
         return self._session_config(run_dir, lines) + ["--appendconfig", str(cfg)]
 
+    # skróty pada jak w pozostałych emulatorach (hotkey.py): przytrzymany LB + A menu, Y zapis
+    # (kolejny numer), ↑/↓ slot, RB przyspieszenie, R3 zrzut, L3 nagrywanie
+    # (XInput w RetroArchu: A=0, Y=3, LB=4, RB=5, L3=8, R3=9)
+    PAD_HOTKEYS = {"input_enable_hotkey_btn": "4", "input_menu_toggle_btn": "0", "input_save_state_btn": "3",
+                   "input_state_slot_increase_btn": "h0up", "input_state_slot_decrease_btn": "h0down",
+                   "input_toggle_fast_forward_btn": "5", "input_screenshot_btn": "9",
+                   "input_recording_toggle_btn": "8", "savestate_auto_index": "true"}
+    _HOTKEYS_MARK = "emustart-skroty-lb.txt"
+
+    def _pad_hotkeys(self) -> None:
+        """Domyślna konfiguracja EmuStart w retroarch.cfg — raz (znacznik obok retroarch.cfg); potem
+        gracz może ją zmienić w RetroArchu. Inne skróty RetroArcha na tych samych przyciskach (np.
+        input_exit_emulator_btn = "0" — LB + A wychodziło z gry) — wyłączone."""
+        cfg, mark = self.home / "retroarch.cfg", self.home / self._HOTKEYS_MARK
+        if mark.exists() or not cfg.is_file():
+            return
+        used = set(self.PAD_HOTKEYS.values()) - {"4", "true"}
+        changes = {(None, k): f'"{v}"' for k, v in self.PAD_HOTKEYS.items()}
+        for k, v in _cfg_map(cfg).items():
+            if (k.endswith("_btn") and not k.startswith("input_player") and k not in self.PAD_HOTKEYS
+                    and v.strip('"') in used):
+                changes[(None, k)] = '"nul"'
+        try:
+            ini_set(cfg, changes)
+            mark.write_text("skróty pada LB + … wpisane do retroarch.cfg\n", encoding="utf-8")
+            log.info("RetroArch: skróty pada LB + … w retroarch.cfg (%s)", ", ".join(sorted(k for _s, k in changes)))
+        except OSError:
+            log.exception("RetroArch: skróty pada")
+
     def config_args(self, run_dir: Path) -> list:
         """RetroArch bez gry, w menu — ustawienia (obraz, dźwięk, sterowanie) zmienione
         tu trafiają do profilu tak jak zmiany w trakcie gry."""
+        self._pad_hotkeys()
         run_dir.mkdir(parents=True, exist_ok=True)
         cfg = run_dir / "emustart_ra.cfg"
         lines = [f'network_cmd_port = "{RA_PORT}"']
