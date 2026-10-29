@@ -419,3 +419,19 @@ def test_pad_shortcuts_lb(monkeypatch):
     m._shortcut("slot_down")
     m._shortcut("menu")
     assert sent == ["F2", "F1", "SHIFT+F2", "ESCAPE"]
+
+
+def test_retroarch_other_hotkeys_on_lb_buttons_off(tmp_path):
+    """Inne skróty RetroArcha na przyciskach LB + … (np. wyjście na A) — na czas gry wyłączone,
+    retroarch.cfg bez zmian; skróty na innych przyciskach zostają."""
+    from emustart import ingame
+    home = tmp_path / "RetroArch"
+    home.mkdir()
+    cfg = 'input_exit_emulator_btn = "0"\ninput_rewind_btn = "6"\ninput_player1_a_btn = "0"\n'
+    (home / "retroarch.cfg").write_text(cfg, encoding="utf-8")
+    ra = ingame.RetroArch(str(home / "retroarch.exe"))
+    ra.launch_args(tmp_path / "run", resume=False)
+    lines = (tmp_path / "run" / "emustart_ra.cfg").read_text(encoding="utf-8").splitlines()
+    assert 'input_exit_emulator_btn = "nul"' in lines
+    assert not any(ln.startswith(("input_rewind_btn", "input_player1_a_btn")) for ln in lines)
+    assert (home / "retroarch.cfg").read_text(encoding="utf-8") == cfg
