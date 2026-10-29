@@ -896,6 +896,7 @@ class Api:
             if th:
                 st["thumb"] = "/media/_stany/" + th
             self._state_label(st, desc)
+        self._continue_newest(states)
         states.sort(key=lambda x: (not x.get("resume"), bool(x.get("other_core")), not x.get("continue"), -x["time"]))
         sc = (self._cfg.get("systems") or {}).get(g["es"]) or {}
         return {"id": g["id"], "title": g["title"], "emulator": emu, "options": opts,
@@ -1105,6 +1106,24 @@ class Api:
         Na PC to ta sama lista co w opcjach gry."""
         opts = self.game_options(game_id)
         return {"ok": bool(opts), "states": opts.get("states", []) if opts else []}
+
+    @staticmethod
+    def _continue_newest(states: list) -> None:
+        """„Kontynuuj” = naprawdę najnowszy stan gry. Autozapis RetroArcha (.state.auto) bywa
+        starszy niż ręczne stany (np. zapis przy wyjściu wyłączony) — wtedy „Kontynuuj” dostaje
+        najnowszy ręczny stan (wczytanie: kopia na miejsce autozapisu), a autozapis to „Autozapis”."""
+        own = [s for s in states if s.get("label") and not s.get("other_core") and not s.get("resume")]
+        if not own:
+            return
+        newest = max(own, key=lambda s: (s["time"], bool(s.get("continue"))))
+        if newest.get("continue"):
+            return
+        for s in own:
+            if s.get("continue"):
+                s.pop("continue")
+                s["label"] = "Autozapis"
+        newest["continue"] = True
+        newest["label"] = f"Kontynuuj — najnowszy stan ({newest['label']})"
 
     @staticmethod
     def _state_label(st: dict, desc: dict) -> None:

@@ -8,6 +8,17 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.50.4] — 2026-10-29
+
+Zakres: klient (`api.py` — lista „Wczytaj zapis”). Serwer bez zmian.
+
+### Poprawione
+- **„Kontynuuj” = naprawdę najnowszy stan.** Autozapis RetroArcha (`.state.auto`) bywa starszy
+  niż ręczne stany (np. zapis przy wyjściu wyłączony), a lista zawsze podpisywała go „Kontynuuj —
+  najnowszy stan” i stawiała na górze. Teraz na górze jest stan z najpóźniejszą datą: „Kontynuuj —
+  najnowszy stan (Stan #5)”; starszy autozapis to „Autozapis”. Wczytanie jak dotąd („Wczytaj
+  zapis” — kopia na miejsce autozapisu).
+
 ## [0.50.3] — 2026-10-28
 
 Zakres: klient (`ingame.py`, `saveslots.py`, `syncclient.py`, `api.py`). Serwer bez zmian (już

@@ -520,3 +520,19 @@ def test_other_core_edit_offline(net, monkeypatch):
 def test_other_core_bad_name(tmp_path):
     with pytest.raises(saveslots.EditError):
         saveslots.other_core_bundle(1, "snes", "g", "../x", 1)
+
+
+def test_continue_is_newest_state():
+    """„Kontynuuj” = najnowszy stan; starszy autozapis (zapis przy wyjściu wyłączony) — „Autozapis”."""
+    from emustart.api import Api
+    sts = [{"path": "g.state.auto", "time": 10.0, "continue": True, "label": "Kontynuuj — najnowszy stan"},
+           {"path": "g.state5", "time": 50.0, "label": "Stan #5"},
+           {"path": "g.state1", "time": 10.0, "label": "Stan #1"},
+           {"path": "x.state2", "time": 99.0, "label": "Stan #2", "other_core": "snes9x"}]
+    Api._continue_newest(sts)
+    assert sts[1]["continue"] and sts[1]["label"] == "Kontynuuj — najnowszy stan (Stan #5)"
+    assert not sts[0].get("continue") and sts[0]["label"] == "Autozapis"
+    sts = [{"path": "g.state.auto", "time": 50.0, "continue": True, "label": "Kontynuuj — najnowszy stan"},
+           {"path": "g.state5", "time": 50.0, "label": "Stan #5"}]
+    Api._continue_newest(sts)
+    assert sts[0]["label"] == "Kontynuuj — najnowszy stan" and not sts[1].get("continue")
