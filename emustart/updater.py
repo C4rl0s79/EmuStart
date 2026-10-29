@@ -168,10 +168,15 @@ class Job:
         """Uruchamia skrypt podmiany (poza tym procesem). Wołający kończy proces.
         server=True — potem start zadania Harmonogramu serwera (gdy jest), False —
         EmuStart z tymi samymi parametrami (okno do grania)."""
+        if self.phase == "applying":
+            # drugie „Aktualizuj” (podwójne kliknięcie, ponowione zapytanie): drugi skrypt podmiany
+            # równolegle z pierwszym uruchomił dwa serwery i zablokował pliki (0.52.1)
+            return {"ok": True}
         if self.phase != "ready":
             return {"ok": False, "reason": "Aktualizacja nie jest gotowa."}
         if os.name != "nt" or not getattr(sys, "frozen", False):
             return {"ok": False, "reason": "Podmiana działa tylko w EmuStart.exe na Windows."}
+        self.phase = "applying"
         script = write_script(update_dir(), paths.APP, os.getpid(), argv, server=server,
                               exe_name=self.info.get("root") or APPS[self.info.get("app") or kind()][0])
         ulog = paths.APP / "logs" / "update.log"
@@ -180,11 +185,11 @@ class Job:
         # proces kończy się dopiero, gdy skrypt potwierdzi start — inaczej zostaje włączony
         # (0.32–0.34: skrypt ginął razem z serwerem, a serwer już się nie podnosił)
         if not _confirmed(ulog, before, f"PID {os.getpid()}"):
+            self.phase = "ready"
             log.error("aktualizacja %s: skrypt podmiany nie wystartował (%s) — serwer działa dalej",
                       self.info["version"], how)
             return {"ok": False, "reason": "Skrypt podmiany nie wystartował — EmuStart działa dalej na obecnej "
                                            "wersji. Szczegóły w logach."}
-        self.phase = "applying"
         log.info("aktualizacja %s: podmiana plików po zamknięciu (%s)", self.info["version"], how)
         return {"ok": True}
 
@@ -321,6 +326,13 @@ Wait-Process -Id {pid} -Timeout 60 -ErrorAction SilentlyContinue
 $exe = {_ps(exe)}
 for ($i = 0; $i -lt 60; $i++) {{
   try {{ $f = [IO.File]::Open($exe, 'Open', 'ReadWrite', 'None'); $f.Close(); break }} catch {{ Start-Sleep 1 }}
+}}
+# program z tego folderu wciąż działa (np. drugi serwer) — zamykamy go, zanim podmienimy pliki w użyciu
+$busy = Get-Process -ErrorAction SilentlyContinue | Where-Object {{ $_.Path -and $_.Path.StartsWith($app, [StringComparison]::OrdinalIgnoreCase) }}
+if ($busy) {{
+  L ('zamykam działający program z folderu: ' + (($busy | ForEach-Object {{ "$($_.Name) $($_.Id)" }}) -join ', '))
+  $busy | Stop-Process -Force -ErrorAction SilentlyContinue
+  Start-Sleep 2
 }}
 L 'kopia zapasowa'
 robocopy (Join-Path $app '_internal') (Join-Path $bak '_internal') /MIR /R:5 /W:2 /NFL /NDL /NJH /NJS /NP | Out-Null
