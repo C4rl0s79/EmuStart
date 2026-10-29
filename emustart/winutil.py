@@ -116,7 +116,7 @@ class _INPUT(ctypes.Structure):
 
 VK = {f"F{i}": 0x6F + i for i in range(1, 13)}
 VK.update({"SPACE": 0x20, "ESCAPE": 0x1B, "ENTER": 0x0D, "SHIFT": 0x10, "CTRL": 0x11,
-           "ALT": 0x12, "P": 0x50})
+           "ALT": 0x12, "P": 0x50, "TAB": 0x09})
 
 
 def _key(vk: int, up: bool) -> _INPUT:

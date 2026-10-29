@@ -198,7 +198,7 @@ function press(a, fromPad) {
     // Menu gry ma dwa źródła pada: to okno (Gamepad API, gdy ma fokus) i wątek
     // XInput w Pythonie. Gdy okno samo widzi pad, akcje z Pythona są pomijane.
     if (!fromPad) return window.ingameInput(a);
-    // A+Y z otwarcia menu: naciśnięcia liczą się dopiero, gdy pad był puszczony
+    // LB + A z otwarcia menu: naciśnięcia liczą się dopiero, gdy pad był puszczony
     // przez chwilę i minęło pół sekundy od otwarcia (A i Y nie puszcza się
     // równocześnie, a odczyt pada tuż po wyjściu okna na wierzch bywa nieświeży)
     if (!IG.armed || performance.now() - IG.openedAt < 500) return;

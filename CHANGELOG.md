@@ -8,6 +8,24 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.52.0] — 2026-10-29
+
+Zakres: klient Windows (`hotkey.py`, `ingame.py`, `xinput.py`, `emupolicy.py`), dokumentacja.
+Serwer i APK bez zmian.
+
+### Zmienione
+- **Jednakowe skróty pada w każdym emulatorze — przytrzymany LB + przycisk** (zamiast A+Y):
+  LB+A — menu (własne menu emulatora, gdy ma je na pada: RetroArch, DuckStation, PCSX2, PPSSPP;
+  inaczej menu EmuStart — np. Dolphin), LB+Y — zapisz w kolejnym slocie, LB+X — zapisz w wybranym
+  slocie, LB+↑/↓ — slot zapisu w górę / w dół, LB+RB — przyspieszenie, LB+R3 — zrzut ekranu,
+  LB+L3 — nagrywanie (gdzie emulator je ma).
+- RetroArch: te skróty w ustawieniach sesji (przycisk skrótu LB, auto-numer zapisu). Ustawienia
+  sesji EmuStart wygrywają z tymi samymi kluczami z serwera (RetroArch bierze pierwszą wartość).
+- Pozostałe emulatory: EmuStart czyta pada i naciska ich skróty klawiszowe (z ich ustawień albo
+  domyślne). Dolphin: slot wybierany przez EmuStart (Shift+F1…F8).
+- A+Y znika. LB trafia też do gry (emulator czyta pada sam) — wybór gracza.
+- Domyślne ustawienia RetroArcha z serwera (`emupolicy`): przycisk skrótów LB, LB+A menu.
+
 ## [0.51.0] — 2026-10-29
 
 Zakres: klient Windows (`savebundles.py`, `saveslots.py`, `syncclient.py`, `api.py`) i APK

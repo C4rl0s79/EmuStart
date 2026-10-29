@@ -1,6 +1,7 @@
 # Menu w grze
 
-W trakcie gry przytrzymaj **A + Y przez 2 sekundy** (pad PlayStation: X + trójkąt).
+W trakcie gry naciśnij **LB + A** (przytrzymany LB). Emulatory z własnym menu na pada (RetroArch,
+DuckStation, PCSX2, PPSSPP) otwierają wtedy swoje menu; pozostałe (np. Dolphin) — menu EmuStart.
 EmuStart pauzuje emulator (gdy trzeba) i pokazuje menu nad grą:
 
 | Pozycja | Działanie |

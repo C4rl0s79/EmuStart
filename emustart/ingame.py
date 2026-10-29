@@ -395,6 +395,29 @@ class Adapter:
     def load_key(self) -> str:
         return ""
 
+    # ── skróty pada LB + … (hotkey.py): klawisze emulatora; "" — emulator nie ma takiego skrótu ──
+    def menu_key(self) -> str:
+        """Własne menu emulatora na pada (pauza z menu); "" — menu EmuStart."""
+        return ""
+
+    def slot_keys(self) -> tuple:
+        """(następny slot zapisu, poprzedni slot)."""
+        return ("", "")
+
+    def slot_save_key(self, n: int) -> str:
+        """Zapis do slotu n — emulator bez wybieranego slotu (slot wybiera EmuStart)."""
+        return ""
+
+    def screenshot_key(self) -> str:
+        return ""
+
+    def record_key(self) -> str:
+        return ""
+
+    def ff_key(self) -> str:
+        """Przełącznik przyspieszenia."""
+        return ""
+
     def state_dirs(self) -> list:
         return []
 
@@ -544,8 +567,7 @@ class RetroArch(Adapter):
         cfg = run_dir / "emustart_ra.cfg"
         # najpierw wymagane ustawienia z serwera — niżej ustawienia sesji EmuStart (wygrywają);
         # „bez shadera” tylko na czas gry: własne ustawienia shadera RetroArcha zostają
-        lines = [f'{k} = "{v}"' for k, v in self.policy.items()] + \
-            (['video_shader_enable = "false"'] if self.shader_off else []) + [
+        session = (['video_shader_enable = "false"'] if self.shader_off else []) + [
             'network_cmd_enable = "true"',
             f'network_cmd_port = "{RA_PORT}"',
             'savestate_auto_save = "true"',
@@ -563,14 +585,28 @@ class RetroArch(Adapter):
             # sesji, retroarch.cfg wskazuje dalej własne foldery RetroArcha
             f'savefile_directory = "{self._cfg_dir("savefile_directory", "saves")}"',
             f'savestate_directory = "{self._cfg_dir("savestate_directory", "states")}"',
+            # skróty pada jak w pozostałych emulatorach (hotkey.py): przytrzymany LB +
+            # A menu, Y zapis (kolejny numer), ↑/↓ slot, RB przyspieszenie, R3 zrzut, L3 nagrywanie
+            # (XInput w RetroArchu: A=0, Y=3, LB=4, RB=5, L3=8, R3=9)
+            'input_enable_hotkey_btn = "4"',
+            'input_menu_toggle_btn = "0"',
+            'input_save_state_btn = "3"',
+            'savestate_auto_index = "true"',
+            'input_state_slot_increase_btn = "h0up"',
+            'input_state_slot_decrease_btn = "h0down"',
+            'input_toggle_fast_forward_btn = "5"',
+            'input_screenshot_btn = "9"',
+            'input_recording_toggle_btn = "8"',
         ]
+        mine = {ln.split("=", 1)[0].strip() for ln in session}
+        lines = [f'{k} = "{v}"' for k, v in self.policy.items() if k not in mine] + session
         if self.keyboard_game:
             # Gry na komputery (Amiga, C64…) używają klawiatury: Shift, F1–F10, Esc,
             # strzałki. Domyślnie RetroArch zamienia część klawiszy na przyciski pada
             # (prawy Shift = Select → w PUAE klawiatura ekranowa, strzałki = joystick)
             # i przechwytuje F1 (menu) oraz Esc (wyjście). Na czas sesji: game focus
             # (klawiatura dla rdzenia, skróty wyłączone) i bez przypisań klawiszy do pada.
-            # Wyjście z gry: menu EmuStart (A + Y), przełączanie: Scroll Lock.
+            # Wyjście z gry: menu EmuStart (LB + A), przełączanie: Scroll Lock.
             lines.append('input_auto_game_focus = "1"')
             for p in (1, 2):
                 for b in ("a", "b", "x", "y", "l", "r", "l2", "r2", "l3", "r3", "start", "select",
@@ -754,6 +790,24 @@ class DuckStation(Adapter):
     def save_key(self) -> str:
         return _qt_key(_ini_value(self._ini(), "SaveSelectedSaveState")) or "F2"
 
+    def _hk(self, name: str, default: str = "") -> str:
+        return _qt_key(_ini_value(self._ini(), name)) or default
+
+    def menu_key(self) -> str:
+        return self._hk("OpenPauseMenu", "ESCAPE")
+
+    def slot_keys(self) -> tuple:
+        return (self._hk("SelectNextSaveStateSlot", "F4"), self._hk("SelectPreviousSaveStateSlot", "F3"))
+
+    def screenshot_key(self) -> str:
+        return self._hk("Screenshot", "F10")
+
+    def record_key(self) -> str:
+        return self._hk("ToggleMediaCapture")
+
+    def ff_key(self) -> str:
+        return self._hk("ToggleFastForward")
+
     def load_key(self) -> str:
         return _qt_key(_ini_value(self._ini(), "LoadSelectedSaveState")) or "F1"
 
@@ -880,6 +934,24 @@ class PCSX2(Adapter):
     def save_key(self) -> str:
         return _qt_key(_ini_value(self._ini(), "SaveStateToSlot")) or "F1"
 
+    def _hk(self, name: str, default: str = "") -> str:
+        return _qt_key(_ini_value(self._ini(), name)) or default
+
+    def menu_key(self) -> str:
+        return self._hk("OpenPauseMenu", "ESCAPE")
+
+    def slot_keys(self) -> tuple:
+        return (self._hk("NextSaveStateSlot", "F2"), self._hk("PreviousSaveStateSlot", "SHIFT+F2"))
+
+    def screenshot_key(self) -> str:
+        return self._hk("Screenshot", "F8")
+
+    def record_key(self) -> str:
+        return self._hk("ToggleVideoCapture")
+
+    def ff_key(self) -> str:
+        return self._hk("ToggleTurbo")
+
     def load_key(self) -> str:
         return _qt_key(_ini_value(self._ini(), "LoadStateFromSlot")) or "F3"
 
@@ -990,6 +1062,12 @@ class Dolphin(Adapter):
     def save_key(self) -> str:
         return self._hotkey("Save State/Save State Slot 1", "SHIFT+F1")
 
+    def slot_save_key(self, n: int) -> str:
+        return self._hotkey(f"Save State/Save State Slot {n}", f"SHIFT+F{n}") if 1 <= n <= 8 else ""
+
+    def screenshot_key(self) -> str:
+        return self._hotkey("General/Take Screenshot", "F9")
+
     def load_key(self) -> str:
         return self._hotkey("Load State/Load State Slot 1", "F1")
 
@@ -1046,6 +1124,12 @@ class PPSSPP(Adapter):
 
     def save_key(self) -> str:
         return self._key("Save State", "F2")
+
+    def menu_key(self) -> str:
+        return "ESCAPE"                     # pauza z menu PPSSPP
+
+    def slot_keys(self) -> tuple:
+        return (self._key("Next Slot", "F3"), "")
 
     def load_key(self) -> str:
         return self._key("Load State", "F4")
