@@ -8,6 +8,16 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.52.1] — 2026-10-29
+
+Zakres: klient (`syncclient.py`, `api.py`, `launcher.py`). Serwer i APK bez zmian.
+
+### Dodane
+- **Postęp wysyłki i pobierania zapisów:** ile MB wysłano / pobrano z ilu i ile zostało czasu
+  (`sync_progress`; w oknie uruchamiania gry — w komunikacie „Synchronizuję zapisy…”). Pierwsza
+  synchronizacja dużych stanów (GameCube ~70 MB na stan) trwa minuty — wcześniej bez żadnej
+  informacji, a Lumen po 90 s pokazywał „EmuStart nie odpowiada”.
+
 ## [0.52.0] — 2026-10-29
 
 Zakres: klient Windows (`hotkey.py`, `ingame.py`, `xinput.py`, `emupolicy.py`), dokumentacja.
