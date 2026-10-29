@@ -8,6 +8,11 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+### Budowa (bez wydania)
+- `build.ps1`: gdy część testów nie przejdzie (testy z lokalnym serwerem testowym bywają niestabilne
+  na maszynach GitHuba), powtarza tylko te, które padły; padną drugi raz — budowa przerwana.
+  Wcześniej wydania 0.52.1, 0.52.3 i 0.52.4 trzeba było uruchamiać ponownie ręcznie.
+
 ## [0.52.4] — 2026-10-29
 
 Zakres: klient (`ingame.py`). Serwer i APK bez zmian.

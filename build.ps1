@@ -17,6 +17,13 @@ Set-Location -Path $PSScriptRoot
 
 Write-Host "== EmuStart: testy ==" -ForegroundColor Cyan
 python -m pytest -q tests | Out-Host
+if ($LASTEXITCODE -ne 0) {
+    # testy z lokalnym serwerem testowym bywają niestabilne na maszynach GitHuba (zerwane połączenia,
+    # przekroczony czas) — za każdym razem inne, osobno przechodzą; powtórka tylko tych, które padły,
+    # w świeżym procesie. Padną drugi raz — budowa przerwana jak dotąd.
+    Write-Host "Część testów nie przeszła — powtarzam tylko je." -ForegroundColor Yellow
+    python -m pytest -q --lf tests | Out-Host
+}
 if ($LASTEXITCODE -ne 0) { Write-Host "Testy nie przeszły — przerywam." -ForegroundColor Red; exit 1 }
 
 Write-Host "== EmuStart: build exe ==" -ForegroundColor Cyan
