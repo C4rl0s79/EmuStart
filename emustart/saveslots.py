@@ -91,10 +91,10 @@ def _root(pid: int, what: str, plat: str, gid: str, slot: int) -> Path:
 def store_bundle(pid: int, plat: str, gid: str, slot: int, b) -> savebundles.Bundle:
     """Paczka `b` slotu `slot` w folderze profilu (nazwy umowne: pliki „game.*”)."""
     folder = _root(pid, "_sloty", plat, gid, slot) / f"{b.emulator_id}-{b.core_id or '-'}-{b.kind}"
-    names = list(b.names) if (b.emulator_id, b.kind) == ("pcsx2", "states") else [savebundles.ARC]
+    native = (b.emulator_id, b.kind) in savebundles.NATIVE      # nazwy jak na urządzeniu (PCSX2, Dolphin, PPSSPP)
     return savebundles.Bundle(b.emulator_id, b.core_id, b.kind, folder,
-                              "" if (b.emulator_id, b.kind) == ("pcsx2", "states") else savebundles.ARC,
-                              names).collect()
+                              (b.stem if native else savebundles.ARC),
+                              list(b.names) if native else [savebundles.ARC]).collect()
 
 
 def trash_bundle(pid: int, plat: str, gid: str, slot: int, states) -> savebundles.Bundle:
@@ -288,7 +288,7 @@ def state_no(arc: str) -> int | None:
     m = _RA.match(arc)
     if m:
         return int(m.group(1) or 0)
-    m = _P2S.match(arc)
+    m = _P2S.match(arc) or savebundles._DOLPHIN_STATE.match(arc) or savebundles._PPSSPP_STATE.match(arc)
     return int(m.group("slot")) if m else None
 
 
@@ -298,6 +298,16 @@ def _arc_no(b, like: str, n: int) -> str:
         if not m or not 0 <= n <= 9:
             raise EditError("Stany PS2 mają numery 0–9.")
         return f"{m.group('prefix')}.{n:02d}.p2s"
+    if b.emulator_id == "dolphin":
+        m = savebundles._DOLPHIN_STATE.match(like)
+        if not m or not 1 <= n <= 99:
+            raise EditError("Stany Dolphina mają numery 1–99.")
+        return f"{m.group('prefix')}.s{n:02d}"
+    if b.emulator_id == "ppsspp":
+        m = savebundles._PPSSPP_STATE.match(like)
+        if not m or not 0 <= n <= 99:
+            raise EditError("Stany PPSSPP mają numery 0–99.")
+        return f"{m.group('prefix')}_{n}.ppst"
     if n < 0:
         raise EditError("Nieprawidłowy numer.")
     return "game.state" if n == 0 else f"game.state{n}"
@@ -321,6 +331,9 @@ def next_free(b, like: str) -> str:
         if not free:
             raise EditError("Wszystkie numery stanów PS2 (0–9) są zajęte.")
         return _arc_no(b, like, free[0])
+    if b.emulator_id in ("dolphin", "ppsspp"):      # pierwszy wolny (klawisze emulatora: niskie numery)
+        lo = 1 if b.emulator_id == "dolphin" else 0
+        return _arc_no(b, like, next(n for n in range(lo, 100) if n not in used))
     return _arc_no(b, like, max(used, default=0) + 1)
 
 
@@ -329,6 +342,9 @@ def free_numbers(b, limit: int = 12) -> list:
     used = used_numbers(b)
     if b.emulator_id == "pcsx2":
         return [n for n in range(10) if n not in used]
+    if b.emulator_id in ("dolphin", "ppsspp"):
+        lo = 1 if b.emulator_id == "dolphin" else 0
+        return [n for n in range(lo, 100) if n not in used][:limit]
     top = max(used, default=0)
     return [n for n in range(0, top + limit) if n not in used][:limit]
 

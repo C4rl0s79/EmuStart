@@ -8,6 +8,30 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.51.0] — 2026-10-29
+
+Zakres: klient Windows (`savebundles.py`, `saveslots.py`, `syncclient.py`, `api.py`) i APK
+(`Saves.kt`, `SaveSync.kt`). Serwer bez zmian (przyjmuje paczki z podfolderami i każdego emulatora).
+
+### Dodane
+- **Dolphin i PPSSPP w nowym formacie synchronizacji zapisów** — jak RetroArch, DuckStation i
+  PCSX2: wersje na serwerze, sumowanie stanów z dwóch urządzeń (nic nie ginie), sloty, kosz,
+  „Wczytaj zapis”, edycja numerów stanów. Wcześniej te emulatory synchronizowały całe foldery
+  (bez wersji i sumowania) — ich foldery wychodzą ze starej synchronizacji.
+  - Dolphin: stany `<ID gry>.sNN` (ID z nagłówka płyty — `DolphinTool header`, np. `GKBEAF`),
+    zapisy GameCube (folder karty: pliki `.gci` tej gry) i Wii (`Wii/title/00010000/<ID>`).
+  - PPSSPP: stany `<numer gry>_N.ppst` i zapisy w grze (`SAVEDATA/<numer gry…>/`).
+  - Paczki z podfolderami (nazwa w paczce ze ścieżką).
+- **APK: PPSSPP** w tym samym formacie (folder `PSP` we wspólnej pamięci telefonu) — zapisy i
+  stany wspólne z komputerem. Dolphin na Androidzie trzyma dane w `Android/data` (niedostępne dla
+  innych aplikacji) — bez synchronizacji na telefonie.
+- Lista stanów Dolphina i PPSSPP: „Stan #N” zamiast nazwy pliku.
+
+### Poprawione
+- **Opis synchronizacji w oknie „Zapisy”** dla emulatorów bez paczek: `folder` (cały folder
+  zapisów z serwerem przed grą i po niej — RPCS3) albo `none` (zapisy tylko na tym urządzeniu),
+  zamiast mylącego „Jeszcze nie synchronizowane”.
+
 ## [0.50.4] — 2026-10-29
 
 Zakres: klient (`api.py` — lista „Wczytaj zapis”). Serwer bez zmian.

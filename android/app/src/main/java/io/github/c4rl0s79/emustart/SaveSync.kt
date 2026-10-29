@@ -233,7 +233,9 @@ class SaveSync(ctx: Context, private val server: Server) {
         ZipFile(z).use { zf ->
             for (e in zf.entries().asSequence().filter { !it.isDirectory }) {
                 val arc = e.name
-                require(!arc.contains('/') && !arc.contains('\\') && !arc.contains("..")) { "zła nazwa w paczce: $arc" }
+                // podfoldery tylko w paczkach, które je mają (zapisy PSP: „ULUS10297DATA00/DATA.BIN”)
+                require(!arc.startsWith("/") && !arc.contains('\\') && arc.split('/').none { it.isEmpty() || it == ".." } &&
+                        (!arc.contains('/') || b.target(arc).isNotEmpty())) { "zła nazwa w paczce: $arc" }
                 val targets = cur[arc]?.let { listOf(it) } ?: b.target(arc)
                 for (t in targets) {
                     t.parentFile?.mkdirs()
@@ -311,7 +313,12 @@ class SaveSync(ctx: Context, private val server: Server) {
                         continue
                     }
                     val p2s = Regex("^(.+?)\\.(\\d{2}|resume|autosave(?:\\.\\d)?)\\.p2s$", RegexOption.IGNORE_CASE).find(arc)
-                    val newArc = if (p2s != null) {
+                    val ppst = Regex("^([A-Z]{4}\\d{5})_\\d{1,2}\\.ppst$", RegexOption.IGNORE_CASE).find(arc)
+                    val newArc = if (ppst != null) {
+                        // PPSSPP: pierwszy wolny numer tej gry (jak na komputerze)
+                        val pre = ppst.groupValues[1]
+                        (0..99).map { "${pre}_$it.ppst" }.firstOrNull { it !in mine && it !in other && it !in taken }
+                    } else if (p2s != null) {
                         // PCSX2 / ArmSX2: pierwszy wolny slot 00–09 tej gry
                         val pre = p2s.groupValues[1]
                         (0..9).map { "$pre.%02d.p2s".format(it) }.firstOrNull { it !in mine && it !in other && it !in taken }
