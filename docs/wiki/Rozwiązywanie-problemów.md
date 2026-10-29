@@ -11,7 +11,7 @@ jest na wierzchu). Jeśli problem wróci, sprawdź po restarcie Windows kolejno
 
 **Pad PlayStation nie działa** — musi być widoczny jako XInput (Steam Input, DS4Windows).
 
-**Menu w grze się nie otwiera** — A + Y trzeba trzymać 2 s; nie działa przy `--pady=brak`.
+**Menu w grze się nie otwiera** — LB + A (przytrzymany LB); nie działa przy `--pady=brak`.
 
 ## Gra
 

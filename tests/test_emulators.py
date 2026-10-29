@@ -232,8 +232,9 @@ def test_required_settings_from_server_applied_before_game(emu_server, tmp_path)
     ra.launch_args(tmp_path / "run", resume=False)
     lines = (tmp_path / "run" / "emustart_ra.cfg").read_text(encoding="utf-8").splitlines()
     assert lines[0] == 'video_vsync = "true"'
-    # ustawienie sesji EmuStart stoi niżej — wygrywa (RetroArch bierze ostatnią wartość)
-    assert lines.index('savestate_thumbnail_enable = "true"') > lines.index('savestate_thumbnail_enable = "false"')
+    # ustawienie sesji EmuStart wygrywa: ten sam klucz z serwera nie trafia do pliku (RetroArch
+    # bierze pierwszą wartość)
+    assert 'savestate_thumbnail_enable = "true"' in lines and 'savestate_thumbnail_enable = "false"' not in lines
     srvadmin.emu_policy_set(A(), {"family": "duckstation", "reset": True})
     assert emupolicy.effective(emu_server)["duckstation"] == emupolicy.DEFAULTS["duckstation"]
 
@@ -273,8 +274,8 @@ def test_all_retroarch_cores_on_server_and_alternatives_on_pc(emu_server, tmp_pa
 
 
 def test_retroarch_default_pad_and_auto_index(tmp_path):
-    """Domyślnie: każdy zapis stanu z nowym numerem, Start+Select — menu, Select — skróty,
-    Select+RB — przyspieszenie, Select+Y — zapis stanu (sterownik XInput)."""
+    """Domyślnie: każdy zapis stanu z nowym numerem, LB — skróty: LB+A menu, LB+RB przyspieszenie,
+    LB+Y zapis stanu, LB+↑/↓ slot, LB+R3 zrzut, LB+L3 nagrywanie (sterownik XInput)."""
     from emustart import emupolicy, ingame
     home = tmp_path / "RetroArch"
     home.mkdir()
@@ -284,8 +285,10 @@ def test_retroarch_default_pad_and_auto_index(tmp_path):
     ra.launch_args(tmp_path / "run", resume=False)
     lines = set((tmp_path / "run" / "emustart_ra.cfg").read_text(encoding="utf-8").splitlines())
     for line in ('savestate_auto_index = "true"', 'input_joypad_driver = "xinput"',
-                 'input_menu_toggle_gamepad_combo = "4"', 'input_enable_hotkey_btn = "7"',
-                 'input_toggle_fast_forward_btn = "5"', 'input_save_state_btn = "3"'):
+                 'input_menu_toggle_btn = "0"', 'input_enable_hotkey_btn = "4"',
+                 'input_toggle_fast_forward_btn = "5"', 'input_save_state_btn = "3"',
+                 'input_state_slot_increase_btn = "h0up"', 'input_screenshot_btn = "9"',
+                 'input_recording_toggle_btn = "8"'):
         assert line in lines, line
 
 
@@ -389,3 +392,30 @@ def test_server_lists_bios_folder(emu_server, tmp_path, monkeypatch):
     c = http.client.HTTPConnection(host, port, timeout=10)
     c.request("GET", "/v1/bios?dir=../..", headers={"Authorization": "Bearer tok"})
     assert c.getresponse().status == 400
+
+
+def test_pad_shortcuts_lb(monkeypatch):
+    """LB + przycisk → skrót klawiszowy emulatora (Dolphin: slot wybiera EmuStart, Shift+F1…F8)."""
+    from emustart import hotkey, ingame, winutil
+    sent = []
+    monkeypatch.setattr(winutil, "send_keys", lambda k, hold=0.08: sent.append(k))
+    monkeypatch.setattr(hotkey.time, "sleep", lambda s: None)
+    d = ingame.Dolphin.__new__(ingame.Dolphin)
+    d._hotkey = lambda name, default: default
+    m = hotkey.GameMenu.__new__(hotkey.GameMenu)
+    m.adapter, m.slot = d, 1
+    m._shortcut("slot_up")
+    m._shortcut("slot_up")
+    m._shortcut("save_here")
+    m._shortcut("save_next")
+    m._shortcut("screenshot")
+    m._shortcut("record")
+    assert sent == ["SHIFT+F3", "SHIFT+F4", "F9", ""] and m.slot == 4
+    p = ingame.PCSX2.__new__(ingame.PCSX2)
+    p._hk = lambda name, default="": default
+    p.save_key = lambda: "F1"
+    m.adapter, sent[:] = p, []
+    m._shortcut("save_next")
+    m._shortcut("slot_down")
+    m._shortcut("menu")
+    assert sent == ["F2", "F1", "SHIFT+F2", "ESCAPE"]

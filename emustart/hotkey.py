@@ -1,8 +1,14 @@
-"""hotkey — A+Y przytrzymane 2 s w trakcie gry otwiera menu EmuStart.
+"""hotkey — skróty pada w trakcie gry, jednakowe w każdym emulatorze: przytrzymany LB +
 
-Przycisk Xbox/PS zajmują same emulatory, dlatego kombinacja na zwykłych
-przyciskach (na padzie PS: X + trójkąt). Pad czytamy przez XInput w osobnym
-wątku, bo w trakcie gry fokus ma emulator, nie nasze okno.
+    A        menu (własne menu emulatora, gdy je ma na pada — inaczej menu EmuStart)
+    Y        zapisz w kolejnym slocie        X   zapisz w wybranym slocie
+    ↑ / ↓    slot zapisu w górę / w dół      RB  przyspieszenie
+    R3       zrzut ekranu                    L3  nagrywanie (gdzie emulator je ma)
+
+RetroArch robi to sam (ustawienia sesji, ingame.RetroArch.launch_args) — tu nic.
+Pozostałe: pad czytamy przez XInput w osobnym wątku (fokus ma emulator, nie nasze okno)
+i naciskamy skróty klawiszowe emulatora (Adapter.menu_key, slot_keys…). LB trafia też do
+gry — emulator czyta pada sam.
 
 Gdy menu jest otwarte, ten sam wątek steruje menu (krzyżak, A, B) i podaje
 akcje do UI. Gamepad API w oknie jest wtedy ignorowane, żeby nie liczyć
@@ -19,8 +25,10 @@ from emustart import ingame, library, winutil, xinput
 
 log = logging.getLogger("emustart.hotkey")
 
-HOLD_SECONDS = 2.0
 POLL = 1 / 60
+# LB + przycisk → akcja (kolejność: pierwsze wciśnięte wygrywa)
+COMBOS = ((xinput.A, "menu"), (xinput.Y, "save_next"), (xinput.X, "save_here"), (xinput.UP, "slot_up"),
+          (xinput.DOWN, "slot_down"), (xinput.RB, "ff"), (xinput.R3, "screenshot"), (xinput.L3, "record"))
 
 
 class GameMenu:
@@ -33,13 +41,16 @@ class GameMenu:
         self.open = False
         self.busy = False
         self.new_resume = False
+        self.slot = 1                # slot wybierany przez EmuStart (emulator bez własnego wyboru slotu)
         self._thread = threading.Thread(target=self._watch, daemon=True, name="hotkey")
 
     def start(self) -> None:
         backend = getattr(self.ui, "pad_backend", lambda: "python")()
         if backend == "none":
-            log.info("obsługa padów wyłączona — menu w grze (A+Y) nieaktywne")
+            log.info("obsługa padów wyłączona — skróty LB + … nieaktywne")
             return
+        if self.adapter.family == "retroarch":
+            return                   # RetroArch: skróty LB w ustawieniach sesji
         if xinput.available():
             self._thread.start()
         else:
@@ -73,8 +84,6 @@ class GameMenu:
     def _loop(self) -> None:
         proc = self.s.proc
         release_since = quiet_since = 0.0
-        held_since = None
-        armed = True
         prev = 0
         repeat_at = 0.0
         wait_release = False
@@ -82,21 +91,17 @@ class GameMenu:
             b = xinput.all_buttons()
             now = time.monotonic()
             if not self.open:
-                combo = (b & xinput.A) and (b & xinput.Y)
-                if combo and armed:
-                    held_since = held_since or now
-                    if now - held_since >= HOLD_SECONDS and not self.busy:
-                        armed = False
-                        held_since = None
-                        wait_release = True
+                pressed = b & ~prev
+                if b & xinput.LB and pressed and not self.busy:
+                    act = next((a for m, a in COMBOS if pressed & m), "")
+                    if act == "menu" and not self.adapter.menu_key():
+                        wait_release = True          # LB + A wciąż wciśnięte po otwarciu menu
                         quiet_since = 0.0
                         self._open()
-                elif not combo:
-                    held_since = None
-                    if not b & (xinput.A | xinput.Y):
-                        armed = True
+                    elif act:
+                        self._shortcut(act)
             else:
-                if wait_release:              # A+Y wciąż wciśnięte po otwarciu menu
+                if wait_release:              # LB + A wciąż wciśnięte po otwarciu menu
                     release_since = release_since or now
                     if b:
                         quiet_since = 0.0
@@ -124,6 +129,35 @@ class GameMenu:
                             repeat_at = now + 0.12
             prev = b
             time.sleep(POLL)
+
+    def _shortcut(self, act: str) -> None:
+        """LB + przycisk: skrót klawiszowy emulatora (fokus ma emulator)."""
+        a = self.adapter
+        nxt, prv = a.slot_keys()
+        if act == "menu":
+            keys = a.menu_key()
+        elif act == "save_next":
+            if nxt:                              # następny slot emulatora, potem zapis do wybranego
+                winutil.send_keys(nxt)
+                time.sleep(0.15)
+                keys = a.save_key()
+            elif a.slot_save_key(1):
+                self.slot = self.slot % 8 + 1
+                keys = a.slot_save_key(self.slot)
+            else:
+                keys = a.save_key()
+        elif act == "save_here":
+            keys = a.slot_save_key(self.slot) or a.save_key()
+        elif act in ("slot_up", "slot_down"):
+            if a.slot_save_key(1) and not (nxt or prv):
+                self.slot = (self.slot % 8 + 1) if act == "slot_up" else ((self.slot - 2) % 8 + 1)
+                log.info("skrót: slot zapisu %d", self.slot)
+                return
+            keys = nxt if act == "slot_up" else prv
+        else:
+            keys = {"ff": a.ff_key, "screenshot": a.screenshot_key, "record": a.record_key}[act]()
+        log.info("skrót LB + %s: %s", act, keys or "(emulator nie ma takiego skrótu)")
+        winutil.send_keys(keys)
 
     def _emu_window(self) -> int:
         wins = winutil.windows_of(self.s.proc.pid)

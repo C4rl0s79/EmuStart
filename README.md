@@ -38,7 +38,7 @@ wydanie z poprawnym podpisem. Zaproszeni gracze pobierają programy prosto ze
   poprzednie wersje zostają na serwerze. Jedna gra naraz na profil (blokada na serwerze).
 - **Sloty zapisów i stany**: 4 osobne „przejścia” każdej gry, „Wczytaj zapis” z podglądem
   stanu, zmiana numeru, kopiowanie i przenoszenie stanów między slotami, kosz.
-- **Menu w grze** (A + Y przez 2 s): zapis / wczytanie stanu, „quicksave i wyjdź”, reset
+- **Skróty w grze** (przytrzymany LB + A menu, Y/X zapis, ↑/↓ slot, RB przyspieszenie, R3 zrzut, L3 nagrywanie) i **menu w grze**: zapis / wczytanie stanu, „quicksave i wyjdź”, reset
   gry, shader ekranu.
 - **Konta graczy** na serwerze: zapisy, ustawienia emulatorów (z historią zmian), wygląd
   i konto RetroAchievements — te same na każdym urządzeniu konta.
@@ -81,7 +81,7 @@ Szczegóły: [Instalacja i pierwsze uruchomienie](../../wiki/Instalacja-i-pierws
 | Y | Y | przypnij grę (zostaje lokalnie) |
 | LB / RB · LT / RT | PgUp / PgDn · Home / End | strona · litera |
 | Start | F2 / Tab | menu |
-| **A + Y przez 2 s** (w grze) | — | menu w grze |
+| **LB + A** (w grze) | — | menu w grze (własne menu emulatora albo EmuStart) |
 
 Pełna tabela: [Sterowanie](../../wiki/Sterowanie).
 

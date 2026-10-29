@@ -88,7 +88,7 @@ ostrzeżenie przy starcie gry.
 **Klawiatura** — w grach na komputery (Amiga, C64, MSX, Atari ST, ZX…) uruchamianych
 przez RetroArch cała klawiatura trafia do emulowanego komputera (Shift, F1–F10, Esc,
 strzałki działają jak na oryginale); skróty RetroArcha są na ten czas wyłączone.
-Wyjście z gry: menu EmuStart (A + Y na padzie) albo Scroll Lock (przywraca skróty
+Wyjście z gry: menu EmuStart (LB + A na padzie) albo Scroll Lock (przywraca skróty
 RetroArcha) i Esc.
 
 ## Tłumaczenia (wersje gier)

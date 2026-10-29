@@ -28,13 +28,14 @@ DEFAULTS = {
         "savestate_thumbnail_enable": "true",   # obrazek stanu — podgląd w EmuStart
         "quit_on_close_content": "2",           # „Zamknij grę” = wyjście (uruchomienie z EmuStart)
         "savestate_auto_index": "true",         # każdy zapis stanu = nowy numer, nic się nie nadpisuje
-        # pad (numery przycisków sterownika XInput, jak w autoconfig/xinput RetroArcha: Y=3, RB=5,
-        # Start=6, Select (View)=7) — dlatego też sterownik
+        # pad (numery przycisków sterownika XInput, jak w autoconfig/xinput RetroArcha: A=0, Y=3,
+        # LB=4, RB=5) — dlatego też sterownik; skróty jak w pozostałych emulatorach (hotkey.py),
+        # ustawia je też sesja EmuStart (ingame.RetroArch.launch_args)
         "input_joypad_driver": "xinput",
-        "input_menu_toggle_gamepad_combo": "4",  # Start + Select = menu RetroArcha
-        "input_enable_hotkey_btn": "7",          # Select (View) = przycisk skrótów
-        "input_toggle_fast_forward_btn": "5",    # Select + RB = przyspieszenie (wł./wył.)
-        "input_save_state_btn": "3",             # Select + Y = zapis stanu
+        "input_enable_hotkey_btn": "4",          # LB = przycisk skrótów
+        "input_menu_toggle_btn": "0",            # LB + A = menu RetroArcha
+        "input_toggle_fast_forward_btn": "5",    # LB + RB = przyspieszenie (wł./wył.)
+        "input_save_state_btn": "3",             # LB + Y = zapis stanu (kolejny numer)
     },
     "duckstation": {"Main|ConfirmPowerOff": "false"},   # wyjście z gry bez okna z pytaniem
     "pcsx2": {"UI|ConfirmShutdown": "false"},

@@ -85,7 +85,7 @@ już sprawdzane.
 - gdy dwa urządzenia zrobiły stan o tym samym numerze (np. gra bez serwera), drugi dostaje
   następny wolny numer — nic nie ginie,
 - przed grą najnowszy stan z dowolnego urządzenia konta wczytuje się sam („Kontynuuj”);
-  start bez stanu: opcje gry → **Graj od początku**, w trakcie gry: A + Y → **Reset gry**,
+  start bez stanu: opcje gry → **Graj od początku**, w trakcie gry: LB + A → **Reset gry**,
 - opcje gry → **Wczytaj zapis**: wszystkie stany gry ze wszystkich urządzeń — miniatura,
   „Stan #N”, urządzenie, data, autozapis; na górze „Kontynuuj — najnowszy stan”,
 - serwer trzyma 50 najnowszych stanów gry (dla każdego rdzenia).
@@ -98,7 +98,7 @@ zastąpiona kopią z profilu. Gdy zmiana coś zepsuje (np. czarny ekran po zbyt 
 rozdzielczości): **Cofnij zmianę** — lista 10 ostatnich zmian (data, gra, pliki); wybrana
 przywraca ustawienia sprzed niej od następnej gry, a samo przywrócenie też da się cofnąć.
 **Shader ekranu** (ta sama strona): gry systemu bez shadera RetroArcha — gdy szukasz shadera
-pasującego do ustawień rdzenia, a obecny daje czarny ekran (też z menu w grze A + Y).
+pasującego do ustawień rdzenia, a obecny daje czarny ekran (też z menu w grze LB + A).
 
 **Menedżer zapisów** (opcje gry → **Zapisy i stany**, na komputerze i telefonie):
 stany tej gry z komputera i z telefonu oraz wspólne zapisy w grze. Stan z jednej platformy
