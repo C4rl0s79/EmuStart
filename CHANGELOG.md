@@ -8,6 +8,16 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.52.4] — 2026-10-29
+
+Zakres: klient (`ingame.py`). Serwer i APK bez zmian.
+
+### Zmienione
+- **Skróty pada LB + … to domyślna konfiguracja RetroArcha:** EmuStart wpisuje je raz do
+  `retroarch.cfg` (znacznik `emustart-skroty-lb.txt` obok), razem z wyłączeniem innych skrótów na
+  tych samych przyciskach (np. wyjście na A). Potem gracz może je zmienić w RetroArchu — zmiana
+  zostaje (sesja już ich nie wymusza). Wymagane ustawienia z serwera nadal wygrywają w grze.
+
 ## [0.52.3] — 2026-10-29
 
 Zakres: klient (`ingame.py`). Serwer i APK bez zmian.

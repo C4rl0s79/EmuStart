@@ -286,9 +286,7 @@ def test_retroarch_default_pad_and_auto_index(tmp_path):
     lines = set((tmp_path / "run" / "emustart_ra.cfg").read_text(encoding="utf-8").splitlines())
     for line in ('savestate_auto_index = "true"', 'input_joypad_driver = "xinput"',
                  'input_menu_toggle_btn = "0"', 'input_enable_hotkey_btn = "4"',
-                 'input_toggle_fast_forward_btn = "5"', 'input_save_state_btn = "3"',
-                 'input_state_slot_increase_btn = "h0up"', 'input_screenshot_btn = "9"',
-                 'input_recording_toggle_btn = "8"'):
+                 'input_toggle_fast_forward_btn = "5"', 'input_save_state_btn = "3"'):
         assert line in lines, line
 
 
@@ -421,17 +419,21 @@ def test_pad_shortcuts_lb(monkeypatch):
     assert sent == ["F2", "F1", "SHIFT+F2", "ESCAPE"]
 
 
-def test_retroarch_other_hotkeys_on_lb_buttons_off(tmp_path):
-    """Inne skróty RetroArcha na przyciskach LB + … (np. wyjście na A) — na czas gry wyłączone,
-    retroarch.cfg bez zmian; skróty na innych przyciskach zostają."""
+def test_retroarch_pad_hotkeys_default_once(tmp_path):
+    """Skróty LB + … to domyślna konfiguracja: raz wpisane do retroarch.cfg (inne skróty na tych
+    przyciskach — np. wyjście na A — wyłączone); potem zmiana gracza w retroarch.cfg zostaje."""
     from emustart import ingame
     home = tmp_path / "RetroArch"
     home.mkdir()
-    cfg = 'input_exit_emulator_btn = "0"\ninput_rewind_btn = "6"\ninput_player1_a_btn = "0"\n'
-    (home / "retroarch.cfg").write_text(cfg, encoding="utf-8")
+    (home / "retroarch.cfg").write_text('input_exit_emulator_btn = "0"' + chr(10) + 'input_rewind_btn = "6"' + chr(10) +
+                                        'input_player1_a_btn = "0"' + chr(10), encoding="utf-8")
     ra = ingame.RetroArch(str(home / "retroarch.exe"))
     ra.launch_args(tmp_path / "run", resume=False)
-    lines = (tmp_path / "run" / "emustart_ra.cfg").read_text(encoding="utf-8").splitlines()
-    assert 'input_exit_emulator_btn = "nul"' in lines
-    assert not any(ln.startswith(("input_rewind_btn", "input_player1_a_btn")) for ln in lines)
-    assert (home / "retroarch.cfg").read_text(encoding="utf-8") == cfg
+    cfg = ingame._cfg_map(home / "retroarch.cfg")
+    assert cfg["input_enable_hotkey_btn"] == '"4"' and cfg["input_menu_toggle_btn"] == '"0"'
+    assert cfg["input_state_slot_increase_btn"] == '"h0up"' and cfg["input_screenshot_btn"] == '"9"'
+    assert cfg["input_exit_emulator_btn"] == '"nul"'
+    assert cfg["input_rewind_btn"] == '"6"' and cfg["input_player1_a_btn"] == '"0"'
+    ingame.ini_set(home / "retroarch.cfg", {(None, "input_enable_hotkey_btn"): '"7"'})   # gracz zmienił
+    ra.launch_args(tmp_path / "run2", resume=False)
+    assert ingame._cfg_map(home / "retroarch.cfg")["input_enable_hotkey_btn"] == '"7"'
