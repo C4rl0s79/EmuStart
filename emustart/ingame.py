@@ -598,6 +598,13 @@ class RetroArch(Adapter):
             'input_screenshot_btn = "9"',
             'input_recording_toggle_btn = "8"',
         ]
+        # inne skróty RetroArcha na tych samych przyciskach (np. input_exit_emulator_btn = "0" — LB + A
+        # wychodziło z gry zamiast otworzyć menu) — na czas gry wyłączone; retroarch.cfg bez zmian
+        ours = {ln.split("=", 1)[0].strip(): ln.split('"')[1] for ln in session if "_btn" in ln}
+        for k, v in _cfg_map(self.home / "retroarch.cfg").items() if (self.home / "retroarch.cfg").is_file() else ():
+            if (k.endswith("_btn") and not k.startswith("input_player") and k not in ours
+                    and v.strip('"') in set(ours.values()) - {"4"}):
+                session.append(f'{k} = "nul"')
         mine = {ln.split("=", 1)[0].strip() for ln in session}
         lines = [f'{k} = "{v}"' for k, v in self.policy.items() if k not in mine] + session
         if self.keyboard_game:

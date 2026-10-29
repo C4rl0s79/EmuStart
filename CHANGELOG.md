@@ -8,6 +8,15 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.52.3] — 2026-10-29
+
+Zakres: klient (`ingame.py`). Serwer i APK bez zmian.
+
+### Poprawione
+- **RetroArch: LB + A wychodziło z gry zamiast otworzyć menu** — w `retroarch.cfg` gracza był skrót
+  wyjścia na A (`input_exit_emulator_btn = "0"`). Na czas gry inne skróty RetroArcha przypisane do
+  przycisków LB + … (A, X, Y, RB, L3, R3, ↑, ↓) są wyłączone; `retroarch.cfg` bez zmian.
+
 ## [0.52.2] — 2026-10-29
 
 Zakres: aktualizator (`updater.py`) — serwer i PC. APK bez zmian.
