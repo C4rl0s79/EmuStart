@@ -8,6 +8,26 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.53.0] — 2026-10-29
+
+Zakres: klient (`ingame.py`, `hotkey.py`, `syncclient.py`, `winutil.py`, `launcher.py`). Serwer i APK bez zmian.
+
+### Dodane
+- **Skróty LB + … działają w każdym emulatorze:** brakujące skróty emulatora (według jego
+  dokumentacji / źródeł) EmuStart dopisuje przed grą do jego ustawień — przypisane przez gracza zostają:
+  - Dolphin (`Hotkeys.ini`): wybór slotu Ctrl+F10/F11, zapis do wybranego slotu Ctrl+F12, wczytanie
+    Ctrl+F9; przyspieszenie (Tab — trzymane: LB + RB włącza, kolejne LB + RB wyłącza), zrzut F9.
+  - DuckStation (`settings.ini`): przełącznik przyspieszenia Ctrl+F11, nagrywanie Ctrl+F12.
+  - PCSX2 (`PCSX2.ini`): nagrywanie Ctrl+F12 (przyspieszenie Tab, zrzut F8 — domyślne PCSX2).
+  - PPSSPP (`controls.ini`): poprzedni slot Ctrl+F10, nagrywanie Ctrl+F11, zrzut Ctrl+F12,
+    przyspieszenie ` (domyślne PPSSPP).
+- **Postęp pakowania zapisów** przed wysyłką („Pakuję zapisy…”) i lżejsza kompresja — pakowanie
+  stanów GameCube trwało dłużej niż wysyłka, a pasek pojawiał się dopiero przy wysyłaniu.
+
+### Poprawione
+- Skróty DuckStation / PCSX2 z kilku klawiszy („Keyboard/Shift & Keyboard/F2”) czytane w całości
+  (wcześniej: sam Shift — np. poprzedni slot w PCSX2 nie działał).
+
 ### Budowa (bez wydania)
 - `build.ps1`: gdy część testów nie przejdzie (testy z lokalnym serwerem testowym bywają niestabilne
   na maszynach GitHuba), powtarza tylko te, które padły; padną drugi raz — budowa przerwana.

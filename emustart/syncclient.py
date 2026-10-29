@@ -92,7 +92,8 @@ def progress_text() -> str:
     mb = lambda n: f"{n / 1048576:.0f}" if n >= 10 * 1048576 else f"{n / 1048576:.1f}"
     t = p["eta"]
     left = "" if t < 0 else f" · ok. {t} s" if t < 60 else f" · ok. {round(t / 60)} min"
-    return f"{'wysłano' if p['op'] == 'send' else 'pobrano'} {mb(p['done'])} / {mb(p['total'])} MB{left}"
+    verb = {"send": "wysłano", "get": "pobrano", "pack": "spakowano"}.get(p["op"], "")
+    return f"{verb} {mb(p['done'])} / {mb(p['total'])} MB{left}"
 
 
 class Offline(OSError):
@@ -381,12 +382,23 @@ def _server_bundle(man: dict, b, slot: int = 1) -> dict:
 # ── paczka ZIP ──
 
 def _pack(b) -> Path:
-    """ZIP paczki w pliku tymczasowym (nazwy umowne, czasy plików zachowane)."""
+    """ZIP paczki w pliku tymczasowym (nazwy umowne, czasy plików zachowane). Kompresja lekka:
+    stany GameCube to kilkaset MB — pełna kompresja trwała dłużej niż wysyłka. Postęp (PROGRESS)."""
     fd, tmp = tempfile.mkstemp(prefix="emustart-save-", suffix=".zip")
     os.close(fd)
-    with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as z:
-        for path, arc in b.files:
-            z.write(path, arc)
+    total = sum(Path(p).stat().st_size for p, _a in b.files)
+    big = total > 8 * 1048576
+    if big:
+        PROGRESS.update(op="pack", done=0, total=total, started=time.monotonic())
+    try:
+        with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED, compresslevel=1) as z:
+            for path, arc in b.files:
+                z.write(path, arc)
+                if big:
+                    PROGRESS["done"] = PROGRESS.get("done", 0) + Path(path).stat().st_size
+    finally:
+        if big:
+            PROGRESS.clear()
     return Path(tmp)
 
 

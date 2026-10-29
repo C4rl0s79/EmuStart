@@ -57,8 +57,25 @@ def _qt_key(binding: str) -> str:
     """'Keyboard/F2' (DuckStation/PCSX2) → 'F2'; 'Keyboard/Shift & F1' → 'SHIFT+F1'."""
     if not binding.lower().startswith("keyboard/"):
         return ""
-    keys = [k.strip().upper() for k in re.split(r"[&+]", binding.split("/", 1)[1])]
-    return "+".join(k for k in keys if k in winutil.VK)
+    alias = {"CONTROL": "CTRL", "RETURN": "ENTER"}
+    keys = [k.strip().upper().removeprefix("KEYBOARD/") for k in re.split(r"[&+]", binding.split("/", 1)[1])]
+    keys = [alias.get(k, k) for k in keys]
+    return "+".join(k for k in keys if k in winutil.VK) if all(k in winutil.VK for k in keys) else ""
+
+
+def _bind_missing(path: Path, section: str, wanted: dict) -> None:
+    """Skróty potrzebne do LB + … (hotkey.py), których emulator nie ma przypisanych — dopisane do jego
+    ustawień; przypisane przez gracza zostają."""
+    if not path.parent.is_dir():
+        return
+    have = ini_section(path, section) if path.is_file() else {}
+    changes = {(section, k): v for k, v in wanted.items() if not (have.get(k) or "").strip()}
+    if changes:
+        try:
+            ini_set(path, changes)
+            log.info("skróty pada: %s ← %s", path.name, ", ".join(sorted(k for _s, k in changes)))
+        except OSError:
+            log.exception("skróty pada: %s", path)
 
 
 def _serial(meta: dict) -> str:
@@ -417,6 +434,13 @@ class Adapter:
     def ff_key(self) -> str:
         """Przełącznik przyspieszenia."""
         return ""
+
+    def ff_hold(self) -> bool:
+        """Przyspieszenie działa, dopóki klawisz jest wciśnięty (LB + RB: wciśnij / puść)."""
+        return False
+
+    def prepare_hotkeys(self) -> None:
+        """Przed grą: brakujące skróty emulatora do LB + … dopisane do jego ustawień."""
 
     def state_dirs(self) -> list:
         return []
@@ -827,6 +851,10 @@ class DuckStation(Adapter):
     def ff_key(self) -> str:
         return self._hk("ToggleFastForward")
 
+    def prepare_hotkeys(self) -> None:
+        _bind_missing(self._ini(), "Hotkeys", {"ToggleFastForward": "Keyboard/Control & Keyboard/F11",
+                                               "ToggleMediaCapture": "Keyboard/Control & Keyboard/F12"})
+
     def load_key(self) -> str:
         return _qt_key(_ini_value(self._ini(), "LoadSelectedSaveState")) or "F1"
 
@@ -969,7 +997,10 @@ class PCSX2(Adapter):
         return self._hk("ToggleVideoCapture")
 
     def ff_key(self) -> str:
-        return self._hk("ToggleTurbo")
+        return self._hk("ToggleTurbo", "TAB")
+
+    def prepare_hotkeys(self) -> None:
+        _bind_missing(self._ini(), "Hotkeys", {"ToggleVideoCapture": "Keyboard/Control & Keyboard/F12"})
 
     def load_key(self) -> str:
         return _qt_key(_ini_value(self._ini(), "LoadStateFromSlot")) or "F3"
@@ -1081,11 +1112,29 @@ class Dolphin(Adapter):
     def save_key(self) -> str:
         return self._hotkey("Save State/Save State Slot 1", "SHIFT+F1")
 
-    def slot_save_key(self, n: int) -> str:
-        return self._hotkey(f"Save State/Save State Slot {n}", f"SHIFT+F{n}") if 1 <= n <= 8 else ""
+    _HK = {"Other State Hotkeys/Increase Selected State Slot": "@(Ctrl+F11)",
+           "Other State Hotkeys/Decrease Selected State Slot": "@(Ctrl+F10)",
+           "Save State/Save to Selected Slot": "@(Ctrl+F12)",
+           "Load State/Load from Selected Slot": "@(Ctrl+F9)"}
+
+    def prepare_hotkeys(self) -> None:
+        _bind_missing(self._user() / "Config" / "Hotkeys.ini", "Hotkeys", self._HK)
+
+    def slot_keys(self) -> tuple:
+        return (self._hotkey("Other State Hotkeys/Increase Selected State Slot", "CTRL+F11"),
+                self._hotkey("Other State Hotkeys/Decrease Selected State Slot", "CTRL+F10"))
+
+    def save_here_key(self) -> str:
+        return self._hotkey("Save State/Save to Selected Slot", "CTRL+F12")
 
     def screenshot_key(self) -> str:
         return self._hotkey("General/Take Screenshot", "F9")
+
+    def ff_key(self) -> str:
+        return self._hotkey("Emulation Speed/Disable Emulation Speed Limit", "TAB")
+
+    def ff_hold(self) -> bool:
+        return True
 
     def load_key(self) -> str:
         return self._hotkey("Load State/Load State Slot 1", "F1")
@@ -1133,13 +1182,40 @@ class PPSSPP(Adapter):
     state_glob = "*.ppst"
     _ANDROID_F1 = 131         # PPSSPP zapisuje klawisze kodami Androida (F1=131)
 
+    _NK = {61: "TAB", 68: "GRAVE", 111: "ESCAPE", 113: "CTRL", 114: "CTRL", 59: "SHIFT", 60: "SHIFT"}
+
+    def _controls(self) -> Path:
+        return self.home / "memstick" / "PSP" / "SYSTEM" / "controls.ini"
+
     def _key(self, name: str, default: str) -> str:
-        raw = _ini_value(self.home / "memstick" / "PSP" / "SYSTEM" / "controls.ini", name)
-        for part in raw.split(","):
-            dev, _, code = part.partition("-")
-            if dev == "1" and code.isdigit() and 0 <= int(code) - self._ANDROID_F1 < 12:
-                return f"F{int(code) - self._ANDROID_F1 + 1}"
+        raw = _ini_value(self._controls(), name)
+        for part in raw.split(","):              # kilka przypisań — pierwsze z klawiatury (urządzenie 1)
+            keys = []
+            for one in part.split(":"):          # kilka klawiszy naraz
+                dev, _, code = one.partition("-")
+                if dev != "1" or not code.isdigit():
+                    break
+                c = int(code)
+                keys.append(f"F{c - self._ANDROID_F1 + 1}" if 0 <= c - self._ANDROID_F1 < 12 else self._NK.get(c, ""))
+            else:
+                if keys and all(keys):
+                    return "+".join(keys)
         return default
+
+    def prepare_hotkeys(self) -> None:
+        # Ctrl + F10 / F11 / F12 (kody Androida: Ctrl 113, F10 140, F11 141, F12 142)
+        _bind_missing(self._controls(), "ControlMapping", {"Previous Slot": "1-113:1-140",
+                                                           "Audio/Video Recording": "1-113:1-141",
+                                                           "Screenshot": "1-113:1-142"})
+
+    def screenshot_key(self) -> str:
+        return self._key("Screenshot", "")
+
+    def record_key(self) -> str:
+        return self._key("Audio/Video Recording", "")
+
+    def ff_key(self) -> str:
+        return self._key("SpeedToggle", "GRAVE")
 
     def save_key(self) -> str:
         return self._key("Save State", "F2")
@@ -1148,7 +1224,7 @@ class PPSSPP(Adapter):
         return "ESCAPE"                     # pauza z menu PPSSPP
 
     def slot_keys(self) -> tuple:
-        return (self._key("Next Slot", "F3"), "")
+        return (self._key("Next Slot", "F3"), self._key("Previous Slot", ""))
 
     def load_key(self) -> str:
         return self._key("Load State", "F4")
