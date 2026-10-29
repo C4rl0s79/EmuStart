@@ -252,3 +252,15 @@ def test_powershell_really_runs_in_background(tmp_path):
     while time.monotonic() < end and not (out.exists() and out.stat().st_size):
         time.sleep(0.25)
     assert out.read_text(encoding="utf-8-sig").strip() == "ok"
+
+
+def test_second_apply_is_ignored_and_script_stops_leftovers(tmp_path, monkeypatch):
+    """Drugie „Aktualizuj” w trakcie podmiany nic nie robi (0.52.1: dwa skrypty naraz uruchomiły
+    dwa serwery); skrypt zamyka program z folderu, który wciąż działa, zanim podmieni pliki."""
+    job = updater.Job.__new__(updater.Job)
+    job.phase, job.info = "applying", {"version": "9.9.9"}
+    real = updater.write_script
+    monkeypatch.setattr(updater, "write_script", lambda *a, **k: pytest.fail("drugi skrypt podmiany"))
+    assert job.apply(["--server"]) == {"ok": True}
+    s = real(tmp_path, tmp_path / "app", 1, ["--server"]).read_text("utf-8-sig")
+    assert "Stop-Process -Force" in s and s.index("Stop-Process") < s.index("podmiana plików")

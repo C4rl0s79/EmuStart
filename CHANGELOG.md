@@ -8,6 +8,17 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.52.2] — 2026-10-29
+
+Zakres: aktualizator (`updater.py`) — serwer i PC. APK bez zmian.
+
+### Poprawione
+- **Serwer nie wstawał po aktualizacji:** drugie „Aktualizuj” (podwójne kliknięcie albo ponowione
+  zapytanie) w ciągu ~30 s uruchamiało drugi skrypt podmiany równolegle z pierwszym — dwa skrypty
+  uruchomiły dwa serwery, a przy następnej próbie jeden z nich trzymał pliki i podmiana utknęła.
+  Teraz aktualizacja jest blokowana od pierwszego kliknięcia, a skrypt przed podmianą zamyka
+  program z folderu serwera, który wciąż działa (wpis w `update.log`).
+
 ## [0.52.1] — 2026-10-29
 
 Zakres: klient (`syncclient.py`, `api.py`, `launcher.py`). Serwer i APK bez zmian.
