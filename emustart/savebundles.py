@@ -19,8 +19,11 @@ tym urządzeniu. Zmiany wykrywa skrót zawartości (nazwy umowne i treść), nie
 from __future__ import annotations
 
 import hashlib
+import json
+import logging
 import os
 import re
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -35,6 +38,14 @@ _P2S = re.compile(r"^(?P<prefix>.+?)\.(?P<slot>\d{2}|resume|autosave(?:\.\d)?)\.
 _TRASH = re.compile(r"^[0-9a-f]{12}\.[^/\\:]+$")
 _CORE_ARG = re.compile(r'-L\s+"?([^"]*?)([\w.+-]+?)_libretro\.(?:dll|so|dylib)"?', re.I)
 SKIP = (".emustart-new", ".emustart-tmp", ".tmp", ".part")
+# stany Dolphina („GKBEAF.s05”, ID gry z płyty) i PPSSPP („ULUS10336_1.ppst”, numer gry)
+_DOLPHIN_STATE = re.compile(r"^(?P<prefix>[A-Z0-9]{6})\.s(?P<slot>\d{2})$", re.I)
+_PPSSPP_STATE = re.compile(r"^(?P<prefix>[A-Z]{4}\d{5})_(?P<slot>\d{1,2})\.ppst$", re.I)
+# paczki z nazwami jak na urządzeniu (te same na każdym: od numeru / ID gry, nie od nazwy pliku)
+NATIVE = {("pcsx2", "states"), ("dolphin", "states"), ("dolphin", "saves"), ("ppsspp", "states"), ("ppsspp", "saves")}
+# paczki z podfolderami (nazwa w paczce ze ścieżką: „ULUS10336DATA00/DATA.BIN”, „GC/USA/Card A/01-GKBE-x.gci”)
+DEEP = {("dolphin", "saves"), ("ppsspp", "saves")}
+log = logging.getLogger("emustart.savebundles")
 
 
 @dataclass
@@ -54,6 +65,11 @@ class Bundle:
     def local_path(self, arc: str) -> Path:
         """Ścieżka na tym urządzeniu dla pliku paczki („game.state2” → „<plik gry>.state2”;
         stany PCSX2 — nazwa jak w paczce, od numeru płyty)."""
+        if (self.emulator_id, self.kind) in DEEP:
+            parts = arc.split("/")
+            if "\\" in arc or ":" in arc or any(x in ("", ".", "..") for x in parts) or not _deep_ok(self, parts):
+                raise ValueError(f"nieoczekiwana nazwa w paczce: {arc}")
+            return self.folder.joinpath(*parts)
         if "/" in arc or "\\" in arc or ".." in arc or ":" in arc:
             raise ValueError(f"nieoczekiwana nazwa w paczce: {arc}")
         if self.kind == "trash":
@@ -62,6 +78,10 @@ class Bundle:
             return self.folder / arc
         if self.emulator_id == "pcsx2" and self.kind == "states":
             if not _P2S.match(arc):
+                raise ValueError(f"nieoczekiwana nazwa w paczce: {arc}")
+            return self.folder / arc
+        if (self.emulator_id, self.kind) in NATIVE:
+            if not _match(self.emulator_id, self.kind, arc, {n.lower() for n in self.names}):
                 raise ValueError(f"nieoczekiwana nazwa w paczce: {arc}")
             return self.folder / arc
         if not arc.startswith(ARC):
@@ -90,7 +110,10 @@ class Bundle:
         self.files = []
         if not self.folder.is_dir():
             return self
-        names = ({n.lower() for n in self.names if n} if (self.emulator_id, self.kind) == ("pcsx2", "states")
+        if (self.emulator_id, self.kind) in DEEP:
+            self.files = sorted(_deep_files(self), key=lambda x: x[1])
+            return self
+        names = ({n.lower() for n in self.names if n} if (self.emulator_id, self.kind) in NATIVE
                  else {norm(n) for n in self.names if n} | {norm(self.stem)})
         mine = norm(self.stem)
         picked: dict = {}
@@ -141,11 +164,94 @@ def _match(emu: str, kind: str, name: str, names: set):
         m = _P2S.match(name)
         if m and not name.lower().endswith(".backup") and any(name.lower().startswith(p) for p in names):
             return m.group("prefix"), name
+    elif (emu, kind) in (("dolphin", "states"), ("ppsspp", "states")):
+        m = (_DOLPHIN_STATE if emu == "dolphin" else _PPSSPP_STATE).match(name)
+        if m and m.group("prefix").lower() in names:
+            return m.group("prefix"), name
     elif emu == "pcsx2" and kind == "memcards":
         m = re.fullmatch(r"(.+)\.ps2", name, re.I)
         if m and norm(m.group(1)) in names:
             return m.group(1), f"{ARC}.ps2"
     return None
+
+
+def _deep_ok(b, parts: list) -> bool:
+    """Ścieżka w paczce z podfolderami należy do tej gry."""
+    ids = [n.upper() for n in b.names if n]
+    if b.emulator_id == "ppsspp":            # SAVEDATA/<numer gry…>/plik
+        return len(parts) == 2 and any(parts[0].upper().startswith(i) for i in ids)
+    if b.emulator_id == "dolphin":
+        if parts[0] == "GC":                 # GC/<region>/Card A/<…>-<ID4>-<…>.gci
+            return (len(parts) == 4 and parts[2].startswith("Card ") and parts[3].lower().endswith(".gci")
+                    and any(f"-{i[:4]}-" in parts[3].upper() for i in ids))
+        return len(parts) > 4 and parts[:3] == ["Wii", "title", "00010000"] and \
+            parts[3].lower() in {i[:4].encode().hex() for i in ids}
+    return False
+
+
+def _deep_files(b) -> list:
+    """[(ścieżka, nazwa w paczce)] paczki z podfolderami."""
+    out, root = [], b.folder
+    ids = [n.upper() for n in b.names if n]
+    if b.emulator_id == "ppsspp":
+        tops = [d for d in root.iterdir() if d.is_dir() and any(d.name.upper().startswith(i) for i in ids)]
+    elif b.emulator_id == "dolphin":
+        tops = [root / "GC"] + [root / "Wii" / "title" / "00010000" / i[:4].encode().hex() for i in ids]
+    else:
+        tops = []
+    for top in tops:
+        if not top.is_dir():
+            continue
+        for dp, _dirs, fns in os.walk(top, followlinks=True):
+            for fn in fns:
+                if fn.endswith(SKIP):
+                    continue
+                p = Path(dp) / fn
+                arc = p.relative_to(root).as_posix()
+                if _deep_ok(b, arc.split("/")):
+                    out.append((p, arc))
+    return out
+
+
+_DOLPHIN_IDS: dict = {}
+
+
+def dolphin_id(adapter, content: Path) -> str:
+    """ID gry GameCube / Wii („GKBEAF”) — z nagłówka płyty (DolphinTool header), zapamiętane
+    po nazwie pliku gry (plik bywa jeszcze niepobrany, gdy lista zapisów pyta o paczki)."""
+    from emustart import library
+    key = Path(content).name.lower()
+    if not _DOLPHIN_IDS:
+        try:
+            _DOLPHIN_IDS.update(json.loads(library.meta_get("dolphin_ids", "{}")))
+        except Exception:
+            pass
+    if _DOLPHIN_IDS.get(key):
+        return _DOLPHIN_IDS[key]
+    tool = Path(adapter.home) / "DolphinTool.exe"
+    if not (tool.is_file() and Path(content).is_file()):
+        return ""
+    try:
+        out = subprocess.run([str(tool), "header", "-i", str(content)], capture_output=True, text=True, timeout=60,
+                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout
+    except (OSError, subprocess.SubprocessError) as ex:
+        log.info("DolphinTool: %s", ex)
+        return ""
+    m = re.search(r"Game ID:\s*([A-Z0-9]{6})", out or "")
+    if not m:
+        return ""
+    _DOLPHIN_IDS[key] = m.group(1)
+    try:
+        library.meta_set("dolphin_ids", json.dumps(_DOLPHIN_IDS))
+    except Exception:
+        pass
+    return m.group(1)
+
+
+def psp_serial(game: dict) -> str:
+    """Numer gry PSP tak, jak nazywa pliki PPSSPP: „ULUS-10336” → „ULUS10336”."""
+    m = re.search(r"([A-Z]{4})-?(\d{5})", (game.get("serial") or "").upper())
+    return m.group(1) + m.group(2) if m else ""
 
 
 # Zapisy w grze (rodzaj „saves”) wspólne dla rdzeni o zgodnym formacie zapisu — surowy SRAM /
@@ -222,6 +328,16 @@ def for_game(adapter, core: str, content: Path, game: dict) -> list:
         if prefixes and adapter.state_dirs():
             # stany wspólne z ArmSX2 na telefonie (ten sam format nazw: numer płyty i CRC)
             out.append(Bundle("pcsx2", "", "states", adapter.state_dirs()[0], "", prefixes).collect())
+    if adapter.family == "dolphin":
+        gid = dolphin_id(adapter, content)
+        if gid:
+            out += [Bundle("dolphin", "", "saves", adapter._user(), gid, [gid]).collect(),
+                    Bundle("dolphin", "", "states", adapter.state_dirs()[0], gid, [gid]).collect()]
+    if adapter.family == "ppsspp":
+        sid = psp_serial(game)
+        if sid:
+            out += [Bundle("ppsspp", "", "saves", adapter.save_dirs()[0], sid, [sid]).collect(),
+                    Bundle("ppsspp", "", "states", adapter.state_dirs()[0], sid, [sid]).collect()]
     return out
 
 
@@ -256,6 +372,8 @@ def covered_dirs(adapter) -> list:
         return [adapter.memcard_dir()]
     if adapter.family == "pcsx2":
         return [adapter.memcard_dir()] + list(adapter.state_dirs()[:1])     # karty i stany — paczkami
+    if adapter.family in ("dolphin", "ppsspp"):
+        return list(adapter.save_dirs())     # GC, Wii, StateSaves / SAVEDATA, PPSSPP_STATE
     return []
 
 
@@ -285,6 +403,9 @@ def _slot_no(arc: str) -> int:
     m = _SLOT.match(arc)
     if m:
         return int(m.group(1) or 0) if not m.group(2) else -1
+    m = _DOLPHIN_STATE.match(arc) or _PPSSPP_STATE.match(arc)
+    if m:
+        return int(m.group("slot"))
     m = _P2S.match(arc)
     return int(m.group("slot")) if m and m.group("slot").isdigit() else -1
 
@@ -292,6 +413,15 @@ def _slot_no(arc: str) -> int:
 def _free_slot(arc: str, used: set, nxt: int) -> tuple[str | None, int]:
     """Nazwa dla starszego stanu z zajętego slotu: RetroArch — następny numer; PCSX2 —
     pierwszy wolny slot 00–09 tej gry (None — brak wolnego: zostaje w historii serwera)."""
+    for rx, fmt, lo in ((_DOLPHIN_STATE, "{p}.s{n:02d}", 1), (_PPSSPP_STATE, "{p}_{n}.ppst", 0)):
+        m = rx.match(arc)
+        if m:
+            for n in range(lo, 100):
+                cand = fmt.format(p=m.group("prefix"), n=n)
+                if cand.lower() not in used:
+                    used.add(cand.lower())
+                    return cand, nxt
+            return None, nxt
     m = _P2S.match(arc)
     if m:
         for n in range(10):

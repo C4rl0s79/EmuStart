@@ -421,6 +421,7 @@ def _apply(pid: int, b, zp: Path) -> None:
         b.folder.mkdir(parents=True, exist_ok=True)
         for i in items:
             dst = targets[i.filename]
+            dst.parent.mkdir(parents=True, exist_ok=True)          # paczki z podfolderami
             tmp = dst.with_name(dst.name + ".emustart-new")
             with z.open(i) as src, open(tmp, "wb") as out:
                 shutil.copyfileobj(src, out, 1 << 20)

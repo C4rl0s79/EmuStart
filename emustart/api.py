@@ -903,7 +903,16 @@ class Api:
                 "states": states, "es": g["es"], "system": systems.info(g["es"])["display"],
                 "retroarch": bool(emu["exe"]) and ingame.adapter_for(emu["exe"]).family == "retroarch",
                 "shader_off": bool(sc.get("shader_off")),
-                "sync": self._sync_status(g), "slots": slots}
+                "sync": self._sync_kind(g, emu), "slots": slots}
+
+    def _sync_kind(self, g: dict, emu: dict) -> dict:
+        """Stan synchronizacji; emulator bez paczek zapisów: „folder” (cały folder zapisów
+        z serwerem przed grą i po niej — RPCS3) albo „none” (zapisy tylko na tym urządzeniu)."""
+        if emu.get("exe"):
+            ad = ingame.adapter_for(emu["exe"])
+            if ad.family not in ("retroarch", "duckstation", "pcsx2", "dolphin", "ppsspp"):
+                return {"state": "folder" if ad.family and ad.save_dirs() else "none", "last": 0}
+        return self._sync_status(g)
 
     def _slots_brief(self, g: dict, emu: dict, ad) -> list:
         """Sloty zapisów gry do opcji gry (po synchronizacji w game_options; `ad` — emulator
@@ -1131,6 +1140,10 @@ class Api:
         name = Path(st["path"]).name if st.get("path") else st.get("name", "")
         d = desc.get(name) or {}
         m = re.match(r"^.+?\.state(\d*)(\.auto)?$", name, re.I)
+        n = re.match(r"^[A-Z0-9]{6}\.s(\d{2})$|^[A-Z]{4}\d{5}_(\d{1,2})\.ppst$", name, re.I)   # Dolphin, PPSSPP
+        if n and not st.get("resume"):
+            st["label"] = f"Stan #{int(n.group(1) or n.group(2))}"
+            return
         if st.get("resume") or not m:
             return
         if m.group(2):

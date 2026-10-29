@@ -37,7 +37,7 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
     private val sync = SaveSync(ctx, server)
     val device: String = "Telefon " + Build.MODEL
 
-    enum class Kind { BY_STEM, PS1_SRM, PS1_CARDS, PS2_CARDS, RA_STATES, PS2_STATES }
+    enum class Kind { BY_STEM, PS1_SRM, PS1_CARDS, PS2_CARDS, RA_STATES, PS2_STATES, PSP_SAVES, PSP_STATES }
     /** Emulator: id (ustawienia), folder na serwerze (tylko stany PS2), sposób dobierania
      *  plików, nazwa folderu danych w pamięci telefonu (wykrywanie). */
     data class Fam(val id: String, val label: String, val nas: String, val kind: Kind, val dirName: Regex,
@@ -45,7 +45,9 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
         /** Pliki w folderach RetroArcha (dobierane po nazwie pliku gry). */
         val ra: Boolean get() = kind == Kind.BY_STEM || kind == Kind.PS1_SRM || kind == Kind.RA_STATES
         /** Stany gry. */
-        val states: Boolean get() = kind == Kind.RA_STATES || kind == Kind.PS2_STATES
+        val states: Boolean get() = kind == Kind.RA_STATES || kind == Kind.PS2_STATES || kind == Kind.PSP_STATES
+        /** PPSSPP: folder PSP (wspólna pamięć) — zapisy w SAVEDATA/<numer gry…>/, stany w PPSSPP_STATE. */
+        val psp: Boolean get() = kind == Kind.PSP_SAVES || kind == Kind.PSP_STATES
         /** Podfolder danych emulatora PS1/PS2 (karty / stany). */
         val sub: String get() = if (kind == Kind.PS2_STATES) "sstates" else "memcards"
     }
@@ -81,7 +83,10 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
             // stany PS2 z telefonu — na serwerze osobno od PC (menedżer zapisów kopiuje je między nimi)
             Fam("armsx2_states", "ArmSX2 — stany gry", "states/android/armsx2", Kind.PS2_STATES, rx("armsx2"), cards = "armsx2"),
             Fam("nethersx2_states", "AetherSX2 — stany gry", "states/android/nethersx2", Kind.PS2_STATES,
-                rx("aether|nether"), cards = "nethersx2"))
+                rx("aether|nether"), cards = "nethersx2"),
+            // PPSSPP — zapisy i stany wspólne z PPSSPP na komputerze (nazwy od numeru gry)
+            Fam("ppsspp", "PPSSPP", "", Kind.PSP_SAVES, rx("ppsspp")),
+            Fam("ppsspp_states", "PPSSPP — stany gry", "", Kind.PSP_STATES, rx("ppsspp"), dirs = "ppsspp"))
 
         private fun byId(id: String): Fam? = if (id == RA_PS1.id) RA_PS1 else FAMS.firstOrNull { it.id == id }
 
@@ -89,7 +94,7 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
         fun famsFor(emu: String, plat: String = ""): List<Fam> {
             val id = Emulators.baseId(emu)
             val save = famFor(emu, plat)
-            val st = if (id in setOf("retroarch", "armsx2", "nethersx2")) byId(id + "_states") else null
+            val st = if (id in setOf("retroarch", "armsx2", "nethersx2", "ppsspp")) byId(id + "_states") else null
             return listOfNotNull(save, st)
         }
 
@@ -194,6 +199,7 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
 
     /** Foldery zapisów emulatora: ustawiony ręcznie, wykryty po grze, typowe miejsca. */
     fun phoneDirs(f: Fam, g: Game?): List<File> {
+        if (f.psp) return pspDirs(f).filter { it.isDirectory }
         val out = LinkedHashSet<File>()
         prefs.saveDir(f.dirs).takeIf { it.isNotBlank() }?.let { out += inner(f, File(it)) }
         prefs.learnedDir(f.dirs).takeIf { it.isNotBlank() }?.let { out += File(it) }
@@ -210,6 +216,24 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
         }
         return out.filter { it.isDirectory }
     }
+
+    /** PPSSPP: SAVEDATA / PPSSPP_STATE we wskazanym folderze PSP (albo jego folderze nadrzędnym)
+     *  i w typowych miejscach (PSP we wspólnej pamięci). */
+    private fun pspDirs(f: Fam): List<File> {
+        val sub = if (f.kind == Kind.PSP_SAVES) "SAVEDATA" else "PPSSPP_STATE"
+        val bases = listOfNotNull(prefs.saveDir(f.dirs).takeIf { it.isNotBlank() }?.let { File(it) },
+                                  prefs.learnedDir(f.dirs).takeIf { it.isNotBlank() }?.let { File(it).parentFile },
+                                  File(ext, "PSP"), File(ext, "Documents/PPSSPP/PSP"))
+        return bases.map { b -> when {
+            b.name.equals(sub, true) -> b
+            File(b, "PSP/$sub").isDirectory -> File(b, "PSP/$sub")
+            else -> File(b, sub)
+        } }.distinct()
+    }
+
+    /** Numer gry PSP tak, jak nazywa pliki PPSSPP: „ULUS-10297” → „ULUS10297”. */
+    private fun pspId(g: Game): String =
+        Regex("([A-Z]{4})-?(\\d{5})").find(g.serial.uppercase())?.let { it.groupValues[1] + it.groupValues[2] } ?: ""
 
     /** Wskazany ręcznie folder danych emulatora (np. ArmSX2, RetroArch) → jego podfolder
      *  z kartami / stanami / zapisami; wskazany bezpośrednio podfolder zostaje. */
@@ -258,8 +282,11 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
             Kind.PS1_SRM -> Triple("duckstation", "", "memcards")
             Kind.PS2_CARDS -> Triple("pcsx2", "", "memcards")
             Kind.PS2_STATES -> Triple("pcsx2", "", "states")              // wspólne z PCSX2 na komputerze
+            Kind.PSP_SAVES -> Triple("ppsspp", "", "saves")
+            Kind.PSP_STATES -> Triple("ppsspp", "", "states")
             else -> return null
         }
+        if (f.psp && pspId(g).isEmpty()) return null                  // bez numeru gry nie wiadomo, które pliki
         if (emu == "retroarch" && c.isEmpty()) return null           // dane rdzeni są osobne
         return SaveSync.Bundle(emu, c, kind, { collect(f, g, phoneDirs(f, g)) }, { arc -> targetsFor(f, g, arc) },
                                JSONObject().put("fam", f.id).put("game", g.toJson()))
@@ -285,6 +312,7 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
             Kind.PS2_STATES -> if (!name.endsWith(".backup", true) && P2S.containsMatchIn(name) &&
                 (statePrefixes(f, g).any { name.startsWith("$it.") } ||
                  (g.serialPrefix.isNotEmpty() && name.startsWith(g.serialPrefix)))) name else null
+            Kind.PSP_STATES -> if (pspId(g).isNotEmpty() && Regex("^${pspId(g)}_\\d{1,2}\\.ppst$", RegexOption.IGNORE_CASE).matches(name)) name else null
             else -> null
         }
     }
@@ -294,6 +322,10 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
         Kind.PS1_SRM -> if (arc == "game_1.mcd") g.stem + ".srm" else null      // karta 2 — tylko na PC
         Kind.PS2_CARDS -> if (arc == "game.ps2") PS2_SLOT else null
         Kind.PS2_STATES -> if (P2S.containsMatchIn(arc) && !arc.contains('/')) arc else null
+        Kind.PSP_STATES -> if (!arc.contains('/') && Regex("^${pspId(g)}_\\d{1,2}\\.ppst$", RegexOption.IGNORE_CASE).matches(arc)) arc else null
+        // zapis PSP: „<numer gry…>/<plik>” — folder zapisu tej gry, jeden poziom
+        Kind.PSP_SAVES -> arc.split('/').takeIf { p -> pspId(g).isNotEmpty() && p.size == 2 && p.none { it.isEmpty() || it == ".." } &&
+            p[0].uppercase().startsWith(pspId(g)) }?.let { arc }
         else -> if (arc.startsWith("game") && !arc.contains('/')) g.stem + arc.removePrefix("game") else null
     }
 
@@ -302,6 +334,19 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
      *  rdzeni o tej samej nazwie gry to inne dane. */
     private fun collect(f: Fam, g: Game, dirs: List<File>): Map<String, File> {
         val out = HashMap<String, File>()
+        if (f.kind == Kind.PSP_SAVES) {                    // SAVEDATA/<numer gry…>/<pliki>
+            val id = pspId(g)
+            for (d in dirs) for (s in d.listFiles() ?: emptyArray()) {
+                if (!s.isDirectory || id.isEmpty() || !s.name.uppercase().startsWith(id)) continue
+                for (x in s.listFiles() ?: emptyArray()) {
+                    if (!x.isFile || x.name.endsWith(".emustart-new")) continue
+                    val arc = s.name + "/" + x.name
+                    val cur = out[arc]
+                    if (cur == null || x.lastModified() > cur.lastModified()) out[arc] = x
+                }
+            }
+            return out
+        }
         val myCore = normCore(coreDirOf(g.core))
         fun take(x: File) {
             if (!x.isFile) return
@@ -326,6 +371,10 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
 
     private fun targetsFor(f: Fam, g: Game, arc: String): List<File> {
         val n = localName(f, g, arc) ?: return emptyList()
+        if (f.psp) {                                       // pierwszy istniejący folder PSP (albo PSP we wspólnej pamięci)
+            val dirs = pspDirs(f)
+            return listOf(File(dirs.firstOrNull { it.isDirectory } ?: dirs.first { it.path.contains("/PSP/") }, n))
+        }
         val dirs = phoneDirs(f, g)
         if (f.kind == Kind.PS2_CARDS) return listOfNotNull(dirs.firstOrNull()?.let { File(it, n) })
         return newTargets(f, g, dirs, n)
@@ -636,6 +685,7 @@ class Saves(private val ctx: Context, private val server: Server, private val pr
 
     /** Po grze: gdzie emulator zapisał (folder z plikiem gry zmienionym w trakcie gry). */
     private fun learn(f: Fam, g: Game, startedAt: Long) {
+        if (f.psp) return                                  // PPSSPP: stałe miejsca (folder PSP)
         val cands = LinkedHashSet<File>()
         cands += phoneDirs(f, g)
         if (!f.ra) cands += deepFind(f.sub, fresh = true)
