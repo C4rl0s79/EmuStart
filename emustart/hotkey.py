@@ -140,20 +140,26 @@ class GameMenu:
             if nxt:                              # następny slot emulatora, potem zapis do wybranego
                 winutil.send_keys(nxt)
                 time.sleep(0.15)
-                keys = a.save_key()
+                keys = getattr(a, "save_here_key", lambda: "")() or a.save_key()
             elif a.slot_save_key(1):
                 self.slot = self.slot % 8 + 1
                 keys = a.slot_save_key(self.slot)
             else:
                 keys = a.save_key()
         elif act == "save_here":
-            keys = a.slot_save_key(self.slot) or a.save_key()
+            keys = getattr(a, "save_here_key", lambda: "")() or a.slot_save_key(self.slot) or a.save_key()
         elif act in ("slot_up", "slot_down"):
             if a.slot_save_key(1) and not (nxt or prv):
                 self.slot = (self.slot % 8 + 1) if act == "slot_up" else ((self.slot - 2) % 8 + 1)
                 log.info("skrót: slot zapisu %d", self.slot)
                 return
             keys = nxt if act == "slot_up" else prv
+        elif act == "ff" and a.ff_hold():
+            # przyspieszenie „trzymane” (Dolphin): LB + RB wciska klawisz, kolejne LB + RB puszcza
+            self._ff_down = not getattr(self, "_ff_down", False)
+            log.info("skrót LB + ff: %s %s", a.ff_key(), "wciśnięty" if self._ff_down else "puszczony")
+            winutil.key_state(a.ff_key(), self._ff_down)
+            return
         else:
             keys = {"ff": a.ff_key, "screenshot": a.screenshot_key, "record": a.record_key}[act]()
         log.info("skrót LB + %s: %s", act, keys or "(emulator nie ma takiego skrótu)")

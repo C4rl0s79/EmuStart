@@ -538,6 +538,7 @@ class Session:
         try:
             from emustart import installer           # wymagane ustawienia z serwera (wygrywają z profilem)
             adapter.apply_policy(installer.policy(adapter.family))
+            adapter.prepare_hotkeys()                # skróty emulatora do LB + … (brakujące)
         except Exception:
             log.exception("wymagane ustawienia emulatora")
         dirs = adapter.save_dirs()               # foldery z (już podmienionych) ustawień

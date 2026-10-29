@@ -393,7 +393,8 @@ def test_server_lists_bios_folder(emu_server, tmp_path, monkeypatch):
 
 
 def test_pad_shortcuts_lb(monkeypatch):
-    """LB + przycisk → skrót klawiszowy emulatora (Dolphin: slot wybiera EmuStart, Shift+F1…F8)."""
+    """LB + przycisk → skrót klawiszowy emulatora (Dolphin: skróty slotu dopisane przez EmuStart,
+    przyspieszenie trzymane)."""
     from emustart import hotkey, ingame, winutil
     sent = []
     monkeypatch.setattr(winutil, "send_keys", lambda k, hold=0.08: sent.append(k))
@@ -403,12 +404,17 @@ def test_pad_shortcuts_lb(monkeypatch):
     m = hotkey.GameMenu.__new__(hotkey.GameMenu)
     m.adapter, m.slot = d, 1
     m._shortcut("slot_up")
-    m._shortcut("slot_up")
+    m._shortcut("slot_down")
     m._shortcut("save_here")
     m._shortcut("save_next")
     m._shortcut("screenshot")
     m._shortcut("record")
-    assert sent == ["SHIFT+F3", "SHIFT+F4", "F9", ""] and m.slot == 4
+    assert sent == ["CTRL+F11", "CTRL+F10", "CTRL+F12", "CTRL+F11", "CTRL+F12", "F9", ""]
+    held = []
+    monkeypatch.setattr(winutil, "key_state", lambda k, down: held.append((k, down)))
+    m._shortcut("ff")
+    m._shortcut("ff")
+    assert held == [("TAB", True), ("TAB", False)]
     p = ingame.PCSX2.__new__(ingame.PCSX2)
     p._hk = lambda name, default="": default
     p.save_key = lambda: "F1"
@@ -437,3 +443,24 @@ def test_retroarch_pad_hotkeys_default_once(tmp_path):
     ingame.ini_set(home / "retroarch.cfg", {(None, "input_enable_hotkey_btn"): '"7"'})   # gracz zmienił
     ra.launch_args(tmp_path / "run2", resume=False)
     assert ingame._cfg_map(home / "retroarch.cfg")["input_enable_hotkey_btn"] == '"7"'
+
+
+def test_missing_emulator_hotkeys_bound_once(tmp_path):
+    """Brakujące skróty emulatora do LB + … dopisane do jego ustawień; przypisane przez gracza zostają.
+    Kombinacje z ustawień DuckStation / PCSX2 („Keyboard/Shift & Keyboard/F2”) czytane w całości."""
+    from emustart import ingame
+    ini = tmp_path / "PCSX2.ini"
+    ini.write_text(chr(10).join(["[Hotkeys]", "ToggleVideoCapture = Keyboard/F5",
+                              "PreviousSaveStateSlot = Keyboard/Shift & Keyboard/F2", ""]),
+                   encoding="utf-8")
+    ingame._bind_missing(ini, "Hotkeys", {"ToggleVideoCapture": "Keyboard/Control & Keyboard/F12",
+                                          "ToggleTurbo": "Keyboard/Tab"})
+    sec = ingame.ini_section(ini, "Hotkeys")
+    assert sec["ToggleVideoCapture"] == "Keyboard/F5" and sec["ToggleTurbo"] == "Keyboard/Tab"
+    assert ingame._qt_key(sec["PreviousSaveStateSlot"]) == "SHIFT+F2"
+    assert ingame._qt_key("Keyboard/Control & Keyboard/F12") == "CTRL+F12"
+    p = ingame.PPSSPP.__new__(ingame.PPSSPP)
+    p.home = tmp_path
+    (tmp_path / "memstick" / "PSP" / "SYSTEM").mkdir(parents=True)
+    p.prepare_hotkeys()
+    assert p.screenshot_key() == "CTRL+F12" and p.slot_keys()[1] == "CTRL+F10" and p.ff_key() == "GRAVE"

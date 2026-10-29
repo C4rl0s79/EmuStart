@@ -116,7 +116,7 @@ class _INPUT(ctypes.Structure):
 
 VK = {f"F{i}": 0x6F + i for i in range(1, 13)}
 VK.update({"SPACE": 0x20, "ESCAPE": 0x1B, "ENTER": 0x0D, "SHIFT": 0x10, "CTRL": 0x11,
-           "ALT": 0x12, "P": 0x50, "TAB": 0x09})
+           "ALT": 0x12, "P": 0x50, "TAB": 0x09, "GRAVE": 0xC0})
 
 
 def _key(vk: int, up: bool) -> _INPUT:
@@ -125,6 +125,17 @@ def _key(vk: int, up: bool) -> _INPUT:
     i = _INPUT(type=1)
     i.ki = _KEYBDINPUT(vk, scan, KEYEVENTF_SCANCODE | (KEYEVENTF_KEYUP if up else 0), 0, 0)
     return i
+
+
+def key_state(combo: str, down: bool) -> None:
+    """Wciska (down) albo puszcza kombinację — skrót „trzymany” (przyspieszenie Dolphina)."""
+    if not IS_WIN or not combo:
+        return
+    vks = [VK[k.strip().upper()] for k in combo.split("+") if k.strip().upper() in VK]
+    if vks:
+        seq = vks if down else list(reversed(vks))
+        arr = (_INPUT * len(seq))(*[_key(v, not down) for v in seq])
+        _u32.SendInput(len(seq), arr, ctypes.sizeof(_INPUT))
 
 
 def send_keys(combo: str, hold: float = 0.08) -> None:
