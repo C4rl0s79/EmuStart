@@ -905,6 +905,10 @@ class Api:
                 "shader_off": bool(sc.get("shader_off")),
                 "sync": self._sync_kind(g, emu), "slots": slots}
 
+    def sync_progress(self) -> dict:
+        """Postęp trwającej wysyłki / pobierania zapisów (pasek postępu): {active, op, done, total, eta}."""
+        return syncclient.progress()
+
     def _sync_kind(self, g: dict, emu: dict) -> dict:
         """Stan synchronizacji; emulator bez paczek zapisów: „folder” (cały folder zapisów
         z serwerem przed grą i po niej — RPCS3) albo „none” (zapisy tylko na tym urządzeniu)."""

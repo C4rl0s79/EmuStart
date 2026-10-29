@@ -40,6 +40,59 @@ log = logging.getLogger("emustart.syncclient")
 TIMEOUT = 15
 BACKUPS_KEEP = 20                    # kopie zapasowe plików przed pobraniem (na profil)
 _lock = threading.Lock()
+# trwająca wysyłka / pobieranie paczki (pasek postępu w UI): {op: send|get, done, total, started}
+PROGRESS: dict = {}
+
+
+class _Counted:
+    """Plik paczki wysyłany na serwer — liczy wysłane bajty (PROGRESS)."""
+
+    def __init__(self, f, total: int):
+        self.f = f
+        PROGRESS.update(op="send", done=0, total=total, started=time.monotonic())
+
+    def read(self, n: int = -1) -> bytes:
+        b = self.f.read(n)
+        PROGRESS["done"] = PROGRESS.get("done", 0) + len(b)
+        return b
+
+    def seek(self, *a):
+        PROGRESS["done"] = 0
+        return self.f.seek(*a)
+
+
+class _CountedSink:
+    """Pobierana paczka — liczy pobrane bajty."""
+
+    def __init__(self, f, total: int):
+        self.f = f
+        PROGRESS.update(op="get", done=0, total=total, started=time.monotonic())
+
+    def write(self, b: bytes) -> int:
+        PROGRESS["done"] = PROGRESS.get("done", 0) + len(b)
+        return self.f.write(b)
+
+
+def progress() -> dict:
+    """Postęp trwającej wysyłki / pobierania: {active, op, done, total, eta (s, -1 nieznany)}."""
+    p = dict(PROGRESS)
+    if not p.get("total"):
+        return {"active": False}
+    took = max(0.001, time.monotonic() - p["started"])
+    speed = p["done"] / took
+    eta = (p["total"] - p["done"]) / speed if speed > 0 and took > 1 else -1
+    return {"active": True, "op": p["op"], "done": p["done"], "total": p["total"], "eta": round(eta)}
+
+
+def progress_text() -> str:
+    """„wysłano 120 / 262 MB · ok. 1 min” — do komunikatu w oknie uruchamiania."""
+    p = progress()
+    if not p["active"]:
+        return ""
+    mb = lambda n: f"{n / 1048576:.0f}" if n >= 10 * 1048576 else f"{n / 1048576:.1f}"
+    t = p["eta"]
+    left = "" if t < 0 else f" · ok. {t} s" if t < 60 else f" · ok. {round(t / 60)} min"
+    return f"{'wysłano' if p['op'] == 'send' else 'pobrano'} {mb(p['done'])} / {mb(p['total'])} MB{left}"
 
 
 class Offline(OSError):
@@ -352,9 +405,12 @@ def _upload(cl: _Client, plat: str, gid: str, b, base: int, slot: int = 1, ops: 
         if slot != 1:
             d["slot"] = int(slot)
         init = cl.json("POST", "/v1/savesync/upload/init", d)
-        with open(zp, "rb") as f:
-            st, data = cl.call("PUT", init["upload_url"], f, {"Content-Length": str(size),
-                                                              "Content-Type": "application/zip"}, timeout=120)
+        try:
+            with open(zp, "rb") as f:
+                st, data = cl.call("PUT", init["upload_url"], _Counted(f, size), {"Content-Length": str(size),
+                                                                                  "Content-Type": "application/zip"}, timeout=120)
+        finally:
+            PROGRESS.clear()
         if st != 200:
             raise Offline(f"wysyłanie paczki: serwer odpowiedział {st}")
         commit = {"upload_id": init["upload_id"], "base_revision": int(base), "sha256": sha, "size": size}
@@ -374,8 +430,11 @@ def _fetch(cl: _Client, srv: dict) -> Path:
     os.close(fd)
     tmp = Path(tmp)
     try:
-        with open(tmp, "wb") as f:
-            st, _ = cl.call("GET", srv["download_url"], timeout=120, sink=f)
+        try:
+            with open(tmp, "wb") as f:
+                st, _ = cl.call("GET", srv["download_url"], timeout=120, sink=_CountedSink(f, int(srv.get("size") or 0)))
+        finally:
+            PROGRESS.clear()
         if st != 200:
             raise Offline(f"pobieranie paczki: serwer odpowiedział {st}")
         if srv.get("sha256") and _sha(tmp) != srv["sha256"]:

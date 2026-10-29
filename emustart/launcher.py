@@ -87,7 +87,11 @@ class Session:
 
     def status(self) -> dict:
         info = systems.info(self.game.get("es", ""))
-        out = {"phase": self.phase, "message": self.message, "mode": self.mode, "source": self.source,
+        msg = self.message
+        if msg.startswith("Synchronizuję"):            # duże paczki (stany GameCube ~70 MB) — postęp
+            p = syncclient.progress_text()
+            msg = f"{msg} {p}" if p else msg
+        out = {"phase": self.phase, "message": msg, "mode": self.mode, "source": self.source,
                "title": self.game.get("title", ""), "tags": self.game.get("tags", ""),
                "system": info["display"], "game_id": self.game_id, "locked_by": self.locked_by,
                "notice": getattr(self, "notice", ""), "conflict": getattr(self, "conflict", [])}

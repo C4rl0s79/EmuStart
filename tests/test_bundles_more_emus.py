@@ -98,3 +98,17 @@ def test_dolphin_ppsspp_numbers():
     with pytest.raises(ValueError):
         savebundles.Bundle("ppsspp", "", "saves", Path("x"), "ULUS10297", ["ULUS10297"]).local_path("ULUS99999DATA00/DATA.BIN")
     assert savebundles.psp_serial({"serial": "ULUS-10297"}) == "ULUS10297"
+
+
+def test_sync_progress_text(monkeypatch):
+    """Pasek postępu: wysłane MB i szacowany czas do końca."""
+    import io
+    t = [100.0]
+    monkeypatch.setattr(syncclient.time, "monotonic", lambda: t[0])
+    body = syncclient._Counted(io.BytesIO(b"x" * 1000), 262 * 1048576)
+    syncclient.PROGRESS["done"] = 131 * 1048576
+    t[0] = 160.0                                       # połowa w minutę → zostało ok. 1 min
+    assert syncclient.progress_text() == "wysłano 131 / 262 MB · ok. 1 min"
+    assert body.read(10) == b"x" * 10
+    syncclient.PROGRESS.clear()
+    assert syncclient.progress() == {"active": False} and syncclient.progress_text() == ""
