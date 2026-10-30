@@ -36,10 +36,36 @@ def open_temp_write(path: str):
     return os.fdopen(fd, "wb")
 
 
-def find_window(title: str) -> int:
+# okna-zastępcy powłoki Windows 11 z tytułem cudzej karty (np. karta przeglądarki „EmuStart”
+# w Alt+Tab) — FindWindow zwracał je zamiast okna programu
+PROXY_CLASSES = ("Windows.Internal.Shell.TabProxyWindow",)
+
+
+def find_window(title: str, pid: int = 0) -> int:
+    """Okno najwyższego poziomu o tym tytule; `pid` — tylko okna tego procesu. Bez okien
+    zastępczych powłoki (PROXY_CLASSES); widoczne przed niewidocznymi. 0 — brak."""
     if not IS_WIN:
         return 0
-    return _u32.FindWindowW(None, title) or 0
+    found: list = []
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def _each(hwnd, _l):
+        n = _u32.GetWindowTextLengthW(hwnd)
+        if n != len(title):
+            return True
+        buf = ctypes.create_unicode_buffer(n + 1)
+        _u32.GetWindowTextW(hwnd, buf, n + 1)
+        if buf.value != title or window_class(hwnd) in PROXY_CLASSES:
+            return True
+        if pid:
+            owner = wintypes.DWORD()
+            _u32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner))
+            if owner.value != pid:
+                return True
+        found.append((not _u32.IsWindowVisible(hwnd), hwnd))
+        return True
+    _u32.EnumWindows(_each, 0)
+    return min(found)[1] if found else 0
 
 
 def is_iconic(hwnd: int) -> bool:

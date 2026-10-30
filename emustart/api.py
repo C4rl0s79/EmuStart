@@ -709,7 +709,13 @@ class Api:
 
     # ── menu w grze (wywoływane z wątku hotkey; nazwy bez _ — to interfejs UI) ──
     def _hwnd(self) -> int:
-        return winutil.find_window(self._window.title) if self._window else 0
+        if not self._window:
+            return 0
+        # okno pywebview jest w tym procesie — szukamy tylko wśród jego okien: inne okno
+        # o tytule „EmuStart” (karta przeglądarki w Alt+Tab Windows 11) brało fokus za nasz,
+        # a UI odrzucało pada („okno nie na wierzchu”); okno Lumen (native=None) — w innym procesie
+        pid = os.getpid() if getattr(self._window, "native", None) is not None else 0
+        return winutil.find_window(self._window.title, pid)
 
     def menu_show(self, items: list, message: str) -> None:
         s = self._session
