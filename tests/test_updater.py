@@ -225,7 +225,7 @@ def test_two_programs_pick_own_release_files(monkeypatch, tmp_path):
 def test_script_runs_as_own_task_and_confirms_start(tmp_path):
     s = updater.write_script(tmp_path, tmp_path / "app", 4321, ["--server"]).read_text(encoding="utf-8-sig")
     assert "New-Item -ItemType Directory" in s and "PID 4321" in s
-    assert "schtasks /Delete /TN 'EmuStart Update'" in s           # jednorazowe zadanie sprząta po sobie
+    assert "& $sch /Delete /TN 'EmuStart Update'" in s           # jednorazowe zadanie sprząta po sobie
     log = tmp_path / "update.log"
     assert not updater._confirmed(log, 0, "PID 4321", seconds=0.6)  # skrypt nie ruszył — proces zostaje
     log.write_text("2026-10-12 aktualizacja: czekam na zamknięcie serwera (PID 4321)\n", encoding="utf-8")
@@ -235,7 +235,7 @@ def test_script_runs_as_own_task_and_confirms_start(tmp_path):
 def test_script_reopens_panel_in_user_session(tmp_path):
     s = updater.write_script(tmp_path, tmp_path / "app", 1, ["--server"]).read_text(encoding="utf-8-sig")
     assert "panel-user.txt" in s and "/IT" in s and "'EmuStart Panel'" in s
-    assert s.index("panel-user.txt") < s.index("schtasks /Delete /TN 'EmuStart Update'")
+    assert s.index("panel-user.txt") < s.index("& $sch /Delete /TN 'EmuStart Update'")
 
 
 @pytest.mark.skipif(__import__("os").name != "nt", reason="PowerShell — Windows")
@@ -264,3 +264,14 @@ def test_second_apply_is_ignored_and_script_stops_leftovers(tmp_path, monkeypatc
     assert job.apply(["--server"]) == {"ok": True}
     s = real(tmp_path, tmp_path / "app", 1, ["--server"]).read_text("utf-8-sig")
     assert "Stop-Process -Force" in s and s.index("Stop-Process") < s.index("podmiana plików")
+
+
+def test_script_runs_tools_by_full_path_and_fails_on_missing_robocopy(tmp_path):
+    """PATH bez System32: „robocopy” nie istnieje — skrypt woła go pełną ścieżką, a pusty kod wyjścia
+    to błąd (dawniej uznany za sukces: pobrana wersja kasowana, aktualizacja stała w miejscu)."""
+    s = updater.write_script(tmp_path, tmp_path / "app", 1, []).read_text(encoding="utf-8-sig")
+    assert "$robo = Join-Path $sys 'robocopy.exe'" in s and "$sch = Join-Path $sys 'schtasks.exe'" in s
+    calls = [ln.strip() for ln in s.splitlines() if " /R:" in ln]   # wywołania robocopy (próby /R:n)
+    assert calls and all(c.startswith("& $robo") for c in calls)
+    assert not any(ln.strip().startswith("schtasks") or "{ schtasks" in ln for ln in s.splitlines())
+    assert "$null -eq $rc1 -or $null -eq $rc2" in s

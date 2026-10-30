@@ -319,6 +319,9 @@ def write_script(udir: Path, app: Path, pid: int, argv: list, server: bool = Tru
 $app = {_ps(app)}; $new = {_ps(udir / 'new')}; $bak = {_ps(udir / 'backup')}
 $log = Join-Path $app 'logs\\update.log'
 New-Item -ItemType Directory -Force -Path (Split-Path $log) | Out-Null
+# pełne ścieżki: EmuStart bywa uruchomiony z PATH bez System32 — wtedy „robocopy” nie istniał,
+# pusty kod wyjścia uznawany był za sukces, a pobrana wersja kasowana (aktualizacja stała w miejscu)
+$sys = [Environment]::SystemDirectory; $robo = Join-Path $sys 'robocopy.exe'; $sch = Join-Path $sys 'schtasks.exe'
 function L($m) {{ Add-Content -LiteralPath $log -Value ("{{0:yyyy-MM-dd HH:mm:ss}} {{1}}" -f (Get-Date), $m) }}
 L 'aktualizacja: czekam na zamknięcie serwera (PID {pid})'
 Wait-Process -Id {pid} -Timeout 60 -ErrorAction SilentlyContinue
@@ -335,16 +338,16 @@ if ($busy) {{
   Start-Sleep 2
 }}
 L 'kopia zapasowa'
-robocopy (Join-Path $app '_internal') (Join-Path $bak '_internal') /MIR /R:5 /W:2 /NFL /NDL /NJH /NJS /NP | Out-Null
+& $robo (Join-Path $app '_internal') (Join-Path $bak '_internal') /MIR /R:5 /W:2 /NFL /NDL /NJH /NJS /NP | Out-Null
 if (Test-Path -LiteralPath $exe) {{ Copy-Item -LiteralPath $exe -Destination (Join-Path $bak {_ps(exe.name)}) -Force }}
 L 'podmiana plików'
-robocopy (Join-Path $new '_internal') (Join-Path $app '_internal') /MIR /R:30 /W:2 /NFL /NDL /NJH /NJS /NP | Out-Null
+& $robo (Join-Path $new '_internal') (Join-Path $app '_internal') /MIR /R:30 /W:2 /NFL /NDL /NJH /NJS /NP | Out-Null
 $rc1 = $LASTEXITCODE
-robocopy $new $app /E /XD _internal /R:30 /W:2 /NFL /NDL /NJH /NJS /NP | Out-Null
+& $robo $new $app /E /XD _internal /R:30 /W:2 /NFL /NDL /NJH /NJS /NP | Out-Null
 $rc2 = $LASTEXITCODE
-if ($rc1 -ge 8 -or $rc2 -ge 8) {{
+if ($null -eq $rc1 -or $null -eq $rc2 -or $rc1 -ge 8 -or $rc2 -ge 8) {{
   L "BŁĄD podmiany (robocopy $rc1/$rc2) — przywracam poprzednią wersję"
-  robocopy (Join-Path $bak '_internal') (Join-Path $app '_internal') /MIR /R:30 /W:2 /NFL /NDL /NJH /NJS /NP | Out-Null
+  & $robo (Join-Path $bak '_internal') (Join-Path $app '_internal') /MIR /R:30 /W:2 /NFL /NDL /NJH /NJS /NP | Out-Null
   if (Test-Path -LiteralPath (Join-Path $bak {_ps(exe.name)})) {{ Copy-Item -LiteralPath (Join-Path $bak {_ps(exe.name)}) -Destination $exe -Force }}
 }} else {{
   L "podmiana zakończona (robocopy $rc1/$rc2)"
@@ -354,9 +357,9 @@ if ($rc1 -ge 8 -or $rc2 -ge 8) {{
     # nie uruchomiłby się — usuwamy go; zadanie Harmonogramu → EmuStartServer.exe --service
     $old = Join-Path $app 'EmuStart.exe'
     if ($old -ne $exe -and (Test-Path -LiteralPath $old)) {{ Remove-Item -LiteralPath $old -Force -ErrorAction SilentlyContinue; L 'usunięto dawny EmuStart.exe z folderu serwera' }}
-    schtasks /Query /TN {_ps(TASK)} 2>$null | Out-Null
+    & $sch /Query /TN {_ps(TASK)} 2>$null | Out-Null
     if ($LASTEXITCODE -eq 0 -and $exe -like '*EmuStartServer.exe') {{
-      schtasks /Change /TN {_ps(TASK)} /TR ('"' + $exe + '" --service') 2>&1 | Out-Null
+      & $sch /Change /TN {_ps(TASK)} /TR ('"' + $exe + '" --service') 2>&1 | Out-Null
       L "zadanie Harmonogramu → $exe --service (kod $LASTEXITCODE)"
       $lnk = Join-Path $env:ProgramData 'Microsoft\\Windows\\Start Menu\\Programs\\EmuStart Server.lnk'
       if (Test-Path -LiteralPath $lnk) {{
@@ -368,12 +371,12 @@ if ($rc1 -ge 8 -or $rc2 -ge 8) {{
   }}
 }}
 $task = $false
-if ({use_task}) {{ schtasks /Query /TN {_ps(TASK)} 2>$null | Out-Null; $task = ($LASTEXITCODE -eq 0) }}
+if ({use_task}) {{ & $sch /Query /TN {_ps(TASK)} 2>$null | Out-Null; $task = ($LASTEXITCODE -eq 0) }}
 $started = $false
 if ($task) {{
   # zadanie bywa jeszcze „uruchomione” (ten skrypt startował z jego procesu) — wtedy /Run
   # nic nie robi (a /End zabiłby ten skrypt); sprawdzamy, czy nowy EmuStart.exe naprawdę ruszył
-  schtasks /Run /TN {_ps(TASK)} 2>$null | Out-Null
+  & $sch /Run /TN {_ps(TASK)} 2>$null | Out-Null
   L "zadanie Harmonogramu: /Run (kod $LASTEXITCODE)"
   for ($i = 0; $i -lt 30; $i++) {{
     Start-Sleep 1
@@ -401,12 +404,12 @@ if (Test-Path -LiteralPath $pu) {{
   if ($u) {{
     Start-Sleep 3
     $tr = '"' + $exe + '" ' + $(if ($exe -like '*EmuStartServer.exe') {{ '--panel' }} else {{ '--server-panel' }})
-    schtasks /Create /F /TN {_ps(PANEL_TASK)} /SC ONCE /ST 00:00 /RU $u /IT /TR $tr 2>&1 | Out-Null
+    & $sch /Create /F /TN {_ps(PANEL_TASK)} /SC ONCE /ST 00:00 /RU $u /IT /TR $tr 2>&1 | Out-Null
     $c1 = $LASTEXITCODE
-    schtasks /Run /TN {_ps(PANEL_TASK)} 2>&1 | Out-Null
+    & $sch /Run /TN {_ps(PANEL_TASK)} 2>&1 | Out-Null
     L "panel serwera: zadanie dla $u (utworzenie $c1, start $LASTEXITCODE)"
   }}
 }}
-schtasks /Delete /TN {_ps(UPD_TASK)} /F 2>$null | Out-Null
+& $sch /Delete /TN {_ps(UPD_TASK)} /F 2>$null | Out-Null
 """, encoding="utf-8-sig")
     return script
