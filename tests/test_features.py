@@ -180,6 +180,7 @@ def test_uipad_events_repeat_and_release(monkeypatch):
     seq = [set(), {"down"}, {"down"}, {"down"}, set(), {"a"}, set()]
     monkeypatch.setattr(uipad, "_actions", lambda: seq.pop(0))
     monkeypatch.setattr(uipad.xinput, "available", lambda: False)   # bez wątku
+    monkeypatch.setattr(uipad.hidpad, "available", lambda: False)
     p = uipad.UiPad(lambda: True)
     for t in (-0.1, 0.0, 0.1, 0.5, 0.6, 0.7, 0.8):   # pierwszy odczyt: tylko synchronizacja
         p._tick(t)

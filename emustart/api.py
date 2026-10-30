@@ -373,7 +373,7 @@ class Api:
             "scan": dict(self._scan),
             "cache": cache.usage(cfg),
             "copying": self._copying(),
-            "py_pad": bool(self._window) and uipad.xinput.available() and self.pad_backend() == "python",
+            "py_pad": bool(self._window) and (uipad.xinput.available() or uipad.hidpad.available()) and self.pad_backend() == "python",
             "pad_backend": self.pad_backend() if self._window else "browser",
             "games_logo": bool(self._cfg.get("games_logo")),
             "look": self._cfg.get("look", {}),
@@ -1541,17 +1541,19 @@ class Api:
 
     # ── pady ──
     def pads_state(self, battery: bool = False) -> dict:
-        from emustart import xinput
+        from emustart import hidpad, xinput
         lst = pads.connected(battery=bool(battery))
+        hid = {pad.id: m & 0xFFFF for pad, m in hidpad.states()} if any(p.get("hid") for p in lst) else {}
         for p in lst:
-            p["buttons"] = xinput.buttons(p["slot"]) or 0
+            p["buttons"] = hid.get(p["slot"], 0) if p.get("hid") else xinput.buttons(p["slot"]) or 0
         po = self._cfg.get("pad_order") or {}
         return {"pads": lst, "order": pads.order(self._cfg, lst),
                 "mode": po.get("mode", "windows"), "manual": po.get("manual", [])}
 
     def pads_set(self, mode: str, manual: list | None = None) -> dict:
         self._cfg["pad_order"] = {"mode": mode if mode in ("windows", "wireless_first", "manual")
-                                  else "windows", "manual": [int(x) for x in (manual or [])]}
+                                  else "windows",
+                                  "manual": [x if pads.is_hid(x) else int(x) for x in (manual or [])]}
         config.save(self._cfg)
         return self.pads_state()
 

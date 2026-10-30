@@ -2,11 +2,13 @@
 
     A        menu (własne menu emulatora, gdy je ma na pada — inaczej menu EmuStart)
     Y        zapisz w kolejnym slocie        X   zapisz w wybranym slocie
-    ↑ / ↓    slot zapisu w górę / w dół      RB  przyspieszenie
+    ↑ / ↓    wybór slotu: wyżej / niżej na liście slotów (↑ = niższy numer); potem przez 3 s
+             samo A wczytuje wybrany slot, Y zapisuje do niego, B zamyka wybór
+    RB       przyspieszenie
     R3       zrzut ekranu                    L3  nagrywanie (gdzie emulator je ma)
 
 RetroArch robi to sam (ustawienia sesji, ingame.RetroArch.launch_args) — tu nic.
-Pozostałe: pad czytamy przez XInput w osobnym wątku (fokus ma emulator, nie nasze okno)
+Pozostałe: pad czytamy przez XInput i hidpad (pady HID: PS, Switch, GameSir w trybie HID) w osobnym wątku (fokus ma emulator, nie nasze okno)
 i naciskamy skróty klawiszowe emulatora (Adapter.menu_key, slot_keys…). LB trafia też do
 gry — emulator czyta pada sam.
 
@@ -21,11 +23,17 @@ import logging
 import threading
 import time
 
-from emustart import ingame, library, winutil, xinput
+from emustart import hidpad, ingame, library, winutil, xinput
 
 log = logging.getLogger("emustart.hotkey")
 
 POLL = 1 / 60
+PICK = 3.0          # po LB + ↑/↓: tyle sekund A = wczytaj, Y = zapisz, B = anuluj (lista slotów na ekranie)
+
+
+def _buttons() -> int:
+    """Przyciski wszystkich padów: XInput + HID (maska XInput)."""
+    return xinput.all_buttons() | hidpad.all_buttons()
 # LB + przycisk → akcja (kolejność: pierwsze wciśnięte wygrywa)
 COMBOS = ((xinput.A, "menu"), (xinput.Y, "save_next"), (xinput.X, "save_here"), (xinput.UP, "slot_up"),
           (xinput.DOWN, "slot_down"), (xinput.RB, "ff"), (xinput.R3, "screenshot"), (xinput.L3, "record"))
@@ -51,10 +59,10 @@ class GameMenu:
             return
         if self.adapter.family == "retroarch":
             return                   # RetroArch: skróty LB w ustawieniach sesji
-        if xinput.available():
+        if xinput.available() or hidpad.available():
             self._thread.start()
         else:
-            log.warning("XInput niedostępny — menu w grze wyłączone")
+            log.warning("XInput i HID niedostępne — menu w grze wyłączone")
 
     def items(self) -> list:
         a = self.adapter
@@ -88,11 +96,21 @@ class GameMenu:
         repeat_at = 0.0
         wait_release = False
         while proc.poll() is None:
-            b = xinput.all_buttons()
+            b = _buttons()
             now = time.monotonic()
             if not self.open:
                 pressed = b & ~prev
-                if b & xinput.LB and pressed and not self.busy:
+                if getattr(self, "_pick_until", 0) > now and pressed and not b & xinput.LB and not self.busy:
+                    # lista slotów z LB + ↑/↓ na ekranie: A wczytuje wybrany slot, Y zapisuje, B zamyka
+                    act = next((a for m, a in ((xinput.A, "load_here"), (xinput.Y, "save_here"),
+                                               (xinput.B, "cancel")) if pressed & m), "")
+                    if act:
+                        self._pick_until = 0.0
+                        if act != "cancel":
+                            self._shortcut(act)
+                        else:
+                            log.info("skrót: wybór slotu anulowany")
+                elif b & xinput.LB and pressed and not self.busy:
                     act = next((a for m, a in COMBOS if pressed & m), "")
                     if act == "menu" and not self.adapter.menu_key():
                         wait_release = True          # LB + A wciąż wciśnięte po otwarciu menu
@@ -148,12 +166,17 @@ class GameMenu:
                 keys = a.save_key()
         elif act == "save_here":
             keys = getattr(a, "save_here_key", lambda: "")() or a.slot_save_key(self.slot) or a.save_key()
+        elif act == "load_here":
+            keys = getattr(a, "load_here_key", lambda: "")() or a.load_key()
         elif act in ("slot_up", "slot_down"):
+            # ↑ = wyżej na liście slotów emulatora (niższy numer), ↓ = niżej — jak znacznik na ekranie
             if a.slot_save_key(1) and not (nxt or prv):
-                self.slot = (self.slot % 8 + 1) if act == "slot_up" else ((self.slot - 2) % 8 + 1)
+                self.slot = ((self.slot - 2) % 8 + 1) if act == "slot_up" else (self.slot % 8 + 1)
                 log.info("skrót: slot zapisu %d", self.slot)
+                self._pick_until = time.monotonic() + PICK
                 return
-            keys = nxt if act == "slot_up" else prv
+            keys = prv if act == "slot_up" else nxt
+            self._pick_until = time.monotonic() + PICK
         elif act == "ff" and a.ff_hold():
             # przyspieszenie „trzymane” (Dolphin): LB + RB wciska klawisz, kolejne LB + RB puszcza
             self._ff_down = not getattr(self, "_ff_down", False)
@@ -177,7 +200,7 @@ class GameMenu:
         """Puszczamy fokus do gry dopiero, gdy nikt nie trzyma przycisku —
         inaczej A wybierające „Wróć do gry” trafiłoby też do gry."""
         end = time.monotonic() + timeout
-        while xinput.all_buttons() and time.monotonic() < end:
+        while _buttons() and time.monotonic() < end:
             time.sleep(POLL)
 
     def _open(self) -> None:

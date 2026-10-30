@@ -17,6 +17,12 @@ from pathlib import Path
 
 from emustart import boot  # noqa: E402
 
+_PROBE = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--sdl-probe=")), "")
+if _PROBE:
+    # numery padów SDL emulatora (emustart/sdlpads.py) — krótki proces pomocniczy, bez okna
+    from emustart import sdlpads
+    sys.exit(sdlpads.probe_main(_PROBE, next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--sdl-out=")), "")))
+
 _UNBLOCKED = boot.unblock_self()
 
 import webview  # noqa: E402  (po zdjęciu blokady)
