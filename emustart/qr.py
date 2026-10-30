@@ -10,12 +10,15 @@ import io
 
 
 def svg(text: str, scale: int = 6) -> str:
-    """Kod QR jako SVG ('' — brak biblioteki)."""
+    """Kod QR jako SVG ('' — brak biblioteki). Z `viewBox` — strona może go zmniejszyć (CSS)
+    i skaluje się cały; bez niego zmniejszony SVG był przycinany (strona serwera pokazywała
+    część kodu, której aparat nie odczytał)."""
     try:
         import segno
     except ImportError:
         return ""
     out = io.BytesIO()
-    segno.make(text, error="m").save(out, kind="svg", scale=scale, border=2, dark="#000", light="#fff",
-                                     xmldecl=False, svgns=True)
-    return out.getvalue().decode("utf-8")
+    code = segno.make(text, error="m")
+    code.save(out, kind="svg", scale=scale, border=2, dark="#000", light="#fff", xmldecl=False, svgns=True)
+    size = code.symbol_size(scale=scale, border=2)[0]
+    return out.getvalue().decode("utf-8").replace("<svg ", f'<svg viewBox="0 0 {size} {size}" ', 1)

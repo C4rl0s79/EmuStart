@@ -224,6 +224,17 @@ def test_login_qr_carries_addresses_fingerprint_and_code(monkeypatch):
         assert not netsrc.parse_login(bad)["ok"], bad
 
 
+def test_login_qr_scales_whole():
+    """Kod QR da się zmniejszyć CSS-em bez przycięcia: viewBox = cały rysunek (strona serwera
+    pokazywała 210 px z 345 px kodu — telefon nie odczytywał)."""
+    pytest.importorskip("segno")
+    import re
+    from emustart import qr
+    s = qr.svg("emustart://login?d=" + "x" * 240, scale=5)
+    w = re.search(r'width="(\d+)"', s).group(1)
+    assert f'viewBox="0 0 {w} {w}"' in s
+
+
 def test_panel_works_without_segno(monkeypatch):
     import builtins
     from emustart import qr

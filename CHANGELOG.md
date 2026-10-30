@@ -8,6 +8,17 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.53.1] — 2026-10-30
+
+Zakres: kod QR logowania (`qr.py`), strona serwera (`web/portal/portal.css`). Zaktualizuj serwer.
+
+### Poprawione
+- **Telefon nie logował się kodem QR ze strony serwera.** Kod QR (SVG bez `viewBox`) strona
+  zmniejszała do 210 px, a taki SVG się nie skaluje, tylko przycina — widać było ok. 60% kodu
+  (jeden znacznik narożny z trzech), aparat nie miał czego odczytać. Teraz SVG ma `viewBox`
+  i zmniejsza się cały (na stronie 240 px). Kod z panelu serwera działał, bo panel pokazuje go
+  w naturalnym rozmiarze.
+
 ## [0.53.0] — 2026-10-29
 
 Zakres: klient (`ingame.py`, `hotkey.py`, `syncclient.py`, `winutil.py`, `launcher.py`). Serwer i APK bez zmian.
