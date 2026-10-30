@@ -409,7 +409,11 @@ def test_pad_shortcuts_lb(monkeypatch):
     m._shortcut("save_next")
     m._shortcut("screenshot")
     m._shortcut("record")
-    assert sent == ["CTRL+F11", "CTRL+F10", "CTRL+F12", "CTRL+F11", "CTRL+F12", "F9", ""]
+    # ↑ = wyżej na liście slotów (niższy numer)
+    assert sent == ["CTRL+F10", "CTRL+F11", "CTRL+F12", "CTRL+F11", "CTRL+F12", "F9", ""]
+    sent.clear()
+    m._shortcut("load_here")
+    assert sent == ["CTRL+F9"]
     held = []
     monkeypatch.setattr(winutil, "key_state", lambda k, down: held.append((k, down)))
     m._shortcut("ff")
@@ -422,7 +426,7 @@ def test_pad_shortcuts_lb(monkeypatch):
     m._shortcut("save_next")
     m._shortcut("slot_down")
     m._shortcut("menu")
-    assert sent == ["F2", "F1", "SHIFT+F2", "ESCAPE"]
+    assert sent == ["F2", "F1", "F2", "ESCAPE"]       # ↓ = następny slot (niżej na liście)
 
 
 def test_retroarch_pad_hotkeys_default_once(tmp_path):
@@ -437,7 +441,7 @@ def test_retroarch_pad_hotkeys_default_once(tmp_path):
     ra.launch_args(tmp_path / "run", resume=False)
     cfg = ingame._cfg_map(home / "retroarch.cfg")
     assert cfg["input_enable_hotkey_btn"] == '"4"' and cfg["input_menu_toggle_btn"] == '"0"'
-    assert cfg["input_state_slot_increase_btn"] == '"h0up"' and cfg["input_screenshot_btn"] == '"9"'
+    assert cfg["input_state_slot_increase_btn"] == '"h0down"' and cfg["input_screenshot_btn"] == '"9"'
     assert cfg["input_exit_emulator_btn"] == '"nul"'
     assert cfg["input_rewind_btn"] == '"6"' and cfg["input_player1_a_btn"] == '"0"'
     ingame.ini_set(home / "retroarch.cfg", {(None, "input_enable_hotkey_btn"): '"7"'})   # gracz zmienił

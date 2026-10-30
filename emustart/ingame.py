@@ -23,7 +23,7 @@ import socket
 import time
 from pathlib import Path
 
-from emustart import dstoken, emulators, paths, winutil
+from emustart import dstoken, emulators, hidpad, pads, paths, winutil, xinput
 
 log = logging.getLogger("emustart.ingame")
 
@@ -240,13 +240,19 @@ def restore_pending() -> None:
     _restore_file().unlink(missing_ok=True)
 
 
-def _remap_sdl_ini(path: Path, section_fmt: str, order: list, players: int = 4):
-    """[Pad1]… DuckStation/PCSX2: SDL-n / XInput-n → slot gracza z `order`."""
+def _remap_sdl_ini(path: Path, section_fmt: str, order: list, players: int = 4, hid: set | None = None):
+    """[Pad1]… DuckStation/PCSX2: SDL-n / XInput-n → numer pada gracza z `order` (None = bez zmian).
+    Gracze z `hid` mają pad HID — ten jest tylko w SDL, więc XInput-n zamieniamy na SDL-n
+    (nazwy przycisków w obu źródłach są te same: A, DPadUp, LeftX…)."""
     changes = {}
     for p, slot in enumerate(order[:players]):
+        if slot is None:
+            continue
         sec = section_fmt.format(p + 1)
+        to_sdl = p in (hid or set())
         for k, v in ini_section(path, sec).items():
-            nv = re.sub(r"\b(SDL|XInput)-\d+/", lambda m: f"{m.group(1)}-{slot}/", v)
+            nv = re.sub(r"\b(SDL|XInput)-\d+/",
+                        lambda m: f"{'SDL' if to_sdl else m.group(1)}-{slot}/", v)
             if nv != v:
                 changes[(sec, k)] = nv
     if not changes:
@@ -265,12 +271,20 @@ def _remap_sdl_ini(path: Path, section_fmt: str, order: list, players: int = 4):
             if cur is None or cur == changes[(sec, key)]:
                 back[(sec, key)] = was
                 continue
-            idx = re.search(r"\b(?:SDL|XInput)-(\d+)/", was)
+            idx = re.search(r"\b(?:SDL|XInput)-\d+/", was)
             if idx:
-                back[(sec, key)] = re.sub(r"\b(SDL|XInput)-\d+/", lambda m: f"{m.group(1)}-{idx.group(1)}/", cur)
+                back[(sec, key)] = re.sub(r"\b(SDL|XInput)-\d+/", lambda m: idx.group(0), cur)
         ini_edit(path, back)
         _restore_file().unlink(missing_ok=True)
     return restore
+
+
+def _remap_sdl_pads(adapter, order: list):
+    """DuckStation / PCSX2: kolejność padów (sloty XInput / „hid:…”) → numery SDL-n z SDL3.dll emulatora."""
+    from emustart import sdlpads
+    nums = sdlpads.slots_for(order, Path(adapter.exe).parent / "SDL3.dll")
+    hid = {i for i, s in enumerate(order) if pads.is_hid(s)}
+    return _remap_sdl_ini(adapter._ini(), "Pad{}", nums, hid=hid)
 
 
 def _session_ini(path: Path, changes: dict, defaults: dict | None = None):
@@ -633,20 +647,96 @@ class RetroArch(Adapter):
                       f'cheevos_token = "{ra["token"] if on else ""}"',
                       'cheevos_password = ""',
                       f'cheevos_hardcore_mode_enable = "{"true" if on and ra.get("hardcore") else "false"}"']
-        # sterownik xinput: indeks pada = slot XInput
-        for p, slot in enumerate((pad_order or [])[:4]):
-            lines.append(f'input_player{p + 1}_joypad_index = "{slot}"')
+        # sterownik xinput: indeks pada = slot XInput; pad HID (sterownik xinput w RetroArchu to
+        # XInput + DirectInput) — jego miejsce na liście urządzeń DirectInput
+        order = (pad_order or [])[:4]
+        di = hidpad.dinput_devices() if any(pads.is_hid(s) for s in order) else []
+        for p, slot in enumerate(order):
+            idx = self._di_index(di, pads.hid_pad(slot)) if pads.is_hid(slot) else slot
+            if idx is not None:
+                lines.append(f'input_player{p + 1}_joypad_index = "{idx}"')
+        hid1 = pads.hid_pad(order[0]) if order and pads.is_hid(order[0]) else None
+        if hid1:
+            lines = self._hid_session(hid1, di, lines)
         cfg.write_text("\n".join(lines) + "\n", encoding="utf-8")
         return self._session_config(run_dir, lines) + ["--appendconfig", str(cfg)]
 
+    # numery przycisków sterownika xinput RetroArcha (A=0 … R3=9) → przycisk XInput
+    XI_BUTTONS = (xinput.A, xinput.B, xinput.X, xinput.Y, xinput.LB, xinput.RB, xinput.BACK, xinput.START,
+                  xinput.L3, xinput.R3)
+
+    @staticmethod
+    def _di_index(di: list, pad) -> int | None:
+        """Numer pada HID w RetroArchu = miejsce na liście DirectInput (wg VID:PID)."""
+        if pad is None:
+            return None
+        idx = next((i for i, (v, p, _n) in enumerate(di) if (v, p) == (pad.vid, pad.pid)), None)
+        return idx if idx is not None else (0 if not di else None)
+
+    def _hid_session(self, pad, di: list, lines: list) -> list:
+        """Gracz 1 to pad HID (PS, Switch, GameSir w trybie HID): skróty RetroArcha (zapisane w numeracji
+        XInput — retroarch.cfg i wymagane ustawienia) przeliczone na numery tego pada, tylko na czas gry;
+        brak profilu przycisków tego pada w autoconfig/dinput — dopisujemy go."""
+        try:
+            self._hid_autoconfig(pad, next((n for v, p, n in di if (v, p) == (pad.vid, pad.pid)), pad.name))
+        except OSError:
+            log.exception("RetroArch: profil pada HID")
+        cur = {k: v.strip('"') for k, v in _cfg_map(self.home / "retroarch.cfg").items()}
+        cur.update({k: v for k, v in self.policy.items()})
+        for ln in lines:
+            m = re.match(r"\s*([^=\s]+)\s*=\s*\"?(.*?)\"?\s*$", ln)
+            if m:
+                cur[m.group(1)] = m.group(2)
+        hk = {}
+        for k, v in cur.items():
+            if not k.endswith("_btn") or k.startswith("input_player") or not v.isdigit():
+                continue
+            n = int(v)
+            num = hidpad.number_of(pad.layout, self.XI_BUTTONS[n]) if n < len(self.XI_BUTTONS) else 0
+            hk[k] = str(num - 1) if num else "nul"
+        if not hk:
+            return lines
+        log.info("RetroArch: Gracz 1 = pad HID %s (%s) — skróty na czas gry: %s", pad.name, pad.layout,
+                 ", ".join(f"{k}={v}" for k, v in sorted(hk.items())))
+        keep = [ln for ln in lines if ln.split("=", 1)[0].strip() not in hk]
+        return keep + [f'{k} = "{v}"' for k, v in hk.items()]
+
+    def _hid_autoconfig(self, pad, di_name: str) -> None:
+        """Profil przycisków pada HID dla RetroArcha (autoconfig/dinput), gdy RetroArch go nie ma —
+        układ jak w hidpad.LAYOUTS (dolny przycisk = B RetroPada = A Xboxa)."""
+        d = self._cfg_dir("joypad_autoconfig_dir", "autoconfig") / "dinput"
+        if not d.is_dir():
+            return
+        for f in d.glob("*.cfg"):
+            m = _cfg_map(f)
+            if (m.get("input_vendor_id", "").strip('"') == str(pad.vid)
+                    and m.get("input_product_id", "").strip('"') == str(pad.pid)):
+                return
+        num = lambda mask: hidpad.number_of(pad.layout, mask)
+        binds = {"b": xinput.A, "a": xinput.B, "y": xinput.X, "x": xinput.Y, "l": xinput.LB, "r": xinput.RB,
+                 "l2": hidpad.LT, "r2": hidpad.RT, "l3": xinput.L3, "r3": xinput.R3,
+                 "select": xinput.BACK, "start": xinput.START}
+        lines = ['input_driver = "dinput"', f'input_device = "{di_name}"',
+                 f'input_device_display_name = "{pad.name}"',
+                 f'input_vendor_id = "{pad.vid}"', f'input_product_id = "{pad.pid}"']
+        lines += [f'input_{k}_btn = "{num(m) - 1}"' for k, m in binds.items() if num(m)]
+        lines += [f'input_{d_}_btn = "h0{d_}"' for d_ in ("up", "down", "left", "right")]
+        # osie DirectInput w RetroArchu: 0 X, 1 Y, 2 Z, 3 Rx, 4 Ry, 5 Rz
+        rx, ry = (2, 5) if {0x32, 0x35} <= set(pad.values) else (3, 4)
+        for side, ax in (("l_x", 0), ("l_y", 1), ("r_x", rx), ("r_y", ry)):
+            lines += [f'input_{side}_plus_axis = "+{ax}"', f'input_{side}_minus_axis = "-{ax}"']
+        name = re.sub(r'[<>:"/\\|?*]', "_", pad.name)
+        (d / f"EmuStart {name}.cfg").write_text("\n".join(lines) + "\n", encoding="utf-8")
+        log.info("RetroArch: profil przycisków pada HID %s → %s", pad.name, d / f"EmuStart {name}.cfg")
+
     # skróty pada jak w pozostałych emulatorach (hotkey.py): przytrzymany LB + A menu, Y zapis
-    # (kolejny numer), ↑/↓ slot, RB przyspieszenie, R3 zrzut, L3 nagrywanie
-    # (XInput w RetroArchu: A=0, Y=3, LB=4, RB=5, L3=8, R3=9)
+    # (kolejny numer), ↑/↓ slot (↑ = niższy numer, jak wyżej na liście), RB przyspieszenie,
+    # R3 zrzut, L3 nagrywanie (XInput w RetroArchu: A=0, Y=3, LB=4, RB=5, L3=8, R3=9)
     PAD_HOTKEYS = {"input_enable_hotkey_btn": "4", "input_menu_toggle_btn": "0", "input_save_state_btn": "3",
-                   "input_state_slot_increase_btn": "h0up", "input_state_slot_decrease_btn": "h0down",
+                   "input_state_slot_increase_btn": "h0down", "input_state_slot_decrease_btn": "h0up",
                    "input_toggle_fast_forward_btn": "5", "input_screenshot_btn": "9",
                    "input_recording_toggle_btn": "8", "savestate_auto_index": "true"}
-    _HOTKEYS_MARK = "emustart-skroty-lb.txt"
+    _HOTKEYS_MARK = "emustart-skroty-lb-2.txt"     # -2: odwrócone ↑/↓ (0.54.0)
 
     def _pad_hotkeys(self) -> None:
         """Domyślna konfiguracja EmuStart w retroarch.cfg — raz (znacznik obok retroarch.cfg); potem
@@ -948,7 +1038,7 @@ class DuckStation(Adapter):
         return filename.rsplit("_", 1)[0] + "_" if "_" in filename else ""
 
     def remap_pads(self, order: list):
-        return _remap_sdl_ini(self._ini(), "Pad{}", order)
+        return _remap_sdl_pads(self, order)
 
 
 class PCSX2(Adapter):
@@ -1084,7 +1174,7 @@ class PCSX2(Adapter):
         return parts[0] + "." if len(parts) == 3 else ""
 
     def remap_pads(self, order: list):
-        return _remap_sdl_ini(self._ini(), "Pad{}", order)
+        return _remap_sdl_pads(self, order)
 
 
 class Dolphin(Adapter):
@@ -1127,6 +1217,9 @@ class Dolphin(Adapter):
     def save_here_key(self) -> str:
         return self._hotkey("Save State/Save to Selected Slot", "CTRL+F12")
 
+    def load_here_key(self) -> str:
+        return self._hotkey("Load State/Load from Selected Slot", "CTRL+F9")
+
     def screenshot_key(self) -> str:
         return self._hotkey("General/Take Screenshot", "F9")
 
@@ -1155,13 +1248,36 @@ class Dolphin(Adapter):
     def prefix_of(self, filename: str) -> str:
         return filename.rsplit(".", 1)[0] + "." if "." in filename else ""
 
+    # nazwy, pod którymi SDL pokazuje pady obsługiwane własnym sterownikiem (HIDAPI); inne pady HID
+    # mają nazwę z układu EmuStart (sdlpads.mapping)
+    SDL_NAMES = {(0x054C, 0x05C4): "PS4 Controller", (0x054C, 0x09CC): "PS4 Controller",
+                 (0x054C, 0x0BA0): "PS4 Controller", (0x054C, 0x0CE6): "PS5 Controller",
+                 (0x054C, 0x0DF2): "PS5 Controller", (0x057E, 0x2009): "Nintendo Switch Pro Controller"}
+
     def remap_pads(self, order: list):
         path = self._user() / "Config" / "GCPadNew.ini"
         changes = {}
+        names: list = []
         for p, slot in enumerate(order[:4]):
             sec = f"GCPad{p + 1}"
-            dev = ini_section(path, sec).get("Device", "")
-            nd = re.sub(r"^(XInput|SDL)/\d+/", lambda m: f"{m.group(1)}/{slot}/", dev)
+            cur = ini_section(path, sec)
+            dev = cur.get("Device", "")
+            if pads.is_hid(slot):
+                # pad HID jest w Dolphinie tylko przez SDL: SDL/<n>/<nazwa SDL> (n — kolejny pad o tej
+                # nazwie); przypisania XInput → nazwy SDL (różnią się tylko A/B/X/Y: S/E/W/N)
+                pad = pads.hid_pad(slot)
+                if pad is None or not re.match(r"^(XInput|SDL)/\d+/", dev):
+                    continue
+                name = self.SDL_NAMES.get((pad.vid, pad.pid), pad.name.replace(",", " "))
+                nd = f"SDL/{names.count(name)}/{name}"
+                names.append(name)
+                if dev.startswith("XInput/"):
+                    for k, v in cur.items():
+                        nv = re.sub(r"\bButton ([ABXY])\b", lambda m: "Button " + "SEWN"["ABXY".index(m.group(1))], v)
+                        if nv != v:
+                            changes[(sec, k)] = nv
+            else:
+                nd = re.sub(r"^(XInput|SDL)/\d+/", lambda m: f"{m.group(1)}/{slot}/", dev)
             if nd != dev:
                 changes[(sec, "Device")] = nd
         if not changes:

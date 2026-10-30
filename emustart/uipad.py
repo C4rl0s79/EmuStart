@@ -1,4 +1,4 @@
-"""uipad — sterowanie interfejsem padem przez XInput (w Pythonie).
+"""uipad — sterowanie interfejsem padem przez XInput i pady HID (w Pythonie, hidpad.py).
 
 Gamepad API w WebView2 potrafi nie zauważyć pada, który rozłączył się i połączył
 ponownie w trakcie działania programu (np. pad Bluetooth uśpiony i wybudzony) —
@@ -16,7 +16,7 @@ import collections
 import threading
 import time
 
-from emustart import xinput
+from emustart import hidpad, xinput
 
 POLL = 1 / 60
 REPEAT_DELAY, REPEAT_SLOW, REPEAT_FAST, FAST_AFTER = 0.38, 0.075, 0.035, 1.6
@@ -31,6 +31,12 @@ _REPEATABLE = {"up", "down", "left", "right", "lb", "rb", "lt", "rt"}
 def _actions() -> set:
     """Wciśnięte akcje ze wszystkich padów (spusty jako lt/rt)."""
     out = set()
+    for _pad, b in hidpad.states():          # pady HID (PS, Switch, GameSir w trybie HID…)
+        out |= {a for mask, a in _BUTTONS if b & mask}
+        if b & hidpad.LT:
+            out.add("lt")
+        if b & hidpad.RT:
+            out.add("rt")
     if not xinput._dll:
         return out
     for slot in range(4):
@@ -63,7 +69,7 @@ class UiPad:
         self._held: dict = {}
         self._lock = threading.Lock()
         self.last_event = 0.0          # kiedy ostatnio pad coś nacisnął (monotonic)
-        if xinput.available():
+        if xinput.available() or hidpad.available():
             threading.Thread(target=self._loop, daemon=True, name="uipad").start()
 
     def poll(self) -> list:

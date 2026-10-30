@@ -634,6 +634,8 @@ const PAD_MODES = [["windows", "Jak w Windows (kolejność podłączenia)"], ["w
 const A_BTN = 0x1000, B_BTN = 0x2000;
 
 function padLabel(p) {
+  if (!p) return "?";
+  if (p.hid) return `${p.name} (${p.wireless ? "Bluetooth" : "USB"})`;
   return `Pad #${p.slot + 1}: ` + (p.wireless ? `bezprzewodowy${p.battery ? `, bateria ${p.battery}` : ""}` : "przewodowy");
 }
 async function openPads() {
@@ -661,8 +663,8 @@ function renderPads() {
   rows.push({ k: "Przypisz ręcznie", v: "naciśnij A na padzie każdego gracza", act: startPadAssign });
   PADS.rows = rows;
   const byslot = Object.fromEntries(st.pads.map((p) => [p.slot, p]));
-  const order = st.order.map((slot, i) => `<div class="setrow"><span class="k">Gracz ${i + 1}</span><span class="v">${esc(padLabel(byslot[slot]))}${byslot[slot].buttons ? " · ●" : ""}</span><span></span></div>`).join("")
-    || `<div class="setrow"><span class="k">Brak podłączonych padów XInput</span><span class="v">Pady PS: przez Steam Input albo DS4Windows</span><span></span></div>`;
+  const order = st.order.map((slot, i) => `<div class="setrow"><span class="k">Gracz ${i + 1}</span><span class="v">${esc(padLabel(byslot[slot]))}${byslot[slot]?.buttons ? " · ●" : ""}</span><span></span></div>`).join("")
+    || `<div class="setrow"><span class="k">Brak podłączonych padów</span><span class="v"></span><span></span></div>`;
   $("padList").innerHTML = `<div class="setrow head">Tryb</div>` +
     rows.map((r, i) => `<div class="setrow${i === PADS.idx ? " sel" : ""} action" data-i="${i}"><span class="k">${esc(r.k)}</span><span class="v">${esc(r.v)}</span><span></span></div>`).join("") +
     `<div class="setrow head">Kolejność graczy (stosowana przy starcie gry)</div>` + order;
@@ -671,7 +673,7 @@ function renderPads() {
   setHints([["a", "Wybierz"], ["b", "Wstecz"]]);
 }
 async function padsInput(a) {
-  if (PADS.assign) return;               // w trakcie przypisywania pad czytamy z XInput
+  if (PADS.assign) return;               // w trakcie przypisywania pad czytamy z XInput / HID
   const n = PADS.rows.length;
   if (a === "up") PADS.idx = (PADS.idx - 1 + n) % n;
   else if (a === "down") PADS.idx = (PADS.idx + 1) % n;

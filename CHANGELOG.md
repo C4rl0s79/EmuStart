@@ -8,6 +8,38 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.54.0] — 2026-10-30
+
+Zakres: klient (`hidpad.py`, `sdlpads.py`, `pads.py`, `hotkey.py`, `uipad.py`, `ingame.py`, `launcher.py`,
+`api.py`, `main.py`, `web/options.js`). Serwer i APK bez zmian.
+
+### Dodane
+- **Pady HID (nie-XInput) jako Gracz 1:** DualShock 4 / DualSense, Switch Pro, GameSir / 8BitDo w trybie
+  Bluetooth HID. Tylko API Windows, bez sterowników.
+  - Bierny odczyt pada (`hidpad.py`): nic nie wysyłamy do pada, emulator czyta go równolegle. Przyciski
+    według położenia (dolny = A), układy jak w Lumenie (sony / nintendo / android / xbox).
+  - Skróty LB + …, menu w grze i sterowanie interfejsem EmuStart działają na padzie HID.
+  - „Kolejność padów” pokazuje pady HID („GameSir-Nova 2 Lite (Bluetooth)”), można je ustawić jako Gracza 1.
+  - RetroArch (sterownik `xinput` bez zmian — widzi pady HID przez DirectInput): gdy Gracz 1 to pad HID,
+    skróty przeliczone na jego przyciski na czas gry, numer pada z kolejności DirectInput; brak profilu
+    przycisków pada — EmuStart dopisuje `autoconfig\dinput\EmuStart <nazwa>.cfg`.
+  - Emulatory na SDL: przy starcie gry `SDL_GAMECONTROLLERCONFIG` z układem padów HID, których SDL nie zna
+    (pliki ustawień bez zmian). DuckStation / PCSX2: `[Pad1]` → `SDL-n` pada HID (numer z SDL3.dll
+    emulatora), Dolphin: `GCPad1` → `SDL/0/<nazwa>` — na czas gry, z przywróceniem.
+
+### Zmienione
+- **LB + ↑ / ↓ jak znacznik na liście slotów:** ↑ = wyżej (niższy numer), ↓ = niżej. Gdy lista slotów jest
+  na ekranie (3 s po LB + ↑/↓): samo **A wczytuje** wybrany slot, **Y zapisuje** do niego, **B zamyka**
+  wybór (DuckStation, PCSX2, Dolphin, PPSSPP). RetroArch: nowy kierunek ↑/↓ wpisany raz do `retroarch.cfg`
+  (A / Y / B bez skrótu — RetroArch obsługuje pada sam).
+
+### Sprawdzone na żywo (GameSir Nova 2 Lite, Bluetooth HID)
+- Wszystkie przyciski, krzyżak, gałka; LB + A / Y / ↑ / ↓ / RB rozpoznane.
+- RetroArch 1.22.2 (snes9x): pad jako Gracz 1 z profilem EmuStart, LB + Y zapisał stan.
+- DuckStation: pad rozpoznany przez SDL3 jako „GameSir-Nova 2 Lite”, skróty LB wysłane, stany zapisane.
+- Nie sprawdzone: DualShock 4, Switch Pro, Dolphin z padem HID, pad XInput w RetroArchu po zmianie,
+  A / Y / B na liście slotów (nowe, po teście).
+
 ## [0.53.1] — 2026-10-30
 
 Zakres: kod QR logowania (`qr.py`), strona serwera (`web/portal/portal.css`). Zaktualizuj serwer.

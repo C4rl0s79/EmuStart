@@ -24,7 +24,7 @@ import zipfile
 from pathlib import Path
 
 from emustart import (bios, cache, emulators, hotkey, ingame, library, pads, savebundles, saveslots,
-                      paths, profiles, syncclient, systems, winutil)
+                      paths, profiles, sdlpads, syncclient, systems, winutil)
 
 log = logging.getLogger("emustart.launcher")
 FRESH = "__od_poczatku__"         # start_state: gra od początku, bez wczytywania stanu
@@ -482,7 +482,7 @@ class Session:
         self.phase = "running"
         try:
             try:
-                self.proc = subprocess.Popen(cmd, cwd=str(Path(exe).parent))
+                self.proc = subprocess.Popen(cmd, cwd=str(Path(exe).parent), env=sdlpads.env())
             except OSError as ex:
                 raise LaunchError(f"Nie udało się uruchomić emulatora: {ex}")
             if self.on_running:
@@ -688,7 +688,7 @@ class Session:
         self.phase, self.message = "running", ""
         t0 = time.monotonic()
         try:
-            self.proc = subprocess.Popen(cmd, cwd=str(Path(exe).parent))
+            self.proc = subprocess.Popen(cmd, cwd=str(Path(exe).parent), env=sdlpads.env())
         except OSError as ex:
             raise LaunchError(f"Nie udało się uruchomić emulatora: {ex}")
         if self.on_running:
