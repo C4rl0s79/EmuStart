@@ -37,7 +37,8 @@ Otwierają się **Ustawienia**:
 1. **Zaloguj** — link ze strony serwera (*Pokaż kod logowania* → *Kopiuj link*) albo adres
    serwera i kod ze strony ([logowanie urządzeń](EmuStart-Server#logowanie-urządzeń)).
    Biblioteka pobiera się z serwera.
-2. **Emulatory** — folder, w którym są (albo mają się zainstalować) emulatory,
+2. **Emulatory** — folder, w którym są (albo mają się zainstalować) emulatory; domyślnie
+   `Emulatory` w folderze programu (np. `D:\emustart\Emulatory`), zmiana — tutaj,
    np. `D:\emu\emulatory`.
 3. **Pamięć podręczna (pobrane gry)** — gdzie trzymać gry pobrane z serwera (domyślnie
    `cache\` obok programu).

@@ -8,11 +8,23 @@ import json
 from emustart import config, emulators, nasfs, paths, profiles
 
 
-def test_new_install_has_no_paths():
+def test_new_install_has_no_paths_but_emulators_next_to_program(monkeypatch):
+    monkeypatch.delenv("EMUSTART_HOME", raising=False)
     cfg = config.load()                                  # brak config.json
-    assert config.rom_roots(cfg) == [] and cfg["emu_root"] == "" and cfg["profiles_nas"] == ""
+    assert config.rom_roots(cfg) == [] and cfg["profiles_nas"] == ""
+    # emulatory: domyślnie „Emulatory” w folderze programu (jak cache) — bez wskazywania folderu
+    assert cfg["emu_root"] == str(paths.APP / "Emulatory")
     assert not nasfs.backend(cfg).online()                       # bez serwera — offline
     assert emulators._scan_root(__import__("pathlib").Path(cfg["emu_root"])) == ([], {})
+    paths.CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    paths.CONFIG_PATH.write_text(json.dumps({"emu_root": ""}), encoding="utf-8")
+    assert config.load()["emu_root"] == str(paths.APP / "Emulatory")   # puste = nie wybrano
+    # Lumen wybiera folder emulatorów sam; folder serwera jest tylko do odczytu
+    monkeypatch.setenv("EMUSTART_HOME", str(paths.APP))
+    assert config.load()["emu_root"] == ""
+    monkeypatch.delenv("EMUSTART_HOME")
+    monkeypatch.setattr(paths, "CONFIG_PATH", paths.SERVER / "config.json")
+    assert config.load()["emu_root"] == ""
 
 
 def test_existing_config_keeps_old_defaults():

@@ -7,6 +7,7 @@ nazwy folderu ES, bo to on jest tożsamością systemu w kolekcji użytkownika.
 from __future__ import annotations
 
 import json
+import os
 import threading
 from pathlib import Path
 
@@ -53,7 +54,19 @@ def load() -> dict:
             paths.CONFIG_PATH.replace(bak)
         except OSError:
             pass
+    if not cfg.get("emu_root") and default_emu_root():
+        cfg["emu_root"] = default_emu_root()
     return cfg
+
+
+def default_emu_root() -> str:
+    """Folder emulatorów, gdy nie wybrano innego: `Emulatory` w folderze programu (przenośnie,
+    jak `cache`) — emulatory z serwera instalują się od razu, bez wskazywania folderu. Nie dla
+    Lumen (EMUSTART_HOME: Lumen wybiera folder sam) ani folderu serwera (tylko do odczytu
+    dla zwykłych użytkowników)."""
+    if os.environ.get("EMUSTART_HOME") or paths.CONFIG_PATH.parent == paths.SERVER:
+        return ""
+    return str(paths.APP / "Emulatory")
 
 
 def save(cfg: dict) -> None:
