@@ -8,7 +8,28 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md). Otwarte po 0.55.0: Xenia 1c (logowanie przypiętego profilu na
 nowym urządzeniu — do sprawdzenia na żywo), Play! (miejsce kart), APK (te same reguły zapisów — brak środowiska do
-budowania), adaptery pozostałych samodzielnych emulatorów przy pierwszym użyciu, sprawdzenie na żywo (niżej).
+budowania), adaptery pozostałych samodzielnych emulatorów przy pierwszym użyciu, sprawdzenie na żywo (niżej);
+jedno zapytanie przygotowujące grę — po pomiarach kroków z prawdziwych startów.
+
+## [0.55.1] — 2026-11-02
+
+Zakres: serwer (`remote.py`, `savesync.py` — nowy `POST /v1/savesync/manifests`, dotychczasowe adresy bez zmian),
+klient Windows i Lumen (silnik): `syncclient.py`, `profiles.py`, `launcher.py`. APK bez zmian (nie używa zmienionych
+ścieżek; zmiana na serwerze tylko dodaje adres).
+
+### Poprawione
+- **Start gry — mniej zapytań do serwera:** przed grą 8 → 4, po grze 5 → 2 (emulator z zapisami w paczkach):
+  bez pytania o foldery zapisów, których nie ma, i bez osobnego sprawdzania serwera w każdym kroku.
+- **Zapisy po starcie programu:** manifesty wszystkich gier jednym zapytaniem zamiast jednego na grę (u użytkownika
+  46 zapytań przy każdym starcie). Starszy serwer — jak dotąd.
+- **Ustawienia:** nowy plik ustawień w nowej wersji nie jest już brany za zmianę zrobioną w emulatorze poza EmuStart.
+- **Log:** „czas do startu” podaje czas każdego kroku przygotowania gry.
+
+### Sprawdzone
+- testy (cały zestaw, w tym liczba zapytań przed grą i po niej, zbiorcze manifesty, starszy serwer, cudze konto).
+
+### Niesprawdzone
+- na żywo z serwerem; czasy kroków z prawdziwych startów.
 
 ### Plan (2026-11-02): mniej zbędnej pracy sieciowej (analiza funkcjonalna EmuStart + Lumen)
 Kolejność od największej korzyści przy najmniejszym ryzyku; każdy etap — założenia sprawdzone w kodzie przed zmianą.
