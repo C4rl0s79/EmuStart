@@ -24,7 +24,10 @@ Kolejność od największej korzyści przy najmniejszym ryzyku; każdy etap — 
    **Pomiar zrobiony:** linia „czas do startu” podaje czas każdego kroku (przeniesione profile, blokada, ustawienia,
    konto RA i emulator, foldery zapisów, zapisy gry, karty rdzeni). Samo zapytanie przygotowujące — po zebraniu
    pomiarów z prawdziwych startów (który krok naprawdę kosztuje).
-4. Ustawienia: odcisk bez fałszywego „zmienione poza EmuStart” po zmianie listy plików.
+4. Ustawienia: odcisk bez fałszywego „zmienione poza EmuStart” po zmianie listy plików. **Zrobione:** odcisk
+   pamięta listę plików ustawień; inna lista (nowa wersja) = „nie wiadomo”, nie zmiana w emulatorze. Konflikt
+   ustawień nie jest „po cichu”, jak podała analiza — trafia do listy konfliktów (`lumen_status.conflicts`,
+   panel zadań Lumena) — bez zmian.
 5. Zmiany architektoniczne z migracją danych (metadane LaunchBox na serwerze, jeden mechanizm synchronizacji
    zapisów, reguły zapisów jako dane) — osobna decyzja.
 

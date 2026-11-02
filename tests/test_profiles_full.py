@@ -923,3 +923,22 @@ def test_settings_changed_in_emulator_outside_emustart_are_kept(prof_env):
     assert ingame.ini_section(ini, "Pad1")["Cross"] == "SDL-0/X"
     s._profile_finish(ad, names)
     assert any("poza EmuStart" in h.get("label", "") for h in profiles.settings_history(pid, "duckstation"))
+
+
+def test_new_settings_file_in_a_new_version_is_not_a_change_outside_emustart(prof_env, monkeypatch):
+    """Nowa wersja dokłada plik do ustawień emulatora (np. retroarch-core-options.cfg) — to nie zmiana
+    zrobiona w emulatorze poza EmuStart; prawdziwa zmiana przy tej samej liście plików — dalej tak."""
+    cfg, tmp = prof_env
+    pid = profiles.first_id()
+    ad = _duck(tmp)
+    _write(ad.settings_base() / "extra.ini", b"[X]\nA = 1\n")
+    s = _session(cfg, pid)
+    s._profile_finish(ad, s._profile_prepare(ad))
+    assert profiles.changed_outside(ad) is None
+    monkeypatch.setattr(type(ad), "settings_files", lambda self: ["settings.ini", "gamesettings", "inputprofiles",
+                                                                  "extra.ini"])
+    assert profiles.changed_outside(ad) is None                          # inna lista plików — nie wiadomo
+    s = _session(cfg, pid)
+    s._profile_finish(ad, s._profile_prepare(ad))
+    ingame.ini_set(ad.settings_base() / "extra.ini", {("X", "A"): "2"})
+    assert profiles.changed_outside(ad) == pid                           # ta sama lista, zmiana pliku

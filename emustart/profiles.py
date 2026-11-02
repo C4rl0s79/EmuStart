@@ -1205,7 +1205,8 @@ def _fingerprint(adapter) -> dict:
 
 def _remember_seen(adapter, pid: int) -> None:
     try:
-        _write_atomic(_seen_file(adapter.family), json.dumps({"pid": pid, "files": _fingerprint(adapter)}))
+        _write_atomic(_seen_file(adapter.family), json.dumps({"pid": pid, "files": _fingerprint(adapter),
+                                                              "rels": list(adapter.settings_files())}))
     except OSError as ex:
         log.info("odcisk ustawień %s: %s", adapter.family, ex)
 
@@ -1220,6 +1221,8 @@ def changed_outside(adapter) -> int | None:
         return None
     if not isinstance(seen, dict) or not isinstance(seen.get("files"), dict):
         return None
+    if seen.get("rels") != list(adapter.settings_files()):
+        return None                          # inna lista plików ustawień (nowa wersja) — nie zmiana w emulatorze
     return int(seen["pid"]) if seen["files"] != _fingerprint(adapter) and get(int(seen.get("pid") or 0)) else None
 
 
