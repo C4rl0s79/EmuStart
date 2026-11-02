@@ -416,7 +416,8 @@ class Session:
             self.resumed = bool(resume)
 
             restore_pads = None
-            if not pads.is_identity(order):
+            # 2+ pady: numery SDL w DuckStation/PCSX2 mogą przesuwać inne interfejsy odbiornika (sdlpads.slots_for)
+            if not pads.is_identity(order) or len(order) > 1:
                 try:
                     restore_pads = adapter.remap_pads(order)
                 except Exception:

@@ -553,6 +553,57 @@ class Adapter:
         winutil.close_windows(proc.pid)
 
 
+# pady XInput, które RetroArch rozpoznaje po samym GUID (xinput_hybrid_joypad.c: common_xinput_guids)
+_RA_XINPUT_IDS = {(0x28DE, 0x11FF), (0x045E, 0x02A1), (0x045E, 0x028E)}
+
+
+def ra_ports(di: list, connected: list, xinput_ids: set) -> list:
+    """Porty padów w RetroArchu 1.22 (sterownik „xinput”, input/drivers_joypad/xinput_hybrid_joypad.c):
+    port = miejsce na liście DirectInput. Wpis o VID:PID urządzenia z interfejsem XInput dostaje kolejny
+    podłączony slot XInput — także inne interfejsy tego samego odbiornika (GameSir: 3 wpisy, 1 pad), które
+    zajmują wtedy nieistniejący slot: to port bez pada (None). Bez żadnego pada XInput sterownik się nie
+    uruchamia i RetroArch bierze „dinput”: wszystkie wpisy jako pady DirectInput.
+    Wynik: [("xinput", slot) | ("dinput", vid, pid) | None] w kolejności portów."""
+    if not any(connected):
+        return [("dinput", v, p) for v, p, _n in di]
+    out, nxt = [], 0
+    for v, p, _n in di:
+        while nxt < 3 and not connected[nxt]:
+            nxt += 1
+        if (v, p) in xinput_ids or (v, p) in _RA_XINPUT_IDS:
+            out.append(("xinput", nxt) if nxt < 4 and connected[nxt] else None)
+            nxt += 1
+        else:
+            out.append(("dinput", v, p))
+    return out
+
+
+def ra_player_ports(ports: list, order: list, players: int = 4) -> list:
+    """Kolejność padów EmuStart (sloty XInput / „hid:…”) → port RetroArcha dla Gracza 1…N. Gracze bez pada
+    dostają port bez urządzenia (za listą), żeby nie trafić na fantomowy port; pad, którego RetroArch nie
+    pokaże — None (bez zmiany)."""
+    used: set = set()
+    out = []
+    empty = len(ports)
+    for p in range(players):
+        if p >= len(order):
+            out.append(empty if empty < 16 else None)
+            continue
+        slot = order[p]
+        if pads.is_hid(slot):
+            pad = pads.hid_pad(slot)
+            want = ("dinput", pad.vid, pad.pid) if pad else None
+        else:
+            want = ("xinput", slot)
+        idx = next((i for i, e in enumerate(ports) if e == want and i not in used), None)
+        if idx is None and not pads.is_hid(slot):
+            idx = slot                                  # brak na liście DirectInput — jak dotąd: slot XInput
+        if idx is not None:
+            used.add(idx)
+        out.append(idx)
+    return out
+
+
 class RetroArch(Adapter):
     """Komendy sieciowe UDP (włączane na czas sesji przez --appendconfig).
     Wznowienie: autozapis RetroArcha przy wyjściu + autowczytanie przy starcie,
@@ -647,31 +698,26 @@ class RetroArch(Adapter):
                       f'cheevos_token = "{ra["token"] if on else ""}"',
                       'cheevos_password = ""',
                       f'cheevos_hardcore_mode_enable = "{"true" if on and ra.get("hardcore") else "false"}"']
-        # sterownik xinput: indeks pada = slot XInput; pad HID (sterownik xinput w RetroArchu to
-        # XInput + DirectInput) — jego miejsce na liście urządzeń DirectInput
+        # numery padów jak w RetroArchu (ra_ports): Gracz N = port N-tego pada z kolejności EmuStart,
+        # gracze bez pada — port bez urządzenia (nie fantomowy port z innego interfejsu odbiornika)
         order = (pad_order or [])[:4]
-        di = hidpad.dinput_devices() if any(pads.is_hid(s) for s in order) else []
-        for p, slot in enumerate(order):
-            idx = self._di_index(di, pads.hid_pad(slot)) if pads.is_hid(slot) else slot
-            if idx is not None:
-                lines.append(f'input_player{p + 1}_joypad_index = "{idx}"')
+        di = hidpad.dinput_devices() if order else []
+        if order:
+            ports = ra_ports(di, [xinput.buttons(i) is not None for i in range(4)], hidpad.xinput_ids())
+            for p, idx in enumerate(ra_player_ports(ports, order, 4)):
+                if idx is not None:
+                    lines.append(f'input_player{p + 1}_joypad_index = "{idx}"')
+            log.info("RetroArch: porty %s → gracze %s", ports, ra_player_ports(ports, order, 4))
         hid1 = pads.hid_pad(order[0]) if order and pads.is_hid(order[0]) else None
         if hid1:
             lines = self._hid_session(hid1, di, lines)
         cfg.write_text("\n".join(lines) + "\n", encoding="utf-8")
         return self._session_config(run_dir, lines) + ["--appendconfig", str(cfg)]
 
-    # numery przycisków sterownika xinput RetroArcha (A=0 … R3=9) → przycisk XInput
-    XI_BUTTONS = (xinput.A, xinput.B, xinput.X, xinput.Y, xinput.LB, xinput.RB, xinput.BACK, xinput.START,
+    # numery przycisków sterownika xinput RetroArcha (xinput_joypad_inl.h: A=0, B, X, Y, LB, RB, Start=6,
+    # Back=7, L3=8, R3=9, Guide=10) → przycisk XInput
+    XI_BUTTONS = (xinput.A, xinput.B, xinput.X, xinput.Y, xinput.LB, xinput.RB, xinput.START, xinput.BACK,
                   xinput.L3, xinput.R3)
-
-    @staticmethod
-    def _di_index(di: list, pad) -> int | None:
-        """Numer pada HID w RetroArchu = miejsce na liście DirectInput (wg VID:PID)."""
-        if pad is None:
-            return None
-        idx = next((i for i, (v, p, _n) in enumerate(di) if (v, p) == (pad.vid, pad.pid)), None)
-        return idx if idx is not None else (0 if not di else None)
 
     def _hid_session(self, pad, di: list, lines: list) -> list:
         """Gracz 1 to pad HID (PS, Switch, GameSir w trybie HID): skróty RetroArcha (zapisane w numeracji

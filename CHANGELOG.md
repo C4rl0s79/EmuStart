@@ -8,6 +8,40 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.54.3] — 2026-11-02
+
+Zakres: klient Windows i Lumen (silnik): `ingame.py`, `sdlpads.py`, `hidpad.py`, `launcher.py`. Serwer i APK
+bez zmian (Android nie ma DirectInput ani tych interfejsów).
+
+### Poprawione
+- **Każdy pad widoczny raz — bez fantomowych graczy.** Odbiornik GameSira w trybie XInput (`3537:1098`) ma
+  3 interfejsy, które DirectInput i SDL biorą za pady (`IG_00` — pad, `MI_01&COL02`, `MI_02`), więc emulatory
+  widziały 3 pady i drugi prawdziwy pad trafiał na dalszy numer. Na czas gry, z przywróceniem jak dotąd:
+  - **RetroArch:** EmuStart odtwarza numerację portów RetroArcha 1.22 (lista DirectInput + rozpoznawanie
+    padów XInput po VID:PID jak `xinput_hybrid_joypad.c`, także przejście na `dinput`, gdy nie ma żadnego
+    pada XInput) i ustawia `input_playerN_joypad_index`: Gracz N = port N-tego pada z kolejności EmuStart
+    (XInput i HID). Gracze bez pada dostają port bez urządzenia, nie fantomowy. Sterownik `xinput` zostaje.
+  - **DuckStation / PCSX2:** przy 2+ padach (nie tylko przy zmienionej kolejności) `[PadN]` → `SDL-n` każdego
+    pada odczytane z SDL3.dll emulatora (pad XInput po „XInput#slot”, pad HID po ścieżce). Interfejsy
+    odbiornika są pomijane.
+- **RetroArch, pad HID jako Gracz 1:** zamienione numery Start / Back w przeliczaniu skrótów
+  (`xinput_joypad_inl.h`: Start = 6, Back = 7).
+
+### Bez zmian
+- **Dolphin:** pady XInput są przypisane po slocie (`XInput/N`), więc fantomów nie ma. Pad HID jest przypisany
+  po nazwie SDL (`SDL/<n>/<nazwa>`, n liczone wśród padów o tej samej nazwie), więc interfejsy odbiornika
+  o innej nazwie go nie przesuwają. Pad XInput ustawiony w Dolphinie jako `SDL/<n>/…` dalej dostaje numer
+  slotu, bez odczytu SDL (z planu, niezrobione). **PPSSPP:** jeden gracz, nie dotyczy. **RPCS3:** EmuStart nie przepina tu padów (jak
+  dotąd), więc fantomowe interfejsy mogą przesunąć Gracza 2 — do zrobienia osobno.
+- Lista gier, menu, układ przycisków, skróty LB.
+
+### Sprawdzone
+- testy: numeracja portów RetroArcha z odbiornikiem GameSira (fantomy, pady mieszane XInput + HID, przejście
+  na `dinput`), plik sesji RetroArcha, numery SDL z pominięciem interfejsów odbiornika; cały zestaw testów.
+
+### Niesprawdzone
+- na żywo z dwoma padami (GameSir przez odbiornik + drugi pad) w RetroArchu, DuckStation i PCSX2.
+
 ## [0.54.2] — 2026-10-30
 
 Zakres: klient Windows i serwer (`updater.py`). APK bez zmian.

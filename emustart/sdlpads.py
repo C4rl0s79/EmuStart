@@ -186,11 +186,13 @@ def index_of(joys: list, pad) -> int | None:
 
 
 def slots_for(order: list, sdl_dll: Path | None) -> list:
-    """Kolejność padów (sloty XInput / „hid:…”) → numery SDL-n emulatora. Slot XInput = jego numer
-    (jak dotąd); pad HID — z SDL3.dll emulatora, a gdy się nie da: None (bez przepinania)."""
+    """Kolejność padów (sloty XInput / „hid:…”) → numery SDL-n emulatora (z SDL3.dll emulatora: pad XInput
+    po „XInput#slot”, pad HID po ścieżce). Przy 2+ padach zawsze z odczytu — inne interfejsy odbiornika
+    (np. GameSir: klawisze multimedialne, interfejs producenta) też są w SDL joystickami i przesuwają numery.
+    Bez odczytu: slot XInput = jego numer (jak dotąd), pad HID — None (bez przepinania)."""
     from emustart import pads
-    if not any(pads.is_hid(s) for s in order):
-        return list(order)
+    if not any(pads.is_hid(s) for s in order) and len(order) < 2:
+        return list(order)                      # jeden pad XInput: SDL-0 = slot 0, bez odczytu
     joys = probe(sdl_dll) if sdl_dll and sdl_dll.is_file() else None
     out = []
     for s in order:
