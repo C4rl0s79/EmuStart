@@ -347,20 +347,60 @@ def ra_folder(adapter, core: str, content: Path, key: str, default: str, by_cont
     return d
 
 
-def ra_core_option(adapter, core: str, key: str) -> str:
-    """Wartość opcji rdzenia z pliku opcji, którego używa ten RetroArch (wspólny plik albo plik rdzenia
-    config/<rdzeń>/<rdzeń>.opt; pliki .opt gry i folderu — bez znaczenia tutaj)."""
+def ra_core_options_file(adapter, core: str) -> Path:
+    """Plik opcji rdzenia, który czyta ten RetroArch: wspólny (global_core_options albo gdy plik rdzenia
+    config/<rdzeń>/<rdzeń>.opt jeszcze nie istnieje — wtedy RetroArch czyta wspólny) albo plik rdzenia.
+    Pliki .opt gry i folderu nie są tu brane pod uwagę."""
     from emustart.ingame import _ini_value
     main = adapter.home / "retroarch.cfg"
-    if _ini_value(main, "global_core_options") == "true":
-        p = _ini_value(main, "core_options_path")
-        if p.startswith(":"):
-            p = str(adapter.home) + p[1:]
-        f = Path(p) if p else adapter.home / "retroarch-core-options.cfg"
-    else:
-        name = core_name(adapter.home, core)
-        f = adapter.home / "config" / name / f"{name}.opt"
+    name = core_name(adapter.home, core)
+    own = adapter.home / "config" / name / f"{name}.opt"
+    if _ini_value(main, "global_core_options") != "true" and own.is_file():
+        return own
+    p = _ini_value(main, "core_options_path")
+    if p.startswith(":"):
+        p = str(adapter.home) + p[1:]
+    return Path(p) if p else adapter.home / "retroarch-core-options.cfg"
+
+
+def ra_core_option(adapter, core: str, key: str) -> str:
+    """Wartość opcji rdzenia z pliku opcji, którego używa ten RetroArch („” — brak)."""
+    from emustart.ingame import _ini_value
+    f = ra_core_options_file(adapter, core)
     return _ini_value(f, key) if f.is_file() else ""
+
+
+# Rdzenie z kartą wspólną dla gier w system\ i opcją osobnej karty dla gry (źródła / pliki rdzeni):
+# rdzeń → (wspólna karta w system\, przyrostek karty gry w katalogu zapisów, opcja, wartości „osobna karta”)
+RA_SHARED_CARDS = {
+    "flycast": (("dc", "vmu_save_A1.bin"), ".A1.bin", "reicast_per_content_vmus", ("VMU A1", "All VMUs")),
+    "pcsx2": (("pcsx2", "memcards", "Mcd001.ps2"), ".ps2", "pcsx2_shared_memory_cards", ("disabled",)),
+}
+
+
+def seed_from_shared(adapter, core: str, content: Path, game: dict) -> list:
+    """Pierwsza gra z osobną kartą: kopia wspólnej karty z system\\ (dotychczasowe zapisy są dalej widoczne).
+    Bez kopii, gdy gra ma już kartę albo rdzeń używa jeszcze wspólnej. Wspólna karta zostaje nietknięta."""
+    c = (core or "").lower()
+    spec = RA_SHARED_CARDS.get(c)
+    if adapter.family != "retroarch" or not spec:
+        return []
+    shared, sfx, key, on = spec
+    if ra_core_option(adapter, core, key) not in on:
+        return []
+    src = Path(adapter._cfg_dir("system_directory", "system")).joinpath(*shared)
+    b = next((x for x in for_game(adapter, core, content, game) if (x.emulator_id, x.kind) == ("retroarch", "saves")),
+             None)
+    if b is None or not src.is_file() or any(arc == ARC + sfx for _p, arc in b.files):
+        return []
+    dst = b.folder / (b.stem + sfx)
+    if dst.exists():
+        return []
+    import shutil
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src, dst)
+    log.info("karta gry z kopii wspólnej: %s → %s", src, dst)
+    return [dst]
 
 
 def ra_save_subdir(adapter, core: str) -> tuple:

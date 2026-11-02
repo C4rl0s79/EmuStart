@@ -804,6 +804,28 @@ class RetroArch(Adapter):
         except OSError:
             log.exception("RetroArch: skróty pada")
 
+    # opcje rdzeni: osobna karta dla każdej gry zamiast wspólnej w system\ (zapisy gry — w paczce gry)
+    CORE_DEFAULTS = {"flycast": ("reicast_per_content_vmus", "VMU A1"),
+                     "pcsx2": ("pcsx2_shared_memory_cards", "disabled")}
+    _CORE_OPTS_MARK = "emustart-opcje-rdzeni-1.txt"
+
+    def core_defaults(self) -> None:
+        """Domyślne opcje rdzeni EmuStart — raz (znacznik obok retroarch.cfg), w pliku opcji, który czyta ten
+        RetroArch; potem gracz może je zmienić. Pozostałe opcje w pliku zostają."""
+        from emustart import savebundles
+        mark = self.home / self._CORE_OPTS_MARK
+        if mark.exists() or not (self.home / "retroarch.cfg").is_file():
+            return
+        try:
+            for core, (key, val) in self.CORE_DEFAULTS.items():
+                f = savebundles.ra_core_options_file(self, core)
+                f.parent.mkdir(parents=True, exist_ok=True)
+                ini_set(f, {(None, key): f'"{val}"'})
+            mark.write_text("opcje rdzeni: osobna karta dla każdej gry (Flycast, LRPS2)\n", encoding="utf-8")
+            log.info("RetroArch: opcje rdzeni — osobna karta dla każdej gry")
+        except OSError:
+            log.exception("RetroArch: opcje rdzeni")
+
     def config_args(self, run_dir: Path) -> list:
         """RetroArch bez gry, w menu — ustawienia (obraz, dźwięk, sterowanie) zmienione
         tu trafiają do profilu tak jak zmiany w trakcie gry."""

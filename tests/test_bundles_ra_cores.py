@@ -224,3 +224,57 @@ def test_puae_whdsaves_reach_second_device(net):
     savebundles.remember_downloaded([b2])
     assert (tel / "saves" / "PUAE" / "WHDSaves" / "MonkeyIsland" / "savegame.1").read_bytes() == b"ZAPIS"
     assert [arc for _p, arc in whd(a2, tmp / "dev2").files] == ["MonkeyIsland/savegame.1"]
+
+
+# ── Flycast i LRPS2: osobna karta dla gry zamiast wspólnej w system\ ──
+
+def opts(home: Path, text: str, global_opts: bool = True) -> None:
+    _write(home / "retroarch.cfg", (home / "retroarch.cfg").read_bytes()
+           + (b'global_core_options = "true"\n' if global_opts else b'global_core_options = "false"\n'))
+    if text:
+        _write(home / "retroarch-core-options.cfg", text.encode())
+
+
+def test_core_defaults_once_in_the_file_retroarch_reads(env, tmp_path):
+    home = tmp_path / "RetroArch"
+    a = ra(home, "flycast", "Flycast")
+    _write(home / "info" / "pcsx2_libretro.info", b'corename = "LRPS2"\n')
+    opts(home, 'reicast_internal_resolution = "1280x960"\n')
+    a.core_defaults()
+    text = (home / "retroarch-core-options.cfg").read_text()
+    assert 'reicast_per_content_vmus = "VMU A1"' in text and 'pcsx2_shared_memory_cards = "disabled"' in text
+    assert 'reicast_internal_resolution = "1280x960"' in text           # pozostałe opcje gracza zostają
+    (home / "retroarch-core-options.cfg").write_text('reicast_per_content_vmus = "disabled"\n')
+    a.core_defaults()                                                     # raz: zmiana gracza zostaje
+    assert (home / "retroarch-core-options.cfg").read_text() == 'reicast_per_content_vmus = "disabled"\n'
+
+
+def test_core_defaults_per_core_file_when_it_exists(env, tmp_path):
+    home = tmp_path / "RetroArch"
+    a = ra(home, "flycast", "Flycast")
+    opts(home, "", global_opts=False)
+    _write(home / "config" / "Flycast" / "Flycast.opt", b'reicast_widescreen_hack = "enabled"\n')
+    a.core_defaults()
+    assert 'reicast_per_content_vmus = "VMU A1"' in (home / "config" / "Flycast" / "Flycast.opt").read_text()
+    # LRPS2 bez własnego pliku: RetroArch czyta wtedy wspólny plik — tam trafia opcja
+    assert 'pcsx2_shared_memory_cards = "disabled"' in (home / "retroarch-core-options.cfg").read_text()
+    assert savebundles.ra_core_option(a, "flycast", "reicast_per_content_vmus") == "VMU A1"
+
+
+@pytest.mark.parametrize("core, corename, shared, sfx, opt", [
+    ("flycast", "Flycast", ("dc", "vmu_save_A1.bin"), ".A1.bin", 'reicast_per_content_vmus = "VMU A1"'),
+    ("pcsx2", "LRPS2", ("pcsx2", "memcards", "Mcd001.ps2"), ".ps2", 'pcsx2_shared_memory_cards = "disabled"')])
+def test_first_card_of_a_game_copied_from_shared(env, tmp_path, core, corename, shared, sfx, opt):
+    home = tmp_path / "RetroArch"
+    a = ra(home, core, corename, sort=False)
+    rom = _write(tmp_path / "roms" / "Gra (USA).chd")
+    game = {"es": "dc", "name": "Gra (USA)", "rel": "Gra (USA).chd"}
+    src = _write(home.joinpath("system", *shared), b"WSPOLNA KARTA")
+    assert savebundles.seed_from_shared(a, core, rom, game) == []      # opcja wyłączona — rdzeń używa wspólnej
+    opts(home, opt + "\n")
+    [dst] = savebundles.seed_from_shared(a, core, rom, game)
+    assert dst == home / "saves" / f"Gra (USA){sfx}" and dst.read_bytes() == b"WSPOLNA KARTA"
+    assert src.read_bytes() == b"WSPOLNA KARTA"                           # wspólna karta nietknięta
+    dst.write_bytes(b"KARTA GRY")
+    assert savebundles.seed_from_shared(a, core, rom, game) == []      # gra ma już kartę — bez kopii
+    assert dst.read_bytes() == b"KARTA GRY"

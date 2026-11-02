@@ -370,6 +370,12 @@ class Session:
             if save_names:
                 profiles.unlock(self.cfg, self.profile_id)
             raise
+        if adapter.family == "retroarch":
+            try:   # osobna karta dla każdej gry (Flycast, LRPS2); pierwsza — kopia wspólnej z system\
+                adapter.core_defaults()
+                savebundles.seed_from_shared(adapter, savebundles.core_id(args), Path(rom), ps2_info(self.cfg, g))
+            except Exception:
+                log.exception("karta gry")
         self._t_prof = time.monotonic() - t_prof
         try:
             adapter.keyboard_game = systems.info(g["es"])["plat"] in systems.COMPUTER_PLATS

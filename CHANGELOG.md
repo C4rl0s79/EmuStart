@@ -66,10 +66,9 @@ i panelem serwera — największa część). Każdy krok: testy, potem sprawdzen
 |---|---|---|---|
 | 4. Dolphin i PPSSPP (rdzenie) | 10 testów, cały zestaw 419 ✓ | czeka — nikt jeszcze nie grał tymi rdzeniami | `7acab25` |
 | 4b-1. FBNeo (`fbneo\<set>.fs`), Kronos (`kronos\saturn\<gra>.ram`, `-ext*.ram`; z `kronos_use_beetle_saves` — wprost), rozszerzenia `.fs` `.ps2` `.nvr`, karta Flycast `<gra>.A1.bin` | 5 testów, cały zestaw 424 ✓ | czeka | `b31a9c5` |
-| 4b-2. Nauczone nazwy (karta / podfolder zmieniony w czasie gry, bez nazw innych gier rdzenia; pobranie paczki gry też uczy) + PUAE `WHDSaves\<gra>\` (paczka `retroarch/puae/memcards`; obraz `WHDSaves.hdf` — wspólny dla gier, bez synchronizacji) | 4 testy (Flycast: ID gry, nazwy innych gier; PUAE: podfolder, drugie urządzenie), cały zestaw 428 ✓; podpięcie w `launcher._sync_before/_sync_after` bez osobnego testu | czeka | (ten etap) |
+| 4b-2. Nauczone nazwy (karta / podfolder zmieniony w czasie gry, bez nazw innych gier rdzenia; pobranie paczki gry też uczy) + PUAE `WHDSaves\<gra>\` (paczka `retroarch/puae/memcards`; obraz `WHDSaves.hdf` — wspólny dla gier, bez synchronizacji) | 4 testy (Flycast: ID gry, nazwy innych gier; PUAE: podfolder, drugie urządzenie), cały zestaw 428 ✓; podpięcie w `launcher._sync_before/_sync_after` bez osobnego testu | czeka | `3100cd0` |
+| 2 + 3. Flycast i LRPS2 — osobna karta dla gry: opcje `reicast_per_content_vmus` = „VMU A1”, `pcsx2_shared_memory_cards` = „disabled” raz (znacznik `emustart-opcje-rdzeni-1.txt`) w pliku opcji, który czyta RetroArch; pierwsza karta gry — kopia wspólnej (`system\dc\vmu_save_A1.bin`, `system\pcsx2\memcards\Mcd001.ps2`), także bez synchronizacji; karta gry w paczce zapisów gry (z rozdzieleniem na graczy) | 4 testy (plik opcji: wspólny / rdzenia, raz; kopia karty: Flycast, LRPS2), cały zestaw 432 ✓; podpięcie w `launcher._play` bez osobnego testu | czeka (Flycast: nazwa karty pod ID gry i odczyt starszej nazwy — z kodu rdzenia, nie z gry) | (ten etap) |
 | 4b-3. Play! (PS2) | — | **zablokowane:** miejsce kart (`Play Data Files\…\mc0`) do ustalenia na żywo — rdzeń nie był uruchomiony | — |
-| 2. Flycast — karty VMU osobno dla gry | — | — | — |
-| 3. LRPS2 | — | — | — |
 | 1. Xenia Edge — profile graczy, panel serwera | — | — | — |
 | 7. APK — te same reguły w `Saves.kt` (rozszerzenia, przyrostki, podfoldery FBNeo, rdzenie Dolphin/PPSSPP, Flycast) | — | — | — |
 | 5. Silnik Lumena (`git subtree`) | — | — | — |
@@ -86,8 +85,13 @@ Ryzyka: (a) podfolder `WHDSaves` przypisany źle (dwie gry WHDLoad z tym samym f
 obejmie cudzy folder; WHDLoad nazywa folder od gry, więc mało prawdopodobne. (b) Nazwy poznane są zapisane na
 urządzeniu (baza biblioteki), nie na serwerze — drugie urządzenie poznaje je z paczki gry albo po swojej grze.
 
-Następny krok: 2 — Flycast: opcja `reicast_per_content_vmus` = „VMU A1” (raz, jako domyślna), pierwsza karta gry
-z kopii wspólnej `system\dc\vmu_save_A1.bin`.
+(c) Kopia wspólnej karty dla pierwszej gry zawiera też zapisy innych gier (i graczy, którzy grali na wspólnej karcie);
+wspólna karta zostaje nietknięta. (d) Flycast „VMU A1”: karty B1–D1 dalej wspólne w `system\dc\`, bez synchronizacji.
+(e) Opcje rdzeni wpisane raz nadpisują wcześniejszy wybór „wspólna karta” (jak skróty LB w 0.52.4); pliki `.opt`
+gry / folderu mają pierwszeństwo w RetroArchu i nie są zmieniane.
+
+Następny krok: 1 — Xenia Edge: paczka zapisów gry względem `content\<XUID>\` (numer gry poznany po grze), potem
+profile graczy (przypięcie w panelu serwera, podmiana `content\` na czas gry).
 
 Moduły: klient Windows i Lumen (silnik `engine/`) — zmiana; serwer — nowe rodzaje paczek (format jak dotychczas);
 APK — Flycast (RetroArch na Androidzie) przez tę samą kartę w `saves\`, Xenia i LRPS2 — nie dotyczy (nie ma ich
