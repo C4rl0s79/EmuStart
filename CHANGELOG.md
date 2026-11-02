@@ -159,6 +159,33 @@ Następny krok (wymaga użytkownika): sprawdzenie na żywo z listy w checkliści
 scalenie / tag EmuStart 0.55.0 i wydanie Lumena 1.0.35; osobno — sprawdzenie formatu `xenia-edge.config.toml` (1c),
 miejsca kart Play! i środowisko do budowania APK.
 
+### Plan (zaakceptowany 2026-11-02): zapisy i ustawienia gracza w każdym emulatorze
+Zasada nadrzędna (użytkownik, 2026-11-02): architektura klient/serwer jest po to, żeby zapisy **i ustawienia** gracza
+przechodziły między klientami, niezależnie od platformy i emulatora; luka w rozdzieleniu na graczy albo w
+synchronizacji to praca do zrobienia, nie przyjęte ograniczenie.
+
+Stan sprawdzony 2026-11-02 (kod + instalacje użytkownika, jeden gracz na każdej): zapisy na gracza — RetroArch (wszystkie
+rdzenie), DuckStation, PCSX2, samodzielny Dolphin (dowiązania `User\GC`, `Wii`, `StateSaves` → `profiles\<gracz>\dolphin`),
+PPSSPP, RPCS3. Ustawienia na gracza — tylko RetroArch (`retroarch.cfg`, `config\`), DuckStation, PCSX2. **Wspólne dla
+wszystkich graczy:** ustawienia Dolphina (`User\Config`), PPSSPP, RPCS3, opcje rdzeni RetroArcha
+(`retroarch-core-options.cfg`), `system\Xenia-Edge\content` (profil i zapisy Xboksa). Emulatory bez adaptera (samodzielne
+melonDS, mGBA, Snes9x, Xenia, ares, Cemu, Ryujinx, Azahar, Vita3K, xemu, MAME, shadPS4) — ani rozdzielenia, ani
+synchronizacji. Używane u użytkownika: prawie wszystko przez rdzenie RetroArcha (Xbox 360: `xenia_edge`), samodzielne
+Dolphin (GC, Wii) i PCSX2 (PS2); PS3 i PS Vita — domyślne (RPCS3, Vita3K).
+
+Zmiany (kolejność):
+1. Ustawienia na gracza: Dolphin (`User\Config`, bez kluczy komputera — karta graficzna, ścieżki), PPSSPP, RPCS3, opcje
+   rdzeni RetroArcha (`retroarch-core-options.cfg`). Opcje Flycast / LRPS2 (osobna karta gry) — wpisywane, gdy plik gracza
+   ich nie ma (zamiast jednego znacznika na komputer): wybór gracza nigdy nie jest nadpisany, każdy gracz ma je u siebie.
+2. Xenia (rdzeń): `system\Xenia-Edge\content` jako dowiązanie do folderu gracza (jak foldery Dolphina); aktualizacje i DLC
+   (`content\0000000000000000`) wspólne. Zastępuje „profil jednego gracza” i blokadę przy kilku profilach.
+3. Slot zapisów osobno dla emulatora (rdzeń i samodzielny emulator tej samej gry).
+4. Adaptery samodzielnych emulatorów — najpierw domyślne dla systemów w bibliotece (RPCS3 już jest; Vita3K), potem
+   pozostałe przy użyciu.
+5. Sprawdzenie, że ustawienia gracza przechodzą między klientami przez serwer (nie tylko lokalne rozdzielenie).
+
+Nie zmienia się: zapisy i ustawienia RetroArcha, DuckStation, PCSX2 (już na gracza), lista gier, sterowanie.
+
 Moduły: klient Windows i Lumen (silnik `engine/`) — zmiana; serwer — nowe rodzaje paczek (format jak dotychczas);
 APK — Flycast (RetroArch na Androidzie) przez tę samą kartę w `saves\`, Xenia i LRPS2 — nie dotyczy (nie ma ich
 na Androidzie). Nie zmienia się: zapisy pozostałych rdzeni i emulatorów, lista gier, sterowanie.
