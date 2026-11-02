@@ -337,3 +337,17 @@ def test_player_settings_reach_second_client(prof_env, monkeypatch, kind):
     assert read_b() == "6" and read_machine() == "9"
     s._release_dirs()
     s._profile_finish(ad_b, names)
+
+
+# ── czas przygotowania do gry: kroki w logu „czas do startu” ──
+
+def test_profile_prepare_records_step_times(prof_env):
+    cfg, tmp = prof_env
+    ad = _dolphin(tmp)
+    s = _session(cfg, profiles.first_id())
+    names = s._profile_prepare(ad)
+    assert [n for n, _t in s._steps] == ["przeniesione profile", "blokada", "ustawienia", "konto RA, emulator",
+                                         "foldery zapisów"]
+    assert all(t >= 0 for _n, t in s._steps)
+    s._release_dirs()
+    s._profile_finish(ad, names)

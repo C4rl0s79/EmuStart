@@ -21,6 +21,9 @@ Kolejność od największej korzyści przy najmniejszym ryzyku; każdy etap — 
      rzadkie akcje administratora (grafiki, opis).
 2. Biblioteka w Lumenie: zmiany pojedynczych gier zamiast pełnej listy (53 tys. gier, 29 MB) po każdej grze.
 3. Start gry: jedno zapytanie przygotowujące zamiast kilku kolejnych (1,5–2,6 s) — najpierw pomiar kroków.
+   **Pomiar zrobiony:** linia „czas do startu” podaje czas każdego kroku (przeniesione profile, blokada, ustawienia,
+   konto RA i emulator, foldery zapisów, zapisy gry, karty rdzeni). Samo zapytanie przygotowujące — po zebraniu
+   pomiarów z prawdziwych startów (który krok naprawdę kosztuje).
 4. Ustawienia: odcisk bez fałszywego „zmienione poza EmuStart” po zmianie listy plików.
 5. Zmiany architektoniczne z migracją danych (metadane LaunchBox na serwerze, jeden mechanizm synchronizacji
    zapisów, reguły zapisów jako dane) — osobna decyzja.
