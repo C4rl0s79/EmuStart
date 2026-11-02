@@ -8,6 +8,13 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+## [0.54.2] — 2026-10-30
+
+Zakres: klient Windows i serwer (`updater.py`). APK bez zmian.
+
+### Poprawione
+- **Aktualizacja stała w miejscu, gdy w PATH brakuje `C:WindowsSystem32`:** skrypt podmiany wołał `robocopy` i `schtasks` bez ścieżki — nie istniały, pusty kod wyjścia uznawany był za sukces, a pobrana wersja kasowana (program wracał do starej wersji). Teraz pełne ścieżki z folderu systemowego, a pusty kod = błąd i powrót do kopii zapasowej. Działa od następnej aktualizacji (skrypt tworzy wersja już zainstalowana); z wersji bez tej poprawki — raz ręcznie paczka ze strony.
+
 ## [0.54.1] — 2026-10-30
 
 Zakres: klient Windows (`winutil.py`, `api.py`, `config.py`). Serwer, APK i Lumen bez zmian
