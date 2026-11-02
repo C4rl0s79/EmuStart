@@ -65,14 +65,25 @@ i panelem serwera — największa część). Każdy krok: testy, potem sprawdzen
 | Etap | Testy (fixture'y) | Na żywo (prawdziwy emulator) | Commit |
 |---|---|---|---|
 | 4. Dolphin i PPSSPP (rdzenie) | 10 testów, cały zestaw 419 ✓ | czeka — nikt jeszcze nie grał tymi rdzeniami | `7acab25` |
-| 4b. FBNeo, PUAE, Kronos, Play! | — | — | — |
+| 4b-1. FBNeo (`fbneo\<set>.fs`), Kronos (`kronos\saturn\<gra>.ram`, `-ext*.ram`; z `kronos_use_beetle_saves` — wprost), rozszerzenia `.fs` `.ps2` `.nvr`, karta Flycast `<gra>.A1.bin` | 5 testów, cały zestaw 424 ✓ | czeka | (ten etap) |
+| 4b-2. Nauczone nazwy (plik / podfolder zmieniony w czasie gry) + PUAE `WHDSaves\<gra>\` | — | — | — |
+| 4b-3. Play! (PS2) | — | **zablokowane:** miejsce kart (`Play Data Files\…\mc0`) do ustalenia na żywo — rdzeń nie był uruchomiony | — |
 | 2. Flycast — karty VMU osobno dla gry | — | — | — |
 | 3. LRPS2 | — | — | — |
 | 1. Xenia Edge — profile graczy, panel serwera | — | — | — |
+| 7. APK — te same reguły w `Saves.kt` (rozszerzenia, przyrostki, podfoldery FBNeo, rdzenie Dolphin/PPSSPP, Flycast) | — | — | — |
 | 5. Silnik Lumena (`git subtree`) | — | — | — |
 | 6. Przygotowanie wydania (lokalny build, checklista) | — | — | — |
 
-Następny krok: 4b — źródła rdzeni (nazwy i miejsca plików zapisów), potem testy i paczki.
+Ustalone ze źródeł i z plików rdzeni zainstalowanych na serwerze (2026-11-02): FBNeo `"%s%cfbneo%c%s.fs"` (libretro.cpp),
+Kronos `%s%ckronos%csaturn%c%s.ram` / `-ext512K…4M.ram` / `kronos_use_beetle_saves` (kronos_libretro.dll), Flycast
+`reicast_per_content_vmus`, karta `<ID gry albo nazwa pliku>.<port>.bin` w katalogu zapisów, wspólne `system\dc\vmu_save_<port>.bin`
+(hostfs::getVmuPath, flycast_libretro.dll), LRPS2 `pcsx2_shared_memory_cards`, karta `%s.ps2` (pcsx2_libretro.dll),
+PUAE `WHDSaves` jako dysk `WHDSaves:` (jeden folder dla gier), `%s.nvr` (puae_libretro.dll), Play! `Play Data Files`,
+`vfs/mc0`, `ps2.mc0.directory.v2` (play_libretro.dll — katalog bazowy nieustalony).
+
+Następny krok: 4b-2 — mechanizm nauczonych nazw (migawka przed grą, porównanie po grze, przypisanie do gry,
+bez nazw należących już do innej gry), potem PUAE `WHDSaves`.
 
 Moduły: klient Windows i Lumen (silnik `engine/`) — zmiana; serwer — nowe rodzaje paczek (format jak dotychczas);
 APK — Flycast (RetroArch na Androidzie) przez tę samą kartę w `saves\`, Xenia i LRPS2 — nie dotyczy (nie ma ich

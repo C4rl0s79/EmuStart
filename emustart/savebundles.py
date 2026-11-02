@@ -31,7 +31,12 @@ CHUNK = 1 << 20
 ARC = "game"                     # nazwa umowna pliku gry w paczce
 # zapisy w grze RetroArcha (nie stany): baterie, zegary, EEPROM-y, karty rdzeni
 RA_SAVE_EXTS = {"srm", "sav", "rtc", "eep", "fla", "mpk", "sra", "nv", "mcr", "bkr", "bcr", "brm",
-                "dsv", "dsa", "ram", "ldci", "lcd"}
+                "dsv", "dsa", "ram", "ldci", "lcd",
+                "fs",       # FBNeo: NVRAM (<zapisy>/fbneo/<set>.fs)
+                "ps2",      # LRPS2: karta gry przy wyłączonych wspólnych kartach (<zapisy>/<gra>.ps2)
+                "nvr"}      # PUAE: NVRAM CD32 / CDTV (<zapisy>/<gra>.nvr)
+# zapisy z przyrostkiem po nazwie gry: Flycast — karta VMU gry (<gra>.A1.bin), Kronos — kartridż pamięci
+_RA_SAVE_SFX = (re.compile(r"^(.+)(\.[A-D][12]\.bin)$", re.I), re.compile(r"^(.+)(-ext(?:512K|1M|2M|4M)\.ram)$", re.I))
 _RA_STATE = re.compile(r"(.+?)(\.state\d*(?:\.auto)?(?:\.png)?)", re.I)
 # stan PCSX2 / ArmSX2: „SLUS-20851 (39B574F0).03.p2s”, wznowienie PCSX2 (.resume), autozapis ArmSX2
 _P2S = re.compile(r"^(?P<prefix>.+?)\.(?P<slot>\d{2}|resume|autosave(?:\.\d)?)\.p2s$", re.I)
@@ -148,6 +153,10 @@ def _match(emu: str, kind: str, name: str, names: set):
     if kind == "trash":                      # kosz — folder tylko tej gry i slotu
         return (name, name) if _TRASH.match(name) else None
     if emu == "retroarch" and kind == "saves":
+        for rx in _RA_SAVE_SFX:
+            m = rx.match(name)
+            if m and norm(m.group(1)) in names:
+                return m.group(1), ARC + m.group(2)
         base, _, ext = name.rpartition(".")
         if base and ext.lower() in RA_SAVE_EXTS and norm(base) in names:
             return base, f"{ARC}.{ext.lower()}"
@@ -323,13 +332,41 @@ def ra_folder(adapter, core: str, content: Path, key: str, default: str, by_cont
     return d
 
 
+def ra_core_option(adapter, core: str, key: str) -> str:
+    """Wartość opcji rdzenia z pliku opcji, którego używa ten RetroArch (wspólny plik albo plik rdzenia
+    config/<rdzeń>/<rdzeń>.opt; pliki .opt gry i folderu — bez znaczenia tutaj)."""
+    from emustart.ingame import _ini_value
+    main = adapter.home / "retroarch.cfg"
+    if _ini_value(main, "global_core_options") == "true":
+        p = _ini_value(main, "core_options_path")
+        if p.startswith(":"):
+            p = str(adapter.home) + p[1:]
+        f = Path(p) if p else adapter.home / "retroarch-core-options.cfg"
+    else:
+        name = core_name(adapter.home, core)
+        f = adapter.home / "config" / name / f"{name}.opt"
+    return _ini_value(f, key) if f.is_file() else ""
+
+
+def ra_save_subdir(adapter, core: str) -> tuple:
+    """Podfolder katalogu zapisów, w którym rdzeń trzyma zapisy nazwane jak gra (źródła / pliki rdzeni):
+    FBNeo — fbneo, Kronos — kronos/saturn (z opcją „Share saves with beetle” — wprost w katalogu zapisów)."""
+    c = (core or "").lower()
+    if c == "fbneo":
+        return ("fbneo",)
+    if c == "kronos" and ra_core_option(adapter, core, "kronos_use_beetle_saves") != "enabled":
+        return ("kronos", "saturn")
+    return ()
+
+
 def retroarch(adapter, core: str, content: Path, names: list) -> list:
     """Zapisy i stany RetroArcha tej gry dla rdzenia `core` — w folderach, w których szuka ich
     ten RetroArch (ustawienia sortowania po rdzeniu / po folderze gry)."""
     stem = Path(content).stem
     return [Bundle("retroarch", save_core(core), "saves",
                    ra_folder(adapter, core, content, "savefile_directory", "saves",
-                             "sort_savefiles_by_content_enable", "sort_savefiles_enable"),
+                             "sort_savefiles_by_content_enable", "sort_savefiles_enable"
+                             ).joinpath(*ra_save_subdir(adapter, core)),
                    stem, names).collect(),
             Bundle("retroarch", core, "states",
                    ra_folder(adapter, core, content, "savestate_directory", "states",

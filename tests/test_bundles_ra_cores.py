@@ -80,6 +80,57 @@ def test_ra_core_folder_without_sorting_and_existing_wins(env, tmp_path):
     assert [arc for _p, arc in b.files] == ["ULUS10297DATA00/DATA.BIN"]
 
 
+def saves_bundle(a, core: str, rom: Path, game: dict):
+    return next(b for b in savebundles.for_game(a, core, rom, game) if (b.emulator_id, b.kind) == ("retroarch", "saves"))
+
+
+def test_fbneo_nvram_in_fbneo_subfolder(env, tmp_path):
+    """FBNeo (źródło rdzenia): NVRAM w <zapisy>/fbneo/<nazwa setu>.fs — osobny plik dla gry."""
+    home = tmp_path / "RetroArch"
+    a = ra(home, "fbneo", "FinalBurn Neo")
+    rom = _write(tmp_path / "roms" / "mslug.zip")
+    sub = home / "saves" / "FinalBurn Neo" / "fbneo"
+    _write(sub / "mslug.fs", b"NVRAM")
+    _write(sub / "kof98.fs", b"INNA GRA")
+    b = saves_bundle(a, "fbneo", rom, {"es": "fbneo", "name": "mslug", "rel": "mslug.zip"})
+    assert b.folder == sub
+    assert [arc for _p, arc in b.files] == ["game.fs"]
+
+
+def test_kronos_backup_ram_and_cartridge(env, tmp_path):
+    """Kronos (ciągi w pliku rdzenia): <zapisy>/kronos/saturn/<gra>.ram i <gra>-ext1M.ram; z opcją
+    „Share saves with beetle” — pliki Beetle wprost w folderze zapisów."""
+    home = tmp_path / "RetroArch"
+    a = ra(home, "kronos", "Kronos")
+    rom = _write(tmp_path / "roms" / "Resident Evil (USA).cue")
+    game = {"es": "saturn", "name": "Resident Evil (USA)", "rel": "Resident Evil (USA).cue"}
+    sub = home / "saves" / "Kronos" / "kronos" / "saturn"
+    _write(sub / "Resident Evil (USA).ram", b"BUP")
+    _write(sub / "Resident Evil (USA)-ext1M.ram", b"CART")
+    _write(sub / "Inna gra.ram", b"INNA")
+    b = saves_bundle(a, "kronos", rom, game)
+    assert b.folder == sub
+    assert sorted(arc for _p, arc in b.files) == ["game-ext1M.ram", "game.ram"]
+    assert b.local_path("game-ext1M.ram") == sub / "Resident Evil (USA)-ext1M.ram"
+    _write(home / "retroarch-core-options.cfg", b'kronos_use_beetle_saves = "enabled"\n')
+    _write(home / "retroarch.cfg", (home / "retroarch.cfg").read_bytes() + b'global_core_options = "true"\n')
+    assert saves_bundle(a, "kronos", rom, game).folder == home / "saves" / "Kronos"
+
+
+@pytest.mark.parametrize("name, arc", [
+    ("Shenmue (USA).A1.bin", "game.A1.bin"),     # Flycast: karta VMU gry (nazwa starsza, od pliku gry)
+    ("Shenmue (USA).ps2", "game.ps2"),           # LRPS2: karta gry przy wyłączonych wspólnych kartach
+    ("Shenmue (USA).nvr", "game.nvr")])          # PUAE: NVRAM CD32 / CDTV
+def test_more_save_file_kinds(env, tmp_path, name, arc):
+    home = tmp_path / "RetroArch"
+    a = ra(home, "flycast", "Flycast", sort=False)
+    rom = _write(tmp_path / "roms" / "Shenmue (USA).chd")
+    _write(home / "saves" / name, b"ZAPIS")
+    _write(home / "saves" / "Shenmue (USA).bin", b"NIE ZAPIS")       # sam .bin bez numeru karty — nie
+    b = saves_bundle(a, "flycast", rom, {"es": "dc", "name": "Shenmue (USA)", "rel": "Shenmue (USA).chd"})
+    assert [x for _p, x in b.files] == [arc]
+
+
 def test_ra_dolphin_core_save_reaches_standalone_dolphin(net):
     """Ten sam format zapisu — rdzeń na PC, samodzielny Dolphin na drugim urządzeniu: jedna paczka."""
     cfgs, tmp = net
