@@ -482,6 +482,8 @@ def _apply(pid: int, b, zp: Path) -> None:
     (do kopii zapasowej)."""
     with zipfile.ZipFile(zp) as z:
         items = [i for i in z.infolist() if not i.is_dir()]
+        if hasattr(b, "pending"):
+            b.pending = []                    # podfoldery z tej paczki — dopiero po zapisie całości
         targets = {i.filename: b.local_path(i.filename) for i in items}      # ValueError: zła nazwa
         if b.files:
             bak = _backup_dir(pid) / time.strftime("%Y%m%d-%H%M%S") / f"{b.emulator_id}-{b.core_id or '-'}-{b.kind}"
@@ -505,6 +507,8 @@ def _apply(pid: int, b, zp: Path) -> None:
     for path, _arc in b.files:
         if str(path).lower() not in keep:
             Path(path).unlink(missing_ok=True)
+    if hasattr(b, "accept_pending"):
+        b.accept_pending()                    # cała paczka zapisana — jej podfoldery należą do gry
     b.collect()
 
 
@@ -834,6 +838,8 @@ def retry(cfg: dict) -> int:
             b = savebundles.from_spec(json.loads(r["spec"]))
         except (ValueError, KeyError, OSError):
             continue
+        if b.core_id == "xenia_edge":       # Xenia — tylko przy grze (profil gracza), nie w tle
+            continue
         local = savebundles.content_hash(b.files)
         ops = pending_ops(r["profile_id"], r["platform"], r["game"], b, r["slot"])
         if local == r["content"] and not (ops["add"] or ops["drop"]):
@@ -941,6 +947,8 @@ def pending(cfg: dict, account: str = "") -> list:
             b = savebundles.from_spec(json.loads(r["spec"]))
         except (ValueError, KeyError, OSError):
             continue
+        if b.core_id == "xenia_edge":       # Xenia — tylko przy grze (profil gracza), nie w tle
+            continue
         if savebundles.content_hash(b.files) in ("", r["content"]):
             continue
         k = (acc.lower(), r["platform"], r["game"])
@@ -990,6 +998,8 @@ def pull_all(cfg: dict, pid: int, skip: set | None = None) -> dict:
                 try:
                     b = savebundles.from_spec(json.loads(r["spec"]))
                 except (ValueError, KeyError, OSError):
+                    continue
+                if b.core_id == "xenia_edge":       # Xenia — tylko przy grze (profil gracza), nie w tle
                     continue
                 srv = _server_bundle(man, b, r["slot"])
                 rev_s = int(srv.get("revision") or 0)

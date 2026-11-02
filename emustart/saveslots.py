@@ -92,9 +92,12 @@ def store_bundle(pid: int, plat: str, gid: str, slot: int, b) -> savebundles.Bun
     """Paczka `b` slotu `slot` w folderze profilu (nazwy umowne: pliki „game.*”)."""
     folder = _root(pid, "_sloty", plat, gid, slot) / f"{b.emulator_id}-{b.core_id or '-'}-{b.kind}"
     native = (b.emulator_id, b.kind) in savebundles.NATIVE      # nazwy jak na urządzeniu (PCSX2, Dolphin, PPSSPP)
+    names = list(b.names)
+    if getattr(b, "learn", ""):                                 # podfoldery poznane też przy pobieraniu slotów
+        names += [n for n in savebundles.learned(b.core_id, b.learn_game) if n not in names]
     return savebundles.Bundle(b.emulator_id, b.core_id, b.kind, folder,
                               (b.stem if native else savebundles.ARC),
-                              list(b.names) if native else [savebundles.ARC],
+                              names if native else [savebundles.ARC],
                               # nazwy poznawane po grze (PUAE, Xenia): podfolder z paczki slotu też
                               learn=getattr(b, "learn", ""), learn_game=getattr(b, "learn_game", "")).collect()
 
@@ -215,8 +218,10 @@ def _backup(pid: int, b, why: str) -> None:
     from emustart import syncclient
     bak = syncclient._backup_dir(pid) / time.strftime("%Y%m%d-%H%M%S") / f"{why}-{b.emulator_id}-{b.core_id or '-'}-{b.kind}"
     bak.mkdir(parents=True, exist_ok=True)
-    for p, _arc in b.files:
-        shutil.copy2(p, bak / Path(p).name)
+    for p, arc in b.files:
+        dst = bak / (arc if "/" in arc else Path(p).name)        # paczki z podfolderami — ze ścieżką
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(p, dst)
     syncclient._prune_backups(pid)
 
 

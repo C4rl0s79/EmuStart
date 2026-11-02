@@ -479,3 +479,44 @@ def test_backup_keeps_subfolders(net):
         syncclient.resolve(cfgs[TEL], TEL, AMIGA, r.conflicts, "remote")
     baks = list(syncclient._backup_dir(TEL).rglob("highs"))
     assert sorted(p.read_bytes() for p in baks) == [b"A-stare", b"B-stare"]
+
+
+
+# ── drugi przegląd kodu (code-review, poziom medium) ──
+
+def test_folder_from_rejected_package_not_learned(env, tmp_path):
+    """Paczka odrzucona w połowie (zła ścieżka dalej): jej podfoldery nie stają się podfolderami gry."""
+    b = whd(ra(tmp_path / "RetroArch", "puae", "PUAE"), tmp_path)
+    assert b.local_path("GameX/save").name == "save"                        # sprawdzona, jeszcze nieprzyjęta
+    with pytest.raises(ValueError):
+        b.local_path("../poza")
+    assert "GameX" not in b.names and savebundles.learned("puae", "amigawhdgames/Monkey Island") == []
+    b.accept_pending()                                                       # dopiero zapis całej paczki
+    assert "GameX" in b.names and savebundles.learned("puae", "amigawhdgames/Monkey Island") == ["GameX"]
+
+
+def test_slot_backup_keeps_subfolders(env, tmp_path):
+    from emustart import saveslots, syncclient
+    root = tmp_path / "PUAE" / "WHDSaves"
+    _write(root / "A" / "highs", b"A")
+    _write(root / "B" / "highs", b"B")
+    b = savebundles.Bundle("retroarch", "puae", "memcards", root, "", ["A", "B"], learn="dirs", learn_game="g").collect()
+    saveslots._backup(1, b, "slot")
+    assert sorted(p.read_bytes() for p in syncclient._backup_dir(1).rglob("highs")) == [b"A", b"B"]
+
+
+def test_slot_store_knows_folders_learned_elsewhere(env, tmp_path):
+    from emustart import saveslots
+    b = whd(ra(tmp_path / "RetroArch", "puae", "PUAE"), tmp_path)
+    savebundles._remember("puae", "amigawhdgames/Monkey Island", ["ZeSlotu2"])  # poznany przy pobraniu slotu
+    s = saveslots.store_bundle(1, "amiga", "g1", 2, b)
+    assert "ZeSlotu2" in s.names
+
+
+def test_xenia_note_when_several_profiles(env, tmp_path):
+    home = tmp_path / "RetroArch"
+    a, content, _rom, _b = xenia(home, tmp_path, "E030000000983487")
+    assert savebundles.xenia_note(a, "xenia_edge") == ""
+    _write(content / "E0300000AAAABBBB" / "FFFE07D1" / "00010000" / "E0300000AAAABBBB" / "Account", b"KONTO 2")
+    assert "bez synchronizacji" in savebundles.xenia_note(a, "xenia_edge")
+    assert savebundles.xenia_note(a, "snes9x") == ""

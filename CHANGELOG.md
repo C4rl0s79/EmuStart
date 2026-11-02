@@ -133,8 +133,24 @@ każdy gracz ma własny profil (XUID) w tym samym `content\`, a EmuStart wskazuj
 9. `spec` / `from_spec` z trybem nauki (pobieranie w tle po starcie).
 10. Profil Xenii może być przypięty tylko jednemu kontu.
 
-Następny krok: commit poprawek → silnik Lumena (subtree, `lumen.py` z `claim=False`) → lokalne buildy (EmuStart
-ponownie, Lumen testowy) → końcowy przegląd i raport.
+**Poprawki po drugim przeglądzie** (code-review, poziom medium, weryfikacja powyższych — 9 z 10 poprawnych):
+- Kopia wspólnej karty: właściciel urządzenia to także urządzenie bez konta serwera albo z jednym graczem (inaczej po
+  przełączeniu na osobne karty dotychczasowe zapisy byłyby dla gier niewidoczne).
+- Kopia zapasowa przed zmianą slotu (`saveslots._backup`) też z podfolderami.
+- Podfoldery z paczki serwera przyjmowane dopiero po zapisie całej paczki (`pending` → `accept_pending`) i wtedy
+  zapamiętane — odrzucona paczka niczego nie uczy; sloty znają podfoldery poznane przy pobieraniu.
+- Synchronizacja w tle (`retry`, `pending`, `pull_all`) pomija paczki Xenii — tylko przy grze, z zabezpieczeniami.
+- Kilka profili Xenii: komunikat dla gracza („zapisy gier X360 bez synchronizacji”); usunięty martwy kod
+  (`xenia_xuid`, przenoszenie paczki do przypiętego folderu).
+- `CHANGELOG.md` z końcówkami LF jak w `main` (wcześniej plik był dla gita binarny przez znak backspace w starym wpisie).
+
+**Ograniczenia przyjęte świadomie:** (f) podfolder zapamiętany na urządzeniu pod inną nazwą gry (gra przemianowana,
+dwie wersje jednej gry WHDLoad) blokuje pobranie paczki tej gry — bezpieczniej niż nadpisać cudzy folder; komunikat
+w logu. (g) Rdzeń Dolphin / PPSSPP i samodzielny emulator tej samej gry na jednym urządzeniu mają jeden aktywny slot
+zapisów — zmiana slotu w jednym nie przenosi plików drugiego (rzadki przypadek: ta sama gra w obu, ze slotami).
+(h) Kilka profili Xenii na urządzeniu — bez synchronizacji Xenii do czasu 1c (logowanie przypiętego profilu).
+
+Następny krok: commit → silnik Lumena (subtree) → testy → końcowy raport.
 
 Moduły: klient Windows i Lumen (silnik `engine/`) — zmiana; serwer — nowe rodzaje paczek (format jak dotychczas);
 APK — Flycast (RetroArch na Androidzie) przez tę samą kartę w `saves\`, Xenia i LRPS2 — nie dotyczy (nie ma ich

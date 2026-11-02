@@ -71,6 +71,16 @@ class Bundle:
     learn: str = ""
     learn_game: str = ""
     seen: dict = field(default_factory=dict)
+    pending: list = field(default_factory=list)     # podfoldery z paczki serwera — przyjęte po udanym zapisie
+
+    def accept_pending(self) -> None:
+        """Paczka z serwera zapisana w całości: jej podfoldery należą do tej gry (zapamiętane na urządzeniu)."""
+        new = [n for n in self.pending if n not in self.names]
+        self.pending = []
+        if new:
+            self.names += new
+            if self.learn == "dirs":
+                _remember(self.core_id, self.learn_game, new)
 
     @property
     def key(self) -> tuple:
@@ -85,10 +95,11 @@ class Bundle:
             if (not bad and self.learn == "dirs" and len(parts) >= 2 and parts[0] not in self.names
                     and all(_SAFE_DIR.match(x) for x in parts)
                     and (self.core_id != "xenia_edge" or _TITLE_ID.match(parts[0]) and parts[0] != _XENIA_PROFILE)
-                    and parts[0] not in _learned_by_others(self.core_id, self.learn_game)):
-                self.names.append(parts[0])         # podfolder gry z paczki tej gry (urządzenie go nie znało)
+                    and parts[0] not in _learned_by_others(self.core_id, self.learn_game)
+                    and parts[0] not in self.pending):
+                self.pending.append(parts[0])       # podfolder gry z paczki — przyjęty po zapisie całej paczki
                 if not _deep_ok(self, parts):       # zła ścieżka w nowym folderze — folder nie zostaje
-                    self.names.remove(parts[0])
+                    self.pending.remove(parts[0])
             if bad or not _deep_ok(self, parts):
                 raise ValueError(f"nieoczekiwana nazwa w paczce: {arc}")
             return self.folder.joinpath(*parts)
@@ -215,10 +226,11 @@ def _deep_ok(b, parts: list) -> bool:
         return len(parts) > 4 and parts[:3] == ["Wii", "title", "00010000"] and \
             parts[3].lower() in {i[:4].encode().hex() for i in ids}
     if b.emulator_id == "retroarch":         # <podfolder gry>/… (nazwy poznane po grze albo z paczki gry)
+        known = set(b.names) | set(getattr(b, "pending", ()))
         if b.core_id == "xenia_edge":        # <Title ID>/00000001/… i Headers/00000001/… — zapisy, bez aktualizacji i DLC
-            return len(parts) >= 3 and parts[0] in b.names and (
+            return len(parts) >= 3 and parts[0] in known and (
                 parts[1] == XENIA_SAVES or (len(parts) >= 4 and parts[1:3] == ["Headers", XENIA_SAVES]))
-        return len(parts) >= 2 and parts[0] in b.names
+        return len(parts) >= 2 and parts[0] in known
     return False
 
 
@@ -536,19 +548,6 @@ _XUID = re.compile(r"^[0-9A-F]{16}$")
 _TITLE_ID = re.compile(r"^[0-9A-F]{8}$")
 
 
-def xenia_xuid(content: Path) -> str:
-    """XUID profilu Xenii na tym urządzeniu: folder z kontem (FFFE07D1\\00010000\\<XUID>\\Account),
-    przy kilku — ostatnio używany; „” — jeszcze bez profilu (rdzeń tworzy go przy pierwszej grze)."""
-    best, when = "", -1.0
-    for d in content.iterdir() if content.is_dir() else ():
-        acc = d / _XENIA_PROFILE / "00010000" / d.name / "Account"
-        if _XUID.match(d.name) and d.name != "0" * 16 and acc.is_file():
-            t = max((p.stat().st_mtime for p in acc.parent.iterdir()), default=0.0)
-            if t > when:
-                best, when = d.name, t
-    return best
-
-
 XENIA_OWNERS = "xenia_owners"
 
 
@@ -557,6 +556,16 @@ def xenia_xuids(content: Path) -> list:
     return sorted(d.name for d in (content.iterdir() if content.is_dir() else ())
                   if _XUID.match(d.name) and d.name != "0" * 16
                   and (d / _XENIA_PROFILE / "00010000" / d.name / "Account").is_file())
+
+
+def xenia_note(adapter, core: str) -> str:
+    """Komunikat dla gracza, gdy zapisy Xbox 360 nie są synchronizowane, bo na urządzeniu jest kilka profili Xenii."""
+    if (core or "").lower() != "xenia_edge" or adapter.family != "retroarch":
+        return ""
+    content = Path(adapter._cfg_dir("system_directory", "system")) / "Xenia-Edge" / "content"
+    if len(xenia_xuids(content)) > 1:
+        return "Kilka profili Xbox 360 na tym urządzeniu — zapisy gier X360 bez synchronizacji z serwerem."
+    return ""
 
 
 def xenia_claim(bundles: list, pid: int, pinned: str = "", claim: bool = True) -> list:
@@ -574,10 +583,7 @@ def xenia_claim(bundles: list, pid: int, pinned: str = "", claim: bool = True) -
             owners = json.loads(library.meta_get(XENIA_OWNERS, "{}") or "{}")
         except (ValueError, TypeError):
             owners = {}
-        if pinned and pinned in xenia_xuids(b.folder.parent):
-            if b.folder.name != pinned:
-                b.folder = b.folder.parent / pinned
-                b.collect()
+        if pinned and pinned == b.folder.name:   # profil przypięty graczowi w panelu serwera — jego
             owners[pinned] = int(pid)
         xuid = b.folder.name
         if not claim:                         # widok (opcje gry, sloty): bez zajmowania profilu

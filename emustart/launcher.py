@@ -375,9 +375,14 @@ class Session:
                 adapter.core_defaults()
                 prof = profiles.get(self.profile_id) or {}
                 mine = (prof.get("nas_name") or prof.get("name") or "").lower()
-                owner = not self.profiles_on or mine == profiles.account_of_device(self.cfg).lower()
+                dev = profiles.account_of_device(self.cfg).lower()
+                # właściciel: bez profili, urządzenie bez konta serwera albo z jednym graczem, albo konto urządzenia
+                owner = (not self.profiles_on or not dev or len(profiles.all_profiles()) <= 1 or mine == dev)
                 savebundles.seed_from_shared(adapter, savebundles.core_id(args), Path(rom), ps2_info(self.cfg, g),
                                              owner=owner)   # wspólna karta — tylko gracz-właściciel urządzenia
+                note = savebundles.xenia_note(adapter, savebundles.core_id(args))
+                if note:
+                    self.notice = note
             except Exception:
                 log.exception("karta gry")
         self._t_prof = time.monotonic() - t_prof
