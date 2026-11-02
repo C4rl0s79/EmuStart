@@ -214,11 +214,29 @@ def _deep_files(b) -> list:
 
 
 _DOLPHIN_IDS: dict = {}
+_GAME_ID = re.compile(rb"^[A-Z0-9]{6}$")
+# miejsce nagłówka płyty (6 znaków ID gry) w pliku: RVZ/WIA — kopia nagłówka za nagłówkiem pliku (0x48 + 0x10),
+# WBFS — za pierwszym sektorem (0x200), CISO — za mapą bloków (0x8000), ISO/GCM — na początku
+_DISC_AT = ((b"RVZ\x01", 0x58), (b"WIA\x01", 0x58), (b"WBFS", 0x200), (b"CISO", 0x8000))
+
+
+def disc_id(content: Path) -> str:
+    """ID gry GameCube / Wii z nagłówka pliku gry (ISO, GCM, RVZ, WIA, WBFS, CISO) — bez DolphinTool.
+    Inne formaty (GCZ: nagłówek skompresowany) i pliki bez ID — „”."""
+    try:
+        with open(content, "rb") as f:
+            magic = f.read(4)
+            f.seek(next((at for m, at in _DISC_AT if magic == m), 0))
+            gid = f.read(6)
+    except OSError:
+        return ""
+    return gid.decode() if _GAME_ID.match(gid) else ""
 
 
 def dolphin_id(adapter, content: Path) -> str:
-    """ID gry GameCube / Wii („GKBEAF”) — z nagłówka płyty (DolphinTool header), zapamiętane
-    po nazwie pliku gry (plik bywa jeszcze niepobrany, gdy lista zapisów pyta o paczki)."""
+    """ID gry GameCube / Wii („GKBEAF”) — z nagłówka płyty (disc_id, a dla innych formatów DolphinTool
+    header samodzielnego Dolphina), zapamiętane po nazwie pliku gry (plik bywa jeszcze niepobrany,
+    gdy lista zapisów pyta o paczki)."""
     from emustart import library
     key = Path(content).name.lower()
     if not _DOLPHIN_IDS:
@@ -228,24 +246,25 @@ def dolphin_id(adapter, content: Path) -> str:
             pass
     if _DOLPHIN_IDS.get(key):
         return _DOLPHIN_IDS[key]
+    gid = disc_id(content) if Path(content).is_file() else ""
     tool = Path(adapter.home) / "DolphinTool.exe"
-    if not (tool.is_file() and Path(content).is_file()):
+    if not gid and tool.is_file() and Path(content).is_file():
+        try:
+            out = subprocess.run([str(tool), "header", "-i", str(content)], capture_output=True, text=True, timeout=60,
+                                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout
+        except (OSError, subprocess.SubprocessError) as ex:
+            log.info("DolphinTool: %s", ex)
+            return ""
+        m = re.search(r"Game ID:\s*([A-Z0-9]{6})", out or "")
+        gid = m.group(1) if m else ""
+    if not gid:
         return ""
-    try:
-        out = subprocess.run([str(tool), "header", "-i", str(content)], capture_output=True, text=True, timeout=60,
-                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout
-    except (OSError, subprocess.SubprocessError) as ex:
-        log.info("DolphinTool: %s", ex)
-        return ""
-    m = re.search(r"Game ID:\s*([A-Z0-9]{6})", out or "")
-    if not m:
-        return ""
-    _DOLPHIN_IDS[key] = m.group(1)
+    _DOLPHIN_IDS[key] = gid
     try:
         library.meta_set("dolphin_ids", json.dumps(_DOLPHIN_IDS))
     except Exception:
         pass
-    return m.group(1)
+    return gid
 
 
 def psp_serial(game: dict) -> str:
@@ -290,35 +309,64 @@ def core_name(ra_home: Path, core: str) -> str:
     return core
 
 
+def ra_folder(adapter, core: str, content: Path, key: str, default: str, by_content: str, by_core: str,
+              sort: bool = True) -> Path:
+    """Folder zapisów / stanów RetroArcha dla gry — tam, gdzie szuka ich ten RetroArch (ustawienia sortowania
+    po folderze gry / po rdzeniu); sort=False — bez podfolderów sortowania."""
+    from emustart.ingame import _ini_value
+    cfg = adapter.home / "retroarch.cfg"
+    d = Path(adapter._cfg_dir(key, default))
+    if sort and _ini_value(cfg, by_content) == "true":
+        d = d / Path(content).parent.name
+    if sort and _ini_value(cfg, by_core) == "true" and core:
+        d = d / core_name(adapter.home, core)
+    return d
+
+
 def retroarch(adapter, core: str, content: Path, names: list) -> list:
     """Zapisy i stany RetroArcha tej gry dla rdzenia `core` — w folderach, w których szuka ich
     ten RetroArch (ustawienia sortowania po rdzeniu / po folderze gry)."""
-    from emustart.ingame import _ini_value
-    cfg = adapter.home / "retroarch.cfg"
-
-    def folder(key: str, default: str, by_content: str, by_core: str) -> Path:
-        d = Path(adapter._cfg_dir(key, default))
-        if _ini_value(cfg, by_content) == "true":
-            d = d / Path(content).parent.name
-        if _ini_value(cfg, by_core) == "true" and core:
-            d = d / core_name(adapter.home, core)
-        return d
-
     stem = Path(content).stem
     return [Bundle("retroarch", save_core(core), "saves",
-                   folder("savefile_directory", "saves", "sort_savefiles_by_content_enable", "sort_savefiles_enable"),
+                   ra_folder(adapter, core, content, "savefile_directory", "saves",
+                             "sort_savefiles_by_content_enable", "sort_savefiles_enable"),
                    stem, names).collect(),
             Bundle("retroarch", core, "states",
-                   folder("savestate_directory", "states", "sort_savestates_by_content_enable", "sort_savestates_enable"),
+                   ra_folder(adapter, core, content, "savestate_directory", "states",
+                             "sort_savestates_by_content_enable", "sort_savestates_enable"),
                    stem, names).collect()]
+
+
+# Rdzenie, które trzymają zapisy w podfolderze katalogu zapisów RetroArcha w układzie samodzielnego emulatora:
+# rdzeń → (emulator, którego paczka — ten sam format zapisu, ta sama paczka na serwerze; podfolder)
+RA_DEEP_CORES = {"dolphin": ("dolphin", ("dolphin-emu", "User")),
+                 "ppsspp": ("ppsspp", ("PSP", "SAVEDATA"))}
+
+
+def ra_core_bundles(adapter, core: str, content: Path, game: dict) -> list:
+    """Zapisy rdzenia z RA_DEEP_CORES — paczka jak dla samodzielnego emulatora. Folder: z sortowaniem po
+    rdzeniu (tam RetroArch kieruje rdzeń), a gdy zapisy leżą już bez podfolderu sortowania — tam."""
+    emu, sub = RA_DEEP_CORES.get((core or "").lower(), ("", ()))
+    if not emu:
+        return []
+    gid = dolphin_id(adapter, content) if emu == "dolphin" else psp_serial(game)
+    if not gid:
+        return []
+    keys = ("savefile_directory", "saves", "sort_savefiles_by_content_enable", "sort_savefiles_enable")
+    places = [ra_folder(adapter, core, content, *keys).joinpath(*sub),
+              ra_folder(adapter, core, content, *keys, sort=False).joinpath(*sub)]
+    folder = next((p for p in places if p.is_dir()), places[0])
+    return [Bundle(emu, "", "saves", folder, gid, [gid]).collect()]
 
 
 def for_game(adapter, core: str, content: Path, game: dict) -> list:
     """Paczki tej gry dla emulatora `adapter` (pusta lista — emulator jeszcze bez synchronizacji
     paczkami, działa dotychczasowa synchronizacja folderów profilu)."""
     if adapter.family == "retroarch":
+        if not core:
+            return []
         names = sorted({Path(content).stem, game.get("name", ""), Path(game.get("rel", "")).stem} - {""})
-        return retroarch(adapter, core, content, names) if core else []
+        return retroarch(adapter, core, content, names) + ra_core_bundles(adapter, core, content, game)
     out = []
     if adapter.family in ("duckstation", "pcsx2") and adapter.memcard_dir():
         card = card_stem(content, game)

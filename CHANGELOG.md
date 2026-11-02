@@ -8,6 +8,62 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
 
+### Plan (zaakceptowany 2026-11-02): zapisy rdzeni RetroArcha w `system\` i w podfolderach `saves\`
+Przyczyna (sprawdzone 2026-11-02 na danych z Lumena i w dokumentacji libretro): synchronizacja RetroArcha
+(paczki i dotychczasowa synchronizacja folderów profilu) bierze tylko pliki nazwane jak gra leżące wprost w `saves\`
+oraz `states\`. Podfoldery `saves\` pomija paczka i pomija dotychczasowa synchronizacja (uznaje `saves\` za obsłużone
+paczkami). Rdzenie, które trzymają zapisy w `system\` albo w podfolderach `saves\`, nie są synchronizowane ani
+rozdzielane na graczy.
+
+**W podfolderach `saves\`:**
+- **Dolphin (rdzeń, GC/Wii):** `saves\[<rdzeń>\]dolphin-emu\User\GC\…` (karty), `…\Wii\title\…` (zapisy Wii) — układ
+  jak w samodzielnym Dolphinie: **ta sama paczka co samodzielnego Dolphina** (serwer i tak łączy je po emulatorze;
+  ten sam format — zapis przechodzi między rdzeniem, samodzielnym Dolphinem i telefonem). ID gry z nagłówka pliku
+  (ISO/GCM/RVZ/WIA/WBFS/CISO), bez DolphinTool. **Zrobione.**
+- **PPSSPP (rdzeń, PSP):** `saves\[<rdzeń>\]PSP\SAVEDATA\<numer gry>…` — ta sama paczka co samodzielnego PPSSPP.
+  **Zrobione.**
+- **FBNeo (FBNeo, Neo Geo — rdzeń domyślny):** NVRAM / EEPROM w `saves\[<rdzeń>\]fbneo\<nazwa setu>.*`.
+- **PUAE (Amiga):** zapisy WHDLoad w `saves\WHDSaves\<gra>\` (albo obraz `WHDSaves.hdf` — wspólny dla gier).
+- **Kronos (Saturn, rdzeń dodatkowy):** `saves\kronos\saturn\…`.
+- **LRPS2 (nowsze wersje):** `saves\lrps2\` — patrz pkt 3.
+- **Play! (PS2, rdzeń dodatkowy):** dokumentacja nie podaje miejsca kart — do sprawdzenia na żywo.
+- Bez zmian (zapisy nazwane jak gra wprost w `saves\`): Mednafen Saturn, melonDS, Mupen64Plus, SwanStation,
+  Genesis Plus GX, Snes9x, mGBA, Gambatte i pozostałe rdzenie z zapisem baterii.
+
+**W `system\`:**
+- **Xenia Edge (X360):** `system\Xenia-Edge\content\<profil Xenii, XUID>\<numer gry, Title ID>\00000001\…`
+  (zapisy) + `…\Headers\00000001\…`; profil Xenii: `content\<XUID>\FFFE07D1\00010000\<XUID>\` (Account, osiągnięcia).
+  XUID jest inny na każdym urządzeniu — zapis przeniesiony pod inny profil nie jest widoczny w grze.
+- **Flycast (DC, domyślny rdzeń):** `system\dc\vmu_save_A1…D1.bin` — cztery karty VMU wspólne dla wszystkich gier
+  (dopóki opcja rdzenia „Per-Game VMUs” jest wyłączona).
+- **LRPS2 (PS2, rdzeń dodatkowy; domyślny jest PCSX2 osobno):** starsze wersje `system\pcsx2\memcards\` (karta
+  wspólna dla gier), nowsze `saves\lrps2\`.
+
+Zmiany:
+1. **Xenia Edge — stały profil Xenii dla każdego gracza EmuStart.** Profil tworzy rdzeń na urządzeniu, jak dotąd
+   (bez serwera). Urządzenie zgłasza swoje profile serwerowi; w panelu serwera (edycja gracza) można **przypiąć**
+   profil Xenii do gracza EmuStart — od tej chwili to stały profil tego gracza (ten sam XUID) na każdym urządzeniu:
+   profil (Account, osiągnięcia) jest synchronizowany jak zapis. Mechanizm ogólny („profil emulatora” przypięty do
+   gracza), żeby inne rdzenie z numerem profilu mogły z niego korzystać. Gracz bez przypiętego profilu: jak dotąd
+   (profil z urządzenia), zapisy gier synchronizowane względem numeru gry. Na czas gry w
+   `system\Xenia-Edge\content\` jest tylko profil grającego gracza (podmiana folderu, przywracana po grze i po
+   awarii — jak dotychczasowe przywracanie ustawień). Zapisy gry: paczka `content\<XUID>\<Title ID>\00000001` +
+   `Headers\00000001`. Numer gry poznany po pierwszej sesji (folder, który się zmienił) i zapamiętany przy grze.
+   Aktualizacje i DLC (`000B0000`, `00000002`) — bez synchronizacji (to nie zapisy, duże pliki).
+2. **Flycast — karty VMU osobno dla każdej gry:** opcja rdzenia „Per-Game VMUs” na czas gry → karta w `saves\`
+   nazwana jak gra, więc obejmuje ją istniejąca paczka zapisów (z rozdzieleniem na graczy). Pierwsze uruchomienie
+   gry: kopia wspólnej karty `vmu_save_A1.bin`, żeby dotychczasowe zapisy nie zniknęły.
+3. **LRPS2:** karta pamięci jako paczka gracza (jedna karta na gracza, nie na grę), w folderze, którego używa
+   zainstalowana wersja rdzenia (`system\pcsx2\memcards\` albo `saves\lrps2\`).
+4. **Dolphin i PPSSPP jako rdzenie:** paczki zapisów z podfolderów `saves\` (wyżej).
+
+Kolejność: 4 (podfoldery, kod paczek Dolphina/PPSSPP już jest) → 2 (Flycast) → 3 (LRPS2) → 1 (Xenia z profilami
+i panelem serwera — największa część). Każdy krok: testy, potem sprawdzenie na żywo, gdzie się da.
+
+Moduły: klient Windows i Lumen (silnik `engine/`) — zmiana; serwer — nowe rodzaje paczek (format jak dotychczas);
+APK — Flycast (RetroArch na Androidzie) przez tę samą kartę w `saves\`, Xenia i LRPS2 — nie dotyczy (nie ma ich
+na Androidzie). Nie zmienia się: zapisy pozostałych rdzeni i emulatorów, lista gier, sterowanie.
+
 ## [0.54.3] — 2026-11-02
 
 Zakres: klient Windows i Lumen (silnik): `ingame.py`, `sdlpads.py`, `hidpad.py`, `launcher.py`. Serwer i APK
