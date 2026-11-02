@@ -60,6 +60,20 @@ Zmiany:
 Kolejność: 4 (podfoldery, kod paczek Dolphina/PPSSPP już jest) → 2 (Flycast) → 3 (LRPS2) → 1 (Xenia z profilami
 i panelem serwera — największa część). Każdy krok: testy, potem sprawdzenie na żywo, gdzie się da.
 
+**Stan etapów** (procedura: `docs/KONTYNUACJA-PRACY.md`; gałąź `zapisy-system`):
+
+| Etap | Testy (fixture'y) | Na żywo (prawdziwy emulator) | Commit |
+|---|---|---|---|
+| 4. Dolphin i PPSSPP (rdzenie) | 10 testów, cały zestaw 419 ✓ | czeka — nikt jeszcze nie grał tymi rdzeniami | `7acab25` |
+| 4b. FBNeo, PUAE, Kronos, Play! | — | — | — |
+| 2. Flycast — karty VMU osobno dla gry | — | — | — |
+| 3. LRPS2 | — | — | — |
+| 1. Xenia Edge — profile graczy, panel serwera | — | — | — |
+| 5. Silnik Lumena (`git subtree`) | — | — | — |
+| 6. Przygotowanie wydania (lokalny build, checklista) | — | — | — |
+
+Następny krok: 4b — źródła rdzeni (nazwy i miejsca plików zapisów), potem testy i paczki.
+
 Moduły: klient Windows i Lumen (silnik `engine/`) — zmiana; serwer — nowe rodzaje paczek (format jak dotychczas);
 APK — Flycast (RetroArch na Androidzie) przez tę samą kartę w `saves\`, Xenia i LRPS2 — nie dotyczy (nie ma ich
 na Androidzie). Nie zmienia się: zapisy pozostałych rdzeni i emulatorów, lista gier, sterowanie.
