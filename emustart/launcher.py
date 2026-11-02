@@ -361,10 +361,12 @@ class Session:
         # profil najpierw: ustawienia, save'y i konto RA muszą być na miejscu,
         # zanim policzymy parametry startu (RetroArch czyta z nich foldery)
         t_prof = time.monotonic()
+        self._t_mark, self._steps = t_prof, []
         save_names = self._profile_prepare(adapter)
         try:
             if save_names:
                 self._sync_before(g, adapter, args, rom)    # zapisy tej gry z serwera
+                self._mark("zapisy gry")
         except BaseException:
             self._release_dirs()
             if save_names:
@@ -385,6 +387,7 @@ class Session:
                     self.notice = note
             except Exception:
                 log.exception("karta gry")
+            self._mark("karty rdzeni")
         self._t_prof = time.monotonic() - t_prof
         try:
             adapter.keyboard_game = systems.info(g["es"])["plat"] in systems.COMPUTER_PLATS
@@ -529,7 +532,9 @@ class Session:
                 profiles.resolve_moves(self.cfg)   # folder przeniesiony z innego komputera
         except Exception:
             log.exception("przeniesione profile")
+        self._mark("przeniesione profile")
         host = profiles.lock(self.cfg, self.profile_id, force=getattr(self, "takeover", False))
+        self._mark("blokada")
         if host:
             prof = profiles.get(self.profile_id) or {}
             raise ProfileLocked(f"Profil „{prof.get('name', '?')}” gra teraz na urządzeniu: {host}. "
@@ -541,6 +546,7 @@ class Session:
                 profiles.settings_load(self.cfg, self.profile_id, adapter)
             except Exception:
                 log.exception("ustawienia profilu")
+        self._mark("ustawienia")
         try:
             ra = profiles.ra_for_launch(self.cfg, self.profile_id, adapter)
             adapter.cheevos = ra
@@ -557,6 +563,7 @@ class Session:
             adapter.prepare_hotkeys()                # skróty emulatora do LB + … (brakujące)
         except Exception:
             log.exception("wymagane ustawienia emulatora")
+        self._mark("konto RA, emulator")
         dirs = adapter.save_dirs()               # foldery z (już podmienionych) ustawień
         names = [d.name for d in dirs]
         # zapisy, stany i karty pamięci w paczkach z serwerem (syncclient) — bez
@@ -580,7 +587,15 @@ class Session:
                 self._restore_dirs = adapter.redirect_session(card)
         except Exception:
             log.exception("podpinanie save'ów profilu")
+        self._mark("foldery zapisów")
         return names or ["-"]
+
+    def _mark(self, step: str) -> None:
+        """Czas kroku przygotowania do gry (log „czas do startu”: co kosztuje przed startem emulatora)."""
+        now = time.monotonic()
+        last = getattr(self, "_t_mark", now)
+        self._t_mark = now
+        self.__dict__.setdefault("_steps", []).append((step, now - last))
 
     # ── zapisy gry z serwerem (emustart/syncclient.py) ──
     def _sync_before(self, g: dict, adapter, args: str, rom) -> None:
@@ -725,8 +740,9 @@ class Session:
 
     def _run_process(self, g: dict, exe: str, cmd: list, adapter) -> None:
         log.info("start: %s", cmd)
-        log.info("czas do startu: %.1f s (profil: zapisy, ustawienia, NAS %.1f s)",
-                 time.monotonic() - self._t_created, getattr(self, "_t_prof", 0.0))
+        steps = ", ".join(f"{n} {t:.2f}" for n, t in getattr(self, "_steps", []))
+        log.info("czas do startu: %.1f s (profil: zapisy, ustawienia, NAS %.1f s%s)",
+                 time.monotonic() - self._t_created, getattr(self, "_t_prof", 0.0), f" — kroki: {steps}" if steps else "")
         self.phase, self.message = "running", ""
         t0 = time.monotonic()
         try:

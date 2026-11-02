@@ -19,6 +19,7 @@ krótkotrwałe, podpisane adresy (HMAC: konto, urządzenie, paczka / wysyłka, c
 API (emustart/remote.py, emustart/server.py):
     GET  /v1/savesync/<platforma>/<gra>/manifest        manifest z adresami pobrania
     GET  /v1/savesync/<platforma>/<gra>/status          to samo bez adresów
+    POST /v1/savesync/manifests {games: [[p, g]…]}      manifesty wielu gier naraz
     POST /v1/savesync/upload/init                       → upload_id, upload_url | 409
     PUT  /v1/files/u/<token>                            treść ZIP (strumieniowo, SHA-256)
     POST /v1/savesync/upload/commit                     → nowa revision | 409
@@ -337,6 +338,24 @@ def manifest(account: str, device: str, platform, game, urls: bool = True) -> di
                  "e": emu, "c": core, "k": kind, "b": b["bundle_id"]})
             b["expires_in"] = URL_TTL
     _log("manifest", account, device, platform, game, "", "", "", out.get("revision"))
+    return out
+
+
+MAX_MANIFESTS = 500
+
+
+def manifests(account: str, device: str, games, urls: bool = True) -> dict:
+    """Manifesty kilku gier jednym zapytaniem (urządzenie po starcie: gry, w które na nim grano) —
+    {"<platforma>/<gra>": manifest}. Gra z nieprawidłowym identyfikatorem jest pominięta."""
+    if not isinstance(games, list) or len(games) > MAX_MANIFESTS:
+        raise SyncError(f"lista gier (najwyżej {MAX_MANIFESTS})")
+    out = {}
+    for g in games:
+        try:
+            platform, game = _id(g[0], "platform_id"), _id(g[1], "game_id")
+        except (SyncError, TypeError, IndexError, KeyError):
+            continue
+        out[f"{platform}/{game}"] = manifest(account, device, platform, game, urls)
     return out
 
 

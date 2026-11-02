@@ -4,6 +4,7 @@ konflikt rozstrzygany przez gracza, gra bez połączenia."""
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -166,6 +167,57 @@ def test_pull_after_login_unchanged_conflict_offline(net):
     _write(tel, b"V1")                                                       # bez zmian lokalnie — pobranie
     r = syncclient.pull_all(cfgs[TEL], TEL)
     assert r["downloaded"] == 1 and tel.read_bytes() == b"V2"
+
+
+GAME2 = {"es": "snes", "name": "Super Metroid (USA)", "rel": "Super Metroid (USA).zip"}
+
+
+def _manifest_calls(monkeypatch) -> list:
+    """Zapytania klienta o manifesty: ("GET", ścieżka) pojedynczo albo ("POST", liczba gier) zbiorczo."""
+    calls = []
+    real = syncclient._Client.call
+
+    def call(self, method, path, body=None, *a, **k):
+        if path.endswith("/manifest"):
+            calls.append(("GET", path))
+        elif path == "/v1/savesync/manifests":
+            calls.append(("POST", len(json.loads(body)["games"])))
+        return real(self, method, path, body, *a, **k)
+    monkeypatch.setattr(syncclient._Client, "call", call)
+    return calls
+
+
+def test_pull_all_asks_for_all_games_at_once(net, monkeypatch):
+    cfgs, tmp = net
+    tel = _two_devices(cfgs, tmp)
+    stem2 = GAME2["name"]
+    b2 = lambda who: [savebundles.Bundle("retroarch", "snes9x", "saves", tmp / f"dev{who}" / "saves", stem2,  # noqa: E731
+                                         [stem2]).collect()]
+    _write(tmp / "dev1" / "saves" / f"{stem2}.srm", b"M1")
+    syncclient.before(cfgs[PC], PC, b2(PC), GAME2)
+    syncclient.before(cfgs[TEL], TEL, b2(TEL), GAME2)
+    _write(tmp / "dev1" / "saves" / f"{stem2}.srm", b"M2")
+    syncclient.after(cfgs[PC], PC, b2(PC), GAME2)
+    calls = _manifest_calls(monkeypatch)
+    r = syncclient.pull_all(cfgs[TEL], TEL)
+    assert r["downloaded"] == 2 and tel.read_bytes() == b"V2"
+    assert (tmp / "dev2" / "saves" / f"{stem2}.srm").read_bytes() == b"M2"
+    assert calls == [("POST", 2)]                                            # jedno zapytanie zamiast dwóch
+
+
+def test_pull_all_on_server_without_bulk_manifests(net, monkeypatch):
+    """Serwer sprzed zbiorczych manifestów (400 „nieznany adres”) — jak dotąd, gra po grze."""
+    from emustart import savesync
+    cfgs, tmp = net
+    tel = _two_devices(cfgs, tmp)
+
+    def old(*_a, **_k):
+        raise savesync.SyncError("nieznany adres")
+    monkeypatch.setattr(savesync, "manifests", old)
+    calls = _manifest_calls(monkeypatch)
+    r = syncclient.pull_all(cfgs[TEL], TEL)
+    assert r["downloaded"] == 1 and tel.read_bytes() == b"V2"
+    assert calls[0] == ("POST", 1) and [c[0] for c in calls[1:]] == ["GET"]
 
 
 def test_pending_saves_of_previous_account_never_land_on_new_one(net, monkeypatch):

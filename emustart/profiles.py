@@ -559,9 +559,23 @@ def attach(pid: int, family: str, emu_dir: Path) -> None:
 
 # ── NAS ──
 
+ONLINE_TTL = 30.0          # s — „dostępny” pamiętany (jeden start gry pytał serwer kilka razy)
+_online_at: dict = {}
+
+
 def nas_online(cfg: dict) -> bool:
-    """Folder profili (konta na serwerze EmuStart) dostępny."""
-    return nasfs.backend(cfg).online()
+    """Folder profili (konta na serwerze EmuStart) dostępny. Odpowiedź „dostępny” pamiętana przez
+    ONLINE_TTL s; „niedostępny” — sprawdzane za każdym razem. Serwer, który zniknął w tym czasie:
+    kolejne zapytania i tak obsługują brak połączenia."""
+    key = (cfg.get("server_url"), cfg.get("profiles_nas"), cfg.get("server_key"))
+    if time.monotonic() - _online_at.get(key, -ONLINE_TTL) < ONLINE_TTL:
+        return True
+    ok = nasfs.backend(cfg).online()
+    if ok:
+        _online_at[key] = time.monotonic()
+    else:
+        _online_at.pop(key, None)
+    return ok
 
 
 def via(cfg: dict) -> str:
@@ -839,6 +853,8 @@ def _sync(cfg: dict, pid: int, kind: str, family: str, names: list, up: bool) ->
 
 
 def sync_down(cfg: dict, pid: int, family: str, names: list) -> int:
+    if not names:
+        return 0               # wszystkie foldery zapisów emulatora idą paczkami — bez zapytań do serwera
     prof = get(pid)
     if not prof or not nas_online(cfg):
         return 0
@@ -846,6 +862,8 @@ def sync_down(cfg: dict, pid: int, family: str, names: list) -> int:
 
 
 def sync_up(cfg: dict, pid: int, family: str, names: list) -> int:
+    if not names:
+        return 0
     prof = get(pid)
     if not prof or not nas_online(cfg):
         _pending(pid, family, names, add=True)
@@ -1205,7 +1223,8 @@ def _fingerprint(adapter) -> dict:
 
 def _remember_seen(adapter, pid: int) -> None:
     try:
-        _write_atomic(_seen_file(adapter.family), json.dumps({"pid": pid, "files": _fingerprint(adapter)}))
+        _write_atomic(_seen_file(adapter.family), json.dumps({"pid": pid, "files": _fingerprint(adapter),
+                                                              "rels": list(adapter.settings_files())}))
     except OSError as ex:
         log.info("odcisk ustawień %s: %s", adapter.family, ex)
 
@@ -1220,6 +1239,8 @@ def changed_outside(adapter) -> int | None:
         return None
     if not isinstance(seen, dict) or not isinstance(seen.get("files"), dict):
         return None
+    if seen.get("rels") != list(adapter.settings_files()):
+        return None                          # inna lista plików ustawień (nowa wersja) — nie zmiana w emulatorze
     return int(seen["pid"]) if seen["files"] != _fingerprint(adapter) and get(int(seen.get("pid") or 0)) else None
 
 

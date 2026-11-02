@@ -8,7 +8,64 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md). Otwarte po 0.55.0: Xenia 1c (logowanie przypiętego profilu na
 nowym urządzeniu — do sprawdzenia na żywo), Play! (miejsce kart), APK (te same reguły zapisów — brak środowiska do
-budowania), adaptery pozostałych samodzielnych emulatorów przy pierwszym użyciu, sprawdzenie na żywo (niżej).
+budowania), adaptery pozostałych samodzielnych emulatorów przy pierwszym użyciu, sprawdzenie na żywo (niżej);
+jedno zapytanie przygotowujące grę — po pomiarach kroków z prawdziwych startów.
+
+## [0.55.1] — 2026-11-02
+
+Zakres: serwer (`remote.py`, `savesync.py` — nowy `POST /v1/savesync/manifests`, dotychczasowe adresy bez zmian),
+klient Windows i Lumen (silnik): `syncclient.py`, `profiles.py`, `launcher.py`. APK bez zmian (nie używa zmienionych
+ścieżek; zmiana na serwerze tylko dodaje adres).
+
+### Poprawione
+- **Start gry — mniej zapytań do serwera:** przed grą 8 → 4, po grze 5 → 2 (emulator z zapisami w paczkach):
+  bez pytania o foldery zapisów, których nie ma, i bez osobnego sprawdzania serwera w każdym kroku.
+- **Zapisy po starcie programu:** manifesty wszystkich gier jednym zapytaniem zamiast jednego na grę (u użytkownika
+  46 zapytań przy każdym starcie). Starszy serwer — jak dotąd.
+- **Ustawienia:** nowy plik ustawień w nowej wersji nie jest już brany za zmianę zrobioną w emulatorze poza EmuStart.
+- **Log:** „czas do startu” podaje czas każdego kroku przygotowania gry.
+
+### Sprawdzone
+- testy (cały zestaw, w tym liczba zapytań przed grą i po niej, zbiorcze manifesty, starszy serwer, cudze konto).
+
+### Niesprawdzone
+- na żywo z serwerem; czasy kroków z prawdziwych startów.
+
+### Plan (2026-11-02): mniej zbędnej pracy sieciowej (analiza funkcjonalna EmuStart + Lumen)
+Kolejność od największej korzyści przy najmniejszym ryzyku; każdy etap — założenia sprawdzone w kodzie przed zmianą.
+1. **Zapisy po starcie silnika (`pull_all`): manifesty wszystkich gier jednym zapytaniem** zamiast jednego na grę
+   (u użytkownika 46 kolejnych zapytań, 4–6 s w tle przy każdym starcie). Serwer: `POST /v1/savesync/manifests`
+   (konto z tokenu, jak pojedynczy manifest); klient: paczki po 200 gier, na starszym serwerze — jak dotąd, gra po
+   grze. **Zrobione** (testy: zbiorcze zapytanie, stary serwer, cudze konto, dotychczasowe testy `pull_all`).
+   - *Wstrzymane:* identyfikator gry serwera w lokalnej kopii biblioteki — uzasadnienie z analizy („zapytanie przy
+     każdym oglądaniu gry”) się nie potwierdziło: wpisy w logu pochodzą z pobierania gry, a `_sid` wołają tylko
+     rzadkie akcje administratora (grafiki, opis).
+2. Biblioteka w Lumenie: zmiany pojedynczych gier zamiast pełnej listy (53 tys. gier, 29 MB) po każdej grze.
+3. Start gry: jedno zapytanie przygotowujące zamiast kilku kolejnych (1,5–2,6 s) — najpierw pomiar kroków.
+   **Pomiar zrobiony:** linia „czas do startu” podaje czas każdego kroku (przeniesione profile, blokada, ustawienia,
+   konto RA i emulator, foldery zapisów, zapisy gry, karty rdzeni). Samo zapytanie przygotowujące — po zebraniu
+   pomiarów z prawdziwych startów (który krok naprawdę kosztuje).
+   **Zbędne zapytania usunięte** (policzone w teście, Dolphin — zapisy w całości paczkami): przed grą 8 → 4, po grze
+   5 → 2. Foldery zapisów: emulator bez folderów poza paczkami nie pyta serwera o znacznik (wynik był zawsze 0);
+   „serwer dostępny” pamiętany 30 s zamiast osobnego `list` w każdym kroku (niedostępny — sprawdzany zawsze).
+   Zostają: blokada, znacznik ustawień, przeniesiony folder profilu (`moved.json` — ochrona przed zapisem do starego
+   folderu), konto RA, manifest zapisów gry.
+4. Ustawienia: odcisk bez fałszywego „zmienione poza EmuStart” po zmianie listy plików. **Zrobione:** odcisk
+   pamięta listę plików ustawień; inna lista (nowa wersja) = „nie wiadomo”, nie zmiana w emulatorze. Konflikt
+   ustawień nie jest „po cichu”, jak podała analiza — trafia do listy konfliktów (`lumen_status.conflicts`,
+   panel zadań Lumena) — bez zmian.
+5. Zmiany architektoniczne z migracją danych (metadane LaunchBox na serwerze, jeden mechanizm synchronizacji
+   zapisów, reguły zapisów jako dane) — osobna decyzja. Sprawdzone 2026-11-02, **niewdrożone, bo bez korzyści**:
+   - LaunchBox na serwerze: serwer ma `lb_id` dla 91% gier (47 801 z 52 618; braki głównie dema Amigi, których
+     LaunchBox nie ma), a Lumen i tak potrzebuje własnej bazy (opisy gier spoza Steama i EmuStart, pobierana na
+     żądanie) — przeniesienie nie oszczędza pobrania.
+   - Jeden mechanizm zapisów: wszystkie używane emulatory (RetroArch, PCSX2, Dolphin, DuckStation, PPSSPP) mają
+     zapisy w paczkach; synchronizacja folderów zostaje tylko dla RPCS3 / Vita3K (w bibliotece 0 gier PS3 i PS Vita)
+     i ustawień. Migracja danych na serwerze — gdy pojawią się te gry albo kolejny emulator bez paczek.
+   - Reguły zapisów jako dane: część dla APK zablokowana (brak środowiska Androida); `lumen_*.py` w Lumenie nie
+     koliduje z `git subtree` (EmuStart ich nie ma).
+
+Moduły: serwer i klient Windows / Lumen (silnik) — etap 1; APK nie używa `pull_all` — bez zmian.
 
 ## [0.55.0] — 2026-11-02
 

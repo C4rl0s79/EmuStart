@@ -964,6 +964,23 @@ def pending(cfg: dict, account: str = "") -> list:
     return out
 
 
+BULK = 200                           # gier w jednym zapytaniu o manifesty
+
+
+def _bulk_manifests(cl, games: list) -> dict | None:
+    """{"platforma/gra": manifest} wszystkich gier — kilkoma zapytaniami zamiast jednego na grę.
+    None: serwer sprzed zbiorczych manifestów albo błąd — wtedy gra po grze, jak dotąd."""
+    out: dict = {}
+    for i in range(0, len(games), BULK):
+        try:
+            r = cl.json("POST", "/v1/savesync/manifests", {"games": [list(g) for g in games[i:i + BULK]]})
+        except (Offline, ConflictError) as ex:
+            log.info("zbiorcze manifesty: %s — gra po grze", ex)
+            return None
+        out.update(r.get("manifests") or {})
+    return out
+
+
 def pull_all(cfg: dict, pid: int, skip: set | None = None) -> dict:
     """Po zalogowaniu i przy starcie: nowsze wersje paczek znanych na tym urządzeniu (tego
     konta), gdy lokalnie bez zmian. Konfliktów nie rozstrzyga — zostają do decyzji przy
@@ -985,14 +1002,20 @@ def pull_all(cfg: dict, pid: int, skip: set | None = None) -> dict:
     except Offline as ex:
         out["offline"] = str(ex)
         return out
+    bulk = _bulk_manifests(cl, list(games))
     for (plat, gid), rs in games.items():
-        try:
-            man = cl.json("GET", f"/v1/savesync/{plat}/{gid}/manifest")
-        except Offline as ex:
-            out["offline"] = str(ex)
-            break
-        except ConflictError:
-            continue
+        if bulk is not None:
+            man = bulk.get(f"{plat}/{gid}".lower())
+            if man is None:
+                continue
+        else:
+            try:
+                man = cl.json("GET", f"/v1/savesync/{plat}/{gid}/manifest")
+            except Offline as ex:
+                out["offline"] = str(ex)
+                break
+            except ConflictError:
+                continue
         with _lock:
             for r in rs:
                 try:
