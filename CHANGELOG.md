@@ -73,7 +73,7 @@ i panelem serwera — największa część). Każdy krok: testy, potem sprawdzen
 | 1b. Xenia Edge — stały profil gracza (zrobione): po grze urządzenie zgłasza profil, z którego grał gracz (`PUT /v1/emuprofiles`, konto z tokenu); panel serwera → konto → „Profil Xbox 360”: przypięcie profilu zgłoszonego przez urządzenie tego konta (`emu_profile_pin`; cudzego nie można); przed grą przypięty profil (`GET /v1/emuprofiles`) — jest na urządzeniu: paczka w jego folderze i należy do tego gracza (zamiast „pierwszy gracz”); bez sieci — jak dotąd | 6 testów (serwer: zgłoszenie, przypięcie, odpięcie, cudzy profil; klient: przypięty profil, zgłoszenie przez serwer), cały zestaw 442 ✓ | czeka (panel — składnia `node --check`, bez kliknięcia w przeglądarce) | `2f352a1` |
 | 1c. Xenia Edge — profil (konto, osiągnięcia `FFFE07D1`) na urządzeniach, gdzie go nie ma, i logowanie przypiętego profilu na czas gry | — | **zablokowane:** rdzeń ma `xenia-edge.config.toml` z `logged_profile_slot_0_xuid` (plik rdzenia), ale sekcja TOML, format XUID i miejsce pliku nieustalone; bez tego nowe urządzenie miałoby dwa profile i Xenia mogłaby zalogować zły — do sprawdzenia na żywo, potem implementacja | — |
 | 7. APK — te same reguły w `Saves.kt` (rozszerzenia, przyrostki, podfoldery FBNeo, rdzenie Dolphin/PPSSPP, Flycast) | — | **zablokowane:** na tym komputerze nie ma Android SDK, JDK ani wrappera Gradle, APK nie ma testów jednostkowych — zmiany w Kotlinie nie dałoby się zbudować ani sprawdzić. Analiza bezpieczeństwa (kod `SaveSync.kt` / `Saves.kt`): APK nie skasuje nowych zapisów z PC — pusty zestaw lokalny nie jest wysyłany (`push`: „pusty zestaw nie kasuje zapisów”), rdzenie FBNeo / Flycast / Kronos / PUAE nie tworzą na Androidzie plików z listy rozszerzeń APK, paczek `retroarch/*/memcards` (PUAE, Xenia) APK nie zakłada. Skutek: te zapisy nie synchronizują się na telefonie; APK pobiera je jako nieużywane pliki do głównego folderu zapisów (nieszkodliwe) | — |
-| 5. Silnik Lumena (`git subtree`) | — | — | — |
+| 5. Silnik Lumena (`git subtree` z gałęzi `zapisy-system` na gałąź Lumena `zapisy-system`; `lumen.py` → opcje gry też przez `xenia_claim`) | testy silnika w Lumenie 498 ✓ (1 pominięty), testy Lumena 200 ✓, typecheck ✓; błąd znaleziony testem Lumena (obiekt zastępczy bez `core_id`) — poprawiony w `8fdcd7f` | czeka | Lumen: `f1a2841`, `db3ebc4`, `a2827d2`; EmuStart: `8fdcd7f` |
 | 6. Przygotowanie wydania (lokalny build, checklista) | — | — | — |
 
 Ustalone ze źródeł i z plików rdzeni zainstalowanych na serwerze (2026-11-02): FBNeo `"%s%cfbneo%c%s.fs"` (libretro.cpp),
@@ -96,8 +96,8 @@ Zmiana planu pkt 1 (2026-11-02, po sprawdzeniu pliku rdzenia): zamiast podmiany 
 każdy gracz ma własny profil (XUID) w tym samym `content\`, a EmuStart wskazuje Xenii profil do zalogowania
 (`logged_profile_slot_0_xuid`); zapisy Xboksa są i tak rozdzielone po profilach. Bez przenoszenia folderów z danymi.
 
-Następny krok: 5 — silnik Lumena: `git subtree pull --prefix engine emustart zapisy-system --squash` na gałęzi
-roboczej Lumena (nie `main`), testy `npm run test:engine`, `npm test`, typecheck; potem 6 (wydanie: lokalny build, checklista).
+Następny krok: 6 — przygotowanie wydania: wynik przeglądu kodu (code-review, poziom high), lokalny build EmuStart
+i testowy build Lumena (osobny folder), checklista wydania; push / merge / publikacja — tylko za zgodą.
 
 Moduły: klient Windows i Lumen (silnik `engine/`) — zmiana; serwer — nowe rodzaje paczek (format jak dotychczas);
 APK — Flycast (RetroArch na Androidzie) przez tę samą kartę w `saves\`, Xenia i LRPS2 — nie dotyczy (nie ma ich
