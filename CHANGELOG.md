@@ -224,6 +224,17 @@ Etap 3 — zrobione (lokalnie, testy na fixture'ach):
   emulatora — slot gry sprzed zmiany (jak dotąd); przerwana zamiana sprzed zmiany nie jest dokańczana na folderach
   innego emulatora (mogłaby skasować jego pliki). Lista stanów innych rdzeni i ich edycja — slot bieżącego rdzenia.
 
+Etap 4 — zrobione dla Vita3K (lokalnie, testy na fixture'ach; Vita3K u użytkownika nigdy nie uruchomiony):
+- **Vita3K (PS Vita):** `ux0\user` (użytkownicy Vity, zapisy `savedata`, trofea) — dowiązanie do folderu gracza, jak
+  RPCS3; synchronizacja folderu z serwerem jak dotąd dla emulatorów bez paczek. `config.yml` — ustawienia gracza;
+  zostają: `pref-path`, `gpu-idx`, `custom-driver-name`. Miejsca z kodu źródłowego Vita3K (`app_init.cpp`,
+  `config.cpp`, `io.cpp`): `portable\` obok exe → wszystko w nim, system plików `portable\fs`; inaczej `config.yml`
+  obok exe i system plików z `pref-path` albo folder użytkownika SDL — przyjęty `%APPDATA%\Vita3K\Vita3K` (nazwy
+  organizacji i aplikacji z ustawień Qt Vita3K; nazw przekazywanych do SDL w kodzie nie znalazłem — do sprawdzenia
+  przy pierwszym uruchomieniu).
+- Pozostałe samodzielne emulatory (melonDS, mGBA, Snes9x, Xenia, ares, Cemu, Ryujinx, Azahar, xemu, MAME, shadPS4,
+  Eden, Citron) — nie są dziś używane w bibliotece użytkownika; adapter przy pierwszym użyciu (zgodnie z planem).
+
 Moduły: klient Windows i Lumen (silnik `engine/`) — zmiana; serwer — nowe rodzaje paczek (format jak dotychczas);
 APK — Flycast (RetroArch na Androidzie) przez tę samą kartę w `saves\`, Xenia i LRPS2 — nie dotyczy (nie ma ich
 na Androidzie). Nie zmienia się: zapisy pozostałych rdzeni i emulatorów, lista gier, sterowanie.
