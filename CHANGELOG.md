@@ -235,6 +235,15 @@ Etap 4 — zrobione dla Vita3K (lokalnie, testy na fixture'ach; Vita3K u użytko
 - Pozostałe samodzielne emulatory (melonDS, mGBA, Snes9x, Xenia, ares, Cemu, Ryujinx, Azahar, xemu, MAME, shadPS4,
   Eden, Citron) — nie są dziś używane w bibliotece użytkownika; adapter przy pierwszym użyciu (zgodnie z planem).
 
+Etap 5 — sprawdzone na fixture'ach (bez prawdziwych emulatorów i drugiego fizycznego komputera):
+- Dwa klienty (osobne foldery profili i instalacje emulatorów, inna karta grafiki) przez serwer EmuStart (HTTP, ten sam
+  serwer testowy co reszta testów profili): ustawienie zmienione przez gracza na kliencie A jest na kliencie B przed
+  grą, a wartość komputera B zostaje — Dolphin, PPSSPP, RPCS3, Vita3K. RetroArch, DuckStation, PCSX2 — wcześniejsze
+  testy profili (bez zmian).
+- **Nie sprawdzone na żywo:** wszystkie etapy 1–5 w prawdziwych emulatorach (czy emulator czyta podmienione pliki
+  i dowiązania tak, jak zakładają testy), APK (Android — ustawienia samodzielnych emulatorów nie dotyczą), Lumen
+  (silnik — po przeniesieniu przez `git subtree`).
+
 Moduły: klient Windows i Lumen (silnik `engine/`) — zmiana; serwer — nowe rodzaje paczek (format jak dotychczas);
 APK — Flycast (RetroArch na Androidzie) przez tę samą kartę w `saves\`, Xenia i LRPS2 — nie dotyczy (nie ma ich
 na Androidzie). Nie zmienia się: zapisy pozostałych rdzeni i emulatorów, lista gier, sterowanie.

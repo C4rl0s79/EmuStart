@@ -6,6 +6,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from emustart import ingame, profiles
 
 from test_core import _write, env  # noqa: F401  (fixture)
@@ -277,3 +279,61 @@ def test_vita3k_saves_and_settings_per_player(prof_env):
     s._profile_finish(ad, names)
     ola_dir = profiles.local_dir(ola, "vita3k", "user")
     assert (ola_dir / "00" / "savedata" / "PCSE00120" / "sce_sys" / "param.sfo").read_bytes() == b"ZAPIS-OLI"
+
+
+
+# ── etap 5: ustawienia gracza przechodzą między klientami (dwa urządzenia, jeden serwer) ──
+
+def _device(tmp: Path, name: str, monkeypatch):
+    """Drugi klient: własny folder profili na urządzeniu i własne instalacje emulatorów (w teście baza
+    profili wspólna — te same konta)."""
+    monkeypatch.setattr(profiles, "LOCAL", tmp / name / "profiles")
+    return tmp / name
+
+
+def _cross(kind: str, root: Path):
+    """(adapter, zmiana gracza, odczyt ustawienia gracza, wartość komputera B, odczyt wartości komputera)."""
+    if kind == "dolphin":
+        ad = _dolphin(root)
+        f = ad.settings_base() / "Config" / "GFX.ini"
+        return (ad, lambda: ingame.ini_set(f, {("Settings", "InternalResolution"): "6"}),
+                lambda: ingame.ini_section(f, "Settings")["InternalResolution"],
+                lambda: ingame.ini_set(f, {("Hardware", "Adapter"): "9"}),
+                lambda: ingame.ini_section(f, "Hardware")["Adapter"])
+    if kind == "ppsspp":
+        ad = _ppsspp(root)
+        f = ad.home / "memstick" / "PSP" / "SYSTEM" / "ppsspp.ini"
+        return (ad, lambda: ingame.ini_set(f, {("Graphics", "InternalResolution"): "6"}),
+                lambda: ingame.ini_section(f, "Graphics")["InternalResolution"],
+                lambda: ingame.ini_set(f, {("Graphics", "VulkanDevice"): "9"}),
+                lambda: ingame.ini_section(f, "Graphics")["VulkanDevice"])
+    if kind == "rpcs3":
+        ad = _rpcs3(root)
+        f = ad.home / "config" / "config.yml"
+        return (ad, lambda: ingame.yml_set(f, {("Video", "Resolution Scale"): "6"}),
+                lambda: ingame.yml_pick(f, [("Video", "Resolution Scale")])[("Video", "Resolution Scale")],
+                lambda: ingame.yml_set(f, {("Video/Vulkan", "Adapter"): "9"}),
+                lambda: ingame.yml_pick(f, [("Video/Vulkan", "Adapter")])[("Video/Vulkan", "Adapter")])
+    home = root / "emu" / "Vita3K"
+    _write(home / "portable" / "config.yml", VITA_CFG.encode())
+    ad = ingame.adapter_for(str(home / "Vita3K.exe"))
+    f = home / "portable" / "config.yml"
+    return (ad, lambda: ingame.yml_set(f, {("", "resolution-multiplier"): "6"}),
+            lambda: ingame.yml_pick(f, [("", "resolution-multiplier")])[("", "resolution-multiplier")],
+            lambda: ingame.yml_set(f, {("", "gpu-idx"): "9"}),
+            lambda: ingame.yml_pick(f, [("", "gpu-idx")])[("", "gpu-idx")])
+
+
+@pytest.mark.parametrize("kind", ["dolphin", "ppsspp", "rpcs3", "vita3k"])
+def test_player_settings_reach_second_client(prof_env, monkeypatch, kind):
+    cfg, tmp = prof_env
+    ola = profiles.create("Ola")["id"]
+    ad_a, change, read, _m, _r = _cross(kind, _device(tmp, "pc", monkeypatch))
+    _play(cfg, ola, ad_a, change)                          # komputer A: Ola zmienia ustawienie
+    ad_b, _c, read_b, machine_b, read_machine = _cross(kind, _device(tmp, "laptop", monkeypatch))
+    machine_b()                                            # komputer B: inna karta grafiki
+    s = _session(cfg, ola)
+    names = s._profile_prepare(ad_b)                       # komputer B: ustawienia Oli z serwera
+    assert read_b() == "6" and read_machine() == "9"
+    s._release_dirs()
+    s._profile_finish(ad_b, names)
