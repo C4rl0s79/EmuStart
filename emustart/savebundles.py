@@ -551,7 +551,7 @@ def xenia_claim(bundles: list, pid: int, pinned: str = "") -> list:
     from emustart import library
     out = []
     for b in bundles:
-        if b.core_id != "xenia_edge":
+        if getattr(b, "core_id", "") != "xenia_edge":       # tylko paczki Xenii (inne obiekty — bez zmian)
             out.append(b)
             continue
         try:

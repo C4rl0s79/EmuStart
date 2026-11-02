@@ -372,3 +372,11 @@ def test_emuprofiles_from_device(net):
     st = syncclient.emu_profiles(cfgs[PC], PC)
     assert [p["xuid"] for p in st["xenia_edge"]["reported"]] == ["E030000000983487"]
     assert st["xenia_edge"]["pinned"] == ""
+
+
+def test_xenia_claim_leaves_other_objects(env):
+    """Paczki z innych miejsc (np. zastępcze obiekty w testach Lumena) bez pola core_id — bez zmian."""
+    class States:
+        kind = "states"
+    s = States()
+    assert savebundles.xenia_claim([s], 1) == [s]
