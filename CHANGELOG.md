@@ -150,7 +150,14 @@ w logu. (g) Rdzeń Dolphin / PPSSPP i samodzielny emulator tej samej gry na jedn
 zapisów — zmiana slotu w jednym nie przenosi plików drugiego (rzadki przypadek: ta sama gra w obu, ze slotami).
 (h) Kilka profili Xenii na urządzeniu — bez synchronizacji Xenii do czasu 1c (logowanie przypiętego profilu).
 
-Następny krok: commit → silnik Lumena (subtree) → testy → końcowy raport.
+**Stan na koniec sesji 2026-11-02:** implementacja zakończona tam, gdzie nie blokuje jej sprawdzenie na żywo; testy
+EmuStart 457 ✓, silnik w Lumenie 513 ✓, Lumen 200 ✓, typecheck ✓; build EmuStart 0.55.0 (`dist\`) i testowy build
+Lumena (`release\zapisy-test`) z ostatecznym kodem ✓. Gałęzie lokalne, niewypchnięte: EmuStart `zapisy-system`,
+Lumen `zapisy-system` (w niej też poprawka Steam `6b1709d`).
+
+Następny krok (wymaga użytkownika): sprawdzenie na żywo z listy w checkliście (na kopii zapisów), potem zgoda na PR /
+scalenie / tag EmuStart 0.55.0 i wydanie Lumena 1.0.35; osobno — sprawdzenie formatu `xenia-edge.config.toml` (1c),
+miejsca kart Play! i środowisko do budowania APK.
 
 Moduły: klient Windows i Lumen (silnik `engine/`) — zmiana; serwer — nowe rodzaje paczek (format jak dotychczas);
 APK — Flycast (RetroArch na Androidzie) przez tę samą kartę w `saves\`, Xenia i LRPS2 — nie dotyczy (nie ma ich
