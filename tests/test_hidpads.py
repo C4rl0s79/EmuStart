@@ -19,6 +19,8 @@ GAMESIR = hidpad.Pad(r"\\?\hid#{00001124-0000-1000-8000-00805f9b34fb}_vid&000235
 @pytest.fixture
 def gamesir(monkeypatch):
     monkeypatch.setattr(hidpad, "pads", lambda: [GAMESIR])
+    monkeypatch.setattr(hidpad, "xinput_ids", lambda: set())
+    monkeypatch.setattr(xinput, "buttons", lambda i: None)          # bez padów XInput (niezależnie od komputera)
     return GAMESIR
 
 
@@ -135,3 +137,46 @@ def test_dolphin_hid_player1(env, tmp_path, gamesir):
     assert "Buttons/A = `Button S`" in text and "Buttons/B = `Button E`" in text and "`Left Y+`" in text
     restore()
     assert "Device = XInput/0/Gamepad" in ini.read_text() and "`Button A`" in ini.read_text()
+
+
+# odbiornik GameSira w trybie XInput: 3 wpisy DirectInput (pad IG_00, MI_01&COL02, MI_02), 1 slot XInput
+DONGLE = [(0x3537, 0x1098, "Controller (XBOX 360 For Windows)")] * 3
+
+
+def test_ra_ports_dongle_phantoms():
+    ports = ingame.ra_ports(DONGLE, [True, False, False, False], {(0x3537, 0x1098)})
+    assert ports == [("xinput", 0), None, None]                     # RetroArch: port 2 = nieistniejący slot 3
+    assert ingame.ra_player_ports(ports, [0], 4) == [0, 3, 3, 3]    # gracze 2–4: port bez urządzenia
+
+
+def test_ra_ports_mixed_and_dinput_fallback(gamesir):
+    di = DONGLE + [(0x3537, 0x100E, "GameSir HID")]
+    ports = ingame.ra_ports(di, [True, False, False, False], {(0x3537, 0x1098)})
+    assert ports[3] == ("dinput", 0x3537, 0x100E)
+    assert ingame.ra_player_ports(ports, [gamesir.id, 0], 3) == [3, 0, 4]
+    # bez padów XInput sterownik „xinput” się nie uruchamia — RetroArch bierze dinput: wszystko po kolei
+    only = ingame.ra_ports([(0x3537, 0x100E, "x")], [False] * 4, set())
+    assert only == [("dinput", 0x3537, 0x100E)] and ingame.ra_player_ports(only, [gamesir.id], 2) == [0, 1]
+
+
+def test_retroarch_session_skips_phantom_port(tmp_path, monkeypatch):
+    monkeypatch.setattr(hidpad, "dinput_devices", lambda: DONGLE)
+    monkeypatch.setattr(hidpad, "xinput_ids", lambda: {(0x3537, 0x1098)})
+    monkeypatch.setattr(xinput, "buttons", lambda i: 0 if i == 0 else None)
+    ra = ingame.RetroArch(str(tmp_path / "retroarch.exe"))
+    args = ra.launch_args(tmp_path / "run", False, [0])
+    text = Path(args[args.index("--appendconfig") + 1]).read_text()
+    assert 'input_player1_joypad_index = "0"' in text and 'input_player2_joypad_index = "3"' in text
+
+
+def test_sdl_numbers_skip_dongle_interfaces(monkeypatch):
+    # DuckStation/PCSX2: XInput#0 = SDL-0, interfejsy odbiornika SDL-1/2, drugi pad XInput = SDL-3
+    joys = sdlpads.player_ids([{"path": "XInput#0", "vid": 0x3537, "pid": 0x1098, "player": 0},
+                               {"path": "HID#VID_3537&PID_1098&MI_01&COL02#x", "vid": 0x3537, "pid": 0x1098, "player": -1},
+                               {"path": "HID#VID_3537&PID_1098&MI_02#x", "vid": 0x3537, "pid": 0x1098, "player": -1},
+                               {"path": "XInput#1", "vid": 0x045E, "pid": 0x028E, "player": 1}])
+    monkeypatch.setattr(sdlpads, "probe", lambda dll: joys)
+    assert [j["sdl"] for j in joys] == [0, 1, 2, 3]                 # numery jak w DuckStation
+    assert sdlpads.slots_for([0, 1], Path(__file__)) == [0, 3]       # Gracz 2 = SDL-3, nie interfejs SDL-1
+    assert sdlpads.slots_for([1, 0], Path(__file__)) == [3, 0]
+    assert sdlpads.slots_for([0], Path(__file__)) == [0]             # jeden pad — bez odczytu

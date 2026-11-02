@@ -535,3 +535,15 @@ def dinput_devices() -> list:
     finally:
         release(obj)
     return out
+
+
+def xinput_ids() -> set:
+    """{(vid, pid)} urządzeń, które mają interfejs XInput („IG_” w ścieżce HID) — tak RetroArch rozpoznaje
+    pady XInput na liście DirectInput (po samym VID:PID, więc także inne interfejsy tego urządzenia)."""
+    import re
+    out = set()
+    for p in _paths() if _hid else []:
+        m = re.search(r"vid_([0-9a-f]{4})&pid_([0-9a-f]{4}).*?ig_", p.lower())
+        if m:
+            out.add((int(m.group(1), 16), int(m.group(2), 16)))
+    return out
