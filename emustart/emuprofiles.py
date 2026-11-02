@@ -83,6 +83,10 @@ def pin(account: str, emu: str, xuid: str) -> str:
         e = a.setdefault(emu, {})
         if x and x not in (e.get("reported") or {}):
             return "Tego profilu nie zgłosiło żadne urządzenie tego konta."
+        other = next((n for n, acc in (_load().get("accounts") or {}).items()
+                      if n != account.strip().lower() and (acc.get(emu) or {}).get("pinned") == x), "")
+        if x and other:                       # jeden profil — jedno konto (inaczej zapisy kont by się nadpisywały)
+            return f"Ten profil jest już przypięty innemu kontu ({other})."
         e["pinned"] = x
         _save()
     return ""

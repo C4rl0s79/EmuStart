@@ -373,7 +373,11 @@ class Session:
         if adapter.family == "retroarch":
             try:   # osobna karta dla każdej gry (Flycast, LRPS2); pierwsza — kopia wspólnej z system\
                 adapter.core_defaults()
-                savebundles.seed_from_shared(adapter, savebundles.core_id(args), Path(rom), ps2_info(self.cfg, g))
+                prof = profiles.get(self.profile_id) or {}
+                mine = (prof.get("nas_name") or prof.get("name") or "").lower()
+                owner = not self.profiles_on or mine == profiles.account_of_device(self.cfg).lower()
+                savebundles.seed_from_shared(adapter, savebundles.core_id(args), Path(rom), ps2_info(self.cfg, g),
+                                             owner=owner)   # wspólna karta — tylko gracz-właściciel urządzenia
             except Exception:
                 log.exception("karta gry")
         self._t_prof = time.monotonic() - t_prof

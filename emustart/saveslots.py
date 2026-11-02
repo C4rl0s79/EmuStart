@@ -94,7 +94,9 @@ def store_bundle(pid: int, plat: str, gid: str, slot: int, b) -> savebundles.Bun
     native = (b.emulator_id, b.kind) in savebundles.NATIVE      # nazwy jak na urządzeniu (PCSX2, Dolphin, PPSSPP)
     return savebundles.Bundle(b.emulator_id, b.core_id, b.kind, folder,
                               (b.stem if native else savebundles.ARC),
-                              list(b.names) if native else [savebundles.ARC]).collect()
+                              list(b.names) if native else [savebundles.ARC],
+                              # nazwy poznawane po grze (PUAE, Xenia): podfolder z paczki slotu też
+                              learn=getattr(b, "learn", ""), learn_game=getattr(b, "learn_game", "")).collect()
 
 
 def trash_bundle(pid: int, plat: str, gid: str, slot: int, states) -> savebundles.Bundle:

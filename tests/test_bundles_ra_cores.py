@@ -59,7 +59,7 @@ def test_ra_dolphin_core_saves_bundle(env, tmp_path):
     bs = [b for b in savebundles.for_game(a, "dolphin", rom, GC) if b.emulator_id == "dolphin"]
     assert len(bs) == 1
     b = bs[0]
-    assert (b.core_id, b.kind, b.folder, b.names) == ("", "saves", user, ["GKBEAF"])
+    assert (b.core_id, b.kind, b.folder, b.names) == ("libretro", "saves", user, ["GKBEAF"])
     assert [arc for _p, arc in b.files] == ["GC/USA/Card A/01-GKBE-BatenKaitos.gci"]
     # zwykłe paczki RetroArcha (zapisy nazwane jak gra, stany) zostają
     assert {(x.emulator_id, x.kind) for x in savebundles.for_game(a, "dolphin", rom, GC)} >= {
@@ -110,8 +110,8 @@ def test_kronos_backup_ram_and_cartridge(env, tmp_path):
     _write(sub / "Inna gra.ram", b"INNA")
     b = saves_bundle(a, "kronos", rom, game)
     assert b.folder == sub
-    assert sorted(arc for _p, arc in b.files) == ["game-ext1M.ram", "game.ram"]
-    assert b.local_path("game-ext1M.ram") == sub / "Resident Evil (USA)-ext1M.ram"
+    # kartridż poza paczką: klient sprzed 0.55 zebrałby tylko <gra>.ram i wysłał paczkę bez kartridża
+    assert [arc for _p, arc in b.files] == ["game.ram"]
     _write(home / "retroarch-core-options.cfg", b'kronos_use_beetle_saves = "enabled"\n')
     _write(home / "retroarch.cfg", (home / "retroarch.cfg").read_bytes() + b'global_core_options = "true"\n')
     assert saves_bundle(a, "kronos", rom, game).folder == home / "saves" / "Kronos"
@@ -350,20 +350,29 @@ def test_xenia_download_accepts_only_title_folders(env, tmp_path):
 
 
 def test_xenia_pinned_profile_is_the_players(env, tmp_path):
-    """Profil przypięty graczowi w panelu serwera: paczka w jego folderze i należy do niego (także gdy inny gracz
-    grał z tego profilu wcześniej); profil przypięty, którego nie ma na urządzeniu — jak bez przypięcia."""
+    """Profil przypięty graczowi w panelu serwera należy do niego, także gdy wcześniej grał z niego inny gracz."""
     home = tmp_path / "RetroArch"
     _a, content, _r, [b] = xenia(home, tmp_path, "E030000000983487")
-    _write(content / "E0300000AAAABBBB" / "FFFE07D1" / "00010000" / "E0300000AAAABBBB" / "Account", b"KONTO 2")
-    assert savebundles.xenia_claim([b], 1)                                   # gracz 1 zajął jeden profil
-    _a, _c, _r, [b] = xenia(home, tmp_path, "")
-    [p] = savebundles.xenia_claim([b], 2, pinned="E030000000983487")
+    assert savebundles.xenia_claim([b], 1)                                   # gracz 1 zajął profil
+    [p] = savebundles.xenia_claim([b], 2, pinned="E030000000983487")         # przypięty graczowi 2
     assert p.folder == content / "E030000000983487"
-    assert savebundles.xenia_claim([b], 1) == []                              # przypięty gracza 2 — nie 1
-    _a, _c, _r, [b] = xenia(home, tmp_path, "")
-    [q] = savebundles.xenia_claim([b], 3, pinned="E0300000FFFFFFFF")          # nie ma go tu — jak bez przypięcia
-    assert q.folder.name == "E0300000AAAABBBB"                                # najnowszy, jeszcze niczyj
-    assert savebundles.xenia_xuids(content) == ["E030000000983487", "E0300000AAAABBBB"]
+    assert savebundles.xenia_claim([b], 1) == []
+    assert savebundles.xenia_xuids(content) == ["E030000000983487"]
+
+
+def test_xenia_several_profiles_no_bundle(env, tmp_path):
+    """Kilka profili Xenii na urządzeniu: nie wiadomo, który zaloguje rdzeń — bez paczki (żadnych cudzych zapisów)."""
+    home = tmp_path / "RetroArch"
+    a, content, rom, _b = xenia(home, tmp_path, "E030000000983487")
+    _write(content / "E0300000AAAABBBB" / "FFFE07D1" / "00010000" / "E0300000AAAABBBB" / "Account", b"KONTO 2")
+    assert [b for b in savebundles.for_game(a, "xenia_edge", rom, X360) if b.kind == "memcards"] == []
+
+
+def test_xenia_view_does_not_claim(env, tmp_path):
+    _a, _c, _r, b = xenia(tmp_path / "RetroArch", tmp_path)
+    assert savebundles.xenia_claim(b, 2, claim=False) == []                  # widok: nie zajmuje
+    assert savebundles.xenia_claim(b, 1) == b                                # gra gracza 1 — jego profil
+    assert savebundles.xenia_claim(b, 1, claim=False) == b
 
 
 def test_emuprofiles_from_device(net):
@@ -380,3 +389,93 @@ def test_xenia_claim_leaves_other_objects(env):
         kind = "states"
     s = States()
     assert savebundles.xenia_claim([s], 1) == [s]
+
+
+
+# ── ustalenia przeglądu kodu (code-review, poziom high) ──
+
+def test_core_and_standalone_on_one_device_keep_each_others_saves(net):
+    """Rdzeń Dolphin i samodzielny Dolphin na jednym urządzeniu: osobne stany (inne foldery), jedna paczka na
+    serwerze — zapis przechodzi w obie strony, nic się nie nadpisuje bez wiedzy."""
+    cfgs, tmp = net
+    home = tmp / "dev1" / "RetroArch"
+    a = ra(home, "dolphin", "Dolphin")
+    rom = disc(tmp / "dev1" / "roms" / "Baten Kaitos (USA).iso", 0, b"GKBEAF")
+    core_card = home / "saves" / "Dolphin" / "dolphin-emu" / "User" / "GC" / "USA" / "Card A" / "01-GKBE-BK.gci"
+    _write(core_card, b"X")
+
+    def core():
+        return [b for b in savebundles.for_game(a, "dolphin", rom, GC) if b.emulator_id == "dolphin"]
+
+    user = tmp / "dev1" / "Dolphin"
+
+    def alone():
+        return [savebundles.Bundle("dolphin", "", "saves", user, "GKBEAF", ["GKBEAF"]).collect()]
+
+    assert syncclient.before(cfgs[PC], PC, core(), GC).uploaded == 1
+    assert syncclient.before(cfgs[PC], PC, alone(), GC).downloaded == 1      # samodzielny dostaje zapis rdzenia
+    sa_card = user / "GC" / "USA" / "Card A" / "01-GKBE-BK.gci"
+    sa_card.write_bytes(b"S")
+    syncclient.after(cfgs[PC], PC, alone(), GC)
+    assert syncclient.before(cfgs[PC], PC, core(), GC).downloaded == 1       # rdzeń dostaje nowszy zapis
+    assert core_card.read_bytes() == b"S"
+
+
+def test_slot_store_keeps_learned_folders(env, tmp_path):
+    from emustart import saveslots
+    b = whd(ra(tmp_path / "RetroArch", "puae", "PUAE"), tmp_path)
+    s = saveslots.store_bundle(1, "amiga", "g1", 2, b)
+    assert s.local_path("MonkeyIsland/savegame.1") == s.folder / "MonkeyIsland" / "savegame.1"
+
+
+def test_package_folder_of_another_game_rejected(env, tmp_path):
+    a = ra(tmp_path / "RetroArch", "puae", "PUAE")
+    savebundles._remember("puae", "amigawhdgames/Turrican", ["Turrican"])
+    b = whd(a, tmp_path)
+    with pytest.raises(ValueError):
+        b.local_path("Turrican/hiscore")                                        # folder innej gry
+    assert "Turrican" not in b.names
+
+
+def test_bad_path_in_new_folder_not_learned(env, tmp_path):
+    _a, _c, _r, [b] = xenia(tmp_path / "RetroArch", tmp_path)
+    with pytest.raises(ValueError):
+        b.local_path("4B4E0842/00000002/dlc.bin")                               # DLC, nie zapis
+    assert "4B4E0842" not in b.names
+
+
+def test_spec_keeps_learning(env, tmp_path):
+    b = whd(ra(tmp_path / "RetroArch", "puae", "PUAE"), tmp_path)
+    c = savebundles.from_spec(b.spec())
+    assert (c.learn, c.learn_game) == ("dirs", "amigawhdgames/Monkey Island")
+    assert c.local_path("MonkeyIsland/savegame.1").name == "savegame.1"
+
+
+def test_shared_card_only_for_device_owner(env, tmp_path):
+    home = tmp_path / "RetroArch"
+    a = ra(home, "flycast", "Flycast", sort=False)
+    rom = _write(tmp_path / "roms" / "Gra (USA).chd")
+    _write(home / "system" / "dc" / "vmu_save_A1.bin", b"WSPOLNA KARTA")
+    opts(home, 'reicast_per_content_vmus = "VMU A1"\n')
+    game = {"es": "dc", "name": "Gra (USA)", "rel": "Gra (USA).chd"}
+    assert savebundles.seed_from_shared(a, "flycast", rom, game, owner=False) == []
+    assert savebundles.seed_from_shared(a, "flycast", rom, game) != []
+
+
+def test_backup_keeps_subfolders(net):
+    """Kopia zapasowa przed pobraniem: pliki o tej samej nazwie w różnych podfolderach — obie w kopii."""
+    cfgs, tmp = net
+    root = tmp / "dev1" / "PUAE" / "WHDSaves"
+    _write(root / "A" / "highs", b"A1")
+    _write(root / "B" / "highs", b"B1")
+    b = savebundles.Bundle("retroarch", "puae", "memcards", root, "", ["A", "B"], learn="dirs", learn_game="g")
+    assert syncclient.before(cfgs[PC], PC, [b.collect()], AMIGA).uploaded == 1
+    tel = tmp / "dev2" / "PUAE" / "WHDSaves"
+    _write(tel / "A" / "highs", b"A-stare")
+    _write(tel / "B" / "highs", b"B-stare")
+    b2 = savebundles.Bundle("retroarch", "puae", "memcards", tel, "", ["A", "B"], learn="dirs", learn_game="g").collect()
+    r = syncclient.before(cfgs[TEL], TEL, [b2], AMIGA)
+    if r.conflicts:
+        syncclient.resolve(cfgs[TEL], TEL, AMIGA, r.conflicts, "remote")
+    baks = list(syncclient._backup_dir(TEL).rglob("highs"))
+    assert sorted(p.read_bytes() for p in baks) == [b"A-stare", b"B-stare"]

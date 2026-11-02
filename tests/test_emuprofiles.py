@@ -44,3 +44,12 @@ def test_profile_of_another_account_cannot_be_pinned(srv):
     req(srv, "PUT", "/v1/emuprofiles", dev="ola-pc", body={"emu": "xenia_edge", "xuids": [X2]})
     assert not srvadmin.emu_profile_pin(None, {"name": "Jezus", "emu": "xenia_edge", "xuid": X2})["ok"]
     assert srvadmin.emu_profile_pin(None, {"name": "Ola", "emu": "xenia_edge", "xuid": X2})["ok"]
+
+
+
+def test_one_profile_one_account(srv):
+    req(srv, "PUT", "/v1/emuprofiles", body={"emu": "xenia_edge", "xuids": [X1]})
+    req(srv, "PUT", "/v1/emuprofiles", dev="ola-pc", body={"emu": "xenia_edge", "xuids": [X1]})   # ten sam komputer
+    assert srvadmin.emu_profile_pin(None, {"name": "Jezus", "emu": "xenia_edge", "xuid": X1})["ok"]
+    r = srvadmin.emu_profile_pin(None, {"name": "Ola", "emu": "xenia_edge", "xuid": X1})
+    assert not r["ok"] and "innemu kontu" in r["reason"]

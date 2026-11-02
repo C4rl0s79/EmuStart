@@ -35,8 +35,9 @@ RA_SAVE_EXTS = {"srm", "sav", "rtc", "eep", "fla", "mpk", "sra", "nv", "mcr", "b
                 "fs",       # FBNeo: NVRAM (<zapisy>/fbneo/<set>.fs)
                 "ps2",      # LRPS2: karta gry przy wyłączonych wspólnych kartach (<zapisy>/<gra>.ps2)
                 "nvr"}      # PUAE: NVRAM CD32 / CDTV (<zapisy>/<gra>.nvr)
-# zapisy z przyrostkiem po nazwie gry: Flycast — karta VMU gry (<gra>.A1.bin), Kronos — kartridż pamięci
-_RA_SAVE_SFX = (re.compile(r"^(.+)(\.[A-D][12]\.bin)$", re.I), re.compile(r"^(.+)(-ext(?:512K|1M|2M|4M)\.ram)$", re.I))
+# zapisy z przyrostkiem po nazwie gry: Flycast — karta VMU gry (<gra>.A1.bin). Kartridż pamięci Kronos
+# (<gra>-ext1M.ram) — poza paczką: klient sprzed 0.55 zebrałby z paczki tylko <gra>.ram i wysłał ją niepełną
+_RA_SAVE_SFX = (re.compile(r"^(.+)(\.[A-D][12]\.bin)$", re.I),)
 _RA_STATE = re.compile(r"(.+?)(\.state\d*(?:\.auto)?(?:\.png)?)", re.I)
 # stan PCSX2 / ArmSX2: „SLUS-20851 (39B574F0).03.p2s”, wznowienie PCSX2 (.resume), autozapis ArmSX2
 _P2S = re.compile(r"^(?P<prefix>.+?)\.(?P<slot>\d{2}|resume|autosave(?:\.\d)?)\.p2s$", re.I)
@@ -47,7 +48,8 @@ SKIP = (".emustart-new", ".emustart-tmp", ".tmp", ".part")
 _DOLPHIN_STATE = re.compile(r"^(?P<prefix>[A-Z0-9]{6})\.s(?P<slot>\d{2})$", re.I)
 _PPSSPP_STATE = re.compile(r"^(?P<prefix>[A-Z]{4}\d{5})_(?P<slot>\d{1,2})\.ppst$", re.I)
 # paczki z nazwami jak na urządzeniu (te same na każdym: od numeru / ID gry, nie od nazwy pliku)
-NATIVE = {("pcsx2", "states"), ("dolphin", "states"), ("dolphin", "saves"), ("ppsspp", "states"), ("ppsspp", "saves")}
+NATIVE = {("pcsx2", "states"), ("dolphin", "states"), ("dolphin", "saves"), ("ppsspp", "states"), ("ppsspp", "saves"),
+          ("retroarch", "memcards")}       # nazwy w paczce jak na urządzeniu (sloty zapisów je zachowują)
 _SAFE_DIR = re.compile(r"^[^<>:\"/\\|?*\x00-\x1f]{1,120}$")
 # paczki z podfolderami (nazwa w paczce ze ścieżką: „ULUS10336DATA00/DATA.BIN”, „GC/USA/Card A/01-GKBE-x.gci”)
 DEEP = {("dolphin", "saves"), ("ppsspp", "saves"),
@@ -82,8 +84,11 @@ class Bundle:
             bad = "\\" in arc or ":" in arc or any(x in ("", ".", "..") for x in parts)
             if (not bad and self.learn == "dirs" and len(parts) >= 2 and parts[0] not in self.names
                     and all(_SAFE_DIR.match(x) for x in parts)
-                    and (self.core_id != "xenia_edge" or _TITLE_ID.match(parts[0]) and parts[0] != _XENIA_PROFILE)):
+                    and (self.core_id != "xenia_edge" or _TITLE_ID.match(parts[0]) and parts[0] != _XENIA_PROFILE)
+                    and parts[0] not in _learned_by_others(self.core_id, self.learn_game)):
                 self.names.append(parts[0])         # podfolder gry z paczki tej gry (urządzenie go nie znało)
+                if not _deep_ok(self, parts):       # zła ścieżka w nowym folderze — folder nie zostaje
+                    self.names.remove(parts[0])
             if bad or not _deep_ok(self, parts):
                 raise ValueError(f"nieoczekiwana nazwa w paczce: {arc}")
             return self.folder.joinpath(*parts)
@@ -120,7 +125,8 @@ class Bundle:
 
     def spec(self) -> dict:
         return {"emu": self.emulator_id, "core": self.core_id, "kind": self.kind,
-                "folder": str(self.folder), "stem": self.stem, "names": list(self.names)}
+                "folder": str(self.folder), "stem": self.stem, "names": list(self.names),
+                "learn": self.learn, "learn_game": self.learn_game}
 
     def collect(self) -> "Bundle":
         """Pliki paczki w folderze (od nowa)."""
@@ -152,7 +158,8 @@ class Bundle:
 
 def from_spec(spec: dict) -> Bundle:
     return Bundle(spec["emu"], spec.get("core", ""), spec["kind"], Path(spec["folder"]),
-                  spec["stem"], list(spec.get("names") or [])).collect()
+                  spec["stem"], list(spec.get("names") or []),
+                  learn=spec.get("learn", ""), learn_game=spec.get("learn_game", "")).collect()
 
 
 def norm(s: str) -> str:
@@ -382,12 +389,14 @@ RA_SHARED_CARDS = {
 }
 
 
-def seed_from_shared(adapter, core: str, content: Path, game: dict) -> list:
+def seed_from_shared(adapter, core: str, content: Path, game: dict, owner: bool = True) -> list:
     """Pierwsza gra z osobną kartą: kopia wspólnej karty z system\\ (dotychczasowe zapisy są dalej widoczne).
     Bez kopii, gdy gra ma już kartę albo rdzeń używa jeszcze wspólnej. Wspólna karta zostaje nietknięta."""
+    # owner=False — gracz inny niż właściciel urządzenia: wspólna karta (zapisy wszystkich graczy) nie trafia
+    # do jego paczek
     c = (core or "").lower()
     spec = RA_SHARED_CARDS.get(c)
-    if adapter.family != "retroarch" or not spec:
+    if adapter.family != "retroarch" or not spec or not owner:
         return []
     shared, sfx, key, on = spec
     if ra_core_option(adapter, core, key) not in on:
@@ -435,6 +444,7 @@ def retroarch(adapter, core: str, content: Path, names: list) -> list:
 
 # Rdzenie, które trzymają zapisy w podfolderze katalogu zapisów RetroArcha w układzie samodzielnego emulatora:
 # rdzeń → (emulator, którego paczka — ten sam format zapisu, ta sama paczka na serwerze; podfolder)
+RA_CORE_ID = "libretro"
 RA_DEEP_CORES = {"dolphin": ("dolphin", ("dolphin-emu", "User")),
                  "ppsspp": ("ppsspp", ("PSP", "SAVEDATA"))}
 
@@ -452,7 +462,9 @@ def ra_core_bundles(adapter, core: str, content: Path, game: dict) -> list:
     places = [ra_folder(adapter, core, content, *keys).joinpath(*sub),
               ra_folder(adapter, core, content, *keys, sort=False).joinpath(*sub)]
     folder = next((p for p in places if p.is_dir()), places[0])
-    return [Bundle(emu, "", "saves", folder, gid, [gid]).collect()]
+    # RA_CORE_ID: osobny stan na urządzeniu niż samodzielny emulator (inny folder); serwer zapisuje paczkę emulatora
+    # bez rdzenia — ta sama paczka, zapis przechodzi między rdzeniem a samodzielnym emulatorem
+    return [Bundle(emu, RA_CORE_ID, "saves", folder, gid, [gid]).collect()]
 
 
 # ── nazwy poznawane po grze ──
@@ -472,6 +484,10 @@ def _learned_map() -> dict:
 
 def learned(core: str, game_key: str) -> list:
     return list(_learned_map().get(core, {}).get(game_key, []))
+
+
+def _learned_by_others(core: str, game_key: str) -> set:
+    return {n for g, ns in _learned_map().get(core, {}).items() if g != game_key for n in ns}
 
 
 def _remember(core: str, game_key: str, names: list) -> None:
@@ -543,7 +559,7 @@ def xenia_xuids(content: Path) -> list:
                   and (d / _XENIA_PROFILE / "00010000" / d.name / "Account").is_file())
 
 
-def xenia_claim(bundles: list, pid: int, pinned: str = "") -> list:
+def xenia_claim(bundles: list, pid: int, pinned: str = "", claim: bool = True) -> list:
     """content\\ Xenii nie jest rozdzielony na graczy EmuStart (folder system\\, nie przekierowany): profil
     Xenii (XUID) na urządzeniu należy do pierwszego gracza, który z niego grał — albo do gracza, któremu
     przypięto go w panelu serwera (`pinned`; jest na urządzeniu — paczka w jego folderze). Inny gracz nie
@@ -564,6 +580,10 @@ def xenia_claim(bundles: list, pid: int, pinned: str = "") -> list:
                 b.collect()
             owners[pinned] = int(pid)
         xuid = b.folder.name
+        if not claim:                         # widok (opcje gry, sloty): bez zajmowania profilu
+            if owners.get(xuid) == int(pid):
+                out.append(b)
+            continue
         if owners.setdefault(xuid, int(pid)) != int(pid):
             log.info("Xenia: profil %s należy do innego gracza — zapisy bez synchronizacji", xuid)
             continue
@@ -579,7 +599,7 @@ def learn_after(bundles: list) -> list:
     for b in bundles:
         if not b.learn:
             continue
-        others = {n for g, ns in _learned_map().get(b.core_id, {}).items() if g != b.learn_game for n in ns}
+        others = _learned_by_others(b.core_id, b.learn_game)
         now = _learn_entries(b)
         new = [n for n, sig in sorted(now.items(), key=lambda x: x[1])
                if b.seen.get(n) != sig and n not in b.names and n not in others and n != b.stem
@@ -630,9 +650,12 @@ def ra_learned_bundles(adapter, core: str, content: Path, game: dict, bundles: l
         # zapisy względem profilu na tym urządzeniu: XUID bywa inny na każdym urządzeniu; bez profilu —
         # bez paczki (zapisy trafiłyby do folderu nieistniejącego profilu)
         content = Path(adapter._cfg_dir("system_directory", "system")) / "Xenia-Edge" / "content"
-        xuid = xenia_xuid(content)
-        if not xuid:
+        # kilka profili: nie wiadomo, który zaloguje Xenia (logowanie profilu — do sprawdzenia na żywo) —
+        # bez paczki, zapisy nie trafią do cudzego profilu
+        xuids = xenia_xuids(content)
+        if len(xuids) != 1:
             return []
+        xuid = xuids[0]
         b = Bundle("retroarch", c, "memcards", content / xuid, "", learned(c, key), learn="dirs", learn_game=key)
         return [b.collect()]
     return []

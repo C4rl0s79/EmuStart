@@ -486,8 +486,10 @@ def _apply(pid: int, b, zp: Path) -> None:
         if b.files:
             bak = _backup_dir(pid) / time.strftime("%Y%m%d-%H%M%S") / f"{b.emulator_id}-{b.core_id or '-'}-{b.kind}"
             bak.mkdir(parents=True, exist_ok=True)
-            for path, _arc in b.files:
-                shutil.copy2(path, bak / Path(path).name)
+            for path, arc in b.files:
+                dst = bak / (arc if "/" in arc else Path(path).name)    # paczki z podfolderami — ze ścieżką
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(path, dst)
             _prune_backups(pid)
         b.folder.mkdir(parents=True, exist_ok=True)
         for i in items:
