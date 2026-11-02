@@ -596,6 +596,11 @@ class Session:
                 self._sync_skip = {c.bundle.key for c in res.conflicts}
         elif res.offline:
             self.notice = "Zapisy bez synchronizacji z serwerem — wyślę je, gdy wróci połączenie."
+        try:   # nazwy zapisów poznawane po grze (Flycast, PUAE): stan po pobraniu, przed grą
+            savebundles.remember_downloaded(bundles)
+            savebundles.learn_snapshot(bundles)
+        except Exception:
+            log.exception("nazwy zapisów przed grą")
         self.message = ""
 
     def _ask_conflict(self, conflicts: list) -> str:
@@ -618,6 +623,10 @@ class Session:
         for b in bundles:                           # stan PS2 zapisany pierwszy raz — poznany przedrostek
             if (b.emulator_id, b.kind) == ("pcsx2", "states"):
                 b.names = savebundles.ps2_prefixes(ps2_info(self.cfg, g))
+        try:   # karta / podfolder zapisany pierwszy raz w tej grze — poznana nazwa (Flycast, PUAE)
+            savebundles.learn_after(bundles)
+        except Exception:
+            log.exception("nazwy zapisów po grze")
         try:
             syncclient.after(self.cfg, self.profile_id, bundles, g, getattr(self, "_sync_skip", set()))
         except Exception:

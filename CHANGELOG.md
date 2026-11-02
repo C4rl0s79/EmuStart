@@ -65,8 +65,8 @@ i panelem serwera — największa część). Każdy krok: testy, potem sprawdzen
 | Etap | Testy (fixture'y) | Na żywo (prawdziwy emulator) | Commit |
 |---|---|---|---|
 | 4. Dolphin i PPSSPP (rdzenie) | 10 testów, cały zestaw 419 ✓ | czeka — nikt jeszcze nie grał tymi rdzeniami | `7acab25` |
-| 4b-1. FBNeo (`fbneo\<set>.fs`), Kronos (`kronos\saturn\<gra>.ram`, `-ext*.ram`; z `kronos_use_beetle_saves` — wprost), rozszerzenia `.fs` `.ps2` `.nvr`, karta Flycast `<gra>.A1.bin` | 5 testów, cały zestaw 424 ✓ | czeka | (ten etap) |
-| 4b-2. Nauczone nazwy (plik / podfolder zmieniony w czasie gry) + PUAE `WHDSaves\<gra>\` | — | — | — |
+| 4b-1. FBNeo (`fbneo\<set>.fs`), Kronos (`kronos\saturn\<gra>.ram`, `-ext*.ram`; z `kronos_use_beetle_saves` — wprost), rozszerzenia `.fs` `.ps2` `.nvr`, karta Flycast `<gra>.A1.bin` | 5 testów, cały zestaw 424 ✓ | czeka | `b31a9c5` |
+| 4b-2. Nauczone nazwy (karta / podfolder zmieniony w czasie gry, bez nazw innych gier rdzenia; pobranie paczki gry też uczy) + PUAE `WHDSaves\<gra>\` (paczka `retroarch/puae/memcards`; obraz `WHDSaves.hdf` — wspólny dla gier, bez synchronizacji) | 4 testy (Flycast: ID gry, nazwy innych gier; PUAE: podfolder, drugie urządzenie), cały zestaw 428 ✓; podpięcie w `launcher._sync_before/_sync_after` bez osobnego testu | czeka | (ten etap) |
 | 4b-3. Play! (PS2) | — | **zablokowane:** miejsce kart (`Play Data Files\…\mc0`) do ustalenia na żywo — rdzeń nie był uruchomiony | — |
 | 2. Flycast — karty VMU osobno dla gry | — | — | — |
 | 3. LRPS2 | — | — | — |
@@ -82,8 +82,12 @@ Kronos `%s%ckronos%csaturn%c%s.ram` / `-ext512K…4M.ram` / `kronos_use_beetle_s
 PUAE `WHDSaves` jako dysk `WHDSaves:` (jeden folder dla gier), `%s.nvr` (puae_libretro.dll), Play! `Play Data Files`,
 `vfs/mc0`, `ps2.mc0.directory.v2` (play_libretro.dll — katalog bazowy nieustalony).
 
-Następny krok: 4b-2 — mechanizm nauczonych nazw (migawka przed grą, porównanie po grze, przypisanie do gry,
-bez nazw należących już do innej gry), potem PUAE `WHDSaves`.
+Ryzyka: (a) podfolder `WHDSaves` przypisany źle (dwie gry WHDLoad z tym samym folderem zapisów) — paczka gry
+obejmie cudzy folder; WHDLoad nazywa folder od gry, więc mało prawdopodobne. (b) Nazwy poznane są zapisane na
+urządzeniu (baza biblioteki), nie na serwerze — drugie urządzenie poznaje je z paczki gry albo po swojej grze.
+
+Następny krok: 2 — Flycast: opcja `reicast_per_content_vmus` = „VMU A1” (raz, jako domyślna), pierwsza karta gry
+z kopii wspólnej `system\dc\vmu_save_A1.bin`.
 
 Moduły: klient Windows i Lumen (silnik `engine/`) — zmiana; serwer — nowe rodzaje paczek (format jak dotychczas);
 APK — Flycast (RetroArch na Androidzie) przez tę samą kartę w `saves\`, Xenia i LRPS2 — nie dotyczy (nie ma ich

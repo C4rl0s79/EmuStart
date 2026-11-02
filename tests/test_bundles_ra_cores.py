@@ -145,3 +145,82 @@ def test_ra_dolphin_core_save_reaches_standalone_dolphin(net):
     standalone = [savebundles.Bundle("dolphin", "", "saves", user2, "GKBEAF", ["GKBEAF"]).collect()]
     assert syncclient.before(cfgs[TEL], TEL, standalone, GC).downloaded == 1
     assert (user2 / "GC" / "USA" / "Card A" / "01-GKBE-BK.gci").read_bytes() == b"Z RDZENIA"
+
+
+# ── nazwy poznawane po grze (Flycast: ID gry w nazwie karty, PUAE: podfolder WHDSaves) ──
+
+DC = {"es": "dc", "name": "Shenmue (USA)", "rel": "Shenmue (USA).chd"}
+AMIGA = {"es": "amigawhdgames", "name": "Monkey Island", "rel": "Monkey Island.lha"}
+
+
+def test_flycast_card_named_by_game_id_learned_after_game(env, tmp_path):
+    home = tmp_path / "RetroArch"
+    a = ra(home, "flycast", "Flycast", sort=False)
+    rom = _write(tmp_path / "roms" / "Shenmue (USA).chd")
+    saves = home / "saves"
+    _write(saves / "MK-51099.A1.bin", b"INNA GRA")                     # karta innej gry — już była
+    b = saves_bundle(a, "flycast", rom, DC)
+    savebundles.learn_snapshot([b])
+    _write(saves / "MK-51059.A1.bin", b"KARTA GRY")                     # rdzeń zapisał kartę pod ID gry
+    assert savebundles.learn_after([b]) == ["MK-51059"]
+    assert b.stem == "MK-51059" and [(p.name, arc) for p, arc in b.files] == [("MK-51059.A1.bin", "game.A1.bin")]
+    # zapamiętane: następna gra od razu zna nazwę, pobranie z serwera trafia w kartę, którą czyta rdzeń
+    b = saves_bundle(a, "flycast", rom, DC)
+    assert b.stem == "MK-51059" and b.local_path("game.A1.bin") == saves / "MK-51059.A1.bin"
+
+
+def test_learning_skips_names_of_other_games(env, tmp_path):
+    home = tmp_path / "RetroArch"
+    a = ra(home, "flycast", "Flycast", sort=False)
+    rom1, rom2 = _write(tmp_path / "roms" / "Shenmue (USA).chd"), _write(tmp_path / "roms" / "Inna (USA).chd")
+    other = {"es": "dc", "name": "Inna (USA)", "rel": "Inna (USA).chd"}
+    b = saves_bundle(a, "flycast", rom2, other)
+    savebundles.learn_snapshot([b])
+    _write(home / "saves" / "MK-51099.A1.bin", b"INNA")
+    assert savebundles.learn_after([b]) == ["MK-51099"]
+    b = saves_bundle(a, "flycast", rom1, DC)
+    savebundles.learn_snapshot([b])
+    _write(home / "saves" / "MK-51099.A1.bin", b"INNA, zmieniona")    # zmiana karty innej gry — nie ta gra
+    assert savebundles.learn_after([b]) == [] and b.files == []
+
+
+def whd(a, tmp: Path) -> savebundles.Bundle:
+    rom = _write(tmp / "roms" / "Monkey Island.lha")
+    return next(b for b in savebundles.for_game(a, "puae", rom, AMIGA) if b.kind == "memcards")
+
+
+def test_puae_whdsaves_folder_of_the_game_learned(env, tmp_path):
+    home = tmp_path / "RetroArch"
+    a = ra(home, "puae", "PUAE")
+    root = home / "saves" / "PUAE" / "WHDSaves"
+    _write(root / "Turrican" / "hiscore", b"INNA GRA")
+    b = whd(a, tmp_path)
+    assert (b.emulator_id, b.core_id, b.folder, b.files) == ("retroarch", "puae", root, [])
+    savebundles.learn_snapshot([b])
+    _write(root / "MonkeyIsland" / "savegame.1", b"ZAPIS")
+    assert savebundles.learn_after([b]) == ["MonkeyIsland"]
+    assert [arc for _p, arc in b.files] == ["MonkeyIsland/savegame.1"]
+    assert [arc for _p, arc in whd(a, tmp_path).files] == ["MonkeyIsland/savegame.1"]
+    with pytest.raises(ValueError):
+        b.local_path("../poza/plik")
+
+
+def test_puae_whdsaves_reach_second_device(net):
+    """Drugie urządzenie nie zna jeszcze podfolderu gry — przyjmuje go z paczki tej gry i zapamiętuje."""
+    cfgs, tmp = net
+    pc, tel = tmp / "dev1" / "RetroArch", tmp / "dev2" / "RetroArch"
+    a1, a2 = ra(pc, "puae", "PUAE"), ra(tel, "puae", "PUAE")
+    b = whd(a1, tmp / "dev1")
+    savebundles.learn_snapshot([b])
+    _write(pc / "saves" / "PUAE" / "WHDSaves" / "MonkeyIsland" / "savegame.1", b"ZAPIS")
+    savebundles.learn_after([b])
+    assert syncclient.before(cfgs[PC], PC, [b], AMIGA).uploaded == 1
+
+    from emustart import library
+    library.meta_set(savebundles.LEARN_KEY, "{}")     # jedna baza w teście — drugie urządzenie nie zna nazw
+    b2 = whd(a2, tmp / "dev2")
+    assert b2.names == []
+    assert syncclient.before(cfgs[TEL], TEL, [b2], AMIGA).downloaded == 1
+    savebundles.remember_downloaded([b2])
+    assert (tel / "saves" / "PUAE" / "WHDSaves" / "MonkeyIsland" / "savegame.1").read_bytes() == b"ZAPIS"
+    assert [arc for _p, arc in whd(a2, tmp / "dev2").files] == ["MonkeyIsland/savegame.1"]

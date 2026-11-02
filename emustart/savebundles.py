@@ -48,8 +48,10 @@ _DOLPHIN_STATE = re.compile(r"^(?P<prefix>[A-Z0-9]{6})\.s(?P<slot>\d{2})$", re.I
 _PPSSPP_STATE = re.compile(r"^(?P<prefix>[A-Z]{4}\d{5})_(?P<slot>\d{1,2})\.ppst$", re.I)
 # paczki z nazwami jak na urządzeniu (te same na każdym: od numeru / ID gry, nie od nazwy pliku)
 NATIVE = {("pcsx2", "states"), ("dolphin", "states"), ("dolphin", "saves"), ("ppsspp", "states"), ("ppsspp", "saves")}
+_SAFE_DIR = re.compile(r"^[^<>:\"/\\|?*\x00-\x1f]{1,120}$")
 # paczki z podfolderami (nazwa w paczce ze ścieżką: „ULUS10336DATA00/DATA.BIN”, „GC/USA/Card A/01-GKBE-x.gci”)
-DEEP = {("dolphin", "saves"), ("ppsspp", "saves")}
+DEEP = {("dolphin", "saves"), ("ppsspp", "saves"),
+        ("retroarch", "memcards")}       # rdzeń z zapisami w podfolderach gier (PUAE: WHDSaves/<gra>/…)
 log = logging.getLogger("emustart.savebundles")
 
 
@@ -62,6 +64,11 @@ class Bundle:
     stem: str                                       # nazwa pliku gry na tym urządzeniu
     names: list = field(default_factory=list)       # nazwy gry, po których rozpoznajemy pliki
     files: list = field(default_factory=list)       # [(ścieżka, nazwa w paczce)]
+    # nazwy poznawane po grze (learn_snapshot / learn_after): „files” — karta <nazwa>.<port>.bin (Flycast:
+    # ID gry z płyty), „dirs” — podfolder gry (PUAE: WHDSaves/<gra>); learn_game — gra w mapie nazw
+    learn: str = ""
+    learn_game: str = ""
+    seen: dict = field(default_factory=dict)
 
     @property
     def key(self) -> tuple:
@@ -72,7 +79,11 @@ class Bundle:
         stany PCSX2 — nazwa jak w paczce, od numeru płyty)."""
         if (self.emulator_id, self.kind) in DEEP:
             parts = arc.split("/")
-            if "\\" in arc or ":" in arc or any(x in ("", ".", "..") for x in parts) or not _deep_ok(self, parts):
+            bad = "\\" in arc or ":" in arc or any(x in ("", ".", "..") for x in parts)
+            if (not bad and self.learn == "dirs" and len(parts) >= 2 and parts[0] not in self.names
+                    and all(_SAFE_DIR.match(x) for x in parts)):
+                self.names.append(parts[0])         # podfolder gry z paczki tej gry (urządzenie go nie znało)
+            if bad or not _deep_ok(self, parts):
                 raise ValueError(f"nieoczekiwana nazwa w paczce: {arc}")
             return self.folder.joinpath(*parts)
         if "/" in arc or "\\" in arc or ".." in arc or ":" in arc:
@@ -195,6 +206,8 @@ def _deep_ok(b, parts: list) -> bool:
                     and any(f"-{i[:4]}-" in parts[3].upper() for i in ids))
         return len(parts) > 4 and parts[:3] == ["Wii", "title", "00010000"] and \
             parts[3].lower() in {i[:4].encode().hex() for i in ids}
+    if b.emulator_id == "retroarch":         # <podfolder gry>/… (nazwy poznane po grze albo z paczki gry)
+        return len(parts) >= 2 and parts[0] in b.names
     return False
 
 
@@ -206,6 +219,8 @@ def _deep_files(b) -> list:
         tops = [d for d in root.iterdir() if d.is_dir() and any(d.name.upper().startswith(i) for i in ids)]
     elif b.emulator_id == "dolphin":
         tops = [root / "GC"] + [root / "Wii" / "title" / "00010000" / i[:4].encode().hex() for i in ids]
+    elif b.emulator_id == "retroarch":
+        tops = [root / n for n in b.names if n]
     else:
         tops = []
     for top in tops:
@@ -396,6 +411,119 @@ def ra_core_bundles(adapter, core: str, content: Path, game: dict) -> list:
     return [Bundle(emu, "", "saves", folder, gid, [gid]).collect()]
 
 
+# ── nazwy poznawane po grze ──
+# Część rdzeni nazywa zapisy nie od pliku gry: Flycast — karta <ID gry z płyty>.<port>.bin, PUAE — WHDLoad
+# zapisuje w WHDSaves/<podfolder gry>. Nazwy poznajemy po grze: co zmieniło się w czasie gry i nie należy do
+# innej gry tego rdzenia — należy do tej gry (zapamiętane na urządzeniu; pobranie paczki gry też je uczy).
+LEARN_KEY = "learned_saves"
+
+
+def _learned_map() -> dict:
+    from emustart import library
+    try:
+        return json.loads(library.meta_get(LEARN_KEY, "{}") or "{}")
+    except (ValueError, TypeError):
+        return {}
+
+
+def learned(core: str, game_key: str) -> list:
+    return list(_learned_map().get(core, {}).get(game_key, []))
+
+
+def _remember(core: str, game_key: str, names: list) -> None:
+    from emustart import library
+    m = _learned_map()
+    have = m.setdefault(core, {}).setdefault(game_key, [])
+    for n in names:
+        if n not in have:
+            have.append(n)
+    library.meta_set(LEARN_KEY, json.dumps(m, ensure_ascii=False))
+
+
+def _learn_entries(b) -> dict:
+    """{nazwa: podpis} wpisów w folderze paczki: karty <nazwa>.<port>.bin albo podfoldery (czas i rozmiar)."""
+    out: dict = {}
+    if not b.folder.is_dir():
+        return out
+    for e in b.folder.iterdir():
+        if b.learn == "files" and e.is_file():
+            m = _RA_SAVE_SFX[0].match(e.name)
+            if m:
+                st = e.stat()
+                out[m.group(1)] = max(out.get(m.group(1), (0, 0)), (st.st_mtime_ns, st.st_size))
+        elif b.learn == "dirs" and e.is_dir():
+            sig = [(0, 0, 0)]
+            for dp, _d, fns in os.walk(e):
+                for fn in fns:
+                    st = (Path(dp) / fn).stat()
+                    sig.append((st.st_mtime_ns, st.st_size, len(fn)))
+            out[e.name] = (max(sig), len(sig), sum(s[1] for s in sig))
+    return out
+
+
+def learn_snapshot(bundles: list) -> None:
+    """Przed grą (po pobraniu zapisów z serwera): stan folderów, w których poznajemy nazwy."""
+    for b in bundles:
+        if b.learn:
+            b.seen = _learn_entries(b)
+
+
+def learn_after(bundles: list) -> list:
+    """Po grze: nowe albo zmienione karty / podfoldery, których nie ma inna gra tego rdzenia — tej gry.
+    Zwraca poznane nazwy (zapamiętane; paczka zebrana od nowa)."""
+    found = []
+    for b in bundles:
+        if not b.learn:
+            continue
+        others = {n for g, ns in _learned_map().get(b.core_id, {}).items() if g != b.learn_game for n in ns}
+        now = _learn_entries(b)
+        new = [n for n, sig in sorted(now.items(), key=lambda x: x[1])
+               if b.seen.get(n) != sig and n not in b.names and n not in others and n != b.stem]
+        if not new:
+            continue
+        b.names += new
+        if b.learn == "files":
+            b.stem = new[-1]                 # nazwa, pod którą rdzeń zapisuje (i czyta) kartę tej gry
+        _remember(b.core_id, b.learn_game, new)
+        b.collect()
+        found += new
+    return found
+
+
+def remember_downloaded(bundles: list) -> None:
+    """Po pobraniu z serwera: podfoldery przyjęte z paczki gry (local_path) — zapamiętane na urządzeniu."""
+    for b in bundles:
+        if b.learn == "dirs" and b.names:
+            _remember(b.core_id, b.learn_game, b.names)
+
+
+def _game_key(game: dict) -> str:
+    return f"{game.get('es', '')}/{game.get('name', '')}"
+
+
+def ra_learned_bundles(adapter, core: str, content: Path, game: dict, bundles: list) -> list:
+    """Flycast: karta gry w paczce zapisów pod nazwą poznaną po grze; PUAE: paczka WHDSaves/<podfolder gry>."""
+    c, key = (core or "").lower(), _game_key(game)
+    if c == "flycast":
+        for b in bundles:
+            if (b.emulator_id, b.kind) == ("retroarch", "saves"):
+                b.learn, b.learn_game = "files", key
+                known = learned(b.core_id, key)
+                b.names = b.names + [n for n in known if n not in b.names]
+                if known:
+                    b.stem = known[-1]
+                b.collect()
+        return []
+    if c == "puae":
+        keys = ("savefile_directory", "saves", "sort_savefiles_by_content_enable", "sort_savefiles_enable")
+        places = [ra_folder(adapter, core, content, *keys) / "WHDSaves",
+                  ra_folder(adapter, core, content, *keys, sort=False) / "WHDSaves"]
+        folder = next((p for p in places if p.is_dir()), places[0])
+        b = Bundle("retroarch", c, "memcards", folder, "", learned(c, key), learn="dirs", learn_game=key)
+        return [b.collect()]
+    return []
+
+
 def for_game(adapter, core: str, content: Path, game: dict) -> list:
     """Paczki tej gry dla emulatora `adapter` (pusta lista — emulator jeszcze bez synchronizacji
     paczkami, działa dotychczasowa synchronizacja folderów profilu)."""
@@ -403,7 +531,8 @@ def for_game(adapter, core: str, content: Path, game: dict) -> list:
         if not core:
             return []
         names = sorted({Path(content).stem, game.get("name", ""), Path(game.get("rel", "")).stem} - {""})
-        return retroarch(adapter, core, content, names) + ra_core_bundles(adapter, core, content, game)
+        out = retroarch(adapter, core, content, names)
+        return out + ra_core_bundles(adapter, core, content, game) + ra_learned_bundles(adapter, core, content, game, out)
     out = []
     if adapter.family in ("duckstation", "pcsx2") and adapter.memcard_dir():
         card = card_stem(content, game)
