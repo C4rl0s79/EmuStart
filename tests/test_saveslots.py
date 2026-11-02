@@ -93,7 +93,7 @@ def test_all_slots_sync_and_active_slot_follows_server(net):
     assert local_states(tmp, TEL) == {"game.state1": b"P2-STAN-1"}
     store1 = saveslots.store_bundle(TEL, PLAT, GID, 1, ra_bundles(tmp, TEL, STEM)[1])
     assert {a: Path(p).read_bytes() for p, a in store1.files} == {"game.state1": b"P1-STAN-1"}
-    assert saveslots.here(TEL, PLAT, GID) == 2
+    assert saveslots.here(TEL, PLAT, GID, ra_bundles(tmp, TEL, STEM)) == 2
 
     # telefon gra w slocie 2, PC wraca do slotu 1 — telefon przy następnej grze przełącza się
     put_state(tmp, TEL, 2, b"P2-STAN-2-TEL")
@@ -120,7 +120,7 @@ def test_interrupted_swap_finishes(net):
     # krok 1 zrobiony, program zamknięty przed podmianą plików
     sb1 = saveslots.store_bundle(PC, PLAT, GID, 1, bundles[1])
     _write(sb1.folder / "game.state1", b"S1")
-    saveslots._put(PC, PLAT, GID, swap='{"from": 1, "to": 2}')
+    saveslots._put_place(PC, PLAT, GID, saveslots.place_of(bundles), swap='{"from": 1, "to": 2}')
     assert saveslots.finish_swap(PC, PLAT, GID, bundles) == 2
     assert local_states(tmp, PC) == {"game.state4": b"S2"}
     assert {a for _p, a in saveslots.store_bundle(PC, PLAT, GID, 1, bundles[1]).files} == {"game.state1"}
@@ -305,19 +305,19 @@ def test_swap_interrupted_in_step_3_loses_nothing(net):
     store2 = saveslots.store_bundle(PC, PLAT, GID, 2, bundles[1])
     _write(store2.folder / "game.state1", b"S2-A")
     _write(store2.folder / "game.state2", b"S2-B")
-    real = saveslots._put
+    real = saveslots._put_place
 
-    def crash(pid, plat, gid, **kw):
-        real(pid, plat, gid, **kw)
+    def crash(pid, plat, gid, place, **kw):
+        real(pid, plat, gid, place, **kw)
         if '"step": 3' in kw.get("swap", ""):
             (store2.folder / "game.state1").unlink()       # część kroku 3 zrobiona, potem awaria
             raise OSError("awaria w kroku 3")
-    saveslots._put = crash
+    saveslots._put_place = crash
     try:
         with pytest.raises(OSError):
             saveslots.swap(PC, PLAT, GID, bundles, 2)
     finally:
-        saveslots._put = real
+        saveslots._put_place = real
     assert saveslots.finish_swap(PC, PLAT, GID, ra_bundles(tmp, PC, STEM)) == 2
     assert local_states(tmp, PC) == {"game.state1": b"S2-A", "game.state2": b"S2-B"}
     assert _slot_files(PC, tmp, PC, 1) == {"game.state1": b"S1-A"} and _slot_files(PC, tmp, PC, 2) == {}
@@ -345,7 +345,7 @@ def test_swap_interrupted_in_step_2_finishes(net):
             saveslots.swap(PC, PLAT, GID, bundles, 2)
     finally:
         saveslots._copy = real
-    assert saveslots.here(PC, PLAT, GID) == 1
+    assert saveslots.here(PC, PLAT, GID, bundles) == 1
     assert _slot_files(PC, tmp, PC, 1) == {"game.state1": b"S1-A", "game.state7": b"S1-B"}   # krok 1 zrobiony
     assert saveslots.finish_swap(PC, PLAT, GID, ra_bundles(tmp, PC, STEM)) == 2
     assert local_states(tmp, PC) == {"game.state1": b"S2-A"}
@@ -375,7 +375,7 @@ def test_swap_with_bad_copy_touches_nothing(net):
             saveslots.set_active(cfgs[PC], PC, GAME, bundles, 2)
     finally:
         saveslots._copy = real
-    assert saveslots.here(PC, PLAT, GID) == 1 and not saveslots.info(PC, PLAT, GID)["swap"]
+    assert saveslots.here(PC, PLAT, GID, bundles) == 1 and not saveslots._place(PC, PLAT, GID, saveslots.place_of(bundles))["swap"]
     assert local_states(tmp, PC) == {"game.state1": b"S1-A"}
     assert _slot_files(PC, tmp, PC, 2) == {"game.state1": b"S2-A"}
 
@@ -396,7 +396,7 @@ def test_no_slot_changes_or_sync_while_game_runs(net, monkeypatch):
     monkeypatch.setattr(syncclient, "before", lambda *x, **k: pytest.fail("synchronizacja w trakcie gry"))
     got = a._bundle_states(GAME, {"args": ""}, None)
     assert [s["arc"] for s in got] == ["game.state1"]
-    assert local_states(tmp, PC) == {"game.state1": b"S1"} and saveslots.here(PC, PLAT, GID) == 1
+    assert local_states(tmp, PC) == {"game.state1": b"S1"} and saveslots.here(PC, PLAT, GID, ra_bundles(tmp, PC, STEM)) == 1
     a._session.phase = "finished"
     called = []
     monkeypatch.setattr(syncclient, "before", lambda *x, **k: called.append(1))
@@ -422,6 +422,46 @@ def test_edit_waits_for_running_sync(net):
     t.join(10)
     assert out["r"]["ok"] and local_states(tmp, PC) == {}
     assert server_slot(1)["file_count"] == 0                          # wysłane po zwolnieniu blokady
+
+
+# ── slot w folderach emulatora — osobno dla każdego emulatora / rdzenia ──
+
+def other_place_bundles(tmp, who):
+    """Ta sama gra w innym emulatorze z innymi folderami (np. rdzeń Dolphin i samodzielny Dolphin)."""
+    base = tmp / f"dev{who}" / "bsnes"
+    names = sorted({STEM, GAME["name"], Path(GAME["rel"]).stem})
+    return [savebundles.Bundle("retroarch", "bsnes", "saves", base / "saves", STEM, names).collect(),
+            savebundles.Bundle("retroarch", "bsnes", "states", base / "states", STEM, names).collect()]
+
+
+def test_slot_in_folders_is_per_emulator(net):
+    cfgs, tmp = net
+    put_state(tmp, PC, 1, b"SNES9X-S1")
+    sync(cfgs, tmp, PC)
+    saveslots.set_active(cfgs[PC], PC, GAME, ra_bundles(tmp, PC, STEM), 2)
+    assert saveslots.here(PC, PLAT, GID, ra_bundles(tmp, PC, STEM)) == 2 and local_states(tmp, PC) == {}
+    # drugi emulator: w jego folderach wciąż slot 1 (zmiana slotu przeniosła tylko pliki pierwszego)
+    _write(tmp / f"dev{PC}" / "bsnes" / "states" / f"{STEM}.state1", b"BSNES-S1")
+    ob = other_place_bundles(tmp, PC)
+    assert saveslots.here(PC, PLAT, GID, ob) == 1
+    r = syncclient.before(cfgs[PC], PC, ob, GAME)
+    assert r.slot == 2 and not r.conflicts
+    assert not (tmp / f"dev{PC}" / "bsnes" / "states" / f"{STEM}.state1").exists()
+    store1 = saveslots.store_bundle(PC, PLAT, GID, 1, ob[1])
+    assert {a: Path(p).read_bytes() for p, a in store1.files} == {"game.state1": b"BSNES-S1"}   # slot 1, nie 2
+    assert saveslots.here(PC, PLAT, GID, ob) == 2
+    # pierwszy emulator bez zmian: jego slot 2 w folderach, jego slot 1 w profilu
+    assert saveslots.here(PC, PLAT, GID, ra_bundles(tmp, PC, STEM)) == 2
+    s1 = saveslots.store_bundle(PC, PLAT, GID, 1, ra_bundles(tmp, PC, STEM)[1])
+    assert {a: Path(p).read_bytes() for p, a in s1.files} == {"game.state1": b"SNES9X-S1"}
+
+
+def test_slot_place_of_bundles():
+    b = lambda e, c, k="saves": savebundles.Bundle(e, c, k, Path("x"), "", [])   # noqa: E731
+    assert saveslots.place_of([b("dolphin", savebundles.RA_CORE_ID), b("retroarch", "dolphin", "states")]) \
+        == "retroarch-dolphin"
+    assert saveslots.place_of([b("dolphin", ""), b("dolphin", "", "states")]) == "dolphin"
+    assert saveslots.place_of([b("dolphin", savebundles.RA_CORE_ID)]) == "dolphin-libretro"
 
 
 # ── stany innych rdzeni RetroArcha ──
@@ -453,7 +493,7 @@ def test_other_core_state_delete_and_restore(net):
     assert other_states(cfgs, PC) == ["game.state1", "game.state2"]
     rev = bsnes_server()["revision"]
 
-    ed = saveslots.OtherCore(cfgs[PC], PC, GAME, "bsnes")
+    ed = saveslots.OtherCore(cfgs[PC], PC, GAME, "bsnes", "snes9x")
     assert ed.delete("game.state1") == {"ok": True, "offline": ""}
     srv = bsnes_server()
     assert srv["revision"] > rev and srv["file_count"] == 1
@@ -470,7 +510,7 @@ def test_other_core_state_delete_and_restore(net):
     assert local_states(tmp, TEL) == {"game.state2": b"BSNES-2", "game.state3": b"BSNES-3"}
     assert other_states(cfgs, PC) == ["game.state2", "game.state3"]
 
-    ed = saveslots.OtherCore(cfgs[PC], PC, GAME, "bsnes")
+    ed = saveslots.OtherCore(cfgs[PC], PC, GAME, "bsnes", "snes9x")
     item = ed.trash()[0]
     assert item["arc"] == "game.state1"
     assert ed.restore(item["name"])["arc"] == "game.state1"
@@ -495,10 +535,10 @@ def test_other_core_edit_offline(net, monkeypatch):
         raise syncclient.Offline("brak sieci")
     monkeypatch.setattr(syncclient._Client, "json", down)
     with pytest.raises(saveslots.EditError):
-        saveslots.OtherCore(cfgs[PC], PC, GAME, "bsnes")
+        saveslots.OtherCore(cfgs[PC], PC, GAME, "bsnes", "snes9x")
     monkeypatch.setattr(syncclient._Client, "json", real)
 
-    ed = saveslots.OtherCore(cfgs[PC], PC, GAME, "bsnes")
+    ed = saveslots.OtherCore(cfgs[PC], PC, GAME, "bsnes", "snes9x")
     push = syncclient.push_edit
 
     def lost(cfg, pid, game, items):                 # połączenie zerwane po zmianie

@@ -6,7 +6,283 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 ## [Nieopublikowane]
 
-Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
+Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md). Otwarte po 0.55.0: Xenia 1c (logowanie przypiętego profilu na
+nowym urządzeniu — do sprawdzenia na żywo), Play! (miejsce kart), APK (te same reguły zapisów — brak środowiska do
+budowania), adaptery pozostałych samodzielnych emulatorów przy pierwszym użyciu, sprawdzenie na żywo (niżej).
+
+## [0.55.0] — 2026-11-02
+
+Zakres: klient Windows i Lumen (silnik): `savebundles.py`, `syncclient.py`, `saveslots.py`, `ingame.py`,
+`profiles.py`, `launcher.py`, `api.py`; serwer: `emuprofiles.py`, `srvadmin.py`, `remote.py`, panel (`web/server.*`).
+APK bez zmian (brak środowiska do budowania; analiza bezpieczeństwa w tabeli etapów niżej: APK nie skasuje zapisów
+z PC). Zasada nadrzędna: zapisy **i ustawienia** gracza przechodzą między klientami dla każdego emulatora.
+
+### Dodane
+- **Zapisy rdzeni RetroArcha spoza `saves\<gra>`:** Dolphin i PPSSPP (ta sama paczka co samodzielne emulatory),
+  FBNeo (`fbneo\<set>.fs`), Kronos, Flycast (karta gry pod ID z płyty), LRPS2 (karta gry), PUAE (`WHDSaves\<gra>`),
+  Xenia Edge (zapisy gier X360, bez aktualizacji, DLC i profilu). Nazwy kart / podfolderów poznawane po grze.
+- **Ustawienia gracza:** Dolphin, PPSSPP, RPCS3 (YAML), Vita3K, wspólne opcje rdzeni RetroArcha — każdy gracz ma
+  swoje, przez serwer na każdym kliencie; karta grafiki, ścieżki, dźwięk, okno zostają na komputerze.
+- **Xenia Edge:** `content\` osobno dla każdego gracza (dowiązanie), aktualizacje i DLC wspólne; panel serwera →
+  konto → „Profil Xbox 360”: przypięcie profilu zgłoszonego przez urządzenie.
+- **Vita3K:** zapisy (`ux0\user`) i ustawienia gracza.
+
+### Poprawione
+- Slot zapisów w folderach emulatora — osobno dla każdego emulatora / rdzenia (rdzeń i samodzielny Dolphin tej samej
+  gry nie mieszają slotów). Poprawki po dwóch przeglądach kodu — opis niżej.
+
+### Sprawdzone
+- testy: cały zestaw EmuStart (474), silnik w Lumenie (530), Lumen (200, typecheck); dwa klienty przez serwer
+  (ustawienia gracza); panel serwera w przeglądarce (Chromium, dane testowe).
+
+### Niesprawdzone
+- na żywo w prawdziwych emulatorach: zapisy rdzeni (lista w checkliście niżej), podmienione pliki ustawień
+  Dolphina / PPSSPP / RPCS3 / Vita3K, rdzeń Xenii z `content\` jako dowiązaniem i z pustym folderem gracza,
+  domyślny folder Vita3K (`%APPDATA%\Vita3K\Vita3K`).
+
+### Szczegóły (plany, etapy, przeglądy)
+
+### Plan (zaakceptowany 2026-11-02): zapisy rdzeni RetroArcha w `system\` i w podfolderach `saves\`
+Przyczyna (sprawdzone 2026-11-02 na danych z Lumena i w dokumentacji libretro): synchronizacja RetroArcha
+(paczki i dotychczasowa synchronizacja folderów profilu) bierze tylko pliki nazwane jak gra leżące wprost w `saves\`
+oraz `states\`. Podfoldery `saves\` pomija paczka i pomija dotychczasowa synchronizacja (uznaje `saves\` za obsłużone
+paczkami). Rdzenie, które trzymają zapisy w `system\` albo w podfolderach `saves\`, nie są synchronizowane ani
+rozdzielane na graczy.
+
+**W podfolderach `saves\`:**
+- **Dolphin (rdzeń, GC/Wii):** `saves\[<rdzeń>\]dolphin-emu\User\GC\…` (karty), `…\Wii\title\…` (zapisy Wii) — układ
+  jak w samodzielnym Dolphinie: **ta sama paczka co samodzielnego Dolphina** (serwer i tak łączy je po emulatorze;
+  ten sam format — zapis przechodzi między rdzeniem, samodzielnym Dolphinem i telefonem). ID gry z nagłówka pliku
+  (ISO/GCM/RVZ/WIA/WBFS/CISO), bez DolphinTool. **Zrobione.**
+- **PPSSPP (rdzeń, PSP):** `saves\[<rdzeń>\]PSP\SAVEDATA\<numer gry>…` — ta sama paczka co samodzielnego PPSSPP.
+  **Zrobione.**
+- **FBNeo (FBNeo, Neo Geo — rdzeń domyślny):** NVRAM / EEPROM w `saves\[<rdzeń>\]fbneo\<nazwa setu>.*`.
+- **PUAE (Amiga):** zapisy WHDLoad w `saves\WHDSaves\<gra>\` (albo obraz `WHDSaves.hdf` — wspólny dla gier).
+- **Kronos (Saturn, rdzeń dodatkowy):** `saves\kronos\saturn\…`.
+- **LRPS2 (nowsze wersje):** `saves\lrps2\` — patrz pkt 3.
+- **Play! (PS2, rdzeń dodatkowy):** dokumentacja nie podaje miejsca kart — do sprawdzenia na żywo.
+- Bez zmian (zapisy nazwane jak gra wprost w `saves\`): Mednafen Saturn, melonDS, Mupen64Plus, SwanStation,
+  Genesis Plus GX, Snes9x, mGBA, Gambatte i pozostałe rdzenie z zapisem baterii.
+
+**W `system\`:**
+- **Xenia Edge (X360):** `system\Xenia-Edge\content\<profil Xenii, XUID>\<numer gry, Title ID>\00000001\…`
+  (zapisy) + `…\Headers\00000001\…`; profil Xenii: `content\<XUID>\FFFE07D1\00010000\<XUID>\` (Account, osiągnięcia).
+  XUID jest inny na każdym urządzeniu — zapis przeniesiony pod inny profil nie jest widoczny w grze.
+- **Flycast (DC, domyślny rdzeń):** `system\dc\vmu_save_A1…D1.bin` — cztery karty VMU wspólne dla wszystkich gier
+  (dopóki opcja rdzenia „Per-Game VMUs” jest wyłączona).
+- **LRPS2 (PS2, rdzeń dodatkowy; domyślny jest PCSX2 osobno):** starsze wersje `system\pcsx2\memcards\` (karta
+  wspólna dla gier), nowsze `saves\lrps2\`.
+
+Zmiany:
+1. **Xenia Edge — stały profil Xenii dla każdego gracza EmuStart.** Profil tworzy rdzeń na urządzeniu, jak dotąd
+   (bez serwera). Urządzenie zgłasza swoje profile serwerowi; w panelu serwera (edycja gracza) można **przypiąć**
+   profil Xenii do gracza EmuStart — od tej chwili to stały profil tego gracza (ten sam XUID) na każdym urządzeniu:
+   profil (Account, osiągnięcia) jest synchronizowany jak zapis. Mechanizm ogólny („profil emulatora” przypięty do
+   gracza), żeby inne rdzenie z numerem profilu mogły z niego korzystać. Gracz bez przypiętego profilu: jak dotąd
+   (profil z urządzenia), zapisy gier synchronizowane względem numeru gry. Na czas gry w
+   `system\Xenia-Edge\content\` jest tylko profil grającego gracza (podmiana folderu, przywracana po grze i po
+   awarii — jak dotychczasowe przywracanie ustawień). Zapisy gry: paczka `content\<XUID>\<Title ID>\00000001` +
+   `Headers\00000001`. Numer gry poznany po pierwszej sesji (folder, który się zmienił) i zapamiętany przy grze.
+   Aktualizacje i DLC (`000B0000`, `00000002`) — bez synchronizacji (to nie zapisy, duże pliki).
+2. **Flycast — karty VMU osobno dla każdej gry:** opcja rdzenia „Per-Game VMUs” na czas gry → karta w `saves\`
+   nazwana jak gra, więc obejmuje ją istniejąca paczka zapisów (z rozdzieleniem na graczy). Pierwsze uruchomienie
+   gry: kopia wspólnej karty `vmu_save_A1.bin`, żeby dotychczasowe zapisy nie zniknęły.
+3. **LRPS2:** karta pamięci jako paczka gracza (jedna karta na gracza, nie na grę), w folderze, którego używa
+   zainstalowana wersja rdzenia (`system\pcsx2\memcards\` albo `saves\lrps2\`).
+4. **Dolphin i PPSSPP jako rdzenie:** paczki zapisów z podfolderów `saves\` (wyżej).
+
+Kolejność: 4 (podfoldery, kod paczek Dolphina/PPSSPP już jest) → 2 (Flycast) → 3 (LRPS2) → 1 (Xenia z profilami
+i panelem serwera — największa część). Każdy krok: testy, potem sprawdzenie na żywo, gdzie się da.
+
+**Stan etapów** (procedura: `docs/KONTYNUACJA-PRACY.md`; gałąź `zapisy-system`):
+
+| Etap | Testy (fixture'y) | Na żywo (prawdziwy emulator) | Commit |
+|---|---|---|---|
+| 4. Dolphin i PPSSPP (rdzenie) | 10 testów, cały zestaw 419 ✓ | czeka — nikt jeszcze nie grał tymi rdzeniami | `7acab25` |
+| 4b-1. FBNeo (`fbneo\<set>.fs`), Kronos (`kronos\saturn\<gra>.ram`; kartridż `-ext*.ram` — poza paczką, pkt 4 poprawek; z `kronos_use_beetle_saves` — wprost), rozszerzenia `.fs` `.ps2` `.nvr`, karta Flycast `<gra>.A1.bin` | 5 testów, cały zestaw 424 ✓ | czeka | `b31a9c5` |
+| 4b-2. Nauczone nazwy (karta / podfolder zmieniony w czasie gry, bez nazw innych gier rdzenia; pobranie paczki gry też uczy) + PUAE `WHDSaves\<gra>\` (paczka `retroarch/puae/memcards`; obraz `WHDSaves.hdf` — wspólny dla gier, bez synchronizacji) | 4 testy (Flycast: ID gry, nazwy innych gier; PUAE: podfolder, drugie urządzenie), cały zestaw 428 ✓; podpięcie w `launcher._sync_before/_sync_after` bez osobnego testu | czeka | `3100cd0` |
+| 2 + 3. Flycast i LRPS2 — osobna karta dla gry: opcje `reicast_per_content_vmus` = „VMU A1”, `pcsx2_shared_memory_cards` = „disabled” raz (znacznik `emustart-opcje-rdzeni-1.txt`) w pliku opcji, który czyta RetroArch; pierwsza karta gry — kopia wspólnej (`system\dc\vmu_save_A1.bin`, `system\pcsx2\memcards\Mcd001.ps2`), także bez synchronizacji; karta gry w paczce zapisów gry (z rozdzieleniem na graczy) | 4 testy (plik opcji: wspólny / rdzenia, raz; kopia karty: Flycast, LRPS2), cały zestaw 432 ✓; podpięcie w `launcher._play` bez osobnego testu | czeka (Flycast: nazwa karty pod ID gry i odczyt starszej nazwy — z kodu rdzenia, nie z gry) | (ten etap) |
+| 4b-3. Play! (PS2) | — | **zablokowane:** miejsce kart (`Play Data Files\…\mc0`) do ustalenia na żywo — rdzeń nie był uruchomiony | — |
+| 1a. Xenia Edge — zapisy gry: paczka `retroarch/xenia_edge/memcards` względem `content\<XUID na tym urządzeniu>\` (inny XUID na drugim urządzeniu — bez znaczenia), numer gry poznany po grze, tylko `<Title ID>\00000001` i `Headers\00000001` (bez aktualizacji / DLC; `FFFE07D1` — profil — nigdy jako gra); urządzenie bez profilu — bez paczki; **profil Xenii należy do pierwszego gracza EmuStart, który z niego grał** (`content\` nie jest rozdzielony na graczy — inny gracz nie dostaje paczki, także w menedżerze zapisów) | 5 testów, cały zestaw 437 ✓ | czeka | `b255ee9` |
+| 1b. Xenia Edge — stały profil gracza (zrobione): po grze urządzenie zgłasza profil, z którego grał gracz (`PUT /v1/emuprofiles`, konto z tokenu); panel serwera → konto → „Profil Xbox 360”: przypięcie profilu zgłoszonego przez urządzenie tego konta (`emu_profile_pin`; cudzego nie można); przed grą przypięty profil (`GET /v1/emuprofiles`) — jest na urządzeniu: paczka w jego folderze i należy do tego gracza (zamiast „pierwszy gracz”); bez sieci — jak dotąd | 6 testów (serwer: zgłoszenie, przypięcie, odpięcie, cudzy profil; klient: przypięty profil, zgłoszenie przez serwer), cały zestaw 442 ✓ | czeka (panel — składnia `node --check`, bez kliknięcia w przeglądarce) | `2f352a1` |
+| 1c. Xenia Edge — profil (konto, osiągnięcia `FFFE07D1`) na urządzeniach, gdzie go nie ma, i logowanie przypiętego profilu na czas gry | — | **zablokowane:** rdzeń ma `xenia-edge.config.toml` z `logged_profile_slot_0_xuid` (plik rdzenia), ale sekcja TOML, format XUID i miejsce pliku nieustalone; bez tego nowe urządzenie miałoby dwa profile i Xenia mogłaby zalogować zły — do sprawdzenia na żywo, potem implementacja | — |
+| 7. APK — te same reguły w `Saves.kt` (rozszerzenia, przyrostki, podfoldery FBNeo, rdzenie Dolphin/PPSSPP, Flycast) | — | **zablokowane:** na tym komputerze nie ma Android SDK, JDK ani wrappera Gradle, APK nie ma testów jednostkowych — zmiany w Kotlinie nie dałoby się zbudować ani sprawdzić. Analiza bezpieczeństwa (kod `SaveSync.kt` / `Saves.kt`): APK nie skasuje nowych zapisów z PC — pusty zestaw lokalny nie jest wysyłany (`push`: „pusty zestaw nie kasuje zapisów”), rdzenie FBNeo / Flycast / Kronos / PUAE nie tworzą na Androidzie plików z listy rozszerzeń APK, paczek `retroarch/*/memcards` (PUAE, Xenia) APK nie zakłada. Skutek: te zapisy nie synchronizują się na telefonie; APK pobiera je jako nieużywane pliki do głównego folderu zapisów (nieszkodliwe) | — |
+| 5. Silnik Lumena (`git subtree` z gałęzi `zapisy-system` na gałąź Lumena `zapisy-system`; `lumen.py` → opcje gry też przez `xenia_claim`) | testy silnika w Lumenie 498 ✓ (1 pominięty), testy Lumena 200 ✓, typecheck ✓; błąd znaleziony testem Lumena (obiekt zastępczy bez `core_id`) — poprawiony w `8fdcd7f` | czeka | Lumen: `f1a2841`, `db3ebc4`, `a2827d2`; EmuStart: `8fdcd7f` |
+| 6. Przygotowanie wydania (lokalny build, checklista) | build EmuStart 0.55.0 ✓, testowy build Lumena ✓, panel w przeglądarce ✓ (checklista niżej) | — | `6764b1a` (wersja) |
+
+Ustalone ze źródeł i z plików rdzeni zainstalowanych na serwerze (2026-11-02): FBNeo `"%s%cfbneo%c%s.fs"` (libretro.cpp),
+Kronos `%s%ckronos%csaturn%c%s.ram` / `-ext512K…4M.ram` / `kronos_use_beetle_saves` (kronos_libretro.dll), Flycast
+`reicast_per_content_vmus`, karta `<ID gry albo nazwa pliku>.<port>.bin` w katalogu zapisów, wspólne `system\dc\vmu_save_<port>.bin`
+(hostfs::getVmuPath, flycast_libretro.dll), LRPS2 `pcsx2_shared_memory_cards`, karta `%s.ps2` (pcsx2_libretro.dll),
+PUAE `WHDSaves` jako dysk `WHDSaves:` (jeden folder dla gier), `%s.nvr` (puae_libretro.dll), Play! `Play Data Files`,
+`vfs/mc0`, `ps2.mc0.directory.v2` (play_libretro.dll — katalog bazowy nieustalony).
+
+Ryzyka: (a) podfolder `WHDSaves` przypisany źle (dwie gry WHDLoad z tym samym folderem zapisów) — paczka gry
+obejmie cudzy folder; WHDLoad nazywa folder od gry, więc mało prawdopodobne. (b) Nazwy poznane są zapisane na
+urządzeniu (baza biblioteki), nie na serwerze — drugie urządzenie poznaje je z paczki gry albo po swojej grze.
+
+(c) Kopia wspólnej karty dla pierwszej gry zawiera też zapisy innych gier; robi ją tylko gracz-właściciel urządzenia
+(pkt 7 poprawek); wspólna karta zostaje nietknięta. (d) Flycast „VMU A1”: karty B1–D1 dalej wspólne w `system\dc\`, bez synchronizacji.
+(e) Opcje rdzeni wpisane raz nadpisują wcześniejszy wybór „wspólna karta” (jak skróty LB w 0.52.4); pliki `.opt`
+gry / folderu mają pierwszeństwo w RetroArchu i nie są zmieniane.
+
+Zmiana planu pkt 1 (2026-11-02, po sprawdzeniu pliku rdzenia): zamiast podmiany folderu `content\` na czas gry —
+każdy gracz ma własny profil (XUID) w tym samym `content\`, a EmuStart wskazuje Xenii profil do zalogowania
+(`logged_profile_slot_0_xuid`); zapisy Xboksa są i tak rozdzielone po profilach. Bez przenoszenia folderów z danymi.
+*Zastąpione* etapem 2 planu „zapisy i ustawienia gracza w każdym emulatorze”: `content\` jako dowiązanie do folderu
+gracza (jak foldery Dolphina) — bez czekania na logowanie profilu.
+
+**Checklista wydania** (EmuStart 0.55.0 + Lumen 1.0.35; ✓ zrobione, ☐ do zrobienia, ⏸ za zgodą użytkownika):
+- ✓ wersja 0.55.0 na gałęzi (`6764b1a`); ✓ wpis `[0.55.0]` (wyżej)
+- ✓ testy EmuStart (cały zestaw), ✓ testy silnika w Lumenie, testy Lumena, typecheck
+- ✓ przegląd kodu (code-review, poziom high): 10 ustaleń, wszystkie poprawione (niżej), testy na każde
+- ✓ lokalny build EmuStart (`build.ps1` bez `-Deploy`, z poprawkami po przeglądzie): `dist\EmuStart-0.55.0-win64.zip`,
+  `dist\EmuStart-Server-0.55.0-win64.zip` (testy w buildzie ✓)
+- ✓ panel serwera w przeglądarce (Chromium, `web/` z repozytorium, akcje profili przez prawdziwe `srvadmin` /
+  `emuprofiles` na danych testowych): Urządzenia i konta → Pliki i kopie → „Profil Xbox 360” — dwa zgłoszone profile,
+  „Przypnij” → „przypięty” / „Odepnij”, przypięcie zapisane po stronie serwera; pozostałe dane panelu — podstawione
+- ✓ testowy build Lumena (`D:\GIT\Launcher\release\zapisy-test\win-unpacked\Lumen.exe`, bez zmiany wersji i podpisów):
+  start na pustym profilu bez sieci — silnik `EmuStart 0.55.0` gotowy, bez danych w folderze builda
+- ⏸ PR `zapisy-system` → `main` (EmuStart), scalenie, tag `v0.55.0` (CI: serwer, klient PC, APK)
+- ⏸ Lumen: silnik z `main` EmuStart (`git subtree`), wersja 1.0.35, `npm run dist`, podpisy, push, GitHub Release
+  (gałąź Lumena `zapisy-system` zawiera też niewypchniętą poprawkę Steam `6b1709d`)
+- ☐ **na żywo, przed wydaniem albo zaraz po** (prawdziwy emulator, kopia zapasowa zapisów): rdzeń Dolphin i PPSSPP
+  (folder zapisów przy sortowaniu po rdzeniu), FBNeo (`.fs`), Kronos, Flycast (karta pod ID gry, odczyt starszej
+  nazwy, kopia wspólnej karty), LRPS2 (`<gra>.ps2`), PUAE (podfolder `WHDSaves`), Xenia (zapis gry na drugim
+  urządzeniu, zgłoszenie profilu, przypięcie w panelu — kliknięcie w przeglądarce)
+- ⏸ zablokowane do sprawdzenia na żywo: Play! (miejsce kart), Xenia — profil na nowych urządzeniach i logowanie
+  przypiętego profilu (`xenia-edge.config.toml`); APK — brak środowiska do budowania
+
+**Poprawki po przeglądzie kodu** (code-review, poziom high, 2026-11-02):
+1. Rdzeń Dolphin / PPSSPP i samodzielny emulator na jednym urządzeniu dzieliły stan synchronizacji przy różnych
+   folderach (zapisy nadpisywały się bez pytania) — paczka rdzenia ma na urządzeniu rdzeń `libretro` (osobny stan),
+   serwer i tak zapisuje ją bez rdzenia: ta sama paczka, zapis przechodzi w obie strony.
+2. Sloty zapisów gubiły nazwy paczek `retroarch/memcards` (PUAE, Xenia) — błąd przy starcie gry; teraz nazwy
+   i tryb nauki zostają.
+3. Podfolder z paczki serwera tylko dla poprawnej ścieżki i folderu, który nie należy do innej gry.
+4. Kartridż pamięci Kronos (`-ext*.ram`) poza paczką: klient sprzed 0.55 wysłałby paczkę bez niego.
+5. Widoki (opcje gry, sloty, Lumen) nie zajmują profilu Xenii — tylko profil, który już należy do gracza.
+6. Kilka profili Xenii na urządzeniu — bez synchronizacji Xenii (nie wiadomo, który profil zaloguje rdzeń, do 1c).
+7. Kopia wspólnej karty (Flycast, LRPS2) tylko dla gracza, do którego konta należy urządzenie (karta zawiera zapisy
+   wszystkich graczy).
+8. Kopia zapasowa przed pobraniem — z podfolderami (pliki o tej samej nazwie w różnych folderach).
+9. `spec` / `from_spec` z trybem nauki (pobieranie w tle po starcie).
+10. Profil Xenii może być przypięty tylko jednemu kontu.
+
+**Poprawki po drugim przeglądzie** (code-review, poziom medium, weryfikacja powyższych — 9 z 10 poprawnych):
+- Kopia wspólnej karty: właściciel urządzenia to także urządzenie bez konta serwera albo z jednym graczem (inaczej po
+  przełączeniu na osobne karty dotychczasowe zapisy byłyby dla gier niewidoczne).
+- Kopia zapasowa przed zmianą slotu (`saveslots._backup`) też z podfolderami.
+- Podfoldery z paczki serwera przyjmowane dopiero po zapisie całej paczki (`pending` → `accept_pending`) i wtedy
+  zapamiętane — odrzucona paczka niczego nie uczy; sloty znają podfoldery poznane przy pobieraniu.
+- Synchronizacja w tle (`retry`, `pending`, `pull_all`) pomija paczki Xenii — tylko przy grze, z zabezpieczeniami.
+- Kilka profili Xenii: komunikat dla gracza („zapisy gier X360 bez synchronizacji”); usunięty martwy kod
+  (`xenia_xuid`, przenoszenie paczki do przypiętego folderu).
+- `CHANGELOG.md` z końcówkami LF jak w `main` (wcześniej plik był dla gita binarny przez znak backspace w starym wpisie).
+
+**Ograniczenia przyjęte świadomie:** (f) podfolder zapamiętany na urządzeniu pod inną nazwą gry (gra przemianowana,
+dwie wersje jednej gry WHDLoad) blokuje pobranie paczki tej gry — bezpieczniej niż nadpisać cudzy folder; komunikat
+w logu. (g) ~~Rdzeń Dolphin / PPSSPP i samodzielny emulator tej samej gry na jednym urządzeniu mają jeden aktywny slot
+zapisów~~ — usunięte w etapie 3 planu „zapisy i ustawienia gracza w każdym emulatorze”.
+(h) Kilka profili Xenii w folderze jednego gracza — bez synchronizacji Xenii do czasu 1c (logowanie przypiętego
+profilu). Od etapu 2 planu „zapisy i ustawienia gracza w każdym emulatorze” każdy gracz ma swój folder `content\`,
+więc profile różnych graczy na jednym urządzeniu już tego nie blokują.
+
+**Stan na koniec sesji 2026-11-02:** implementacja zakończona tam, gdzie nie blokuje jej sprawdzenie na żywo; testy
+EmuStart 457 ✓, silnik w Lumenie 513 ✓, Lumen 200 ✓, typecheck ✓; build EmuStart 0.55.0 (`dist\`) i testowy build
+Lumena (`release\zapisy-test`) z ostatecznym kodem ✓. Gałęzie lokalne, niewypchnięte: EmuStart `zapisy-system`,
+Lumen `zapisy-system` (w niej też poprawka Steam `6b1709d`).
+
+Następny krok (wymaga użytkownika): sprawdzenie na żywo z listy w checkliście (na kopii zapisów), potem zgoda na PR /
+scalenie / tag EmuStart 0.55.0 i wydanie Lumena 1.0.35; osobno — sprawdzenie formatu `xenia-edge.config.toml` (1c),
+miejsca kart Play! i środowisko do budowania APK.
+
+### Plan (zaakceptowany 2026-11-02): zapisy i ustawienia gracza w każdym emulatorze
+Zasada nadrzędna (użytkownik, 2026-11-02): architektura klient/serwer jest po to, żeby zapisy **i ustawienia** gracza
+przechodziły między klientami, niezależnie od platformy i emulatora; luka w rozdzieleniu na graczy albo w
+synchronizacji to praca do zrobienia, nie przyjęte ograniczenie.
+
+Stan sprawdzony 2026-11-02 (kod + instalacje użytkownika, jeden gracz na każdej): zapisy na gracza — RetroArch (wszystkie
+rdzenie), DuckStation, PCSX2, samodzielny Dolphin (dowiązania `User\GC`, `Wii`, `StateSaves` → `profiles\<gracz>\dolphin`),
+PPSSPP, RPCS3. Ustawienia na gracza — tylko RetroArch (`retroarch.cfg`, `config\`), DuckStation, PCSX2. **Wspólne dla
+wszystkich graczy:** ustawienia Dolphina (`User\Config`), PPSSPP, RPCS3, opcje rdzeni RetroArcha
+(`retroarch-core-options.cfg`), `system\Xenia-Edge\content` (profil i zapisy Xboksa). Emulatory bez adaptera (samodzielne
+melonDS, mGBA, Snes9x, Xenia, ares, Cemu, Ryujinx, Azahar, Vita3K, xemu, MAME, shadPS4) — ani rozdzielenia, ani
+synchronizacji. Używane u użytkownika: prawie wszystko przez rdzenie RetroArcha (Xbox 360: `xenia_edge`), samodzielne
+Dolphin (GC, Wii) i PCSX2 (PS2); PS3 i PS Vita — domyślne (RPCS3, Vita3K).
+
+Zmiany (kolejność):
+1. Ustawienia na gracza: Dolphin (`User\Config`, bez kluczy komputera — karta graficzna, ścieżki), PPSSPP, RPCS3, opcje
+   rdzeni RetroArcha (`retroarch-core-options.cfg`). Opcje Flycast / LRPS2 (osobna karta gry) — wpisywane, gdy plik gracza
+   ich nie ma (zamiast jednego znacznika na komputer): wybór gracza nigdy nie jest nadpisany, każdy gracz ma je u siebie.
+2. Xenia (rdzeń): `system\Xenia-Edge\content` jako dowiązanie do folderu gracza (jak foldery Dolphina); aktualizacje i DLC
+   (`content\0000000000000000`) wspólne. Zastępuje „profil jednego gracza” i blokadę przy kilku profilach.
+3. Slot zapisów osobno dla emulatora (rdzeń i samodzielny emulator tej samej gry).
+4. Adaptery samodzielnych emulatorów — najpierw domyślne dla systemów w bibliotece (RPCS3 już jest; Vita3K), potem
+   pozostałe przy użyciu.
+5. Sprawdzenie, że ustawienia gracza przechodzą między klientami przez serwer (nie tylko lokalne rozdzielenie).
+
+Nie zmienia się: zapisy i ustawienia RetroArcha, DuckStation, PCSX2 (już na gracza), lista gier, sterowanie.
+
+Etap 1 — zrobione (lokalnie, testy na fixture'ach; w prawdziwym emulatorze niesprawdzone):
+- **Dolphin:** do profilu gracza należą `Config\` (Dolphin.ini, GFX.ini, pady GC/Wii/klawiatura, skróty, GBA, FreeLook,
+  RetroAchievements.ini, TimePlayed.ini, `Profiles\`, `GraphicMods\`) i `GameSettings\`. Zostają na komputerze: `Qt.ini`
+  (okno), `Logger.ini`, ścieżki gier i kart (`ISOPath*`, `*Path*`), `GFXBackend`, karta grafiki (`[Hardware] Adapter`),
+  wyjście dźwięku, pełny ekran / okno renderowania, `[Analytics]`, `[AutoUpdate]`, `[SDL_Hints]`, `WirelessMac`, konto
+  RetroAchievements tego komputera (token w kopii profilu pusty).
+- **PPSSPP:** `ppsspp.ini`, `controls.ini` i ustawienia gier `<ID>_ppsspp.ini`. Zostają: folder gier, okno, zdalne ISO,
+  backend i urządzenie grafiki, pełny ekran, urządzenie dźwięku, `MacAddress` (sieć ad hoc — każdy komputer swój),
+  login RetroAchievements, `[Recent]`, `[Upgrade]`, `[Debugger]`.
+- **RPCS3:** `config\config.yml` (nowa obsługa YAML: klucze zagnieżdżone), `custom_configs\` (ustawienia gier),
+  `input_configs\` (pady). Zostają: karta Vulkan, urządzenia dźwięku i mikrofonu, kamera, serwer GDB; `vfs.yml`
+  (ścieżki) i `GuiConfigs\` (okno) poza profilem. `Console PSID` przechodzi z graczem (stała tożsamość konsoli gracza
+  na każdym kliencie — jak profil Xenii).
+- **RetroArch:** `retroarch-core-options.cfg` w profilu (gdy włączone wspólne opcje rdzeni; pliki `config\<rdzeń>\*.opt`
+  były w profilu już wcześniej). Opcje osobnej karty Flycast / LRPS2 dopisywane przy każdej grze, gdy plik opcji
+  gracza ich nie ma — bez znacznika „raz na komputer”; wybór gracza zostaje.
+
+Etap 2 — zrobione (lokalnie, testy na fixture'ach; w prawdziwym rdzeniu niesprawdzone):
+- **Xenia Edge (rdzeń):** przed grą `system\Xenia-Edge\content` → dowiązanie do `profiles\<gracz>\xenia_edge\content`.
+  Pierwszy raz: profile (XUID) przechodzą do graczy, którzy z nich grali (dotychczasowa mapa właścicieli), reszta — do
+  pierwszego profilu; `content\0000000000000000` (aktualizacje, DLC) → wspólny `Xenia-Edge\content-shared\`,
+  podpięty dowiązaniem w folderze każdego gracza. Profil przypięty graczowi w panelu serwera, leżący u innego gracza
+  na tym urządzeniu, przechodzi do niego. Paczka zapisów Xenii z folderu gracza zawsze jego (mapa właścicieli zostaje
+  tylko dla instalacji bez profili graczy).
+- **Do sprawdzenia na żywo:** czy rdzeń sam zakłada profil, gdy folder gracza jest pusty (dziś profil „Player” z
+  `xbl_profilename.txt` powstał bez udziału użytkownika — wniosek z pliku i logu, nie z dokumentacji); czy rdzeń
+  działa z `content\` jako dowiązaniem (Dolphin, PPSSPP i RPCS3 działają tak od dawna).
+
+Etap 3 — zrobione (lokalnie, testy na fixture'ach):
+- **Sloty zapisów:** „który slot leży w folderach emulatora” i znacznik przerwanej zamiany — osobno dla każdego
+  emulatora / rdzenia (`save_slot_place`: `retroarch-<rdzeń>`, `dolphin`, `ppsspp`…); wybrany slot gry (`active`,
+  wspólny z serwerem) — dalej jeden na grę. Zmiana slotu w rdzeniu Dolphin nie myli samodzielnego Dolphina tej samej
+  gry: przy jego następnej grze jego pliki idą do jego slotu, a z serwera przychodzi wybrany slot. Bez wiersza dla
+  emulatora — slot gry sprzed zmiany (jak dotąd); przerwana zamiana sprzed zmiany nie jest dokańczana na folderach
+  innego emulatora (mogłaby skasować jego pliki). Lista stanów innych rdzeni i ich edycja — slot bieżącego rdzenia.
+
+Etap 4 — zrobione dla Vita3K (lokalnie, testy na fixture'ach; Vita3K u użytkownika nigdy nie uruchomiony):
+- **Vita3K (PS Vita):** `ux0\user` (użytkownicy Vity, zapisy `savedata`, trofea) — dowiązanie do folderu gracza, jak
+  RPCS3; synchronizacja folderu z serwerem jak dotąd dla emulatorów bez paczek. `config.yml` — ustawienia gracza;
+  zostają: `pref-path`, `gpu-idx`, `custom-driver-name`. Miejsca z kodu źródłowego Vita3K (`app_init.cpp`,
+  `config.cpp`, `io.cpp`): `portable\` obok exe → wszystko w nim, system plików `portable\fs`; inaczej `config.yml`
+  obok exe i system plików z `pref-path` albo folder użytkownika SDL — przyjęty `%APPDATA%\Vita3K\Vita3K` (nazwy
+  organizacji i aplikacji z ustawień Qt Vita3K; nazw przekazywanych do SDL w kodzie nie znalazłem — do sprawdzenia
+  przy pierwszym uruchomieniu).
+- Pozostałe samodzielne emulatory (melonDS, mGBA, Snes9x, Xenia, ares, Cemu, Ryujinx, Azahar, xemu, MAME, shadPS4,
+  Eden, Citron) — nie są dziś używane w bibliotece użytkownika; adapter przy pierwszym użyciu (zgodnie z planem).
+
+Etap 5 — sprawdzone na fixture'ach (bez prawdziwych emulatorów i drugiego fizycznego komputera):
+- Dwa klienty (osobne foldery profili i instalacje emulatorów, inna karta grafiki) przez serwer EmuStart (HTTP, ten sam
+  serwer testowy co reszta testów profili): ustawienie zmienione przez gracza na kliencie A jest na kliencie B przed
+  grą, a wartość komputera B zostaje — Dolphin, PPSSPP, RPCS3, Vita3K. RetroArch, DuckStation, PCSX2 — wcześniejsze
+  testy profili (bez zmian).
+- **Nie sprawdzone na żywo:** wszystkie etapy 1–5 w prawdziwych emulatorach (czy emulator czyta podmienione pliki
+  i dowiązania tak, jak zakładają testy), APK (Android — ustawienia samodzielnych emulatorów nie dotyczą), Lumen
+  (silnik — po przeniesieniu przez `git subtree`).
+
+Moduły: klient Windows i Lumen (silnik `engine/`) — zmiana; serwer — nowe rodzaje paczek (format jak dotychczas);
+APK — Flycast (RetroArch na Androidzie) przez tę samą kartę w `saves\`, Xenia i LRPS2 — nie dotyczy (nie ma ich
+na Androidzie). Nie zmienia się: zapisy pozostałych rdzeni i emulatorów, lista gier, sterowanie.
 
 ## [0.54.3] — 2026-11-02
 
@@ -836,7 +1112,7 @@ opis wspólnych stanów RetroArcha w katalogu serwera (`emustart/savemgr.py`), `
 ### Naprawione
 - **PCSX2 i DuckStation zainstalowane z serwera startowały z kreatorem pierwszego uruchomienia**
   (i bez BIOS-u). Teraz przed grą: kreator i własne aktualizacje emulatora wyłączone
-  (aktualizuje serwer), BIOS z serwera w folderze emulatora (PCSX2: `pcsx2ios` z folderu
+  (aktualizuje serwer), BIOS z serwera w folderze emulatora (PCSX2: `pcsx2\bios` z folderu
   BIOS-ów serwera — serwer wypisuje BIOS-y z folderu, `GET /v1/bios?dir=`; DuckStation: BIOS-y
   PS1). Przy okazji: zmiana pustej wartości w pliku ini (`BIOS = `) trafiała do następnej linii.
 - Skróty pada RetroArcha na PC: przycisk skrótów był ustawiony na Start (numer 6 w sterowniku

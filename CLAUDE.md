@@ -18,6 +18,10 @@
 - Nie zgłaszaj „naprawione”, jeśli nie da się tego sprawdzić tutaj (okno Windows, WebView2,
   pad) — napisz wprost, co sprawdzone, a co nie.
 
+## Praca etapami przez kilka sesji
+- Procedura kontynuacji (start sesji, cykl etapu, bezpieczeństwo zapisów, checkpoint): `docs/KONTYNUACJA-PRACY.md`.
+  Plan i stan etapów — wyłącznie w `CHANGELOG.md` → `[Nieopublikowane]`.
+
 ## Wydania
 - Wersja w `emustart/__init__.py` (APK bierze ją stąd). Każdy PR z wydaniem: wersja +
   wpis w CHANGELOG.

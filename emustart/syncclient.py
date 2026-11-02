@@ -482,12 +482,16 @@ def _apply(pid: int, b, zp: Path) -> None:
     (do kopii zapasowej)."""
     with zipfile.ZipFile(zp) as z:
         items = [i for i in z.infolist() if not i.is_dir()]
+        if hasattr(b, "pending"):
+            b.pending = []                    # podfoldery z tej paczki — dopiero po zapisie całości
         targets = {i.filename: b.local_path(i.filename) for i in items}      # ValueError: zła nazwa
         if b.files:
             bak = _backup_dir(pid) / time.strftime("%Y%m%d-%H%M%S") / f"{b.emulator_id}-{b.core_id or '-'}-{b.kind}"
             bak.mkdir(parents=True, exist_ok=True)
-            for path, _arc in b.files:
-                shutil.copy2(path, bak / Path(path).name)
+            for path, arc in b.files:
+                dst = bak / (arc if "/" in arc else Path(path).name)    # paczki z podfolderami — ze ścieżką
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(path, dst)
             _prune_backups(pid)
         b.folder.mkdir(parents=True, exist_ok=True)
         for i in items:
@@ -503,6 +507,8 @@ def _apply(pid: int, b, zp: Path) -> None:
     for path, _arc in b.files:
         if str(path).lower() not in keep:
             Path(path).unlink(missing_ok=True)
+    if hasattr(b, "accept_pending"):
+        b.accept_pending()                    # cała paczka zapisana — jej podfoldery należą do gry
     b.collect()
 
 
@@ -594,6 +600,28 @@ def _newest(b) -> float:
 
 # ── przed grą / po grze ──
 
+# ── profile emulatorów graczy (emustart/emuprofiles.py na serwerze) ──
+
+def emu_profiles(cfg: dict, pid: int) -> dict:
+    """Profile emulatorów konta gracza na serwerze: {emulator: {"pinned", "reported"}}. Offline — wyjątek."""
+    st, data = _Client(cfg, pid).call("GET", "/v1/emuprofiles")
+    if st != 200:
+        raise Offline(f"profile emulatorów: HTTP {st}")
+    out = json.loads(data or b"{}")
+    out.pop("ok", None)
+    return out
+
+
+def emu_report(cfg: dict, pid: int, emu: str, xuids: list) -> int:
+    """Profile emulatora, z których grał gracz na tym urządzeniu → serwer (przypięcie w panelu)."""
+    body = json.dumps({"emu": emu, "xuids": list(xuids)}).encode()
+    st, data = _Client(cfg, pid).call("PUT", "/v1/emuprofiles", body=body,
+                                      headers={"Content-Type": "application/json"})
+    if st != 200:
+        raise Offline(f"profile emulatorów: HTTP {st}")
+    return int(json.loads(data or b"{}").get("accepted", 0))
+
+
 def before(cfg: dict, pid: int, bundles: list, game: dict) -> Result:
     """Synchronizacja przed grą: paczki aktywnego slotu (foldery emulatora), pozostałe sloty
     i kosze slotów (folder profilu); potem aktywny slot jak na serwerze (zamiana plików).
@@ -637,7 +665,7 @@ def before(cfg: dict, pid: int, bundles: list, game: dict) -> Result:
                     res.slot = want
                 except OSError as ex:            # kopia niezgodna / dysk — gra na dotychczasowym slocie
                     log.warning("sloty %s/%s: zamiana %d → %d wstrzymana: %s", plat, gid, here, want, ex)
-                    res.slot = saveslots.here(pid, plat, gid)
+                    res.slot = saveslots.here(pid, plat, gid, bundles)
     return res
 
 
@@ -756,7 +784,7 @@ def after(cfg: dict, pid: int, bundles: list, game: dict, skip: set | None = Non
     from emustart import saveslots
     res = Result()
     plat, gid = game_ids(game)
-    slot = saveslots.here(pid, plat, gid)
+    slot = saveslots.here(pid, plat, gid, bundles)
     res.slot = slot
     todo = []
     for b in bundles:
@@ -810,6 +838,8 @@ def retry(cfg: dict) -> int:
             b = savebundles.from_spec(json.loads(r["spec"]))
         except (ValueError, KeyError, OSError):
             continue
+        if b.core_id == "xenia_edge":       # Xenia — tylko przy grze (profil gracza), nie w tle
+            continue
         local = savebundles.content_hash(b.files)
         ops = pending_ops(r["profile_id"], r["platform"], r["game"], b, r["slot"])
         if local == r["content"] and not (ops["add"] or ops["drop"]):
@@ -844,7 +874,7 @@ def other_core_states(cfg: dict, pid: int, game: dict, core: str) -> list:
     zmiana gracza tutaj — saveslots.OtherCore — czeka w niej do wysłania). [{core, path, time}]."""
     from emustart import saveslots
     plat, gid = game_ids(game)
-    slot = saveslots.here(pid, plat, gid)
+    slot = saveslots.here_at(pid, plat, gid, f"retroarch-{core}")
     try:
         cl = _Client(cfg, pid)
         man = cl.json("GET", f"/v1/savesync/{plat}/{gid}/manifest")
@@ -917,6 +947,8 @@ def pending(cfg: dict, account: str = "") -> list:
             b = savebundles.from_spec(json.loads(r["spec"]))
         except (ValueError, KeyError, OSError):
             continue
+        if b.core_id == "xenia_edge":       # Xenia — tylko przy grze (profil gracza), nie w tle
+            continue
         if savebundles.content_hash(b.files) in ("", r["content"]):
             continue
         k = (acc.lower(), r["platform"], r["game"])
@@ -966,6 +998,8 @@ def pull_all(cfg: dict, pid: int, skip: set | None = None) -> dict:
                 try:
                     b = savebundles.from_spec(json.loads(r["spec"]))
                 except (ValueError, KeyError, OSError):
+                    continue
+                if b.core_id == "xenia_edge":       # Xenia — tylko przy grze (profil gracza), nie w tle
                     continue
                 srv = _server_bundle(man, b, r["slot"])
                 rev_s = int(srv.get("revision") or 0)

@@ -719,7 +719,25 @@ async function openAccount(name) {
   }));
   $("bakAuto").checked = !!r.auto;
   $("bakKeep").value = r.keep;
+  showEmuProfiles(name);
   $("acctBox").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+/* profil Xbox 360 konta (emustart/emuprofiles.py): zgłoszone przez urządzenia, przypięcie do konta */
+async function showEmuProfiles(name) {
+  const r = await admin("emu_profiles", { name }).catch(() => null);
+  const x = r?.profiles?.xenia_edge || { pinned: "", reported: [] };
+  $("acctEmu").innerHTML = x.reported.length ? x.reported.map((p) => {
+    const on = p.xuid === x.pinned;
+    return `<tr><td>${esc(p.xuid)}${on ? ' <span class="muted">· przypięty</span>' : ""}</td><td>${esc(p.device)}</td>` +
+      `<td class="n">${fmtTime(p.seen)}</td><td class="n"><button data-xpin="${on ? "" : esc(p.xuid)}">${on ? "Odepnij" : "Przypnij"}</button></td></tr>`;
+  }).join("") : `<tr><td colspan="4" class="muted">Żadne urządzenie tego konta nie zgłosiło jeszcze profilu.</td></tr>`;
+  $("acctEmu").querySelectorAll("[data-xpin]").forEach((b) => b.addEventListener("click", async () => {
+    const xuid = b.dataset.xpin;
+    if (xuid && !confirm(`Przypiąć profil ${xuid} kontu „${name}”? Będzie to stały profil Xbox 360 tego gracza na każdym urządzeniu.`)) return;
+    const res = await admin("emu_profile_pin", { name, emu: "xenia_edge", xuid }).catch(() => null);
+    msg(res?.ok ? (xuid ? "Profil przypięty." : "Profil odpięty.") : res?.reason || "Serwer nie odpowiada.", res?.ok);
+    showEmuProfiles(name);
+  }));
 }
 $("bAcctBackup").addEventListener("click", async () => {
   if (!acctOpen) return;

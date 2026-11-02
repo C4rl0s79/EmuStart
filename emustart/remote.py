@@ -320,6 +320,8 @@ def handle(handler) -> None:
             return _emulators_get(handler, parts[1:])
         if len(parts) == 4 and parts[0] == "savesync" and parts[3] in ("manifest", "status"):
             return savesync_get(handler, parts[1], parts[2], parts[3] == "manifest")
+        if parts == ["emuprofiles"]:
+            return emuprofiles_call(handler, "GET")
         if parts == ["systems"]:
             from emustart import emucatalog, emulators, systems
             out = []
@@ -425,6 +427,8 @@ def handle_write(handler, method: str) -> None:
     parts = [p for p in path.split("/") if p][1:]
     if parts and parts[0] == "admin":
         return _admin_route(handler, method, parts[1:])
+    if method == "PUT" and parts == ["emuprofiles"]:
+        return emuprofiles_call(handler, "PUT")
     if method == "PUT" and len(parts) == 2 and parts[0] == "profiles":
         return _profiles_put(handler, parts[1])
     if method == "PUT" and parts == ["savemgr", "copy"]:
@@ -994,6 +998,20 @@ def _sync_errors(handler, fn) -> None:
         return _json(handler, {"ok": False, "reason": str(ex)}, 400)
     if out is not None:
         return _json(handler, out)
+
+
+def emuprofiles_call(handler, method: str) -> None:
+    """GET /v1/emuprofiles — profile emulatorów konta (przypięty profil); PUT {emu, xuids} — profile, z których
+    grało konto na tym urządzeniu (emustart/emuprofiles.py). Konto — jak przy zapisach (token, nie treść)."""
+    from emustart import emuprofiles
+
+    def run():
+        d = _body(handler) if method == "PUT" else None
+        account, device = _sync_identity(handler, d)
+        if method == "GET":
+            return {"ok": True, **emuprofiles.state(account)}
+        return {"ok": True, "accepted": emuprofiles.report(account, device, str(d.get("emu", "")), d.get("xuids") or [])}
+    return _sync_errors(handler, run)
 
 
 def savesync_get(handler, platform: str, game: str, urls: bool) -> None:

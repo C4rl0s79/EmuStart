@@ -942,8 +942,9 @@ class Api:
         from emustart import savebundles
         core = savebundles.core_id(emu.get("args", ""))
         try:
-            return savebundles.for_game(ad, core, launcher.content_guess(self._cfg, g, emu["exe"]),
-                                        launcher.ps2_info(self._cfg, g))
+            return savebundles.xenia_claim(          # profil Xenii — tylko już należący do gracza (widok, bez zajmowania)
+                savebundles.for_game(ad, core, launcher.content_guess(self._cfg, g, emu["exe"]),
+                                     launcher.ps2_info(self._cfg, g)), self._profile, claim=False)
         except Exception:
             log.exception("paczki zapisów gry")
             return None
@@ -1045,7 +1046,9 @@ class Api:
         g = library.game(int(game_id))
         if not g:
             raise saveslots.EditError("Nie ma takiej gry.")
-        return saveslots.OtherCore(self._cfg, self._profile, g, str(core))
+        from emustart import savebundles
+        cur = savebundles.core_id(self._effective_emu(g).get("args", ""))     # bieżący rdzeń gry — jego slot
+        return saveslots.OtherCore(self._cfg, self._profile, g, str(core), cur)
 
     def state_edit(self, game_id: int, op: str, arc: str, arg=None, core: str = "") -> dict:
         """Zmiana stanu aktywnego slotu: renumber (arg: numer), copy_new, copy_slot / move_slot

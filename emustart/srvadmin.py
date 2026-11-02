@@ -419,6 +419,19 @@ def account_admin(_api, args: dict) -> dict:
     return {"ok": True, "name": name}
 
 
+def emu_profiles(_api, args: dict) -> dict:
+    """Panel: profile emulatorów konta (zgłoszone przez jego urządzenia) i przypięty profil."""
+    from emustart import emuprofiles
+    return {"ok": True, "profiles": emuprofiles.state(str(args.get("name", "")))}
+
+
+def emu_profile_pin(_api, args: dict) -> dict:
+    """Panel: przypięcie profilu emulatora do konta (stały profil gracza na każdym urządzeniu); xuid „” — odpięcie."""
+    from emustart import emuprofiles
+    why = emuprofiles.pin(str(args.get("name", "")), str(args.get("emu", "")), str(args.get("xuid", "")))
+    return {"ok": not why, "reason": why}
+
+
 def device_games(_api, args: dict) -> dict:
     """Panel: czy urządzenie pobiera gry z serwera."""
     from emustart import devices
@@ -563,7 +576,8 @@ def profiles_migrate_status(_api) -> dict:
 ACTIONS_ARGS = {"device_revoke": device_revoke, "device_rename": device_rename, "account_password": account_password,
                 "profiles_migrate": profiles_migrate, 
                 "public_set": public_set, "tunnel_set": tunnel_set,
-                "enroll_decide": enroll_decide, "device_games": device_games, "account_admin": account_admin}
+                "enroll_decide": enroll_decide, "device_games": device_games, "account_admin": account_admin,
+                "emu_profiles": emu_profiles, "emu_profile_pin": emu_profile_pin}
 def config_get(api) -> dict:
     from emustart import srvconfig
     return srvconfig.get(api._cfg)
