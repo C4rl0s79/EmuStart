@@ -6,7 +6,41 @@ Wszystkie istotne zmiany w EmuStart. Format oparty na
 
 ## [Nieopublikowane]
 
-Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md).
+Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md). Otwarte po 0.55.0: Xenia 1c (logowanie przypiętego profilu na
+nowym urządzeniu — do sprawdzenia na żywo), Play! (miejsce kart), APK (te same reguły zapisów — brak środowiska do
+budowania), adaptery pozostałych samodzielnych emulatorów przy pierwszym użyciu, sprawdzenie na żywo (niżej).
+
+## [0.55.0] — 2026-11-02
+
+Zakres: klient Windows i Lumen (silnik): `savebundles.py`, `syncclient.py`, `saveslots.py`, `ingame.py`,
+`profiles.py`, `launcher.py`, `api.py`; serwer: `emuprofiles.py`, `srvadmin.py`, `remote.py`, panel (`web/server.*`).
+APK bez zmian (brak środowiska do budowania; analiza bezpieczeństwa w tabeli etapów niżej: APK nie skasuje zapisów
+z PC). Zasada nadrzędna: zapisy **i ustawienia** gracza przechodzą między klientami dla każdego emulatora.
+
+### Dodane
+- **Zapisy rdzeni RetroArcha spoza `saves\<gra>`:** Dolphin i PPSSPP (ta sama paczka co samodzielne emulatory),
+  FBNeo (`fbneo\<set>.fs`), Kronos, Flycast (karta gry pod ID z płyty), LRPS2 (karta gry), PUAE (`WHDSaves\<gra>`),
+  Xenia Edge (zapisy gier X360, bez aktualizacji, DLC i profilu). Nazwy kart / podfolderów poznawane po grze.
+- **Ustawienia gracza:** Dolphin, PPSSPP, RPCS3 (YAML), Vita3K, wspólne opcje rdzeni RetroArcha — każdy gracz ma
+  swoje, przez serwer na każdym kliencie; karta grafiki, ścieżki, dźwięk, okno zostają na komputerze.
+- **Xenia Edge:** `content\` osobno dla każdego gracza (dowiązanie), aktualizacje i DLC wspólne; panel serwera →
+  konto → „Profil Xbox 360”: przypięcie profilu zgłoszonego przez urządzenie.
+- **Vita3K:** zapisy (`ux0\user`) i ustawienia gracza.
+
+### Poprawione
+- Slot zapisów w folderach emulatora — osobno dla każdego emulatora / rdzenia (rdzeń i samodzielny Dolphin tej samej
+  gry nie mieszają slotów). Poprawki po dwóch przeglądach kodu — opis niżej.
+
+### Sprawdzone
+- testy: cały zestaw EmuStart (474), silnik w Lumenie (530), Lumen (200, typecheck); dwa klienty przez serwer
+  (ustawienia gracza); panel serwera w przeglądarce (Chromium, dane testowe).
+
+### Niesprawdzone
+- na żywo w prawdziwych emulatorach: zapisy rdzeni (lista w checkliście niżej), podmienione pliki ustawień
+  Dolphina / PPSSPP / RPCS3 / Vita3K, rdzeń Xenii z `content\` jako dowiązaniem i z pustym folderem gracza,
+  domyślny folder Vita3K (`%APPDATA%\Vita3K\Vita3K`).
+
+### Szczegóły (plany, etapy, przeglądy)
 
 ### Plan (zaakceptowany 2026-11-02): zapisy rdzeni RetroArcha w `system\` i w podfolderach `saves\`
 Przyczyna (sprawdzone 2026-11-02 na danych z Lumena i w dokumentacji libretro): synchronizacja RetroArcha
@@ -95,9 +129,11 @@ gry / folderu mają pierwszeństwo w RetroArchu i nie są zmieniane.
 Zmiana planu pkt 1 (2026-11-02, po sprawdzeniu pliku rdzenia): zamiast podmiany folderu `content\` na czas gry —
 każdy gracz ma własny profil (XUID) w tym samym `content\`, a EmuStart wskazuje Xenii profil do zalogowania
 (`logged_profile_slot_0_xuid`); zapisy Xboksa są i tak rozdzielone po profilach. Bez przenoszenia folderów z danymi.
+*Zastąpione* etapem 2 planu „zapisy i ustawienia gracza w każdym emulatorze”: `content\` jako dowiązanie do folderu
+gracza (jak foldery Dolphina) — bez czekania na logowanie profilu.
 
 **Checklista wydania** (EmuStart 0.55.0 + Lumen 1.0.35; ✓ zrobione, ☐ do zrobienia, ⏸ za zgodą użytkownika):
-- ✓ wersja 0.55.0 na gałęzi (`6764b1a`); ☐ wpis `[0.55.0]` z tego planu (co weszło, co nie, sprawdzone / niesprawdzone)
+- ✓ wersja 0.55.0 na gałęzi (`6764b1a`); ✓ wpis `[0.55.0]` (wyżej)
 - ✓ testy EmuStart (cały zestaw), ✓ testy silnika w Lumenie, testy Lumena, typecheck
 - ✓ przegląd kodu (code-review, poziom high): 10 ustaleń, wszystkie poprawione (niżej), testy na każde
 - ✓ lokalny build EmuStart (`build.ps1` bez `-Deploy`, z poprawkami po przeglądzie): `dist\EmuStart-0.55.0-win64.zip`,
