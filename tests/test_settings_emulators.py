@@ -223,3 +223,57 @@ def test_retroarch_global_core_options_file_is_per_player(prof_env):
     assert '"1920x1440"' in opts.read_text()
     s._release_dirs()
     s._profile_finish(ra, names)
+
+
+# ── Vita3K (PS Vita): ux0\user — folder gracza (dowiązanie), config.yml — ustawienia gracza ──
+
+VITA_CFG = 'backend-renderer: Vulkan\ngpu-idx: 0\nresolution-multiplier: 1\npref-path: ""\nuser-id: "00"\n'
+
+
+def test_vita3k_folders(tmp_path, monkeypatch):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    home = tmp_path / "Vita3K"
+    _write(home / "Vita3K.exe", b"")
+    ad = ingame.adapter_for(str(home / "Vita3K.exe"))
+    assert ad.family == "vita3k"
+    # domyślnie: system plików Vity w folderze użytkownika (SDL), config.yml obok exe
+    assert ad.save_dirs() == [tmp_path / "appdata" / "Vita3K" / "Vita3K" / "ux0" / "user"]
+    assert ad.settings_base() == home and ad.settings_files() == ["config.yml"]
+    # pref-path z config.yml
+    _write(home / "config.yml", f'pref-path: {tmp_path / "vita"}\n'.encode())
+    (tmp_path / "vita").mkdir()
+    assert ad.save_dirs() == [tmp_path / "vita" / "ux0" / "user"]
+    # tryb przenośny: folder portable\ obok exe — wszystko w nim, system plików w portable\fs
+    (home / "portable").mkdir()
+    assert ad.save_dirs() == [home / "portable" / "fs" / "ux0" / "user"]
+    assert ad.settings_base() == home / "portable"
+
+
+def test_vita3k_saves_and_settings_per_player(prof_env):
+    cfg, tmp = prof_env
+    first = profiles.first_id()
+    ola = profiles.create("Ola")["id"]
+    home = tmp / "emu" / "Vita3K"
+    _write(home / "portable" / "config.yml", VITA_CFG.encode())
+    user = home / "portable" / "fs" / "ux0" / "user"
+    _write(user / "00" / "savedata" / "PCSE00120" / "sce_sys" / "param.sfo", b"ZAPIS-PIERWSZEGO")
+    ad = ingame.adapter_for(str(home / "Vita3K.exe"))
+    yml = home / "portable" / "config.yml"
+
+    _play(cfg, first, ad, lambda: ingame.yml_set(yml, {("", "resolution-multiplier"): "2"}))
+    assert profiles._is_junction(user)
+    def ola_plays():
+        _write(user / "00" / "savedata" / "PCSE00120" / "sce_sys" / "param.sfo", b"ZAPIS-OLI")
+        ingame.yml_set(yml, {("", "resolution-multiplier"): "3", ("", "gpu-idx"): "1"})
+    _play(cfg, ola, ad, ola_plays)                       # Ola: pusty folder gracza, swój zapis
+
+    ingame.yml_set(yml, {("", "gpu-idx"): "5"})          # karta tego komputera
+    s = _session(cfg, first)
+    names = s._profile_prepare(ad)
+    assert (user / "00" / "savedata" / "PCSE00120" / "sce_sys" / "param.sfo").read_bytes() == b"ZAPIS-PIERWSZEGO"
+    got = ingame.yml_pick(yml, [("", "resolution-multiplier|gpu-idx")])
+    assert got == {("", "resolution-multiplier"): "2", ("", "gpu-idx"): "5"}
+    s._release_dirs()
+    s._profile_finish(ad, names)
+    ola_dir = profiles.local_dir(ola, "vita3k", "user")
+    assert (ola_dir / "00" / "savedata" / "PCSE00120" / "sce_sys" / "param.sfo").read_bytes() == b"ZAPIS-OLI"

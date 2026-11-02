@@ -1582,7 +1582,39 @@ class RPCS3(Adapter):
                                       ("Input/Output", "Camera ID|SDL Camera ID"), ("Miscellaneous", "GDB Server")]}
 
 
-_ADAPTERS = {a.family: a for a in (RetroArch, DuckStation, PCSX2, Dolphin, PPSSPP, RPCS3)}
+class Vita3K(Adapter):
+    """PS Vita: ux0\\user (użytkownicy Vity, zapisy, trofea) — folder gracza; config.yml — ustawienia gracza.
+    Miejsca wg źródeł Vita3K (app_init.cpp, config.cpp): folder `portable\\` obok exe = tryb przenośny (config
+    w nim, system plików w portable\\fs); inaczej config.yml obok exe, system plików z `pref-path` albo folder
+    użytkownika SDL (%APPDATA%\\Vita3K\\Vita3K — nazwy z ustawień Qt Vita3K; w prawdziwym emulatorze
+    niesprawdzone). Zapisy: ux0\\user\\<user-id>\\savedata\\<gra> (io.cpp)."""
+    family = "vita3k"
+
+    def _portable(self) -> Path:
+        return self.home / "portable"
+
+    def settings_base(self) -> Path:
+        return self._portable() if self._portable().is_dir() else self.home
+
+    def _fs(self) -> Path:
+        if self._portable().is_dir():
+            return self._portable() / "fs"
+        pref = yml_pick(self.home / "config.yml", [("", "pref-path")]).get(("", "pref-path"), "").strip("\"'")
+        if pref and Path(pref).is_dir():
+            return Path(pref)
+        return Path(os.environ.get("APPDATA", str(Path.home()))) / "Vita3K" / "Vita3K"
+
+    def save_dirs(self) -> list:
+        return [self._fs() / "ux0" / "user"]
+
+    def settings_files(self) -> list:
+        return ["config.yml"]
+
+    def machine_keys(self) -> dict:
+        return {"config.yml": [("", "pref-path|gpu-idx|custom-driver-name")]}
+
+
+_ADAPTERS = {a.family: a for a in (RetroArch, DuckStation, PCSX2, Dolphin, PPSSPP, RPCS3, Vita3K)}
 
 
 def list_states(adapter: Adapter, game: dict, meta: dict, learned: list) -> list:
