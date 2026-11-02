@@ -536,10 +536,18 @@ def xenia_xuid(content: Path) -> str:
 XENIA_OWNERS = "xenia_owners"
 
 
-def xenia_claim(bundles: list, pid: int) -> list:
+def xenia_xuids(content: Path) -> list:
+    """Wszystkie profile Xenii na urządzeniu (foldery z kontem)."""
+    return sorted(d.name for d in (content.iterdir() if content.is_dir() else ())
+                  if _XUID.match(d.name) and d.name != "0" * 16
+                  and (d / _XENIA_PROFILE / "00010000" / d.name / "Account").is_file())
+
+
+def xenia_claim(bundles: list, pid: int, pinned: str = "") -> list:
     """content\\ Xenii nie jest rozdzielony na graczy EmuStart (folder system\\, nie przekierowany): profil
-    Xenii (XUID) na urządzeniu należy do pierwszego gracza, który z niego grał. Inny gracz nie dostaje paczki
-    zapisów Xenii — nie pobierze swoich zapisów do cudzego profilu i nie wyśle cudzych jako swoich."""
+    Xenii (XUID) na urządzeniu należy do pierwszego gracza, który z niego grał — albo do gracza, któremu
+    przypięto go w panelu serwera (`pinned`; jest na urządzeniu — paczka w jego folderze). Inny gracz nie
+    dostaje paczki zapisów Xenii — nie pobierze swoich zapisów do cudzego profilu i nie wyśle cudzych jako swoich."""
     from emustart import library
     out = []
     for b in bundles:
@@ -550,6 +558,11 @@ def xenia_claim(bundles: list, pid: int) -> list:
             owners = json.loads(library.meta_get(XENIA_OWNERS, "{}") or "{}")
         except (ValueError, TypeError):
             owners = {}
+        if pinned and pinned in xenia_xuids(b.folder.parent):
+            if b.folder.name != pinned:
+                b.folder = b.folder.parent / pinned
+                b.collect()
+            owners[pinned] = int(pid)
         xuid = b.folder.name
         if owners.setdefault(xuid, int(pid)) != int(pid):
             log.info("Xenia: profil %s należy do innego gracza — zapisy bez synchronizacji", xuid)

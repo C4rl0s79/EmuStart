@@ -347,3 +347,28 @@ def test_xenia_download_accepts_only_title_folders(env, tmp_path):
     with pytest.raises(ValueError):
         b.local_path("FFFE07D1/00010000/E030000000983487/Account")
     assert "FFFE07D1" not in b.names
+
+
+def test_xenia_pinned_profile_is_the_players(env, tmp_path):
+    """Profil przypięty graczowi w panelu serwera: paczka w jego folderze i należy do niego (także gdy inny gracz
+    grał z tego profilu wcześniej); profil przypięty, którego nie ma na urządzeniu — jak bez przypięcia."""
+    home = tmp_path / "RetroArch"
+    _a, content, _r, [b] = xenia(home, tmp_path, "E030000000983487")
+    _write(content / "E0300000AAAABBBB" / "FFFE07D1" / "00010000" / "E0300000AAAABBBB" / "Account", b"KONTO 2")
+    assert savebundles.xenia_claim([b], 1)                                   # gracz 1 zajął jeden profil
+    _a, _c, _r, [b] = xenia(home, tmp_path, "")
+    [p] = savebundles.xenia_claim([b], 2, pinned="E030000000983487")
+    assert p.folder == content / "E030000000983487"
+    assert savebundles.xenia_claim([b], 1) == []                              # przypięty gracza 2 — nie 1
+    _a, _c, _r, [b] = xenia(home, tmp_path, "")
+    [q] = savebundles.xenia_claim([b], 3, pinned="E0300000FFFFFFFF")          # nie ma go tu — jak bez przypięcia
+    assert q.folder.name == "E0300000AAAABBBB"                                # najnowszy, jeszcze niczyj
+    assert savebundles.xenia_xuids(content) == ["E030000000983487", "E0300000AAAABBBB"]
+
+
+def test_emuprofiles_from_device(net):
+    cfgs, _tmp = net
+    assert syncclient.emu_report(cfgs[PC], PC, "xenia_edge", ["E030000000983487"]) == 1
+    st = syncclient.emu_profiles(cfgs[PC], PC)
+    assert [p["xuid"] for p in st["xenia_edge"]["reported"]] == ["E030000000983487"]
+    assert st["xenia_edge"]["pinned"] == ""

@@ -594,6 +594,28 @@ def _newest(b) -> float:
 
 # ── przed grą / po grze ──
 
+# ── profile emulatorów graczy (emustart/emuprofiles.py na serwerze) ──
+
+def emu_profiles(cfg: dict, pid: int) -> dict:
+    """Profile emulatorów konta gracza na serwerze: {emulator: {"pinned", "reported"}}. Offline — wyjątek."""
+    st, data = _Client(cfg, pid).call("GET", "/v1/emuprofiles")
+    if st != 200:
+        raise Offline(f"profile emulatorów: HTTP {st}")
+    out = json.loads(data or b"{}")
+    out.pop("ok", None)
+    return out
+
+
+def emu_report(cfg: dict, pid: int, emu: str, xuids: list) -> int:
+    """Profile emulatora, z których grał gracz na tym urządzeniu → serwer (przypięcie w panelu)."""
+    body = json.dumps({"emu": emu, "xuids": list(xuids)}).encode()
+    st, data = _Client(cfg, pid).call("PUT", "/v1/emuprofiles", body=body,
+                                      headers={"Content-Type": "application/json"})
+    if st != 200:
+        raise Offline(f"profile emulatorów: HTTP {st}")
+    return int(json.loads(data or b"{}").get("accepted", 0))
+
+
 def before(cfg: dict, pid: int, bundles: list, game: dict) -> Result:
     """Synchronizacja przed grą: paczki aktywnego slotu (foldery emulatora), pozostałe sloty
     i kosze slotów (folder profilu); potem aktywny slot jak na serwerze (zamiana plików).
