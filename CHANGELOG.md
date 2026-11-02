@@ -146,8 +146,8 @@ każdy gracz ma własny profil (XUID) w tym samym `content\`, a EmuStart wskazuj
 
 **Ograniczenia przyjęte świadomie:** (f) podfolder zapamiętany na urządzeniu pod inną nazwą gry (gra przemianowana,
 dwie wersje jednej gry WHDLoad) blokuje pobranie paczki tej gry — bezpieczniej niż nadpisać cudzy folder; komunikat
-w logu. (g) Rdzeń Dolphin / PPSSPP i samodzielny emulator tej samej gry na jednym urządzeniu mają jeden aktywny slot
-zapisów — zmiana slotu w jednym nie przenosi plików drugiego (rzadki przypadek: ta sama gra w obu, ze slotami).
+w logu. (g) ~~Rdzeń Dolphin / PPSSPP i samodzielny emulator tej samej gry na jednym urządzeniu mają jeden aktywny slot
+zapisów~~ — usunięte w etapie 3 planu „zapisy i ustawienia gracza w każdym emulatorze”.
 (h) Kilka profili Xenii w folderze jednego gracza — bez synchronizacji Xenii do czasu 1c (logowanie przypiętego
 profilu). Od etapu 2 planu „zapisy i ustawienia gracza w każdym emulatorze” każdy gracz ma swój folder `content\`,
 więc profile różnych graczy na jednym urządzeniu już tego nie blokują.
@@ -215,6 +215,14 @@ Etap 2 — zrobione (lokalnie, testy na fixture'ach; w prawdziwym rdzeniu niespr
 - **Do sprawdzenia na żywo:** czy rdzeń sam zakłada profil, gdy folder gracza jest pusty (dziś profil „Player” z
   `xbl_profilename.txt` powstał bez udziału użytkownika — wniosek z pliku i logu, nie z dokumentacji); czy rdzeń
   działa z `content\` jako dowiązaniem (Dolphin, PPSSPP i RPCS3 działają tak od dawna).
+
+Etap 3 — zrobione (lokalnie, testy na fixture'ach):
+- **Sloty zapisów:** „który slot leży w folderach emulatora” i znacznik przerwanej zamiany — osobno dla każdego
+  emulatora / rdzenia (`save_slot_place`: `retroarch-<rdzeń>`, `dolphin`, `ppsspp`…); wybrany slot gry (`active`,
+  wspólny z serwerem) — dalej jeden na grę. Zmiana slotu w rdzeniu Dolphin nie myli samodzielnego Dolphina tej samej
+  gry: przy jego następnej grze jego pliki idą do jego slotu, a z serwera przychodzi wybrany slot. Bez wiersza dla
+  emulatora — slot gry sprzed zmiany (jak dotąd); przerwana zamiana sprzed zmiany nie jest dokańczana na folderach
+  innego emulatora (mogłaby skasować jego pliki). Lista stanów innych rdzeni i ich edycja — slot bieżącego rdzenia.
 
 Moduły: klient Windows i Lumen (silnik `engine/`) — zmiana; serwer — nowe rodzaje paczek (format jak dotychczas);
 APK — Flycast (RetroArch na Androidzie) przez tę samą kartę w `saves\`, Xenia i LRPS2 — nie dotyczy (nie ma ich

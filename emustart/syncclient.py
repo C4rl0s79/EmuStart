@@ -665,7 +665,7 @@ def before(cfg: dict, pid: int, bundles: list, game: dict) -> Result:
                     res.slot = want
                 except OSError as ex:            # kopia niezgodna / dysk — gra na dotychczasowym slocie
                     log.warning("sloty %s/%s: zamiana %d → %d wstrzymana: %s", plat, gid, here, want, ex)
-                    res.slot = saveslots.here(pid, plat, gid)
+                    res.slot = saveslots.here(pid, plat, gid, bundles)
     return res
 
 
@@ -784,7 +784,7 @@ def after(cfg: dict, pid: int, bundles: list, game: dict, skip: set | None = Non
     from emustart import saveslots
     res = Result()
     plat, gid = game_ids(game)
-    slot = saveslots.here(pid, plat, gid)
+    slot = saveslots.here(pid, plat, gid, bundles)
     res.slot = slot
     todo = []
     for b in bundles:
@@ -874,7 +874,7 @@ def other_core_states(cfg: dict, pid: int, game: dict, core: str) -> list:
     zmiana gracza tutaj — saveslots.OtherCore — czeka w niej do wysłania). [{core, path, time}]."""
     from emustart import saveslots
     plat, gid = game_ids(game)
-    slot = saveslots.here(pid, plat, gid)
+    slot = saveslots.here_at(pid, plat, gid, f"retroarch-{core}")
     try:
         cl = _Client(cfg, pid)
         man = cl.json("GET", f"/v1/savesync/{plat}/{gid}/manifest")

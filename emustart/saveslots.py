@@ -59,11 +59,47 @@ def _db():
         here INTEGER NOT NULL DEFAULT 1, active INTEGER NOT NULL DEFAULT 1, active_at REAL NOT NULL DEFAULT 0,
         sent INTEGER NOT NULL DEFAULT 1, swap TEXT NOT NULL DEFAULT '',
         PRIMARY KEY(profile_id, platform, game))""")
+    # slot w folderach emulatora i przerwana zamiana — osobno dla każdego emulatora / rdzenia (rdzeń Dolphin
+    # i samodzielny Dolphin tej samej gry mają różne foldery); `active` (wybór gracza) — jeden na grę
+    c.execute("""CREATE TABLE IF NOT EXISTS save_slot_place(
+        profile_id INTEGER NOT NULL, platform TEXT NOT NULL, game TEXT NOT NULL, place TEXT NOT NULL,
+        here INTEGER NOT NULL DEFAULT 1, swap TEXT NOT NULL DEFAULT '',
+        PRIMARY KEY(profile_id, platform, game, place))""")
     return c
 
 
+def place_of(bundles: list) -> str:
+    """Emulator, którego foldery trzymają slot: RetroArch — rdzeń („retroarch-dolphin”), inne — emulator."""
+    for b in bundles:
+        if b.emulator_id == "retroarch":
+            return f"retroarch-{b.core_id}"
+    return next((b.emulator_id + (f"-{b.core_id}" if b.core_id else "") for b in bundles), "")
+
+
+def _place(pid: int, plat: str, gid: str, place: str) -> dict:
+    r = _db().execute("SELECT here, swap FROM save_slot_place WHERE profile_id=? AND platform=? AND game=? AND place=?",
+                      (pid, plat, gid, place)).fetchone()
+    if r:
+        return {"here": int(r["here"]), "swap": r["swap"] or ""}
+    # emulator bez własnego wiersza: slot gry sprzed rozdzielenia na emulatory (bez przerwanej zamiany — nie
+    # wiadomo, którego emulatora dotyczyła; dokończona na cudzych folderach mogłaby skasować ich pliki)
+    return {"here": int(info(pid, plat, gid)["here"]), "swap": ""}
+
+
+def _put_place(pid: int, plat: str, gid: str, place: str, **kw) -> None:
+    row = {**_place(pid, plat, gid, place), **kw}
+    with _db() as c:
+        c.execute("INSERT OR REPLACE INTO save_slot_place(profile_id, platform, game, place, here, swap) "
+                  "VALUES(?,?,?,?,?,?)", (pid, plat, gid, place, int(row["here"]), row["swap"] or ""))
+
+
+def here_at(pid: int, plat: str, gid: str, place: str) -> int:
+    return int(_place(pid, plat, gid, place)["here"])
+
+
 def info(pid: int, plat: str, gid: str) -> dict:
-    """{here: slot w folderach emulatora, active: slot wybrany, active_at, sent, swap}."""
+    """{active: slot wybrany (wspólny dla urządzeń konta), active_at, sent; here, swap — sprzed rozdzielenia
+    na emulatory (save_slot_place)}."""
     r = _db().execute("SELECT * FROM save_slot WHERE profile_id=? AND platform=? AND game=?",
                       (pid, plat, gid)).fetchone()
     return dict(r) if r else {"here": 1, "active": 1, "active_at": 0.0, "sent": 1, "swap": ""}
@@ -77,8 +113,9 @@ def _put(pid: int, plat: str, gid: str, **kw) -> None:
                                               float(row["active_at"]), int(row["sent"]), row["swap"] or ""))
 
 
-def here(pid: int, plat: str, gid: str) -> int:
-    return int(info(pid, plat, gid)["here"])
+def here(pid: int, plat: str, gid: str, bundles: list) -> int:
+    """Slot w folderach emulatora, do którego należą `bundles`."""
+    return here_at(pid, plat, gid, place_of(bundles))
 
 
 # ── foldery slotów w profilu ──
@@ -123,7 +160,7 @@ def bundle_in(pid: int, plat: str, gid: str, bundles: list, slot: int, kind: str
     b = next((x for x in bundles if x.kind == kind), None)
     if b is None:
         return None
-    return b.collect() if slot == here(pid, plat, gid) else store_bundle(pid, plat, gid, slot, b)
+    return b.collect() if slot == here(pid, plat, gid, bundles) else store_bundle(pid, plat, gid, slot, b)
 
 
 # ── zmiana slotu ──
@@ -131,14 +168,14 @@ def bundle_in(pid: int, plat: str, gid: str, bundles: list, slot: int, kind: str
 def finish_swap(pid: int, plat: str, gid: str, bundles: list) -> int:
     """Przerwana zamiana slotów (np. zamknięty program) — dokończenie od zapisanego kroku.
     Zwraca slot w folderach emulatora."""
-    row = info(pid, plat, gid)
+    row = _place(pid, plat, gid, place_of(bundles))
     if row["swap"]:
         try:
             st = json.loads(row["swap"])
             _swap_files(pid, plat, gid, bundles, int(st["from"]), int(st["to"]), int(st.get("step") or 2))
         except (ValueError, KeyError, OSError):
             log.exception("dokończenie zamiany slotów %s/%s", plat, gid)
-    return here(pid, plat, gid)
+    return here(pid, plat, gid, bundles)
 
 
 class SwapError(OSError):
@@ -168,7 +205,7 @@ def swap(pid: int, plat: str, gid: str, bundles: list, to: int) -> None:
     frm = finish_swap(pid, plat, gid, bundles)
     if frm == to:
         return
-    if info(pid, plat, gid)["swap"]:
+    if _place(pid, plat, gid, place_of(bundles))["swap"]:
         raise SwapError("poprzednia zamiana slotów nie skończyła się — pliki zostają bez zmian")
     for b in bundles:
         b.collect()
@@ -182,7 +219,7 @@ def swap(pid: int, plat: str, gid: str, bundles: list, to: int) -> None:
             _copy(Path(p), sb.local_path(arc))
         if not _same(sb, b):
             raise SwapError(f"kopia slotu {frm} niezgodna z plikami emulatora ({b.kind}) — zamiana wstrzymana")
-    _put(pid, plat, gid, swap=json.dumps({"from": frm, "to": to, "step": 2}))
+    _put_place(pid, plat, gid, place_of(bundles), swap=json.dumps({"from": frm, "to": to, "step": 2}))
     _swap_files(pid, plat, gid, bundles, frm, to, 2)
     log.info("sloty %s/%s: aktywny slot %d → %d", plat, gid, frm, to)
 
@@ -203,7 +240,7 @@ def _swap_files(pid: int, plat: str, gid: str, bundles: list, frm: int, to: int,
                     Path(p).unlink(missing_ok=True)
             if not _same(b, tb):
                 raise SwapError(f"pliki slotu {to} w emulatorze niezgodne z kopią ({b.kind}) — dokończę później")
-        _put(pid, plat, gid, swap=json.dumps({"from": frm, "to": to, "step": 3}))
+        _put_place(pid, plat, gid, place_of(bundles), swap=json.dumps({"from": frm, "to": to, "step": 3}))
     # 3. folder nowego slotu pusty; synchronizacja wie, gdzie są pliki obu slotów
     for b in bundles:
         tb = store_bundle(pid, plat, gid, to, b)
@@ -211,7 +248,7 @@ def _swap_files(pid: int, plat: str, gid: str, bundles: list, frm: int, to: int,
             Path(p).unlink(missing_ok=True)
         syncclient.respec(pid, plat, gid, frm, store_bundle(pid, plat, gid, frm, b))
         syncclient.respec(pid, plat, gid, to, b.collect())
-    _put(pid, plat, gid, here=to, swap="")
+    _put_place(pid, plat, gid, place_of(bundles), here=to, swap="")
 
 
 def _backup(pid: int, b, why: str) -> None:
@@ -563,12 +600,13 @@ class OtherCore(Editor):
     i przywróć. Najpierw aktualne paczki tego rdzenia z serwera (bez połączenia — odmowa),
     zmiana od razu na serwer; usunięty stan nie wraca przy synchronizacji urządzenia z tym rdzeniem."""
 
-    def __init__(self, cfg: dict, pid: int, game: dict, core: str):
+    def __init__(self, cfg: dict, pid: int, game: dict, core: str, cur: str = ""):
         from emustart import syncclient
         self.cfg, self.pid, self.game = cfg, pid, game
         self.plat, self.gid = syncclient.game_ids(game)
         self.bundles, self._items = [], []
-        self.slot = here(pid, self.plat, self.gid)
+        # slot w folderach bieżącego rdzenia gry (`cur`) — ten, z którego lista pokazuje stany innych rdzeni
+        self.slot = here_at(pid, self.plat, self.gid, f"retroarch-{cur}")
         self.st = other_core_bundle(pid, self.plat, self.gid, core, self.slot)
         tb = trash_bundle(pid, self.plat, self.gid, self.slot, self.st)
         r = syncclient.push_edit(cfg, pid, game, [(self.st, self.slot), (tb, self.slot)])   # tu: pobranie
@@ -592,7 +630,7 @@ class OtherCore(Editor):
 def summary(pid: int, plat: str, gid: str, bundles: list) -> list:
     """Sloty gry dla opcji gry: [{slot, active, states, saves, time, trash}] — z plików na tym urządzeniu
     (po synchronizacji wszystkie sloty są tutaj)."""
-    at = here(pid, plat, gid)
+    at = here(pid, plat, gid, bundles)
     out = []
     for n in SLOTS:
         bs = [b.collect() for b in bundles] if n == at else [store_bundle(pid, plat, gid, n, b) for b in bundles]
