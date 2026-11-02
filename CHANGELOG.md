@@ -148,7 +148,9 @@ każdy gracz ma własny profil (XUID) w tym samym `content\`, a EmuStart wskazuj
 dwie wersje jednej gry WHDLoad) blokuje pobranie paczki tej gry — bezpieczniej niż nadpisać cudzy folder; komunikat
 w logu. (g) Rdzeń Dolphin / PPSSPP i samodzielny emulator tej samej gry na jednym urządzeniu mają jeden aktywny slot
 zapisów — zmiana slotu w jednym nie przenosi plików drugiego (rzadki przypadek: ta sama gra w obu, ze slotami).
-(h) Kilka profili Xenii na urządzeniu — bez synchronizacji Xenii do czasu 1c (logowanie przypiętego profilu).
+(h) Kilka profili Xenii w folderze jednego gracza — bez synchronizacji Xenii do czasu 1c (logowanie przypiętego
+profilu). Od etapu 2 planu „zapisy i ustawienia gracza w każdym emulatorze” każdy gracz ma swój folder `content\`,
+więc profile różnych graczy na jednym urządzeniu już tego nie blokują.
 
 **Stan na koniec sesji 2026-11-02:** implementacja zakończona tam, gdzie nie blokuje jej sprawdzenie na żywo; testy
 EmuStart 457 ✓, silnik w Lumenie 513 ✓, Lumen 200 ✓, typecheck ✓; build EmuStart 0.55.0 (`dist\`) i testowy build
@@ -202,6 +204,17 @@ Etap 1 — zrobione (lokalnie, testy na fixture'ach; w prawdziwym emulatorze nie
 - **RetroArch:** `retroarch-core-options.cfg` w profilu (gdy włączone wspólne opcje rdzeni; pliki `config\<rdzeń>\*.opt`
   były w profilu już wcześniej). Opcje osobnej karty Flycast / LRPS2 dopisywane przy każdej grze, gdy plik opcji
   gracza ich nie ma — bez znacznika „raz na komputer”; wybór gracza zostaje.
+
+Etap 2 — zrobione (lokalnie, testy na fixture'ach; w prawdziwym rdzeniu niesprawdzone):
+- **Xenia Edge (rdzeń):** przed grą `system\Xenia-Edge\content` → dowiązanie do `profiles\<gracz>\xenia_edge\content`.
+  Pierwszy raz: profile (XUID) przechodzą do graczy, którzy z nich grali (dotychczasowa mapa właścicieli), reszta — do
+  pierwszego profilu; `content\0000000000000000` (aktualizacje, DLC) → wspólny `Xenia-Edge\content-shared\`,
+  podpięty dowiązaniem w folderze każdego gracza. Profil przypięty graczowi w panelu serwera, leżący u innego gracza
+  na tym urządzeniu, przechodzi do niego. Paczka zapisów Xenii z folderu gracza zawsze jego (mapa właścicieli zostaje
+  tylko dla instalacji bez profili graczy).
+- **Do sprawdzenia na żywo:** czy rdzeń sam zakłada profil, gdy folder gracza jest pusty (dziś profil „Player” z
+  `xbl_profilename.txt` powstał bez udziału użytkownika — wniosek z pliku i logu, nie z dokumentacji); czy rdzeń
+  działa z `content\` jako dowiązaniem (Dolphin, PPSSPP i RPCS3 działają tak od dawna).
 
 Moduły: klient Windows i Lumen (silnik `engine/`) — zmiana; serwer — nowe rodzaje paczek (format jak dotychczas);
 APK — Flycast (RetroArch na Androidzie) przez tę samą kartę w `saves\`, Xenia i LRPS2 — nie dotyczy (nie ma ich

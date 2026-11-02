@@ -586,14 +586,18 @@ class Session:
     def _sync_before(self, g: dict, adapter, args: str, rom) -> None:
         self._sync_bundles, self._sync_skip = [], set()
         try:
-            bundles = savebundles.for_game(adapter, savebundles.core_id(args), Path(rom), ps2_info(self.cfg, g))
-            pinned = ""
-            if any(b.core_id == "xenia_edge" for b in bundles):
+            core, pinned = savebundles.core_id(args), ""
+            if adapter.family == "retroarch" and core == "xenia_edge":
                 try:   # profil Xenii przypięty graczowi w panelu serwera
                     pinned = (syncclient.emu_profiles(self.cfg, self.profile_id).get("xenia_edge") or {}).get("pinned", "")
                 except Exception as ex:
                     log.info("profile emulatorów z serwera: %s", ex)
-            bundles = savebundles.xenia_claim(bundles, self.profile_id, pinned)   # profil Xenii — jednego gracza
+                try:   # content\ Xenii — folder tego gracza (jego profil Xboksa i zapisy)
+                    savebundles.xenia_attach(adapter, self.profile_id, pinned)
+                except Exception:
+                    log.exception("Xenia: folder gracza")
+            bundles = savebundles.for_game(adapter, core, Path(rom), ps2_info(self.cfg, g))
+            bundles = savebundles.xenia_claim(bundles, self.profile_id, pinned)   # profil Xenii — tego gracza
             for b in bundles:
                 b.adopt_names()                     # nazwy od pliku, który uruchomi emulator
         except Exception:

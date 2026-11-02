@@ -562,27 +562,89 @@ def xenia_note(adapter, core: str) -> str:
     """Komunikat dla gracza, gdy zapisy Xbox 360 nie są synchronizowane, bo na urządzeniu jest kilka profili Xenii."""
     if (core or "").lower() != "xenia_edge" or adapter.family != "retroarch":
         return ""
-    content = Path(adapter._cfg_dir("system_directory", "system")) / "Xenia-Edge" / "content"
+    content = xenia_content(adapter)
     if len(xenia_xuids(content)) > 1:
-        return "Kilka profili Xbox 360 na tym urządzeniu — zapisy gier X360 bez synchronizacji z serwerem."
+        return "Kilka profili Xbox 360 w folderze gracza na tym urządzeniu — zapisy gier X360 bez synchronizacji z serwerem."
     return ""
 
 
+XENIA_SHARED = "0000000000000000"     # content\0000000000000000: aktualizacje i DLC — wspólne dla graczy
+
+
+def xenia_content(adapter) -> Path:
+    return Path(adapter._cfg_dir("system_directory", "system")) / "Xenia-Edge" / "content"
+
+
+def _xenia_owners() -> dict:
+    from emustart import library
+    try:
+        owners = json.loads(library.meta_get(XENIA_OWNERS, "{}") or "{}")
+    except (ValueError, TypeError):
+        owners = {}
+    return owners if isinstance(owners, dict) else {}
+
+
+def _xenia_own(content: Path, pid: int) -> bool:
+    """content\\ Xenii to dowiązanie do folderu gracza `pid` (xenia_attach)."""
+    from emustart import profiles
+    t = profiles._junction_target(content) if profiles._is_junction(content) else None
+    return bool(t) and profiles._same(t, profiles.local_dir(int(pid), "xenia_edge", "content"))
+
+
+def xenia_attach(adapter, pid: int, pinned: str = "") -> None:
+    """Przed grą rdzeniem Xenia: system\\Xenia-Edge\\content → dowiązanie do folderu gracza (profile\\<gracz>\\
+    xenia_edge\\content) — każdy gracz ma swój profil Xboksa i swoje zapisy, jak foldery Dolphina. Aktualizacje
+    i DLC (content\\0000000000000000) — jeden wspólny folder obok (content-shared), podpięty u każdego gracza.
+    Pierwszy raz: profile z folderu przechodzą do graczy, którzy z nich grali (mapa właścicieli), pozostałe — do
+    pierwszego profilu. Profil przypięty graczowi w panelu serwera (`pinned`), leżący u innego gracza na tym
+    urządzeniu, przechodzi do niego."""
+    from emustart import profiles
+    content = xenia_content(adapter)
+    shared = content.parent / "content-shared" / XENIA_SHARED
+    mine = profiles.local_dir(int(pid), "xenia_edge", "content")
+    if content.is_dir() and not profiles._is_junction(content):
+        owners = _xenia_owners()
+        for d in list(content.iterdir()):
+            if profiles._is_junction(d):
+                os.rmdir(d)                          # samo dowiązanie, nie zawartość
+            elif d.is_dir() and d.name == XENIA_SHARED:
+                profiles._merge_move(d, shared)
+            elif d.is_dir() and _XUID.match(d.name) and profiles.get(int(owners.get(d.name) or 0)):
+                profiles._merge_move(d, profiles.local_dir(int(owners[d.name]), "xenia_edge", "content") / d.name)
+    if pinned and _XUID.match(pinned) and not (mine / pinned).exists():
+        for other in profiles.LOCAL.glob(f"*/xenia_edge/content/{pinned}"):
+            if other.is_dir() and not profiles._same(other.parent, mine):
+                log.info("Xenia: profil %s przypięty graczowi %s — przenoszę z %s", pinned, pid, other.parent)
+                profiles._merge_move(other, mine / pinned)
+                break
+    profiles.attach(int(pid), "xenia_edge", content)
+    link = mine / XENIA_SHARED
+    if profiles._is_junction(link):
+        if profiles._same(profiles._junction_target(link) or Path(), shared):
+            return
+        os.rmdir(link)
+    elif link.is_dir():                              # pobrane, zanim było dowiązanie — do wspólnego
+        profiles._merge_move(link, shared)
+    shared.mkdir(parents=True, exist_ok=True)
+    profiles._make_junction(link, shared)
+
+
 def xenia_claim(bundles: list, pid: int, pinned: str = "", claim: bool = True) -> list:
-    """content\\ Xenii nie jest rozdzielony na graczy EmuStart (folder system\\, nie przekierowany): profil
-    Xenii (XUID) na urządzeniu należy do pierwszego gracza, który z niego grał — albo do gracza, któremu
-    przypięto go w panelu serwera (`pinned`; jest na urządzeniu — paczka w jego folderze). Inny gracz nie
-    dostaje paczki zapisów Xenii — nie pobierze swoich zapisów do cudzego profilu i nie wyśle cudzych jako swoich."""
+    """Paczki zapisów Xenii gracza `pid`. content\\ jest folderem tego gracza (xenia_attach) — jego. Inaczej
+    (bez profili graczy albo wspólny folder): profil Xenii (XUID) na urządzeniu należy do pierwszego gracza,
+    który z niego grał — albo do gracza, któremu przypięto go w panelu serwera (`pinned`; jest na urządzeniu —
+    paczka w jego folderze). Inny gracz nie dostaje paczki zapisów Xenii — nie pobierze swoich zapisów do
+    cudzego profilu i nie wyśle cudzych jako swoich."""
     from emustart import library
     out = []
     for b in bundles:
         if getattr(b, "core_id", "") != "xenia_edge":       # tylko paczki Xenii (inne obiekty — bez zmian)
             out.append(b)
             continue
-        try:
-            owners = json.loads(library.meta_get(XENIA_OWNERS, "{}") or "{}")
-        except (ValueError, TypeError):
-            owners = {}
+        if _xenia_own(b.folder.parent, pid):
+            out.append(b)
+            continue
+        owners = _xenia_owners()
         if pinned and pinned == b.folder.name:   # profil przypięty graczowi w panelu serwera — jego
             owners[pinned] = int(pid)
         xuid = b.folder.name
@@ -655,7 +717,7 @@ def ra_learned_bundles(adapter, core: str, content: Path, game: dict, bundles: l
     if c == "xenia_edge":
         # zapisy względem profilu na tym urządzeniu: XUID bywa inny na każdym urządzeniu; bez profilu —
         # bez paczki (zapisy trafiłyby do folderu nieistniejącego profilu)
-        content = Path(adapter._cfg_dir("system_directory", "system")) / "Xenia-Edge" / "content"
+        content = xenia_content(adapter)
         # kilka profili: nie wiadomo, który zaloguje Xenia (logowanie profilu — do sprawdzenia na żywo) —
         # bez paczki, zapisy nie trafią do cudzego profilu
         xuids = xenia_xuids(content)
