@@ -105,7 +105,7 @@ każdy gracz ma własny profil (XUID) w tym samym `content\`, a EmuStart wskazuj
 - ✓ panel serwera w przeglądarce (Chromium, `web/` z repozytorium, akcje profili przez prawdziwe `srvadmin` /
   `emuprofiles` na danych testowych): Urządzenia i konta → Pliki i kopie → „Profil Xbox 360” — dwa zgłoszone profile,
   „Przypnij” → „przypięty” / „Odepnij”, przypięcie zapisane po stronie serwera; pozostałe dane panelu — podstawione
-- ✓ testowy build Lumena (`D:\GIT\Launcherelease\zapisy-test\win-unpacked\Lumen.exe`, bez zmiany wersji i podpisów):
+- ✓ testowy build Lumena (`D:\GIT\Launcher\release\zapisy-test\win-unpacked\Lumen.exe`, bez zmiany wersji i podpisów):
   start na pustym profilu bez sieci — silnik `EmuStart 0.55.0` gotowy, bez danych w folderze builda
 - ⏸ PR `zapisy-system` → `main` (EmuStart), scalenie, tag `v0.55.0` (CI: serwer, klient PC, APK)
 - ⏸ Lumen: silnik z `main` EmuStart (`git subtree`), wersja 1.0.35, `npm run dist`, podpisy, push, GitHub Release
@@ -968,7 +968,7 @@ opis wspólnych stanów RetroArcha w katalogu serwera (`emustart/savemgr.py`), `
 ### Naprawione
 - **PCSX2 i DuckStation zainstalowane z serwera startowały z kreatorem pierwszego uruchomienia**
   (i bez BIOS-u). Teraz przed grą: kreator i własne aktualizacje emulatora wyłączone
-  (aktualizuje serwer), BIOS z serwera w folderze emulatora (PCSX2: `pcsx2ios` z folderu
+  (aktualizuje serwer), BIOS z serwera w folderze emulatora (PCSX2: `pcsx2\bios` z folderu
   BIOS-ów serwera — serwer wypisuje BIOS-y z folderu, `GET /v1/bios?dir=`; DuckStation: BIOS-y
   PS1). Przy okazji: zmiana pustej wartości w pliku ini (`BIOS = `) trafiała do następnej linii.
 - Skróty pada RetroArcha na PC: przycisk skrótów był ustawiony na Start (numer 6 w sterowniku
