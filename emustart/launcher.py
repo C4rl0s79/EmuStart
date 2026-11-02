@@ -578,6 +578,7 @@ class Session:
         self._sync_bundles, self._sync_skip = [], set()
         try:
             bundles = savebundles.for_game(adapter, savebundles.core_id(args), Path(rom), ps2_info(self.cfg, g))
+            bundles = savebundles.xenia_claim(bundles, self.profile_id)   # profil Xenii — jednego gracza
             for b in bundles:
                 b.adopt_names()                     # nazwy od pliku, który uruchomi emulator
         except Exception:

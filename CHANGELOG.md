@@ -69,7 +69,8 @@ i panelem serwera — największa część). Każdy krok: testy, potem sprawdzen
 | 4b-2. Nauczone nazwy (karta / podfolder zmieniony w czasie gry, bez nazw innych gier rdzenia; pobranie paczki gry też uczy) + PUAE `WHDSaves\<gra>\` (paczka `retroarch/puae/memcards`; obraz `WHDSaves.hdf` — wspólny dla gier, bez synchronizacji) | 4 testy (Flycast: ID gry, nazwy innych gier; PUAE: podfolder, drugie urządzenie), cały zestaw 428 ✓; podpięcie w `launcher._sync_before/_sync_after` bez osobnego testu | czeka | `3100cd0` |
 | 2 + 3. Flycast i LRPS2 — osobna karta dla gry: opcje `reicast_per_content_vmus` = „VMU A1”, `pcsx2_shared_memory_cards` = „disabled” raz (znacznik `emustart-opcje-rdzeni-1.txt`) w pliku opcji, który czyta RetroArch; pierwsza karta gry — kopia wspólnej (`system\dc\vmu_save_A1.bin`, `system\pcsx2\memcards\Mcd001.ps2`), także bez synchronizacji; karta gry w paczce zapisów gry (z rozdzieleniem na graczy) | 4 testy (plik opcji: wspólny / rdzenia, raz; kopia karty: Flycast, LRPS2), cały zestaw 432 ✓; podpięcie w `launcher._play` bez osobnego testu | czeka (Flycast: nazwa karty pod ID gry i odczyt starszej nazwy — z kodu rdzenia, nie z gry) | (ten etap) |
 | 4b-3. Play! (PS2) | — | **zablokowane:** miejsce kart (`Play Data Files\…\mc0`) do ustalenia na żywo — rdzeń nie był uruchomiony | — |
-| 1. Xenia Edge — profile graczy, panel serwera | — | — | — |
+| 1a. Xenia Edge — zapisy gry: paczka `retroarch/xenia_edge/memcards` względem `content\<XUID na tym urządzeniu>\` (inny XUID na drugim urządzeniu — bez znaczenia), numer gry poznany po grze, tylko `<Title ID>\00000001` i `Headers\00000001` (bez aktualizacji / DLC; `FFFE07D1` — profil — nigdy jako gra); urządzenie bez profilu — bez paczki; **profil Xenii należy do pierwszego gracza EmuStart, który z niego grał** (`content\` nie jest rozdzielony na graczy — inny gracz nie dostaje paczki, także w menedżerze zapisów) | 5 testów, cały zestaw 437 ✓ | czeka | (ten etap) |
+| 1b. Xenia Edge — stały profil gracza: urządzenie zgłasza profile (XUID) serwerowi, przypięcie profilu do gracza w panelu serwera, profil (konto, `FFFE07D1`) jako paczka gracza, właściciel profilu z przypięcia zamiast „pierwszy gracz”, logowanie przypiętego profilu na czas gry | — | **częściowo zablokowane:** rdzeń ma `xenia-edge.config.toml` i opcję `logged_profile_slot_0_xuid` (plik rdzenia), ale sekcja TOML, format XUID i miejsce pliku — do sprawdzenia na żywo | — |
 | 7. APK — te same reguły w `Saves.kt` (rozszerzenia, przyrostki, podfoldery FBNeo, rdzenie Dolphin/PPSSPP, Flycast) | — | — | — |
 | 5. Silnik Lumena (`git subtree`) | — | — | — |
 | 6. Przygotowanie wydania (lokalny build, checklista) | — | — | — |
@@ -90,8 +91,14 @@ wspólna karta zostaje nietknięta. (d) Flycast „VMU A1”: karty B1–D1 dale
 (e) Opcje rdzeni wpisane raz nadpisują wcześniejszy wybór „wspólna karta” (jak skróty LB w 0.52.4); pliki `.opt`
 gry / folderu mają pierwszeństwo w RetroArchu i nie są zmieniane.
 
-Następny krok: 1 — Xenia Edge: paczka zapisów gry względem `content\<XUID>\` (numer gry poznany po grze), potem
-profile graczy (przypięcie w panelu serwera, podmiana `content\` na czas gry).
+Zmiana planu pkt 1 (2026-11-02, po sprawdzeniu pliku rdzenia): zamiast podmiany folderu `content\` na czas gry —
+każdy gracz ma własny profil (XUID) w tym samym `content\`, a EmuStart wskazuje Xenii profil do zalogowania
+(`logged_profile_slot_0_xuid`); zapisy Xboksa są i tak rozdzielone po profilach. Bez przenoszenia folderów z danymi.
+
+Następny krok: 1b — serwer: zgłoszone profile urządzeń i przypięcie profilu do gracza (dane + `/v1/…` + akcje
+panelu `srvadmin` + edycja gracza w `web/server.js`), klient: zgłaszanie XUID, przypięty XUID jako właściciel
+profilu (`xenia_claim`), profil jako paczka gracza; logowanie profilu (`xenia-edge.config.toml`) — po sprawdzeniu
+na żywo. Potem 7 (APK), 5 (silnik Lumena z gałęzi `zapisy-system`), 6 (wydanie).
 
 Moduły: klient Windows i Lumen (silnik `engine/`) — zmiana; serwer — nowe rodzaje paczek (format jak dotychczas);
 APK — Flycast (RetroArch na Androidzie) przez tę samą kartę w `saves\`, Xenia i LRPS2 — nie dotyczy (nie ma ich

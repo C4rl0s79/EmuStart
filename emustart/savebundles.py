@@ -81,7 +81,8 @@ class Bundle:
             parts = arc.split("/")
             bad = "\\" in arc or ":" in arc or any(x in ("", ".", "..") for x in parts)
             if (not bad and self.learn == "dirs" and len(parts) >= 2 and parts[0] not in self.names
-                    and all(_SAFE_DIR.match(x) for x in parts)):
+                    and all(_SAFE_DIR.match(x) for x in parts)
+                    and (self.core_id != "xenia_edge" or _TITLE_ID.match(parts[0]) and parts[0] != _XENIA_PROFILE)):
                 self.names.append(parts[0])         # podfolder gry z paczki tej gry (urządzenie go nie znało)
             if bad or not _deep_ok(self, parts):
                 raise ValueError(f"nieoczekiwana nazwa w paczce: {arc}")
@@ -207,6 +208,9 @@ def _deep_ok(b, parts: list) -> bool:
         return len(parts) > 4 and parts[:3] == ["Wii", "title", "00010000"] and \
             parts[3].lower() in {i[:4].encode().hex() for i in ids}
     if b.emulator_id == "retroarch":         # <podfolder gry>/… (nazwy poznane po grze albo z paczki gry)
+        if b.core_id == "xenia_edge":        # <Title ID>/00000001/… i Headers/00000001/… — zapisy, bez aktualizacji i DLC
+            return len(parts) >= 3 and parts[0] in b.names and (
+                parts[1] == XENIA_SAVES or (len(parts) >= 4 and parts[1:3] == ["Headers", XENIA_SAVES]))
         return len(parts) >= 2 and parts[0] in b.names
     return False
 
@@ -508,6 +512,53 @@ def learn_snapshot(bundles: list) -> None:
             b.seen = _learn_entries(b)
 
 
+# Xenia Edge (system\Xenia-Edge\content\<XUID>\…, pliki rdzenia i dane z gry): zapisy gry w <Title ID>\00000001,
+# profil (konto, osiągnięcia) w FFFE07D1 — zmienia się przy każdej grze, nie jest zapisem żadnej gry
+XENIA_SAVES = "00000001"
+_XENIA_PROFILE = "FFFE07D1"
+_XUID = re.compile(r"^[0-9A-F]{16}$")
+_TITLE_ID = re.compile(r"^[0-9A-F]{8}$")
+
+
+def xenia_xuid(content: Path) -> str:
+    """XUID profilu Xenii na tym urządzeniu: folder z kontem (FFFE07D1\\00010000\\<XUID>\\Account),
+    przy kilku — ostatnio używany; „” — jeszcze bez profilu (rdzeń tworzy go przy pierwszej grze)."""
+    best, when = "", -1.0
+    for d in content.iterdir() if content.is_dir() else ():
+        acc = d / _XENIA_PROFILE / "00010000" / d.name / "Account"
+        if _XUID.match(d.name) and d.name != "0" * 16 and acc.is_file():
+            t = max((p.stat().st_mtime for p in acc.parent.iterdir()), default=0.0)
+            if t > when:
+                best, when = d.name, t
+    return best
+
+
+XENIA_OWNERS = "xenia_owners"
+
+
+def xenia_claim(bundles: list, pid: int) -> list:
+    """content\\ Xenii nie jest rozdzielony na graczy EmuStart (folder system\\, nie przekierowany): profil
+    Xenii (XUID) na urządzeniu należy do pierwszego gracza, który z niego grał. Inny gracz nie dostaje paczki
+    zapisów Xenii — nie pobierze swoich zapisów do cudzego profilu i nie wyśle cudzych jako swoich."""
+    from emustart import library
+    out = []
+    for b in bundles:
+        if b.core_id != "xenia_edge":
+            out.append(b)
+            continue
+        try:
+            owners = json.loads(library.meta_get(XENIA_OWNERS, "{}") or "{}")
+        except (ValueError, TypeError):
+            owners = {}
+        xuid = b.folder.name
+        if owners.setdefault(xuid, int(pid)) != int(pid):
+            log.info("Xenia: profil %s należy do innego gracza — zapisy bez synchronizacji", xuid)
+            continue
+        library.meta_set(XENIA_OWNERS, json.dumps(owners))
+        out.append(b)
+    return out
+
+
 def learn_after(bundles: list) -> list:
     """Po grze: nowe albo zmienione karty / podfoldery, których nie ma inna gra tego rdzenia — tej gry.
     Zwraca poznane nazwy (zapamiętane; paczka zebrana od nowa)."""
@@ -518,7 +569,8 @@ def learn_after(bundles: list) -> list:
         others = {n for g, ns in _learned_map().get(b.core_id, {}).items() if g != b.learn_game for n in ns}
         now = _learn_entries(b)
         new = [n for n, sig in sorted(now.items(), key=lambda x: x[1])
-               if b.seen.get(n) != sig and n not in b.names and n not in others and n != b.stem]
+               if b.seen.get(n) != sig and n not in b.names and n not in others and n != b.stem
+               and (b.core_id != "xenia_edge" or _TITLE_ID.match(n) and n != _XENIA_PROFILE)]
         if not new:
             continue
         b.names += new
@@ -560,6 +612,15 @@ def ra_learned_bundles(adapter, core: str, content: Path, game: dict, bundles: l
                   ra_folder(adapter, core, content, *keys, sort=False) / "WHDSaves"]
         folder = next((p for p in places if p.is_dir()), places[0])
         b = Bundle("retroarch", c, "memcards", folder, "", learned(c, key), learn="dirs", learn_game=key)
+        return [b.collect()]
+    if c == "xenia_edge":
+        # zapisy względem profilu na tym urządzeniu: XUID bywa inny na każdym urządzeniu; bez profilu —
+        # bez paczki (zapisy trafiłyby do folderu nieistniejącego profilu)
+        content = Path(adapter._cfg_dir("system_directory", "system")) / "Xenia-Edge" / "content"
+        xuid = xenia_xuid(content)
+        if not xuid:
+            return []
+        b = Bundle("retroarch", c, "memcards", content / xuid, "", learned(c, key), learn="dirs", learn_game=key)
         return [b.collect()]
     return []
 

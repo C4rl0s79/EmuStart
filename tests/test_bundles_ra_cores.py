@@ -278,3 +278,72 @@ def test_first_card_of_a_game_copied_from_shared(env, tmp_path, core, corename, 
     dst.write_bytes(b"KARTA GRY")
     assert savebundles.seed_from_shared(a, core, rom, game) == []      # gra ma już kartę — bez kopii
     assert dst.read_bytes() == b"KARTA GRY"
+
+
+# ── Xenia Edge: zapisy gry w content\<XUID profilu>\<Title ID>\00000001 (XUID inny na każdym urządzeniu) ──
+
+X360 = {"es": "xbox360", "name": "Zone of the Enders HD (USA)", "rel": "Zone of the Enders HD (USA).iso"}
+
+
+def xenia(home: Path, tmp: Path, xuid: str = "E030000000983487"):
+    a = ra(home, "xenia_edge", "Xenia Edge")
+    content = home / "system" / "Xenia-Edge" / "content"
+    if xuid:
+        _write(content / xuid / "FFFE07D1" / "00010000" / xuid / "Account", b"KONTO")
+    rom = _write(tmp / "roms" / "Zone of the Enders HD (USA).iso")
+    b = [b for b in savebundles.for_game(a, "xenia_edge", rom, X360) if b.kind == "memcards"]
+    return a, content, rom, b
+
+
+def test_xenia_game_saves_learned_title_without_updates_and_profile(env, tmp_path):
+    home = tmp_path / "RetroArch"
+    _a, content, _rom, [b] = xenia(home, tmp_path)
+    x = content / "E030000000983487"
+    assert (b.core_id, b.folder, b.files) == ("xenia_edge", x, [])
+    savebundles.learn_snapshot([b])
+    _write(x / "4B4E0842" / "00000001" / "zoe1_360" / "savegame.txt", b"ZAPIS")
+    _write(x / "4B4E0842" / "Headers" / "00000001" / "zoe1_360.header", b"NAGLOWEK")
+    _write(x / "4B4E0842" / "000B0000" / "aktualizacja.bin", b"TU")           # aktualizacja gry — nie zapis
+    _write(x / "FFFE07D1" / "00010000" / "E030000000983487" / "4B4E0842.gpd", b"OSIAGNIECIA")   # profil
+    assert savebundles.learn_after([b]) == ["4B4E0842"]
+    assert [arc for _p, arc in b.files] == ["4B4E0842/00000001/zoe1_360/savegame.txt",
+                                            "4B4E0842/Headers/00000001/zoe1_360.header"]
+    with pytest.raises(ValueError):
+        b.local_path("4B4E0842/000B0000/aktualizacja.bin")
+
+
+def test_xenia_without_profile_no_bundle(env, tmp_path):
+    assert xenia(tmp_path / "RetroArch", tmp_path, xuid="")[3] == []
+
+
+def test_xenia_saves_reach_other_device_with_other_profile(net):
+    cfgs, tmp = net
+    _a, c1, _r, [b1] = xenia(tmp / "dev1" / "RetroArch", tmp / "dev1", "E030000000983487")
+    savebundles.learn_snapshot([b1])
+    _write(c1 / "E030000000983487" / "4B4E0842" / "00000001" / "zoe1_360" / "savegame.txt", b"ZAPIS PC")
+    savebundles.learn_after([b1])
+    assert syncclient.before(cfgs[PC], PC, [b1], X360).uploaded == 1
+
+    from emustart import library
+    library.meta_set(savebundles.LEARN_KEY, "{}")
+    _a, c2, _r, [b2] = xenia(tmp / "dev2" / "RetroArch", tmp / "dev2", "E0300000AAAABBBB")
+    assert syncclient.before(cfgs[TEL], TEL, [b2], X360).downloaded == 1
+    assert (c2 / "E0300000AAAABBBB" / "4B4E0842" / "00000001" / "zoe1_360" / "savegame.txt").read_bytes() == b"ZAPIS PC"
+
+
+def test_xenia_profile_of_one_player_on_shared_device(env, tmp_path):
+    """content\ Xenii nie jest rozdzielony na graczy: profil (XUID) należy do pierwszego gracza, który go użył —
+    inny gracz na tym urządzeniu nie dostaje paczki (nie nadpisze cudzych zapisów), dopóki nie ma własnego profilu."""
+    _a, _c, _r, b = xenia(tmp_path / "RetroArch", tmp_path)
+    assert savebundles.xenia_claim(b, 1) == b
+    assert savebundles.xenia_claim(b, 1) == b
+    assert savebundles.xenia_claim(b, 2) == []
+    other = [savebundles.Bundle("retroarch", "snes9x", "saves", tmp_path, "x")]
+    assert savebundles.xenia_claim(other, 2) == other           # inne paczki bez zmian
+
+
+def test_xenia_download_accepts_only_title_folders(env, tmp_path):
+    _a, _c, _r, [b] = xenia(tmp_path / "RetroArch", tmp_path)
+    with pytest.raises(ValueError):
+        b.local_path("FFFE07D1/00010000/E030000000983487/Account")
+    assert "FFFE07D1" not in b.names
