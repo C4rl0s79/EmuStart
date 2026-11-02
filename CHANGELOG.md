@@ -10,6 +10,23 @@ Plan najbliższych zmian: [ROADMAP.md](ROADMAP.md). Otwarte po 0.55.0: Xenia 1c 
 nowym urządzeniu — do sprawdzenia na żywo), Play! (miejsce kart), APK (te same reguły zapisów — brak środowiska do
 budowania), adaptery pozostałych samodzielnych emulatorów przy pierwszym użyciu, sprawdzenie na żywo (niżej).
 
+### Plan (2026-11-02): mniej zbędnej pracy sieciowej (analiza funkcjonalna EmuStart + Lumen)
+Kolejność od największej korzyści przy najmniejszym ryzyku; każdy etap — założenia sprawdzone w kodzie przed zmianą.
+1. **Zapisy po starcie silnika (`pull_all`): manifesty wszystkich gier jednym zapytaniem** zamiast jednego na grę
+   (u użytkownika 46 kolejnych zapytań, 4–6 s w tle przy każdym starcie). Serwer: `POST /v1/savesync/manifests`
+   (konto z tokenu, jak pojedynczy manifest); klient: paczki po 200 gier, na starszym serwerze — jak dotąd, gra po
+   grze. **Zrobione** (testy: zbiorcze zapytanie, stary serwer, cudze konto, dotychczasowe testy `pull_all`).
+   - *Wstrzymane:* identyfikator gry serwera w lokalnej kopii biblioteki — uzasadnienie z analizy („zapytanie przy
+     każdym oglądaniu gry”) się nie potwierdziło: wpisy w logu pochodzą z pobierania gry, a `_sid` wołają tylko
+     rzadkie akcje administratora (grafiki, opis).
+2. Biblioteka w Lumenie: zmiany pojedynczych gier zamiast pełnej listy (53 tys. gier, 29 MB) po każdej grze.
+3. Start gry: jedno zapytanie przygotowujące zamiast kilku kolejnych (1,5–2,6 s) — najpierw pomiar kroków.
+4. Ustawienia: odcisk bez fałszywego „zmienione poza EmuStart” po zmianie listy plików.
+5. Zmiany architektoniczne z migracją danych (metadane LaunchBox na serwerze, jeden mechanizm synchronizacji
+   zapisów, reguły zapisów jako dane) — osobna decyzja.
+
+Moduły: serwer i klient Windows / Lumen (silnik) — etap 1; APK nie używa `pull_all` — bez zmian.
+
 ## [0.55.0] — 2026-11-02
 
 Zakres: klient Windows i Lumen (silnik): `savebundles.py`, `syncclient.py`, `saveslots.py`, `ingame.py`,

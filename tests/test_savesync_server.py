@@ -163,6 +163,27 @@ def test_retroarch_cores_are_separate(srv):
     assert "bundles" in req(srv, "GET", "/v1/savesync/snes/g2/manifest")[1]["emulators"]["pcsx2"]
 
 
+def test_bulk_manifests_of_own_account_only(srv):
+    """POST /v1/savesync/manifests — manifesty kilku gier jednym zapytaniem (jak GET manifest
+    każdej z nich); konto z tokenu sesji; zły identyfikator gry pominięty, reszta odpowiada."""
+    assert upload(srv, {"Gra.srm": b"Jezusa"}, 0)[0] == 200
+    st, r = req(srv, "POST", "/v1/savesync/manifests", body={"games": [["snes", "g1"], ["snes", "g2"],
+                                                                       ["snes", "../zle"]]})
+    assert st == 200 and sorted(r["manifests"]) == ["snes/g1", "snes/g2"]
+    one = req(srv, "GET", "/v1/savesync/snes/g1/manifest")[1]
+    g1 = r["manifests"]["snes/g1"]
+    assert g1["revision"] == one["revision"] == 1 and g1["active_slot"] == one["active_slot"]
+    b = g1["emulators"]["retroarch"]["cores"]["snes9x"]["bundles"]["saves"]
+    assert b["download_url"] and b["updated_by_device_name"]
+    assert r["manifests"]["snes/g2"]["revision"] == 0
+    st, r = req(srv, "POST", "/v1/savesync/manifests", "ola-pc", body={"games": [["snes", "g1"]]})
+    assert st == 200 and r["manifests"]["snes/g1"]["revision"] == 0             # konto Oli — puste
+    st, _r = req(srv, "POST", "/v1/savesync/manifests", "ola-pc", body={"games": [["snes", "g1"]]},
+                 headers={"X-EmuStart-Account": "Jezus"})
+    assert st == 403
+    assert req(srv, "POST", "/v1/savesync/manifests", body={"games": "x"})[0] == 400
+
+
 def test_accounts_are_isolated(srv, monkeypatch):
     """Konto z tokenu sesji, nie z treści zapytania: urządzenie konta Ola nie widzi zapisów
     konta Jezus; podanie cudzego konta bez jego tokenu — 403."""

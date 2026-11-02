@@ -1018,18 +1018,22 @@ def savesync_get(handler, platform: str, game: str, urls: bool) -> None:
     from emustart import savesync
 
     def run():
-        from emustart import devices
         acc, dev = _sync_identity(handler)
-        out = savesync.manifest(acc, dev, platform, game, urls=urls)
-        for _e, _c, _k, b in savesync._bundles(out):    # nazwa urządzenia do okna konfliktu
-            did = b.get("updated_by_device_id") or ""
-            b["updated_by_device_name"] = (devices.name_of(did) if did and did != "serwer" else did) or did
-        return out
+        return _device_names(savesync.manifest(acc, dev, platform, game, urls=urls))
     return _sync_errors(handler, run)
 
 
+def _device_names(out: dict) -> dict:
+    """Nazwa urządzenia, które wysłało paczkę (okno konfliktu)."""
+    from emustart import devices, savesync
+    for _e, _c, _k, b in savesync._bundles(out):
+        did = b.get("updated_by_device_id") or ""
+        b["updated_by_device_name"] = (devices.name_of(did) if did and did != "serwer" else did) or did
+    return out
+
+
 def savesync_post(handler) -> None:
-    """POST /v1/savesync/upload/init | upload/commit | <platforma>/<gra>/resolve | <platforma>/<gra>/slot."""
+    """POST /v1/savesync/upload/init | upload/commit | manifests | <platforma>/<gra>/resolve | <platforma>/<gra>/slot."""
     from emustart import savesync
     if not authorized(handler):
         return _json(handler, {"error": "brak lub zły klucz serwera"}, 401)
@@ -1048,6 +1052,9 @@ def savesync_post(handler) -> None:
             return savesync.upload_init(acc, dev, d)
         if parts == ["upload", "commit"]:
             return savesync.upload_commit(acc, dev, d)
+        if parts == ["manifests"]:                   # manifesty wielu gier naraz (pull_all po starcie)
+            return {"ok": True, "manifests": {k: _device_names(m) for k, m in
+                                              savesync.manifests(acc, dev, d.get("games")).items()}}
         if len(parts) == 3 and parts[2] == "resolve":
             return savesync.resolve(acc, dev, parts[0], parts[1], d)
         if len(parts) == 3 and parts[2] == "slot":
