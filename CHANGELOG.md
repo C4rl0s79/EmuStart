@@ -186,6 +186,23 @@ Zmiany (kolejność):
 
 Nie zmienia się: zapisy i ustawienia RetroArcha, DuckStation, PCSX2 (już na gracza), lista gier, sterowanie.
 
+Etap 1 — zrobione (lokalnie, testy na fixture'ach; w prawdziwym emulatorze niesprawdzone):
+- **Dolphin:** do profilu gracza należą `Config\` (Dolphin.ini, GFX.ini, pady GC/Wii/klawiatura, skróty, GBA, FreeLook,
+  RetroAchievements.ini, TimePlayed.ini, `Profiles\`, `GraphicMods\`) i `GameSettings\`. Zostają na komputerze: `Qt.ini`
+  (okno), `Logger.ini`, ścieżki gier i kart (`ISOPath*`, `*Path*`), `GFXBackend`, karta grafiki (`[Hardware] Adapter`),
+  wyjście dźwięku, pełny ekran / okno renderowania, `[Analytics]`, `[AutoUpdate]`, `[SDL_Hints]`, `WirelessMac`, konto
+  RetroAchievements tego komputera (token w kopii profilu pusty).
+- **PPSSPP:** `ppsspp.ini`, `controls.ini` i ustawienia gier `<ID>_ppsspp.ini`. Zostają: folder gier, okno, zdalne ISO,
+  backend i urządzenie grafiki, pełny ekran, urządzenie dźwięku, `MacAddress` (sieć ad hoc — każdy komputer swój),
+  login RetroAchievements, `[Recent]`, `[Upgrade]`, `[Debugger]`.
+- **RPCS3:** `config\config.yml` (nowa obsługa YAML: klucze zagnieżdżone), `custom_configs\` (ustawienia gier),
+  `input_configs\` (pady). Zostają: karta Vulkan, urządzenia dźwięku i mikrofonu, kamera, serwer GDB; `vfs.yml`
+  (ścieżki) i `GuiConfigs\` (okno) poza profilem. `Console PSID` przechodzi z graczem (stała tożsamość konsoli gracza
+  na każdym kliencie — jak profil Xenii).
+- **RetroArch:** `retroarch-core-options.cfg` w profilu (gdy włączone wspólne opcje rdzeni; pliki `config\<rdzeń>\*.opt`
+  były w profilu już wcześniej). Opcje osobnej karty Flycast / LRPS2 dopisywane przy każdej grze, gdy plik opcji
+  gracza ich nie ma — bez znacznika „raz na komputer”; wybór gracza zostaje.
+
 Moduły: klient Windows i Lumen (silnik `engine/`) — zmiana; serwer — nowe rodzaje paczek (format jak dotychczas);
 APK — Flycast (RetroArch na Androidzie) przez tę samą kartę w `saves\`, Xenia i LRPS2 — nie dotyczy (nie ma ich
 na Androidzie). Nie zmienia się: zapisy pozostałych rdzeni i emulatorów, lista gier, sterowanie.

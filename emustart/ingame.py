@@ -208,6 +208,100 @@ def ini_pick(path: Path, rules: list) -> dict:
     return out
 
 
+# ── YAML (RPCS3 config.yml): klucze zagnieżdżone wcięciem; „sekcja” = ścieżka rodziców, np. "Video/Vulkan" ──
+_YML_LINE = re.compile(r"^( *)([^#\s{}\[\]-][^:]*?):(?:[ \t]+(.*?))?\s*$")
+
+
+def _yml_walk(lines: list):
+    """(indeks linii, sekcja, klucz, wartość albo None dla rodzica, wcięcie) dla linii „klucz: wartość”."""
+    stack: list = []                     # [(wcięcie, klucz)]
+    for i, line in enumerate(lines):
+        m = _YML_LINE.match(line.rstrip("\r\n"))
+        if not m:
+            continue
+        ind, key, val = len(m.group(1)), m.group(2), m.group(3)
+        while stack and stack[-1][0] >= ind:
+            stack.pop()
+        sec = "/".join(k for _i, k in stack)
+        yield i, sec, key, (val if val not in (None, "") else None), ind
+        if val in (None, ""):
+            stack.append((ind, key))
+
+
+def yml_pick(path: Path, rules: list) -> dict:
+    """Jak ini_pick, dla YAML: {(ścieżka sekcji, klucz): wartość} liści pasujących do reguł."""
+    try:
+        lines = path.read_text(encoding="utf-8-sig", errors="replace").splitlines()
+    except OSError:
+        return {}
+    return {(sec, key): val for _i, sec, key, val, _ind in _yml_walk(lines)
+            if val is not None and any(re.fullmatch(sr, sec) and re.fullmatch(kr, key) for sr, kr in rules)}
+
+
+def yml_set(path: Path, changes: dict) -> None:
+    """Jak ini_set, dla YAML: podmienia wartości liści; brakujący klucz dopisuje na końcu istniejącej
+    sekcji (sekcji, której nie ma, nie tworzy — emulator dopisze ją sam z wartością domyślną)."""
+    try:
+        lines = path.read_text(encoding="utf-8-sig").splitlines(keepends=True)
+    except OSError:
+        return
+    if lines and not lines[-1].endswith("\n"):
+        lines[-1] += "\n"
+    todo = {((s or ""), k): v for (s, k), v in changes.items()}
+    last_i: dict = {}                    # sekcja → indeks ostatniej linii jej bloku
+    child_ind: dict = {}                 # sekcja → wcięcie jej kluczy
+    for i, sec, key, val, ind in _yml_walk(lines):
+        parts = sec.split("/") if sec else []
+        for n in range(len(parts) + 1):
+            last_i["/".join(parts[:n])] = i
+        child_ind.setdefault(sec, ind)
+        if val is None:
+            last_i.setdefault(f"{sec}/{key}" if sec else key, i)
+            continue
+        if (sec, key) in todo:
+            m = _YML_LINE.match(lines[i].rstrip("\r\n"))
+            eol = lines[i][len(lines[i].rstrip("\r\n")):] or "\n"
+            lines[i] = f"{m.group(1)}{key}: {todo.pop((sec, key))}{eol}"
+    inserts: dict = {}
+    for (sec, key), val in todo.items():
+        if sec in last_i:
+            ind = child_ind.get(sec, (sec.count("/") + 1) * 2 if sec else 0)
+            inserts.setdefault(last_i[sec], []).append(f"{' ' * ind}{key}: {val}\n")
+    for idx in sorted(inserts, reverse=True):
+        lines[idx + 1:idx + 1] = inserts[idx]
+    tmp = path.with_name(path.name + ".emustart-tmp")
+    tmp.write_text("".join(lines), encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def _yml_blank(text: str, rules: list) -> str:
+    lines = text.splitlines(keepends=True)
+    for i, sec, key, val, _ind in list(_yml_walk(lines)):
+        if val is not None and val != '""' and any(re.fullmatch(sr, sec) and re.fullmatch(kr, key) for sr, kr in rules):
+            m = _YML_LINE.match(lines[i].rstrip("\r\n"))
+            lines[i] = f"{m.group(1)}{key}: \"\"{lines[i][len(lines[i].rstrip(chr(13) + chr(10))):]}"
+    return "".join(lines)
+
+
+def _is_yml(name) -> bool:
+    return str(name).lower().endswith((".yml", ".yaml"))
+
+
+def cfg_pick(path: Path, rules: list) -> dict:
+    """ini_pick albo yml_pick — wg rozszerzenia pliku."""
+    return yml_pick(path, rules) if _is_yml(path) else ini_pick(path, rules)
+
+
+def cfg_set(path: Path, changes: dict) -> None:
+    """ini_set albo yml_set — wg rozszerzenia pliku."""
+    (yml_set if _is_yml(path) else ini_set)(path, changes)
+
+
+def cfg_blank(text: str, rules: list, name) -> str:
+    """blank_secrets dla ini/cfg albo YAML — wg nazwy pliku."""
+    return _yml_blank(text, rules) if _is_yml(name) else blank_secrets(text, rules)
+
+
 def _restore_file() -> Path:
     return paths.DATA / "pad_restore.json"
 
@@ -807,22 +901,24 @@ class RetroArch(Adapter):
     # opcje rdzeni: osobna karta dla każdej gry zamiast wspólnej w system\ (zapisy gry — w paczce gry)
     CORE_DEFAULTS = {"flycast": ("reicast_per_content_vmus", "VMU A1"),
                      "pcsx2": ("pcsx2_shared_memory_cards", "disabled")}
-    _CORE_OPTS_MARK = "emustart-opcje-rdzeni-1.txt"
-
     def core_defaults(self) -> None:
-        """Domyślne opcje rdzeni EmuStart — raz (znacznik obok retroarch.cfg), w pliku opcji, który czyta ten
-        RetroArch; potem gracz może je zmienić. Pozostałe opcje w pliku zostają."""
+        """Domyślne opcje rdzeni EmuStart w pliku opcji, który czyta ten RetroArch — tylko gdy opcji
+        w nim nie ma (pliki opcji należą do profilu gracza: każdy gracz dostaje je w swoim pliku, a jego
+        własny wybór zostaje). Pozostałe opcje w pliku zostają."""
         from emustart import savebundles
-        mark = self.home / self._CORE_OPTS_MARK
-        if mark.exists() or not (self.home / "retroarch.cfg").is_file():
+        if not (self.home / "retroarch.cfg").is_file():
             return
         try:
+            added = []
             for core, (key, val) in self.CORE_DEFAULTS.items():
                 f = savebundles.ra_core_options_file(self, core)
+                if f.is_file() and ini_pick(f, [("", re.escape(key))]):
+                    continue
                 f.parent.mkdir(parents=True, exist_ok=True)
                 ini_set(f, {(None, key): f'"{val}"'})
-            mark.write_text("opcje rdzeni: osobna karta dla każdej gry (Flycast, LRPS2)\n", encoding="utf-8")
-            log.info("RetroArch: opcje rdzeni — osobna karta dla każdej gry")
+                added.append(core)
+            if added:
+                log.info("RetroArch: opcje rdzeni — osobna karta dla każdej gry (%s)", ", ".join(added))
         except OSError:
             log.exception("RetroArch: opcje rdzeni")
 
@@ -910,7 +1006,8 @@ class RetroArch(Adapter):
         return self._r(p) if key in ("savefile_directory", "savestate_directory") else p
 
     def settings_files(self) -> list:
-        return ["retroarch.cfg", "config"]
+        # opcje rdzeni: config\<rdzeń>\*.opt albo wspólny plik (global_core_options)
+        return ["retroarch.cfg", "config", "retroarch-core-options.cfg"]
 
     def machine_keys(self) -> dict:
         return {"retroarch.cfg": [("", r".*(_directory|_path|_dir)|video_driver|video_adapter_index|"
@@ -1313,6 +1410,26 @@ class Dolphin(Adapter):
         u = self._user()
         return [u / "GC", u / "Wii", u / "StateSaves"]
 
+    # ustawienia gracza: Config (bez Qt.ini — okno tego komputera, Logger.ini) i ustawienia gier
+    def settings_base(self) -> Path:
+        return self._user()
+
+    def settings_files(self) -> list:
+        return [f"Config/{n}" for n in ("Dolphin.ini", "GFX.ini", "GCPadNew.ini", "WiimoteNew.ini", "GCKeyNew.ini",
+                                         "Hotkeys.ini", "GBA.ini", "FreeLook.ini", "FreeLookController.ini",
+                                         "RetroAchievements.ini", "TimePlayed.ini", "Profiles", "GraphicMods")] + ["GameSettings"]
+
+    def machine_keys(self) -> dict:
+        return {"Config/Dolphin.ini": [("General", r"ISOPath\d+|ISOPaths|RecursiveISOPaths|.*Path|WirelessMac"),
+                                       ("Core", r"GFXBackend|.*Path.*|.*Override"), ("DSP", "Backend"),
+                                       ("Display", r"Fullscreen|FullscreenDisplayRes|RenderToMain|RenderWindow.*"),
+                                       ("Analytics|AutoUpdate|SDL_Hints", ".*")],
+                "Config/GFX.ini": [("Hardware", "Adapter")],
+                "Config/RetroAchievements.ini": [("Achievements", "Enabled|Username|ApiToken")]}
+
+    def secret_keys(self) -> dict:
+        return {"Config/RetroAchievements.ini": [("Achievements", "ApiToken")]}
+
     def prefix_of(self, filename: str) -> str:
         return filename.rsplit(".", 1)[0] + "." if "." in filename else ""
 
@@ -1427,6 +1544,20 @@ class PPSSPP(Adapter):
         psp = self.home / "memstick" / "PSP"
         return [psp / "SAVEDATA", psp / "PPSSPP_STATE"]
 
+    # ustawienia gracza: ppsspp.ini, sterowanie i ustawienia gier (<ID gry>_ppsspp.ini)
+    _SYS = "memstick/PSP/SYSTEM"
+
+    def settings_files(self) -> list:
+        return [f"{self._SYS}/ppsspp.ini", f"{self._SYS}/controls.ini", f"{self._SYS}/*_ppsspp.ini"]
+
+    def machine_keys(self) -> dict:
+        return {f"{self._SYS}/ppsspp.ini": [
+            ("General", r"CurrentDirectory|Window.*|.*Remote.*|.*ScrollPosition|FirstRun|RunCount|TopMost|ShowMenuBar"),
+            ("Graphics", r"GraphicsBackend|DisabledGraphicsBackends|VulkanDevice|D3D11Device|CameraDevice|"
+                         r"FullScreen|FullScreenMulti|DisplayRefreshRate"),
+            ("Sound", "AudioDevice|AutoAudioDevice"), ("SystemParam", "MacAddress"),
+            ("Achievements", "AchievementsUserName"), ("Recent|Upgrade|Debugger", ".*")]}
+
     def state_patterns(self, game: dict, meta: dict) -> list:
         serial = _serial(meta).replace("-", "")
         return [f"{serial}_*.ppst"] if serial else []
@@ -1436,11 +1567,19 @@ class PPSSPP(Adapter):
 
 
 class RPCS3(Adapter):
-    """Tylko save'y (do profili) — RPCS3 nie ma stanów ani skrótów do sterowania."""
+    """Save'y i ustawienia (do profili) — RPCS3 nie ma stanów ani skrótów do sterowania."""
     family = "rpcs3"
 
     def save_dirs(self) -> list:
         return [self.home / "dev_hdd0" / "home" / "00000001" / "savedata"]
+
+    # ustawienia gracza: config.yml, ustawienia gier i pady (bez vfs.yml — ścieżki, GuiConfigs — okno)
+    def settings_files(self) -> list:
+        return ["config/config.yml", "config/custom_configs", "config/input_configs"]
+
+    def machine_keys(self) -> dict:
+        return {"config/config.yml": [("Video/Vulkan", "Adapter"), ("Audio", "Audio Device|Microphone Devices"),
+                                      ("Input/Output", "Camera ID|SDL Camera ID"), ("Miscellaneous", "GDB Server")]}
 
 
 _ADAPTERS = {a.family: a for a in (RetroArch, DuckStation, PCSX2, Dolphin, PPSSPP, RPCS3)}

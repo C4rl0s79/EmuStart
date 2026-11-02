@@ -245,8 +245,13 @@ def test_core_defaults_once_in_the_file_retroarch_reads(env, tmp_path):
     assert 'reicast_per_content_vmus = "VMU A1"' in text and 'pcsx2_shared_memory_cards = "disabled"' in text
     assert 'reicast_internal_resolution = "1280x960"' in text           # pozostałe opcje gracza zostają
     (home / "retroarch-core-options.cfg").write_text('reicast_per_content_vmus = "disabled"\n')
-    a.core_defaults()                                                     # raz: zmiana gracza zostaje
-    assert (home / "retroarch-core-options.cfg").read_text() == 'reicast_per_content_vmus = "disabled"\n'
+    a.core_defaults()                                  # wybór gracza zostaje, brakująca opcja LRPS2 wraca
+    assert (home / "retroarch-core-options.cfg").read_text() == ('pcsx2_shared_memory_cards = "disabled"\n'
+                                                                 'reicast_per_content_vmus = "disabled"\n')
+    # plik opcji innego gracza (bez opcji EmuStart) — opcje dopisane znowu, bez znacznika „raz na komputer”
+    (home / "retroarch-core-options.cfg").write_text('reicast_internal_resolution = "640x480"\n')
+    a.core_defaults()
+    assert 'reicast_per_content_vmus = "VMU A1"' in (home / "retroarch-core-options.cfg").read_text()
 
 
 def test_core_defaults_per_core_file_when_it_exists(env, tmp_path):
@@ -332,7 +337,7 @@ def test_xenia_saves_reach_other_device_with_other_profile(net):
 
 
 def test_xenia_profile_of_one_player_on_shared_device(env, tmp_path):
-    """content\ Xenii nie jest rozdzielony na graczy: profil (XUID) należy do pierwszego gracza, który go użył —
+    """content\\ Xenii nie jest rozdzielony na graczy: profil (XUID) należy do pierwszego gracza, który go użył —
     inny gracz na tym urządzeniu nie dostaje paczki (nie nadpisze cudzych zapisów), dopóki nie ma własnego profilu."""
     _a, _c, _r, b = xenia(tmp_path / "RetroArch", tmp_path)
     assert savebundles.xenia_claim(b, 1) == b

@@ -1159,6 +1159,11 @@ def _same_file(a: Path, b: Path) -> bool:
 def _files_under(base: Path, rels: list):
     """(ścieżka względna, plik) dla plików i zawartości folderów z listy."""
     for rel in rels:
+        if any(c in rel for c in "*?["):          # wzorzec (np. ustawienia gier PPSSPP: *_ppsspp.ini)
+            for f in sorted(base.glob(rel)) if base.is_dir() else []:
+                if f.is_file():
+                    yield f.relative_to(base), f
+            continue
         p = base / rel
         if p.is_file():
             yield Path(rel), p
@@ -1191,7 +1196,7 @@ def _fingerprint(adapter) -> dict:
             data = f.read_bytes()
             rules = rules_by.get(Path(rel).as_posix())
             if rules:
-                data = ingame.blank_secrets(data.decode("utf-8-sig", errors="replace"), rules).encode("utf-8")
+                data = ingame.cfg_blank(data.decode("utf-8-sig", errors="replace"), rules, rel).encode("utf-8")
             out[Path(rel).as_posix()] = hashlib.sha1(data).hexdigest()
         except OSError:
             pass
@@ -1240,7 +1245,7 @@ def settings_load(cfg: dict, pid: int, adapter) -> int:
         return 0
     # wartości tego komputera (ścieżki, GPU, audio) i sekrety (puste w kopii) zostają
     rules_by = _merge_rules(adapter.machine_keys(), adapter.secret_keys())
-    keep = {rel: ingame.ini_pick(base / rel, rules) for rel, rules in rules_by.items()}
+    keep = {rel: ingame.cfg_pick(base / rel, rules) for rel, rules in rules_by.items()}
     machine_bak = LOCAL / "_machine" / family
     n = 0
     for rel, f in files:
@@ -1253,10 +1258,10 @@ def settings_load(cfg: dict, pid: int, adapter) -> int:
         n += 1
     for rel, vals in keep.items():
         if vals and (base / rel).is_file():
-            cur = ingame.ini_pick(base / rel, [(re.escape(s or ""), re.escape(k)) for s, k in vals])
+            cur = ingame.cfg_pick(base / rel, [(re.escape(s or ""), re.escape(k)) for s, k in vals])
             diff = {k: v for k, v in vals.items() if cur.get(k) != v}
             if diff:
-                ingame.ini_set(base / rel, {((s or None), k): v for (s, k), v in diff.items()})
+                ingame.cfg_set(base / rel, {((s or None), k): v for (s, k), v in diff.items()})
     if n:
         log.info("ustawienia profilu %s → %s: %d plików", pid, family, n)
     _remember_seen(adapter, pid)
@@ -1365,7 +1370,7 @@ def settings_save(cfg: dict, pid: int, adapter, label: str = "") -> int:
             # kopia bez haseł i tokenów (trafia też na NAS i do kopii zapasowych)
             from emustart import ingame
             try:
-                text = ingame.blank_secrets(f.read_text(encoding="utf-8-sig", errors="replace"), rules)
+                text = ingame.cfg_blank(f.read_text(encoding="utf-8-sig", errors="replace"), rules, rel)
             except OSError:
                 continue
             if dst.is_file() and dst.read_text(encoding="utf-8", errors="replace") == text:
