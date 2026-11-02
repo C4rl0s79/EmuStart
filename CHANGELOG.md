@@ -74,7 +74,7 @@ i panelem serwera — największa część). Każdy krok: testy, potem sprawdzen
 | 1c. Xenia Edge — profil (konto, osiągnięcia `FFFE07D1`) na urządzeniach, gdzie go nie ma, i logowanie przypiętego profilu na czas gry | — | **zablokowane:** rdzeń ma `xenia-edge.config.toml` z `logged_profile_slot_0_xuid` (plik rdzenia), ale sekcja TOML, format XUID i miejsce pliku nieustalone; bez tego nowe urządzenie miałoby dwa profile i Xenia mogłaby zalogować zły — do sprawdzenia na żywo, potem implementacja | — |
 | 7. APK — te same reguły w `Saves.kt` (rozszerzenia, przyrostki, podfoldery FBNeo, rdzenie Dolphin/PPSSPP, Flycast) | — | **zablokowane:** na tym komputerze nie ma Android SDK, JDK ani wrappera Gradle, APK nie ma testów jednostkowych — zmiany w Kotlinie nie dałoby się zbudować ani sprawdzić. Analiza bezpieczeństwa (kod `SaveSync.kt` / `Saves.kt`): APK nie skasuje nowych zapisów z PC — pusty zestaw lokalny nie jest wysyłany (`push`: „pusty zestaw nie kasuje zapisów”), rdzenie FBNeo / Flycast / Kronos / PUAE nie tworzą na Androidzie plików z listy rozszerzeń APK, paczek `retroarch/*/memcards` (PUAE, Xenia) APK nie zakłada. Skutek: te zapisy nie synchronizują się na telefonie; APK pobiera je jako nieużywane pliki do głównego folderu zapisów (nieszkodliwe) | — |
 | 5. Silnik Lumena (`git subtree` z gałęzi `zapisy-system` na gałąź Lumena `zapisy-system`; `lumen.py` → opcje gry też przez `xenia_claim`) | testy silnika w Lumenie 498 ✓ (1 pominięty), testy Lumena 200 ✓, typecheck ✓; błąd znaleziony testem Lumena (obiekt zastępczy bez `core_id`) — poprawiony w `8fdcd7f` | czeka | Lumen: `f1a2841`, `db3ebc4`, `a2827d2`; EmuStart: `8fdcd7f` |
-| 6. Przygotowanie wydania (lokalny build, checklista) | — | — | — |
+| 6. Przygotowanie wydania (lokalny build, checklista) | build EmuStart 0.55.0 ✓, testowy build Lumena ✓, panel w przeglądarce ✓ (checklista niżej) | — | `6764b1a` (wersja) |
 
 Ustalone ze źródeł i z plików rdzeni zainstalowanych na serwerze (2026-11-02): FBNeo `"%s%cfbneo%c%s.fs"` (libretro.cpp),
 Kronos `%s%ckronos%csaturn%c%s.ram` / `-ext512K…4M.ram` / `kronos_use_beetle_saves` (kronos_libretro.dll), Flycast
@@ -100,8 +100,13 @@ każdy gracz ma własny profil (XUID) w tym samym `content\`, a EmuStart wskazuj
 - ✓ wersja 0.55.0 na gałęzi (`6764b1a`); ☐ wpis `[0.55.0]` z tego planu (co weszło, co nie, sprawdzone / niesprawdzone)
 - ✓ testy EmuStart (cały zestaw), ✓ testy silnika w Lumenie, testy Lumena, typecheck
 - ✓ przegląd kodu (code-review, poziom high): 10 ustaleń, wszystkie poprawione (niżej), testy na każde
-- ☐ lokalny build EmuStart (`build.ps1` bez `-Deploy`: klient i serwer, ZIP-y w `dist\`)
-- ☐ testowy build Lumena (osobny folder `release\zapisy-test`, bez zmiany wersji)
+- ✓ lokalny build EmuStart (`build.ps1` bez `-Deploy`, z poprawkami po przeglądzie): `dist\EmuStart-0.55.0-win64.zip`,
+  `dist\EmuStart-Server-0.55.0-win64.zip` (testy w buildzie ✓)
+- ✓ panel serwera w przeglądarce (Chromium, `web/` z repozytorium, akcje profili przez prawdziwe `srvadmin` /
+  `emuprofiles` na danych testowych): Urządzenia i konta → Pliki i kopie → „Profil Xbox 360” — dwa zgłoszone profile,
+  „Przypnij” → „przypięty” / „Odepnij”, przypięcie zapisane po stronie serwera; pozostałe dane panelu — podstawione
+- ✓ testowy build Lumena (`D:\GIT\Launcherelease\zapisy-test\win-unpacked\Lumen.exe`, bez zmiany wersji i podpisów):
+  start na pustym profilu bez sieci — silnik `EmuStart 0.55.0` gotowy, bez danych w folderze builda
 - ⏸ PR `zapisy-system` → `main` (EmuStart), scalenie, tag `v0.55.0` (CI: serwer, klient PC, APK)
 - ⏸ Lumen: silnik z `main` EmuStart (`git subtree`), wersja 1.0.35, `npm run dist`, podpisy, push, GitHub Release
   (gałąź Lumena `zapisy-system` zawiera też niewypchniętą poprawkę Steam `6b1709d`)
