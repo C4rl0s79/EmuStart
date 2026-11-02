@@ -351,3 +351,29 @@ def test_profile_prepare_records_step_times(prof_env):
     assert all(t >= 0 for _n, t in s._steps)
     s._release_dirs()
     s._profile_finish(ad, names)
+
+
+def test_game_preparation_asks_the_server_only_what_it_needs(prof_env, monkeypatch):
+    """Emulator, którego zapisy idą w całości paczkami (Dolphin): bez zapytań o foldery zapisów
+    (nie ma czego synchronizować) i jedno sprawdzenie serwera zamiast kilku — przed grą i po niej."""
+    from emustart import nasfs
+    cfg, tmp = prof_env
+    calls = []
+    real = nasfs.RemoteFs._req
+
+    def req(self, method, path, q, *a, **k):
+        calls.append(f"{path} {q.get('p', '')}")
+        return real(self, method, path, q, *a, **k)
+    monkeypatch.setattr(nasfs.RemoteFs, "_req", req)
+    ad = _dolphin(tmp)
+    pid = profiles.first_id()
+    _play(cfg, pid, ad)
+    calls.clear()
+    s = _session(cfg, pid)
+    names = s._profile_prepare(ad)
+    assert not [c for c in calls if "/save/" in c] and [c.split()[0] for c in calls].count("list") <= 1
+    assert any("settings/windows/dolphin/.emustart-stamp" in c for c in calls)     # ustawienia — jak dotąd
+    calls.clear()
+    s._release_dirs()
+    s._profile_finish(ad, names)
+    assert not [c for c in calls if "/save/" in c] and [c.split()[0] for c in calls].count("list") <= 1

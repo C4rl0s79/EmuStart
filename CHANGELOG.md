@@ -24,12 +24,25 @@ Kolejność od największej korzyści przy najmniejszym ryzyku; każdy etap — 
    **Pomiar zrobiony:** linia „czas do startu” podaje czas każdego kroku (przeniesione profile, blokada, ustawienia,
    konto RA i emulator, foldery zapisów, zapisy gry, karty rdzeni). Samo zapytanie przygotowujące — po zebraniu
    pomiarów z prawdziwych startów (który krok naprawdę kosztuje).
+   **Zbędne zapytania usunięte** (policzone w teście, Dolphin — zapisy w całości paczkami): przed grą 8 → 4, po grze
+   5 → 2. Foldery zapisów: emulator bez folderów poza paczkami nie pyta serwera o znacznik (wynik był zawsze 0);
+   „serwer dostępny” pamiętany 30 s zamiast osobnego `list` w każdym kroku (niedostępny — sprawdzany zawsze).
+   Zostają: blokada, znacznik ustawień, przeniesiony folder profilu (`moved.json` — ochrona przed zapisem do starego
+   folderu), konto RA, manifest zapisów gry.
 4. Ustawienia: odcisk bez fałszywego „zmienione poza EmuStart” po zmianie listy plików. **Zrobione:** odcisk
    pamięta listę plików ustawień; inna lista (nowa wersja) = „nie wiadomo”, nie zmiana w emulatorze. Konflikt
    ustawień nie jest „po cichu”, jak podała analiza — trafia do listy konfliktów (`lumen_status.conflicts`,
    panel zadań Lumena) — bez zmian.
 5. Zmiany architektoniczne z migracją danych (metadane LaunchBox na serwerze, jeden mechanizm synchronizacji
-   zapisów, reguły zapisów jako dane) — osobna decyzja.
+   zapisów, reguły zapisów jako dane) — osobna decyzja. Sprawdzone 2026-11-02, **niewdrożone, bo bez korzyści**:
+   - LaunchBox na serwerze: serwer ma `lb_id` dla 91% gier (47 801 z 52 618; braki głównie dema Amigi, których
+     LaunchBox nie ma), a Lumen i tak potrzebuje własnej bazy (opisy gier spoza Steama i EmuStart, pobierana na
+     żądanie) — przeniesienie nie oszczędza pobrania.
+   - Jeden mechanizm zapisów: wszystkie używane emulatory (RetroArch, PCSX2, Dolphin, DuckStation, PPSSPP) mają
+     zapisy w paczkach; synchronizacja folderów zostaje tylko dla RPCS3 / Vita3K (w bibliotece 0 gier PS3 i PS Vita)
+     i ustawień. Migracja danych na serwerze — gdy pojawią się te gry albo kolejny emulator bez paczek.
+   - Reguły zapisów jako dane: część dla APK zablokowana (brak środowiska Androida); `lumen_*.py` w Lumenie nie
+     koliduje z `git subtree` (EmuStart ich nie ma).
 
 Moduły: serwer i klient Windows / Lumen (silnik) — etap 1; APK nie używa `pull_all` — bez zmian.
 
