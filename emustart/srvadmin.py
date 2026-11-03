@@ -297,12 +297,16 @@ ACTIONS = {"status": status, "rescan": rescan, "restart": restart, "logs": open_
            "update_status": update_status, "update_apply": update_apply}
 
 
+UPLOAD_MAX = 24 << 20
+
+
 def handle(handler, api) -> None:
     """POST /admin/<akcja> (server.py sprawdził już Host i X-EmuStart)."""
     name = handler.path.split("?")[0].removeprefix("/admin/")
     fn = (ACTIONS.get(name) or ACTIONS_ARGS.get(name)) if ENABLED else None
     n = int(handler.headers.get("Content-Length") or 0)
-    raw = handler.rfile.read(min(n, 1 << 16)) if n else b""
+    # wgrane zdjęcie konsoli (base64) ma kilka MB — pozostałe akcje jak dotąd do 64 KB
+    raw = handler.rfile.read(min(n, UPLOAD_MAX if name == "system_console_upload" else 1 << 16)) if n else b""
     if not fn:
         return handler.send_error(404)
     try:
@@ -720,6 +724,13 @@ GAME_ACTIONS = {
                                                                                          "emu_rec", "core_rec") if k in a}),
     "system_logo_candidates": lambda api, a: {"ok": True, "list": api.system_logo_candidates(str(a.get("es", "")))},
     "system_logo_choose": lambda api, a: api.system_logo_choose(str(a.get("es", "")), str(a.get("id", ""))),
+    "system_logo_packs": lambda api, a: {"ok": True, "list": api.system_logo_packs()},
+    "system_logo_pack_apply": lambda api, a: api.system_logo_pack_apply(str(a.get("id", ""))),
+    "system_logo_pack_status": lambda api, a: api.system_logo_pack_status(),
+    "system_console_candidates": lambda api, a: {"ok": True, "list": api.system_console_candidates(str(a.get("es", "")))},
+    "system_console_choose": lambda api, a: api.system_console_choose(str(a.get("es", "")), str(a.get("id", ""))),
+    "system_console_upload": lambda api, a: api.system_console_upload(str(a.get("es", "")), str(a.get("data", "")),
+                                                                      str(a.get("credit", ""))),
     "system_merge": lambda api, a: api.system_merge(str(a.get("es", "")), str(a.get("into", ""))),
 }
 ACTIONS_ARGS.update(GAME_ACTIONS)

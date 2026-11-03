@@ -278,14 +278,16 @@ async function refreshSysLook() {
   const r = await admin("systems_look").catch(() => null);
   if (!r?.ok) return;
   $("sysLook").innerHTML = r.systems.map((s) =>
-    `<tr><td>${s.logo ? `<img class="syslogo" src="${esc(s.logo)}" alt="" style="${s.glow ? "filter:drop-shadow(0 0 6px #fff8)" : ""}">` : '<span class="muted">bez logo</span>'}</td>` +
+    `<tr><td>${s.logo ? `<img class="syslogo" src="${esc(s.logo)}" alt="" style="${s.glow ? "filter:drop-shadow(0 0 6px #fff8)" : ""}">` : '<span class="muted">bez logo</span>'}` +
+    `${s.console ? `<img class="syslogo" src="${esc(s.console)}" alt="konsola" title="${esc(s.console_credit || "")}" style="max-height:34px;margin-left:6px">` : ""}</td>` +
     `<td><input data-name="${esc(s.es)}" value="${esc(s.display)}" placeholder="${esc(s.default_name)}" style="width:100%">` +
     `<div class="sysdirs">${esc(s.es)} · ${(s.dirs || []).map(esc).join(" · ") || "brak folderu"}` +
     `${(s.merged || []).length ? ` · scalone: ${s.merged.map((m) => `${esc(m)} <button data-split="${esc(m)}">Rozdziel</button>`).join(" ")}` : ""}</div></td>` +
     `<td class="n">${s.games}</td>` +
     `<td class="n"><label><input type="checkbox" data-glow="${esc(s.es)}" ${s.glow ? "checked" : ""}> poświata</label> ` +
     `<label><input type="checkbox" data-en="${esc(s.es)}" ${s.enabled ? "checked" : ""}> widoczny</label> ` +
-    `<button data-logo="${esc(s.es)}">Logo…</button> <select data-merge="${esc(s.es)}"><option value="">scal z…</option>` +
+    `<button data-logo="${esc(s.es)}">Logo…</button> <button data-console="${esc(s.es)}">Konsola…</button> ` +
+    `<select data-merge="${esc(s.es)}"><option value="">scal z…</option>` +
     r.systems.filter((o) => o.es !== s.es).map((o) => `<option value="${esc(o.es)}">${esc(o.display)} (${esc(o.es)})</option>`).join("") +
     `</select></td></tr>` +
     `<tr><td></td><td colspan="3" class="muted">zalecany emulator: <select data-emu="${esc(s.es)}">` +
@@ -318,17 +320,77 @@ async function refreshSysLook() {
   $("sysLook").querySelectorAll("[data-emu]").forEach((el) => el.addEventListener("change", () => set(el.dataset.emu, { emu_rec: el.value })));
   $("sysLook").querySelectorAll("[data-core]").forEach((el) => el.addEventListener("change", () => set(el.dataset.core, { core_rec: el.value })));
   $("sysLook").querySelectorAll("[data-logo]").forEach((b) => b.addEventListener("click", () => sysPick(b.dataset.logo)));
+  $("sysLook").querySelectorAll("[data-console]").forEach((b) => b.addEventListener("click", () => consolePick(b.dataset.console)));
+  if (!$("packSel").options.length) {
+    const p = await admin("system_logo_packs").catch(() => null);
+    $("packSel").innerHTML = (p?.list || []).map((x) =>
+      `<option value="${esc(x.id)}">${esc(x.id)}${x.license ? " — " + esc(x.license) : ""}</option>`).join("");
+  }
+}
+
+/* ── paczka logo dla wszystkich systemów (w tle — serwer sprawdza adresy w motywach) ── */
+$("bPackApply").addEventListener("click", async () => {
+  const id = $("packSel").value;
+  if (!id || !confirm(`Zmienić logo wszystkich systemów na paczkę „${id}”? Systemy, których ta paczka nie ma, zostaną przy swoim.`)) return;
+  const r = await admin("system_logo_pack_apply", { id }).catch(() => null);
+  if (!r?.ok) return sysMsg(r?.reason || "Serwer nie odpowiada.", false);
+  $("packStatus").textContent = "Zmieniam logo…";
+  const poll = async () => {
+    const st = await admin("system_logo_pack_status").catch(() => null);
+    if (st?.running) return setTimeout(poll, 1500);
+    $("packStatus").textContent = st ? `Zmieniono ${st.changed.length}, bez zmian ${st.missing.length} (paczka ich nie ma).` : "";
+    refreshSysLook();
+  };
+  setTimeout(poll, 800);
+});
+
+/* ── zdjęcie konsoli systemu (emustart/consoles.py): Wikimedia Commons, wybór, własne zdjęcie ── */
+async function consolePick(es) {
+  sysPickEs = es;
+  $("sysPick").hidden = false;
+  $("sysPickInfo").textContent = "Szukam zdjęć konsoli…";
+  $("sysPickList").innerHTML = "";
+  $("sysPickExtra").innerHTML = "";
+  const r = await admin("system_console_candidates", { es }).catch(() => null);
+  const list = [...(r?.list || []), { id: "auto", title: "automatycznie (najlepsze z propozycji)" },
+                { id: "none", title: "bez zdjęcia" }];
+  $("sysPickInfo").textContent = `Konsola ${es} — ${list.length - 2} zdjęć z Wikimedia Commons, kliknij, żeby wybrać (Esc — zamknij).`;
+  $("sysPickList").innerHTML = list.map((c, i) =>
+    `<button data-i="${i}">${c.thumb ? `<img src="${esc(c.thumb)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ""}` +
+    `<span>${esc(c.title || "")}${c.credit ? " · " + esc(c.credit) : ""}</span></button>`).join("");
+  $("sysPickExtra").innerHTML =
+    `<label class="muted">Własne zdjęcie: <input type="file" id="conFile" accept="image/png,image/jpeg,image/webp"></label> ` +
+    `<input id="conCredit" placeholder="autor zdjęcia (np. imię, źródło)"> <button id="bConUp">Wgraj</button>`;
+  const done = (res, what) => {
+    sysMsg(res?.ok ? `${what} — urządzenia pokażą je po odświeżeniu biblioteki.` : res?.reason || "Serwer nie odpowiada.", res?.ok);
+    $("sysPick").hidden = true;
+    refreshSysLook();
+  };
+  $("sysPickList").querySelectorAll("[data-i]").forEach((b) => b.addEventListener("click", async () => {
+    done(await admin("system_console_choose", { es, id: list[+b.dataset.i].id }).catch(() => null), "Zdjęcie konsoli zapisane");
+  }));
+  $("bConUp").addEventListener("click", async () => {
+    const f = $("conFile").files[0];
+    if (!f) return sysMsg("Wybierz plik ze zdjęciem.", false);
+    const data = await new Promise((ok) => {
+      const rd = new FileReader();
+      rd.onload = () => ok(String(rd.result).split(",")[1] || "");
+      rd.readAsDataURL(f);
+    });
+    done(await admin("system_console_upload", { es, data, credit: $("conCredit").value }).catch(() => null), "Zdjęcie konsoli wgrane");
+  });
 }
 async function sysPick(es) {
   sysPickEs = es;
   $("sysPick").hidden = false;
   $("sysPickInfo").textContent = "Szukam logo…";
   $("sysPickList").innerHTML = "";
+  $("sysPickExtra").innerHTML = "";
   const r = await admin("system_logo_candidates", { es }).catch(() => null);
   const list = [...(r?.list || []), { id: "none", url: "", source: "bez logo (sama nazwa)" }];
   $("sysPickInfo").textContent = `Logo systemu ${es} — ${list.length - 1} propozycji, kliknij, żeby wybrać (Esc — zamknij).`;
   $("sysPickList").innerHTML = list.map((c, i) =>
-    `<button data-i="${i}">${c.url ? `<img src="${esc(c.url)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ""}<span>${esc(c.source || "")}${c.label ? " · " + esc(c.label) : ""}</span></button>`).join("");
+    `<button data-i="${i}">${c.url ? `<img src="${esc(c.url)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ""}<span>${esc(c.source || "")}${c.label ? " · " + esc(c.label) : ""}${c.license ? " · " + esc(c.license) : ""}</span></button>`).join("");
   $("sysPickList").querySelectorAll("[data-i]").forEach((b) => b.addEventListener("click", async () => {
     const res = await admin("system_logo_choose", { es, id: list[+b.dataset.i].id }).catch(() => null);
     sysMsg(res?.ok ? "Logo zapisane — urządzenia pokażą je po odświeżeniu biblioteki." : res?.reason || "Serwer nie odpowiada.", res?.ok);
@@ -340,7 +402,7 @@ $("bSysPickClose").addEventListener("click", () => { $("sysPick").hidden = true;
 document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("sysPick").hidden) $("sysPick").hidden = true; });
 document.addEventListener("mousedown", (e) => {          // kliknięcie obok okna — zamyka
   const box = $("sysPick");
-  if (!box.hidden && !box.contains(e.target) && !e.target.closest("[data-logo]")) box.hidden = true;
+  if (!box.hidden && !box.contains(e.target) && !e.target.closest("[data-logo],[data-console]")) box.hidden = true;
 });
 
 /* ── przeniesienie serwera (emustart/tls.py: export_move / import_move) ── */

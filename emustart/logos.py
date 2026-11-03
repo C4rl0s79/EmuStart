@@ -117,6 +117,66 @@ ES_PARENT = {"amigawhddemos": "amiga", "amigawhdgames": "amiga", "SNESMSU1": "sn
              "n64dd": "n64", "fbneo": "arcade", "xbox360": "x360"}
 
 
+# motywy Playnite (sprawdzone 2026-11-03): logo nazwane jak platformy LaunchBox / Playnite
+# („Sony Playstation 2.png”, „Nintendo 64.png”) albo krótkim kodem („plat_n64.svg”)
+PN_NAME_THEMES = (
+    ("Aniki Lite (Playnite)", GH + "Mike-Aniki/Aniki-Lite/main/Source/Icons/Platform/{name}.png"),
+    ("Jonos ReMix (Playnite)", GH + "jonosellier/ReMiX_jonosellier/main/source/Icons/Filter/{name}.png"),
+)
+PN_CODE_THEMES = (
+    ("Playnite Platform Logos", GH + "itscosmyx/Playnite-Platform-Logos/main/plat_{es}.svg"),
+)
+# licencje z repozytoriów (README / plik licencji); bez wpisu — nie sprawdzono
+LICENSES = {
+    "Art Book Next": "CC BY-NC-SA", "Alekfull NX": "CC BY-NC-SA", "Canvas": "CC0",
+    "Aniki Lite (Playnite)": "brak licencji w repozytorium", "Jonos ReMix (Playnite)": "brak licencji w repozytorium",
+    "Playnite Platform Logos": "brak licencji w repozytorium",
+}
+
+
+def playnite_names(es: str) -> list:
+    """Nazwy platformy w stylu LaunchBox / Playnite, w kilku zapisach (GitHub rozróżnia wielkość liter):
+    „Sony Playstation 2”, „Playstation 2”, „PlayStation 2”."""
+    from emustart import launchbox
+    info = systems.info(es)
+    base = [launchbox.PLATFORMS.get(es, ""), LB_NAMES.get(es, ""), info["display"]]
+    base += [n.replace(" - ", " ") for n in systems.names(es) if " - " in n][:2]
+    out = []
+    for n in base:
+        words = n.split()
+        for v in (n, n.title(), " ".join(words[1:]) if len(words) > 2 else "", " ".join(words[1:]).title() if len(words) > 2 else ""):
+            if v and v not in out:
+                out.append(v)
+    return out
+
+
+def _web(es: str, only: str = "") -> list:
+    """[(źródło, adres, etykieta)] logo systemu w motywach ES / ES-DE i Playnite (`only` — jedno źródło)."""
+    import urllib.parse
+    names = theme_names(es)
+    out = [(src, tpl.format(es=n), n) for src, tpl in ES_THEMES + PN_CODE_THEMES for n in names]
+    out += [(src, tpl.format(name=urllib.parse.quote(n)), n) for src, tpl in PN_NAME_THEMES for n in playnite_names(es)]
+    return [w for w in out if not only or w[0] == only]
+
+
+def pack_sources() -> list:
+    """Paczki logo (motywy) do zmiany logo wszystkich systemów naraz: [{id, license}]."""
+    return [{"id": src, "license": LICENSES.get(src, "")}
+            for src, _tpl in ES_THEMES + PN_CODE_THEMES + PN_NAME_THEMES]
+
+
+def apply_pack(cfg: dict, source: str, es_list) -> dict:
+    """Logo wszystkich systemów z jednej paczki (jednolity wygląd): system, którego paczka nie ma,
+    zostaje przy swoim. {ok, changed, missing}. Zapis ustawień — wywołujący."""
+    if source not in {p["id"] for p in pack_sources()}:
+        return {"ok": False, "reason": "Nie ma takiej paczki logo."}
+    changed, missing = [], []
+    for es in es_list:
+        hit = next((u for _s, u, _l in _web(es, source) if _exists(u)), None)
+        (changed if hit and choose(cfg, es, "url:" + hit) else missing).append(es)
+    return {"ok": True, "changed": changed, "missing": missing}
+
+
 def theme_names(es: str) -> list:
     """Nazwy folderów do sprawdzenia w motywach ES / ES-DE: kod ES i inne nazwy w stylu ES
     (systems.names: „atarilynx”, „gc”, „genesis”…), potem system „rodzica"."""
@@ -213,8 +273,7 @@ def candidates(cfg: dict, es: str) -> list:
         out.append({"id": "downloaded", "url": d, "source": "pobrane wcześniej", "label": es})
     import urllib.parse
     from concurrent.futures import ThreadPoolExecutor
-    names = theme_names(es)
-    web = [(src, tpl.format(es=n), n) for src, tpl in ES_THEMES for n in names]
+    web = _web(es)
     web += [(f"RetroArch ({t})", RA_ICON.format(theme=t, name=urllib.parse.quote(info["libretro"])),
              info["libretro"]) for t in RA_THEMES if info["libretro"]]
     with ThreadPoolExecutor(max_workers=12) as ex:    # pustych ramek (404) nie pokazujemy
@@ -223,7 +282,7 @@ def candidates(cfg: dict, es: str) -> list:
     for (src, u, label), ok in zip(web, found):
         if ok and src not in seen:                    # z motywu pierwsza istniejąca nazwa
             seen.add(src)
-            out.append({"id": "url:" + u, "url": u, "source": src, "label": label})
+            out.append({"id": "url:" + u, "url": u, "source": src, "label": label, "license": LICENSES.get(src, "")})
     # paczka (nazwy jak LaunchBox: „Atari Lynx”, „Sony Playstation”) — po wszystkich pełnych nazwach
     targets = [t for t in dict.fromkeys([n.replace(" - ", " ") for n in systems.names(es) if " " in n]
                                         + [info["display"], LB_NAMES.get(es, "")]) if t]

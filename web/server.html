@@ -218,9 +218,15 @@
     <div class="muted">Tak systemy wyglądają na wszystkich urządzeniach (PC i telefony). Wyłączony system
       znika z list na urządzeniach. Zalecany emulator i rdzeń RetroArcha — urządzenie bez własnego wyboru
       używa tego.</div>
+    <div class="actions" style="margin-top:8px">
+      <label>Paczka logo dla wszystkich systemów: <select id="packSel"></select></label>
+      <button id="bPackApply">Zmień logo wszystkich</button> <span id="packStatus" class="muted"></span></div>
+    <div class="muted">Systemy, których paczka nie ma, zostają przy swoim logo. Pojedyncze logo zmienisz dalej przyciskiem
+      „Logo…” w wierszu systemu. Konsola to zdjęcie w tle platformy w motywach Lumena (Kronika, Horyzont).</div>
     <table style="margin-top:8px"><tbody id="sysLook"></tbody></table>
     <div id="sysPick" hidden style="margin-top:8px">
       <div class="muted" id="sysPickInfo"></div><div id="sysPickList" class="picks logos"></div>
+      <div id="sysPickExtra" class="actions"></div>
       <div class="actions"><button id="bSysPickClose">Zamknij</button></div></div>
     <div id="sysMsg" style="min-height:1.4em"></div>
   </section>

@@ -12,7 +12,7 @@ import re
 import threading
 from pathlib import Path
 
-from emustart import (art, catalog, config, launchbox, library, logos, metadata, scanner,
+from emustart import (art, catalog, config, consoles, launchbox, library, logos, metadata, scanner,
                       sysinfo, systems)
 
 log = logging.getLogger("emustart.srvapi")
@@ -48,6 +48,7 @@ class ServerApi:
     def list_systems(self) -> list:
         summary = library.systems_summary()
         logos.fetch_missing(self._cfg, [s["es"] for s in summary])
+        consoles.fetch_missing([s["es"] for s in summary])
         counts = catalog.visible_counts(self._cfg, summary)
         out = []
         for s in summary:
@@ -57,8 +58,10 @@ class ServerApi:
             if not emu.get("enabled", True) or not s["games"]:
                 continue
             lg = logos.url_for(s["es"], self._cfg)
+            cn = consoles.url_for(s["es"])
             out.append({"es": s["es"], "display": emu.get("name") or s["display"], "games": s["games"],
                         "cached": 0, "logo": lg["url"], "logo_glow": lg["glow"],
+                        "console": cn["url"], "console_credit": cn["credit"], "console_lum": cn["lum"],
                         "emulator": emu.get("label", ""), "kind": systems.info(s["es"])["kind"]})
         return out
 
@@ -320,6 +323,7 @@ class ServerApi:
             out.append({"es": es, "display": sc.get("name") or systems.info(es)["display"],
                         "default_name": systems.info(es)["display"], "games": s_["games"],
                         "logo": lg["url"], "glow": bool(lg["glow"]), "logo_choice": sc.get("logo", ""),
+                        "console": consoles.url_for(es)["url"], "console_credit": consoles.url_for(es)["credit"],
                         "enabled": sc.get("enabled", True),
                         "emu_rec": sc.get("emu_rec", ""), "core_rec": sc.get("core_rec", ""),
                         "core_default": emucatalog.CORES.get(plat, ""), "cores": list(dict.fromkeys(emulators.cores_for(plat) + emustore.alt_cores(store_idx, es))),
@@ -387,6 +391,58 @@ class ServerApi:
         self._cfg["systems"][es].setdefault("logo_glow", False)
         config.save(self._cfg)
         return {"ok": True, **logos.url_for(es, self._cfg)}
+
+    # ── paczka logo dla wszystkich systemów naraz (jednolity wygląd; w tle — sprawdza adresy) ──
+    def system_logo_packs(self) -> list:
+        return logos.pack_sources()
+
+    def system_logo_pack_apply(self, source: str) -> dict:
+        import threading
+        if source not in {p["id"] for p in logos.pack_sources()}:
+            return {"ok": False, "reason": "Nie ma takiej paczki logo."}
+        job = getattr(self, "_pack_job", None)
+        if job and job["running"]:
+            return {"ok": False, "reason": "Zmiana logo już trwa."}
+        self._pack_job = {"running": True, "source": source, "changed": [], "missing": []}
+
+        def run():
+            try:
+                es_list = [s["es"] for s in library.systems_summary()]
+                r = logos.apply_pack(self._cfg, source, es_list)
+                for es in r.get("changed", []):
+                    self._cfg["systems"][es].setdefault("logo_glow", False)
+                config.save(self._cfg)
+                self._pack_job.update(changed=r.get("changed", []), missing=r.get("missing", []))
+            except Exception:
+                log.exception("paczka logo %s", source)
+            finally:
+                self._pack_job["running"] = False
+        threading.Thread(target=run, daemon=True, name="paczka-logo").start()
+        return {"ok": True}
+
+    def system_logo_pack_status(self) -> dict:
+        return dict(getattr(self, "_pack_job", None) or {"running": False, "source": "", "changed": [], "missing": []})
+
+    # ── zdjęcie konsoli systemu (tło platformy w motywach Lumena; emustart/consoles.py) ──
+    def system_console_candidates(self, es: str) -> list:
+        return [{"id": "commons:" + c["title"], "thumb": c["thumb"], "title": c["title"].removeprefix("File:"),
+                 "credit": c["credit"], "page": c["page"]} for c in consoles.search(es)]
+
+    def system_console_choose(self, es: str, cid: str) -> dict:
+        if not consoles.choose(es, cid):
+            return {"ok": False, "reason": "Nie udało się pobrać tego zdjęcia."}
+        return {"ok": True, **consoles.url_for(es)}
+
+    def system_console_upload(self, es: str, data: str, credit: str = "") -> dict:
+        import base64
+        import binascii
+        try:
+            raw = base64.b64decode(data or "", validate=True)
+        except (binascii.Error, ValueError):
+            raw = b""
+        if not raw or not consoles.upload(es, raw, credit):
+            return {"ok": False, "reason": "To nie jest obraz (PNG, JPG albo WebP)."}
+        return {"ok": True, **consoles.url_for(es)}
 
 
 META_FIELDS = ("title", "developer", "publisher", "year", "genre", "players", "description")

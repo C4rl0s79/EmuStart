@@ -11,6 +11,70 @@ nowym urządzeniu — do sprawdzenia na żywo), Play! (miejsce kart), APK (te sa
 budowania), adaptery pozostałych samodzielnych emulatorów przy pierwszym użyciu, sprawdzenie na żywo (niżej);
 jedno zapytanie przygotowujące grę — po pomiarach kroków z prawdziwych startów.
 
+## [0.56.0] — 2026-11-03
+
+Zakres: serwer (`consoles.py` — nowy, `logos.py`, `srvapi.py`, `srvadmin.py`, panel `web/server.*`), klient Windows i
+Lumen (silnik): `libsync.py`, `api.py` — zdjęcie konsoli przy systemie jak logo. APK: dane dostępne jak logo, interfejs
+telefonu bez zmian.
+
+### Dodane
+- **Zdjęcia konsol platform:** serwer sam szuka zdjęcia konsoli w Wikimedia Commons (tylko wolne licencje: domena
+  publiczna, CC0, CC BY/BY-SA z autorem), odrzuca płyty główne, wnętrza, pudełka i inne generacje, wycina białe tło,
+  zapisuje WebP z autorem, licencją i jasnością. Klienci dostają je jak logo (`/media/_systems/`), także offline.
+- **Panel serwera, Konfiguracja → systemy:** przycisk „Konsola…” — wybór z kandydatów, „auto”, „brak” albo własny plik.
+- **Logo z motywów Playnite:** Aniki Lite, Jonos ReMix, Playnite Platform Logos jako kolejne źródła; przy każdym źródle
+  widać licencję (także „brak licencji w repozytorium”).
+- **Paczka logo dla wszystkich systemów:** jeden zestaw (np. Canvas, Art Book Next, Aniki Lite) zmienia logo każdego
+  systemu, który go ma; system bez logo w paczce zostaje przy swoim.
+
+### Sprawdzone
+- pytest: 497 ✓ (wyszukiwanie i odsiew zdjęć, wycięcie tła, ręczny wybór i wgranie, przekazanie serwer → urządzenie →
+  klient, paczka logo); wyszukiwanie na żywo w Commons dla ~40 systemów; panel w przeglądarce na danych testowych.
+
+### Niesprawdzone
+- serwer na żywo (pobieranie w tle przy prawdziwej bibliotece), panel na prawdziwym serwerze.
+- Bez zdjęcia w Commons: sega32x, msx, fds, wiiu, pokemini (do wgrania ręcznie); Amiga dostaje CD32, C64 — C64GS.
+
+### Plan (2026-11-03): media platform na serwerze — logo, konsola, tło
+Cel (użytkownik): motywy Lumena łączą się z platformą przez to, na czym stoi jej oryginalne logo (nośnik motywu), a tło
+pokazuje konsolę platformy. Grafik konsol użytkownik nie ma — serwer ma się nauczyć je szukać, tak jak logo z motywów
+EmulationStation i Playnite. Jedno miejsce prawdy: serwer pobiera i trzyma media platform, klienci (PC, Lumen, APK)
+dostają je jak dziś logo (`/media/_systems/…`).
+
+Sprawdzone źródła (2026-11-03, przez API GitHuba i Wikimedia Commons, tylko odczyt):
+- **Konsole — Wikimedia Commons, zdjęcia Evana-Amosa:** jeden styl studyjny dla prawie każdej konsoli, powtarzalne nazwy
+  (`<Konsola>-Console-Set.png`, `…-FL.jpg`), część PNG z przezroczystym tłem (Dreamcast, N64, Mega Drive), część JPG na
+  białym tle (Jaguar, PS2 — do wycięcia). Licencje: domena publiczna albo CC BY-SA 3.0 (podanie autora).
+- **Motywy ES-DE:** zdjęć konsol brak. Art Book Next (CC-BY-NC-SA, 213 systemów): kadry z gier, płyty główne, kontury;
+  Alekfull NX (CC-BY-NC-SA, 182 tła): grafika z gier z logo; Canvas (CC0): pady platform w 3 jasnościach, logo.
+- **Motywy Playnite** (40 pełnoekranowych z bazy dodatków): zdjęć konsol brak; logo platform w Aniki Lite (376, nazwy jak
+  LaunchBox, bez licencji), Jonos ReMix (166, bez licencji); Playnite-Platform-Logos (SVG, bez licencji).
+- **LaunchBox:** `Metadata.zip` nie ma grafik platform (tylko opisy w `Platforms.xml`); zdjęcia „Device” są wyłącznie na
+  stronach serwisu, bez API — nieużywane.
+
+Zmiany (kolejność):
+1. Podgląd: konsola z Commons jako tło Kroniki i Horyzontu (prawdziwy CSS Lumena, nośniki logo) — decyzja użytkownika.
+   **Zrobione** (kierunek przyjęty).
+2. Serwer: media platformy (logo, konsola, tło) z zapisem źródła, autora i licencji; automatycznie tylko źródła z jasną
+   licencją (wbudowane, CC0, domena publiczna, CC BY-SA z autorem); do ręcznego wyboru w panelu również motywy ES-DE i
+   Playnite (z widocznym źródłem i licencją, także „brak licencji”) i wgranie własnego pliku. **Paczka dla wszystkich
+   systemów naraz** (użytkownik, 2026-11-03): wybór jednego zestawu logo (np. Canvas, Art Book Next, Aniki Lite) zmienia
+   logo wszystkich systemów, które ten zestaw ma — jednolity wygląd; system, którego paczka nie ma, zostaje przy swoim;
+   ręczny wybór dla jednego systemu zostaje wyjątkiem.
+   **Zrobione:** konsole z Commons (`consoles.py`: tylko wolne licencje, odsiew płyt/wnętrz/innych generacji, wycięcie
+   białego tła, WebP, jasność `lum`, znacznik „nie znaleziono”), w panelu: wybór z kandydatów, „auto”, „brak”, własny
+   plik; logo z motywów Playnite (Aniki Lite, Jonos ReMix, Playnite Platform Logos) z licencją przy każdym źródle;
+   paczka logo dla wszystkich systemów (w tle, wynik: zmienione / bez zmian). Osobne „tło” platformy poza zdjęciem
+   konsoli — nie robione (tłem jest konsola). Logo automatyczne bez zmian (Carbon).
+3. Lumen: tło z konsolą wybranej platformy w Kronice i Horyzoncie; autor zdjęcia w opisie systemu, gdy licencja tego
+   wymaga. Motyw EmuStart bez zmian.
+   **Zrobione (Lumen, gałąź neon-logo):** `lumen-art emusys:<es>/hero` = zdjęcie konsoli, flaga motywu
+   `consoleBackdrop` (Kronika: sepia, Horyzont: chłodna poświata), jasność wyrównana wg `lum`; autor i licencja pokazane
+   przy każdym zdjęciu (także domena publiczna).
+
+Moduły: serwer (pobieranie, magazyn, panel), klient Windows / Lumen (silnik: odczyt mediów jak logo), Lumen (tło);
+APK — media dostępne tak jak logo, użycie w interfejsie telefonu osobno.
+
 ## [0.55.1] — 2026-11-02
 
 Zakres: serwer (`remote.py`, `savesync.py` — nowy `POST /v1/savesync/manifests`, dotychczasowe adresy bez zmian),
