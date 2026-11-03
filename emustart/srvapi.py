@@ -323,6 +323,7 @@ class ServerApi:
             out.append({"es": es, "display": sc.get("name") or systems.info(es)["display"],
                         "default_name": systems.info(es)["display"], "games": s_["games"],
                         "logo": lg["url"], "glow": bool(lg["glow"]), "logo_choice": sc.get("logo", ""),
+                        "console": consoles.url_for(es)["url"], "console_credit": consoles.url_for(es)["credit"],
                         "enabled": sc.get("enabled", True),
                         "emu_rec": sc.get("emu_rec", ""), "core_rec": sc.get("core_rec", ""),
                         "core_default": emucatalog.CORES.get(plat, ""), "cores": list(dict.fromkeys(emulators.cores_for(plat) + emustore.alt_cores(store_idx, es))),
