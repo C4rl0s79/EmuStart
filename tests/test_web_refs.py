@@ -10,7 +10,7 @@ PAGES = {"index": ["app.js", "options.js", "look.js"], "server": ["server.js"]}
 BROWSER = set("""setTimeout setInterval clearInterval clearTimeout requestAnimationFrame cancelAnimationFrame
 parseInt parseFloat isNaN isFinite Number String Boolean Array Object Promise JSON Math Date Set Map WeakMap
 fetch encodeURIComponent decodeURIComponent confirm alert prompt getComputedStyle structuredClone atob btoa
-URL URLSearchParams Image Error Event CustomEvent Proxy CSS queueMicrotask""".split())
+URL URLSearchParams Image Error Event CustomEvent Proxy CSS queueMicrotask FileReader""".split())
 KEYWORDS = set("if for while switch catch function return typeof await new async super import".split())
 
 
