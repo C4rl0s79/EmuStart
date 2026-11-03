@@ -166,6 +166,7 @@ def test_pixel_logo_chosen_before_is_recognised_from_the_file(env):
 
 def test_art_book_next_pack_falls_back_to_alekfull_and_canvas(env, monkeypatch):
     monkeypatch.setattr(logos, "_exists", lambda u: "canvas-es-de" in u and u.endswith("/vectrex.svg"))
-    c = [x for x in logos.candidates({}, "vectrex") if x["source"] == logos.ABN]
-    assert len(c) == 1 and "canvas-es-de" in c[0]["url"] and "CC0" in c[0]["license"]
+    monkeypatch.setattr(logos.art_sources, "fetch", lambda u, timeout=20: SVG)
+    c = [x for x in logos.candidates({}, "vectrex") if x["source"] in ("Art Book Next", "Alekfull NX", "Canvas")]
+    assert len(c) == 1 and c[0]["source"] == "Canvas" and "canvas-es-de" in c[0]["url"] and c[0]["license"] == "CC0"
     assert [p["id"] for p in logos.pack_sources()].count(logos.ABN) == 1

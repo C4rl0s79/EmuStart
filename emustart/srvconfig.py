@@ -62,15 +62,17 @@ def _status(key: str, value: str) -> dict:
     kind = FIELDS[key][1]
     if not value:
         if key == "logo_pack_dir":
-            from emustart import mediastore
-            n = len(mediastore.files("_logopack"))
-            return {"ok": True, "text": f"logo w magazynie: {n}" if n else "nie ustawiono"}
+            return _pack_status(empty="nie ustawiono")
         d = default_dir(key)
         return {"ok": True, "text": f"domyślnie: {d}" if d else "nie ustawiono"}
     p = Path(value)
     try:
         if kind == "file":
             return {"ok": p.is_file(), "text": "jest" if p.is_file() else "serwer nie widzi pliku"}
+        if not p.is_dir() and key == "logo_pack_dir" and not logos_import()["running"]:
+            st = _pack_status()
+            if st["ok"] and st["text"].startswith("logo w magazynie"):
+                return {"ok": True, "text": st["text"] + " (folder już usunięty)"}
         if not p.is_dir():
             return {"ok": False, "text": "serwer nie widzi folderu" + (" — " + _UNC_HINT if _mapped(value) else "")}
         if key == "rom_roots":
@@ -82,8 +84,7 @@ def _status(key: str, value: str) -> dict:
             n = sum(1 for _ in p.rglob("*") if _.is_file())
             return {"ok": True, "text": f"plików: {n}"}
         if key == "logo_pack_dir":
-            from emustart import mediastore
-            return {"ok": True, "text": f"logo w magazynie: {len(mediastore.files('_logopack'))}"}
+            return _pack_status()
         if key == "emu_root":
             ra = any((p / d / "retroarch.exe").is_file() for d in ("", "RetroArch", "retroarch")) or \
                 any(p.glob("*/retroarch.exe"))
@@ -91,6 +92,23 @@ def _status(key: str, value: str) -> dict:
         return {"ok": True, "text": "jest"}
     except OSError as ex:
         return {"ok": False, "text": f"błąd dostępu: {ex}"}
+
+
+def logos_import() -> dict:
+    from emustart import logos
+    return logos.IMPORT
+
+
+def _pack_status(empty: str = "") -> dict:
+    """Paczka logo: import w toku, błąd ostatniego importu albo liczba logo w magazynie."""
+    from emustart import mediastore
+    imp = logos_import()
+    if imp["running"]:
+        return {"ok": True, "text": f"wczytuję paczkę: {imp['done']} / {imp['total'] or '…'}", "busy": True}
+    n = len(mediastore.files("_logopack"))
+    if imp["error"]:
+        return {"ok": False, "text": f"{imp['error']} (logo w magazynie: {n})"}
+    return {"ok": True, "text": f"logo w magazynie: {n}" if n or not empty else empty}
 
 
 def _mapped(value: str) -> bool:
@@ -156,7 +174,7 @@ def set_value(api, key: str, value) -> dict:
         cfg[key] = v
     config.save(cfg)
     log.info("panel: %s = %s", key, cfg.get(key))
-    if changed:
+    if changed or key == "logo_pack_dir":            # ta sama ścieżka paczki — wczytaj ponownie
         _apply(api, key)
     return {"ok": True, **get(cfg)}
 
@@ -168,12 +186,17 @@ def _apply(api, key: str) -> None:
         from emustart import remote
         remote.init_nas(api._cfg)
     elif key == "logo_pack_dir" and api._cfg.get("logo_pack_dir"):
+        if logos_import()["running"]:
+            return
+        logos_import().update(running=True, done=0, total=0, error="")   # status „wczytuję” od razu
         def run(folder=api._cfg["logo_pack_dir"]):
             from emustart import logos
             try:
                 logos.import_pack(Path(folder))
             except Exception:
                 log.exception("paczka logo")
+            finally:
+                logos.IMPORT["running"] = False
         threading.Thread(target=run, daemon=True, name="paczka-logo").start()
     elif key == "mame_exe":
         threading.Thread(target=api._arcade_meta, daemon=True, name="arcade").start()

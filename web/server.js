@@ -513,11 +513,18 @@ document.querySelectorAll("#tabs button").forEach((b) => b.addEventListener("cli
 let cfgFields = [];
 function cfgMsg(text, ok) { toast(text, ok); }
 const stHtml = (s) => `<span class="st ${s.ok ? "ok" : "bad"}">${esc(s.text)}</span>`;
+let cfgPoll = 0;
 async function refreshConfig() {
   const r = await admin("config").catch(() => null);
   if (!r?.ok) return cfgMsg("Serwer nie odpowiada.");
   cfgFields = r.fields;
   renderConfig();
+  pollWhileBusy();
+}
+// import paczki logo w toku — pole odświeżane, aż się skończy (postęp, potem liczba logo)
+function pollWhileBusy() {
+  clearTimeout(cfgPoll);
+  if (cfgFields.some((f) => !Array.isArray(f.status) && f.status?.busy)) cfgPoll = setTimeout(refreshConfig, 2000);
 }
 function renderConfig() {
   $("cfgFields").innerHTML = cfgFields.map((f, i) => {
@@ -569,6 +576,7 @@ async function saveField(f, value) {
   if (!r?.ok) return cfgMsg(r?.reason || "Serwer nie odpowiada.");
   cfgFields = r.fields;
   renderConfig();
+  pollWhileBusy();
   cfgMsg(`Zapisano: ${f.label}.` + (f.key === "rom_roots" ? " Przeładowuję listę gier (zakładka Stan)." : ""), true);
 }
 

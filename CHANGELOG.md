@@ -11,6 +11,34 @@ nowym urządzeniu — do sprawdzenia na żywo), Play! (miejsce kart), APK (te sa
 budowania), adaptery pozostałych samodzielnych emulatorów przy pierwszym użyciu, sprawdzenie na żywo (niżej);
 jedno zapytanie przygotowujące grę — po pomiarach kroków z prawdziwych startów.
 
+## [0.56.5] — 2026-11-03
+
+Zakres: serwer (`logos.py`, `srvconfig.py`, panel `web/server.*`). Klient Windows i Lumen — nowy silnik bez zmian
+zachowania (te funkcje są tylko w panelu serwera). APK bez zmian. Nie dotyka: logo wbudowanych i pobieranych
+automatycznie, paczek do zmiany logo wszystkich systemów naraz, listy gier.
+
+### Poprawione
+- **Okno wyboru logo:** logo mieści się w całości w ramce (stała wysokość, bez przycinania), małe grafiki są
+  powiększane, pixel-art do 64×64 ostro (piksel w piksel); podpis w najwyżej dwóch wierszach, pełny i wymiary pliku
+  w podpowiedzi.
+- **Zła ścieżka paczki logo nie kasuje wczytanej paczki:** import, który nie znajdzie żadnego obrazka, kończy się
+  błędem w panelu, magazyn zostaje.
+- **Postęp importu paczki:** pole „Paczka logo platform” pokazuje „wczytuję paczkę: N / M” i odświeża się samo, potem
+  liczbę logo (wcześniej „logo w magazynie: 0” zaraz po zapisie, choć import trwał). Po usunięciu folderu — liczba
+  logo „(folder już usunięty)” zamiast „serwer nie widzi folderu”.
+- **Zapis tej samej ścieżki wczytuje paczkę ponownie** (wcześniej tylko zmiana ścieżki).
+- **Art Book Next, Alekfull NX i Canvas w ręcznym wyborze znowu osobno, gdy plik się różni:** 0.56.4 połączyło je
+  w jedną propozycję, a 8 z 73 systemów (m.in. n64dd, 3do, psp, wii) ma w nich różne logo. Ten sam plik — jedna
+  propozycja. Paczka do zmiany wszystkich systemów naraz — dalej jedna.
+
+### Sprawdzone
+- pytest (cały zestaw), nowe testy importu (zła ścieżka, postęp, usunięty folder, ponowny zapis, odczyt z innego
+  wątku); na żywo z GitHubem: n64dd — ABN i Canvas, wii — ABN i Alekfull, snes — jedna; okno wyboru — zrzut
+  w przeglądarce (Edge headless) z logo z paczki PyLinks.
+- Nie odtworzone: paczka niewidoczna do restartu serwera — test odczytu z wątku, który czytał magazyn przed
+  importem, widzi nową paczkę. Najpewniej panel pokazał stan sprzed końca importu (teraz widać postęp).
+- Nie sprawdzone tutaj: panel na serwerze użytkownika (okno WebView2).
+
 ## [0.56.4] — 2026-11-03
 
 Zakres: serwer (`logos.py`, `srvapi.py`, `remote.py`, panel), klient Windows i Lumen (silnik: `libsync.py`, `api.py` —

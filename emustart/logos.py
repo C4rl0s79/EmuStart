@@ -106,8 +106,11 @@ def url_for(es: str, cfg: dict | None = None) -> dict:
 
 # motywy EmulationStation / ES-DE z logo systemów (nazwy folderów ES pasują 1:1) — pobiera
 # serwer, bez żadnych plików na dysku; propozycje sprawdzane naraz (puste ramki pomijane)
-# Alekfull NX i Canvas mają te same pliki logo co Art Book Next (sha1, sprawdzone 2026-11-03) — jedna paczka
+# Alekfull NX i Canvas mają zwykle te same pliki logo co Art Book Next — jedna paczka do zmiany wszystkich
+# systemów naraz; w ręcznym wyborze osobno, gdy plik się różni (sha1 2026-11-03: 8 z 73 systemów, np. n64dd, wii)
 ABN = "Art Book Next / Alekfull NX / Canvas"
+ABN_REPOS = {"/art-book-next-es-de/": ("Art Book Next", "CC BY-NC-SA"),
+             "/alekfull-nx-es-de/": ("Alekfull NX", "CC BY-NC-SA"), "/canvas-es-de/": ("Canvas", "CC0")}
 ES_THEMES = (
     (ABN, GH + "anthonycaccese/art-book-next-es-de/main/_inc/systems/logos/{es}.svg"),
     (ABN, GH + "anthonycaccese/alekfull-nx-es-de/main/_inc/systems/logos/{es}.svg"),     # logo, których ABN nie ma
@@ -261,31 +264,46 @@ PACK_STORE = "_logopack"      # paczka logo w jednym pliku: media/_logopack.medi
 PACK_SEP = "~"                # nazwa w magazynie: <wariant>~<plik>, np. Light_Color~Sega Saturn-01.png
 
 
+# import paczki w toku / wynik ostatniego (pole „Paczka logo platform” w panelu)
+IMPORT = {"running": False, "done": 0, "total": 0, "error": ""}
+
+
 def import_pack(folder: Path) -> int:
     """Folder paczki logo (np. platform_logos z PyLinks: _variants/<wariant>/*.png albo same
     obrazy) → magazyn _logopack — jeden plik zamiast tysięcy małych (kopiowanie serwera,
-    kopie zapasowe). Zastępuje poprzednią zawartość. Zwraca liczbę logo."""
+    kopie zapasowe). Zastępuje poprzednią zawartość. Zwraca liczbę logo.
+    Folder bez żadnego obrazka — błąd, magazyn zostaje (zła ścieżka nie kasuje wczytanej paczki)."""
     from emustart import mediastore
-    root = Path(folder)
-    if (root / "_variants").is_dir():
-        root = root / "_variants"
-    if not root.is_dir():
-        raise OSError(f"nie ma folderu {folder}")
-    dirs = [(d, d.name) for d in sorted(root.iterdir()) if d.is_dir() and not d.name.startswith("_")]
-    dirs.append((root, "paczka"))
-    names = set()
+    IMPORT.update(running=True, done=0, total=0, error="")
+    try:
+        root = Path(folder)
+        if (root / "_variants").is_dir():
+            root = root / "_variants"
+        if not root.is_dir():
+            raise OSError(f"nie ma folderu {folder}")
+        dirs = [(d, d.name) for d in sorted(root.iterdir()) if d.is_dir() and not d.name.startswith("_")]
+        dirs.append((root, "paczka"))
+        todo = [(f"{variant}{PACK_SEP}{f.name}", f) for d, variant in dirs for f in sorted(d.iterdir())
+                if f.is_file() and f.suffix.lower() in _IMG and PACK_SEP not in f.name]
+        if not todo:
+            raise OSError(f"w folderze {folder} nie ma obrazków logo — paczka bez zmian")
+        IMPORT["total"] = len(todo)
 
-    def items():
-        for d, variant in dirs:
-            for f in sorted(d.iterdir()):
-                if f.is_file() and f.suffix.lower() in _IMG and PACK_SEP not in f.name:
-                    names.add(f"{variant}{PACK_SEP}{f.name}")
-                    yield f"{variant}{PACK_SEP}{f.name}", f.read_bytes(), f.stat().st_mtime
-    n = mediastore.put_many(PACK_STORE, items())
-    for old in set(mediastore.files(PACK_STORE)) - names:
-        mediastore.delete(PACK_STORE, old)
-    log.info("paczka logo z %s: %d plików", folder, n)
-    return n
+        def items():
+            for name, f in todo:
+                yield name, f.read_bytes(), f.stat().st_mtime
+                IMPORT["done"] += 1
+        n = mediastore.put_many(PACK_STORE, items())
+        names = {name for name, _f in todo}
+        for old in set(mediastore.files(PACK_STORE)) - names:
+            mediastore.delete(PACK_STORE, old)
+        log.info("paczka logo z %s: %d plików", folder, n)
+        return n
+    except Exception as ex:
+        IMPORT["error"] = str(ex)
+        raise
+    finally:
+        IMPORT["running"] = False
 
 
 def _pack_entries() -> list:
@@ -315,12 +333,17 @@ def candidates(cfg: dict, es: str) -> list:
     web = _web(es)                                    # motywy ES, Playnite i ikony RetroArcha
     with ThreadPoolExecutor(max_workers=12) as ex:    # pustych ramek (404) nie pokazujemy
         found = list(ex.map(lambda w: _exists(w[1]), web))
-    seen = set()
+    seen, abn_files = set(), set()
     for (src, u, label), ok in zip(web, found):
-        if ok and src not in seen:                    # z motywu pierwsza istniejąca nazwa
-            seen.add(src)
-            out.append({"id": "url:" + u, "url": u, "source": src, "label": label,
-                        "license": license_of(src)})
+        name, lic = (_abn_repo(u) if src == ABN else (src, license_of(src)))
+        if ok and name not in seen:                   # z motywu pierwsza istniejąca nazwa
+            seen.add(name)
+            if src == ABN:                            # ten sam plik co w motywie wyżej — bez powtórki
+                digest = _sha1_of(u)
+                if digest and digest in abn_files:
+                    continue
+                abn_files.add(digest)
+            out.append({"id": "url:" + u, "url": u, "source": name, "label": label, "license": lic})
     # paczka (nazwy jak LaunchBox: „Atari Lynx”, „Sony Playstation”) — po wszystkich pełnych nazwach
     targets = [t for t in dict.fromkeys([n.replace(" - ", " ") for n in systems.names(es) if " " in n]
                                         + [info["display"], LB_NAMES.get(es, "")]) if t]
@@ -335,6 +358,17 @@ def candidates(cfg: dict, es: str) -> list:
         out.append({"id": "pack:" + key, "url": f"/media/{PACK_STORE}/" + urllib.parse.quote(key),
                     "source": f"paczka ({label})", "label": name})
     return out
+
+
+def _abn_repo(url: str) -> tuple:
+    """(nazwa motywu, licencja) adresu z grupy Art Book Next / Alekfull NX / Canvas."""
+    return next((v for k, v in ABN_REPOS.items() if k in url), (ABN, license_of(ABN)))
+
+
+def _sha1_of(url: str) -> str:
+    import hashlib
+    data = art_sources.fetch(url, timeout=8)
+    return hashlib.sha1(data).hexdigest() if data else ""
 
 
 def _exists(url: str) -> bool:
