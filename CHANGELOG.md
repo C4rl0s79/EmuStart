@@ -30,14 +30,23 @@ Sprawdzone źródła (2026-11-03, przez API GitHuba i Wikimedia Commons, tylko o
 
 Zmiany (kolejność):
 1. Podgląd: konsola z Commons jako tło Kroniki i Horyzontu (prawdziwy CSS Lumena, nośniki logo) — decyzja użytkownika.
+   **Zrobione** (kierunek przyjęty).
 2. Serwer: media platformy (logo, konsola, tło) z zapisem źródła, autora i licencji; automatycznie tylko źródła z jasną
    licencją (wbudowane, CC0, domena publiczna, CC BY-SA z autorem); do ręcznego wyboru w panelu również motywy ES-DE i
    Playnite (z widocznym źródłem i licencją, także „brak licencji”) i wgranie własnego pliku. **Paczka dla wszystkich
    systemów naraz** (użytkownik, 2026-11-03): wybór jednego zestawu logo (np. Canvas, Art Book Next, Aniki Lite) zmienia
    logo wszystkich systemów, które ten zestaw ma — jednolity wygląd; system, którego paczka nie ma, zostaje przy swoim;
    ręczny wybór dla jednego systemu zostaje wyjątkiem.
+   **Zrobione:** konsole z Commons (`consoles.py`: tylko wolne licencje, odsiew płyt/wnętrz/innych generacji, wycięcie
+   białego tła, WebP, jasność `lum`, znacznik „nie znaleziono”), w panelu: wybór z kandydatów, „auto”, „brak”, własny
+   plik; logo z motywów Playnite (Aniki Lite, Jonos ReMix, Playnite Platform Logos) z licencją przy każdym źródle;
+   paczka logo dla wszystkich systemów (w tle, wynik: zmienione / bez zmian). Osobne „tło” platformy poza zdjęciem
+   konsoli — nie robione (tłem jest konsola). Logo automatyczne bez zmian (Carbon).
 3. Lumen: tło z konsolą wybranej platformy w Kronice i Horyzoncie; autor zdjęcia w opisie systemu, gdy licencja tego
    wymaga. Motyw EmuStart bez zmian.
+   **Zrobione (Lumen, gałąź neon-logo):** `lumen-art emusys:<es>/hero` = zdjęcie konsoli, flaga motywu
+   `consoleBackdrop` (Kronika: sepia, Horyzont: chłodna poświata), jasność wyrównana wg `lum`; autor i licencja pokazane
+   przy każdym zdjęciu (także domena publiczna).
 
 Moduły: serwer (pobieranie, magazyn, panel), klient Windows / Lumen (silnik: odczyt mediów jak logo), Lumen (tło);
 APK — media dostępne tak jak logo, użycie w interfejsie telefonu osobno.
