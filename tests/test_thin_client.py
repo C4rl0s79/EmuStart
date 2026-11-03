@@ -177,3 +177,5 @@ def test_new_logo_or_console_alone_tells_the_ui_to_redraw(srv, monkeypatch):
     monkeypatch.setattr(libsync, "sync", lambda cfg, force=False: {"ok": True, "changed": 0, "look": True})
     a._thin_sync()
     assert a._lib_version == 8
+    a._after_sync({"ok": True, "changed": 2})                                # pełne skanowanie — to samo miejsce
+    assert a._lib_version == 9

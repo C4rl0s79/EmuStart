@@ -353,13 +353,18 @@ def _store_custom(es: str, data: bytes, ext: str) -> None:
     _put(f"{es}.custom.{ext}", data)
 
 
+PROGRESS = mediaprogress.Progress("logo")            # pobieranie w tle — pasek w panelu serwera
+_retry_at: dict = {}              # es → kiedy znowu próbować po błędzie sieci (nie przy każdym zapytaniu urządzenia)
+RETRY_AFTER = 600
+
+
 def fetch_missing(cfg: dict, es_list) -> None:
     """W tle: logo dla systemów bez wbudowanego i bez pobranego."""
+    import time
     todo = []
     with _lock:
         for es in es_list:
-            if es in _busy or bundled(systems.info(es)["plat"]) or downloaded(es) \
-                    or _has(f"{es}.none"):
+            if es in _busy or bundled(systems.info(es)["plat"]) or downloaded(es)                     or _has(f"{es}.none") or _retry_at.get(es, 0) > time.monotonic():
                 continue
             _busy.add(es)
             todo.append(es)
@@ -368,10 +373,9 @@ def fetch_missing(cfg: dict, es_list) -> None:
         threading.Thread(target=_run, args=(cfg, todo), daemon=True, name="logos").start()
 
 
-PROGRESS = mediaprogress.Progress("logo")            # pobieranie w tle — pasek w panelu serwera
-
-
 def _run(cfg: dict, todo: list) -> None:
+    import time
+    import urllib.parse
     for es in todo:
         t0, result, err = PROGRESS.begin(es), "retry", ""
         art_sources.clear_error()
@@ -381,18 +385,18 @@ def _run(cfg: dict, todo: list) -> None:
                 _put(f"{es}.svg", data)
                 result = "found"
                 continue
-            import urllib.parse
             name = systems.info(es)["libretro"]
             icon = art_sources.fetch(RA_ICON.format(theme="systematic", name=urllib.parse.quote(name)),
                                      timeout=15) if name else None
             if icon and art_sources.is_image(icon):
                 _put(f"{es}.png", icon)
                 result = "found"
-            elif data is not None or art_sources.online():
-                _put(f"{es}.none", b"")                 # sprawdzone — logo nie ma
+            # oba źródła odpowiedziały (np. 404) — sprawdzone, logo nie ma; błąd sieci — ponowna próba po przerwie
+            elif not art_sources.last_error() and (data is not None or art_sources.online()):
+                _put(f"{es}.none", b"")
                 result = "none"
             else:
-                err = art_sources.last_error() or "brak odpowiedzi"
+                err = art_sources.last_error() or "brak sieci"
         except Exception as ex:
             log.exception("logo %s", es)
             err = str(ex)[:120]
@@ -400,3 +404,7 @@ def _run(cfg: dict, todo: list) -> None:
             PROGRESS.end(es, t0, result, err)
             with _lock:
                 _busy.discard(es)
+                if result == "retry":
+                    _retry_at[es] = time.monotonic() + RETRY_AFTER
+                else:
+                    _retry_at.pop(es, None)

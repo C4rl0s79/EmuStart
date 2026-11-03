@@ -334,7 +334,7 @@ async function refreshSysLook() {
 }
 
 /* ── pobieranie logo i zdjęć konsol w tle: postęp, bieżący system, ostatni błąd ── */
-let mediaWasRunning = false;
+let mediaRunning = false, mediaSeen = null, mediaRedraw = false;
 function mediaLine(label, p) {
   if (!p.total) return "";
   const head = p.running ? `${label}: ${p.done} z ${p.total}` + (p.current ? ` — teraz ${p.current}` : "")
@@ -343,19 +343,26 @@ function mediaLine(label, p) {
     (p.slowest >= 10 ? ` · najdłużej ${p.slowest} s na system` : "") + (p.last_error ? ` · ostatni błąd: ${p.last_error}` : "");
 }
 async function mediaProgTick() {
-  const r = await admin("systems_media_progress").catch(() => null);
+  const r = curTab === "konfig" ? await admin("systems_media_progress").catch(() => null) : null;   // tylko na tej zakładce
   if (r?.ok) {
-    const running = r.logos.running || r.consoles.running;
+    mediaRunning = r.logos.running || r.consoles.running;
     $("mediaProg").hidden = !(r.logos.total || r.consoles.total);
     for (const [k, label, p] of [["logo", "Logo", r.logos], ["con", "Konsole", r.consoles]]) {
       $(k + "ProgText").textContent = mediaLine(label, p);
       $(k + "ProgBar").parentElement.hidden = !p.total;
       $(k + "ProgBar").style.width = p.total ? (100 * p.done / p.total).toFixed(0) + "%" : "0%";
     }
-    if (mediaWasRunning && !running) refreshSysLook();          // nowe grafiki w wierszach systemów
-    mediaWasRunning = running;
+    // coś doszło od ostatniego razu (także krótka partia między odczytami) — nowe grafiki w wierszach systemów
+    const seen = [r.logos, r.consoles].map((p) => `${p.started}:${p.done}`).join("|");
+    if (mediaSeen !== null && seen !== mediaSeen) mediaRedraw = true;
+    mediaSeen = seen;
   }
-  setTimeout(mediaProgTick, mediaWasRunning ? 1500 : 5000);
+  // tabela przebudowuje się dopiero po partii i nie w trakcie edycji wiersza (nazwa, wybory zostają)
+  if (mediaRedraw && !mediaRunning && curTab === "konfig" && !$("sysLook").contains(document.activeElement)) {
+    mediaRedraw = false;
+    refreshSysLook();
+  }
+  setTimeout(mediaProgTick, mediaRunning ? 1500 : 5000);
 }
 mediaProgTick();
 

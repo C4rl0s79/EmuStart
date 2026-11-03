@@ -103,8 +103,49 @@ def test_found_but_download_failed_is_tried_again_later(env, monkeypatch):
     monkeypatch.setattr(consoles, "search", lambda es: [{"title": "File:PS2-Versions.jpg", "thumb": "x"}])
     monkeypatch.setattr(consoles, "fetch", lambda es, cand: False)
     monkeypatch.setattr(consoles.art_sources, "online", lambda: True)
+    monkeypatch.setattr(consoles.art_sources, "last_error", lambda: "upload.wikimedia.org: HTTP 503")
     consoles._run(["ps2"])
     assert not mediastore.exists(consoles.STORE, "ps2.console.none")
+    # po błędzie sieci — przerwa: kolejne zapytania urządzeń nie szukają od nowa co chwilę
+    started = []
+    monkeypatch.setattr(consoles.threading, "Thread", lambda *a, **k: started.append(k) or type("T", (), {"start": lambda self: None})())
+    consoles.fetch_missing(["ps2"])
+    assert started == []
+    consoles.choose("ps2", "auto")                                          # ręczne „automatycznie” — od razu
+    consoles.fetch_missing(["ps2"])
+    assert len(started) == 1
+
+
+def test_candidates_that_are_not_images_mean_no_photo_not_a_network_error(env, monkeypatch):
+    monkeypatch.setattr(consoles, "search", lambda es: [{"title": "File:X.jpg", "thumb": "x"}])
+    monkeypatch.setattr(consoles.art_sources, "fetch", lambda url, timeout=20: b"to nie obraz")
+    monkeypatch.setattr(consoles, "PROGRESS", consoles.mediaprogress.Progress("konsola"))
+    consoles.PROGRESS.start(1)
+    consoles._run(["ps2"])
+    p = consoles.PROGRESS.snapshot()
+    assert mediastore.exists(consoles.STORE, "ps2.console.none") and p["none"] == 1 and not p["last_error"]
+
+
+def test_logo_network_error_is_retried_404_is_an_answer(env, monkeypatch):
+    import urllib.error
+    from emustart import art_sources, logos
+
+    def answer(code):
+        def urlopen(*a, **k):
+            raise urllib.error.HTTPError("https://raw.githubusercontent.com/x", code, "x", {}, None)
+        return urlopen
+    monkeypatch.setattr(art_sources, "online", lambda: True)
+    monkeypatch.setattr(logos, "PROGRESS", consoles.mediaprogress.Progress("logo"))
+    logos.PROGRESS.start(2)
+    monkeypatch.setattr(art_sources.urllib.request, "urlopen", answer(429))
+    logos._run({}, ["vectrex"])
+    assert not logos._has("vectrex.none")                                   # chwilowy błąd — bez znacznika
+    monkeypatch.setattr(art_sources.urllib.request, "urlopen", answer(404))
+    logos._retry_at.clear()
+    logos._run({}, ["vectrex"])
+    assert logos._has("vectrex.none")                                       # oba źródła: nie ma
+    p = logos.PROGRESS.snapshot()
+    assert (p["retry"], p["none"]) == (1, 1) and "HTTP 429" in p["last_error"]
 
 
 def test_choose_none_and_auto(env, monkeypatch):

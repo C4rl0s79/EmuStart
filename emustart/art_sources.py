@@ -51,16 +51,17 @@ TGDB_PLATFORMS = {
 }
 
 
-_err = threading.local()           # ostatni błąd fetch() w tym wątku (postęp pobierania w panelu, log)
+_err = threading.local()           # błąd sieci fetch() w tym wątku (postęp pobierania w panelu, log)
 
 
 def last_error() -> str:
-    """Dlaczego ostatnie fetch() w tym wątku nie zwróciło danych („HTTP 429”, „timeout”); pusty — udane."""
+    """Pierwszy chwilowy błąd sieci od clear_error() w tym wątku („HTTP 429”, „timed out”) — wtedy brak wyniku
+    nie znaczy „nie ma”. 404 / 410 to odpowiedź „nie ma”, nie błąd. Pusty — wszystkie zapytania odpowiedziały."""
     return getattr(_err, "text", "")
 
 
 def clear_error() -> None:
-    """Przed nową pozycją (system): błąd poprzedniej nie przechodzi na tę, która nic nie pobiera."""
+    """Przed nową pozycją (system): błąd poprzedniej nie przechodzi na kolejną."""
     _err.text = ""
 
 
@@ -69,13 +70,12 @@ def fetch(url: str, hdrs: dict | None = None, data: bytes | None = None,
     try:
         req = urllib.request.Request(url, data=data, headers={**UA, **(hdrs or {})})
         with urllib.request.urlopen(req, timeout=timeout) as r:
-            body = r.read()
-        _err.text = ""
-        return body
+            return r.read()
     except Exception as ex:
         code = getattr(ex, "code", None)
-        _err.text = f"{urllib.parse.urlsplit(url).hostname}: " + (f"HTTP {code}" if code else
-                                                                   (str(ex) or type(ex).__name__)[:80])
+        if code not in (404, 410) and not last_error():
+            _err.text = f"{urllib.parse.urlsplit(url).hostname}: " + (f"HTTP {code}" if code else
+                                                                       (str(ex) or type(ex).__name__)[:80])
         return None
 
 

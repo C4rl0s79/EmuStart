@@ -19,6 +19,7 @@ import json
 import logging
 import re
 import threading
+import time
 import urllib.parse
 
 from emustart import art_sources, mediaprogress, systems
@@ -47,6 +48,8 @@ _NOT_COMPUTER = {"console", "cd32", "cdtv", "c64gs", "screen", "splash", "menu",
                  "opened", "expansions", "cover", "top"}
 _busy: set = set()
 _lock = threading.Lock()
+_retry_at: dict = {}              # es → kiedy znowu próbować po błędzie sieci (nie przy każdym zapytaniu urządzenia)
+RETRY_AFTER = 600
 
 # motywy ES / ES-DE z grafikami konsol (sprawdzone 2026-11-03 na liście ES-DE i najpopularniejszych
 # es-theme-* z GitHuba; pliki nazwane kodami ES jak logo). Trzy różne style; ten sam zestaw renderów
@@ -249,6 +252,7 @@ def choose(es: str, cid: str) -> bool:
     if cid == "auto":                       # następna lista systemów (fetch_missing) pobierze od nowa
         for f in (f"{es}.console.webp", f"{es}.console.json", f"{es}.console.none"):
             mediastore.delete(STORE, f)
+        _retry_at.pop(es, None)
         return True
     if cid.startswith("commons:"):
         hit = next((c for c in search(es) if c["title"] == cid[8:]), None)     # tylko z propozycji
@@ -335,7 +339,7 @@ def fetch_missing(es_list) -> None:
     with _lock:
         for es in es_list:
             if es in _busy or mediastore.exists(STORE, f"{es}.console.webp") \
-                    or mediastore.exists(STORE, f"{es}.console.none"):
+                    or mediastore.exists(STORE, f"{es}.console.none") or _retry_at.get(es, 0) > time.monotonic():
                 continue
             _busy.add(es)
             todo.append(es)
@@ -351,15 +355,16 @@ def _run(todo: list) -> None:
         art_sources.clear_error()
         try:
             found = search(es)
-            err = art_sources.last_error()
             if any(fetch(es, c) for c in found[:3]):
-                result, err = "found", ""
-            elif not found and not err and (art_sources.online() or systems.info(es)["kind"] == "arcade"):
-                mediastore.put(STORE, f"{es}.console.none", b"")          # sprawdzone — zdjęcia nie ma
+                result = "found"
+            # wszystkie zapytania odpowiedziały: nic nie ma albo propozycje to nie obrazy — sprawdzone, bez zdjęcia
+            elif not art_sources.last_error() and (found or systems.info(es)["kind"] == "arcade"
+                                                   or art_sources.online()):
+                mediastore.put(STORE, f"{es}.console.none", b"")
                 result = "none"
             else:
-                # błąd sieci przy szukaniu albo pobieraniu — bez znacznika, następna lista systemów spróbuje znowu
-                err = err or art_sources.last_error() or "brak odpowiedzi"
+                # błąd sieci (np. HTTP 429) albo brak sieci — bez znacznika; ponowna próba po przerwie
+                err = art_sources.last_error() or "brak sieci"
         except Exception as ex:
             log.exception("konsola %s", es)
             err = str(ex)[:120]
@@ -367,3 +372,7 @@ def _run(todo: list) -> None:
             PROGRESS.end(es, t0, result, err)
             with _lock:
                 _busy.discard(es)
+                if result == "retry":
+                    _retry_at[es] = time.monotonic() + RETRY_AFTER
+                else:
+                    _retry_at.pop(es, None)
