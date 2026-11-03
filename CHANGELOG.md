@@ -11,6 +11,37 @@ nowym urządzeniu — do sprawdzenia na żywo), Play! (miejsce kart), APK (te sa
 budowania), adaptery pozostałych samodzielnych emulatorów przy pierwszym użyciu, sprawdzenie na żywo (niżej);
 jedno zapytanie przygotowujące grę — po pomiarach kroków z prawdziwych startów.
 
+### Plan (2026-11-03): media platform na serwerze — logo, konsola, tło
+Cel (użytkownik): motywy Lumena łączą się z platformą przez to, na czym stoi jej oryginalne logo (nośnik motywu), a tło
+pokazuje konsolę platformy. Grafik konsol użytkownik nie ma — serwer ma się nauczyć je szukać, tak jak logo z motywów
+EmulationStation i Playnite. Jedno miejsce prawdy: serwer pobiera i trzyma media platform, klienci (PC, Lumen, APK)
+dostają je jak dziś logo (`/media/_systems/…`).
+
+Sprawdzone źródła (2026-11-03, przez API GitHuba i Wikimedia Commons, tylko odczyt):
+- **Konsole — Wikimedia Commons, zdjęcia Evana-Amosa:** jeden styl studyjny dla prawie każdej konsoli, powtarzalne nazwy
+  (`<Konsola>-Console-Set.png`, `…-FL.jpg`), część PNG z przezroczystym tłem (Dreamcast, N64, Mega Drive), część JPG na
+  białym tle (Jaguar, PS2 — do wycięcia). Licencje: domena publiczna albo CC BY-SA 3.0 (podanie autora).
+- **Motywy ES-DE:** zdjęć konsol brak. Art Book Next (CC-BY-NC-SA, 213 systemów): kadry z gier, płyty główne, kontury;
+  Alekfull NX (CC-BY-NC-SA, 182 tła): grafika z gier z logo; Canvas (CC0): pady platform w 3 jasnościach, logo.
+- **Motywy Playnite** (40 pełnoekranowych z bazy dodatków): zdjęć konsol brak; logo platform w Aniki Lite (376, nazwy jak
+  LaunchBox, bez licencji), Jonos ReMix (166, bez licencji); Playnite-Platform-Logos (SVG, bez licencji).
+- **LaunchBox:** `Metadata.zip` nie ma grafik platform (tylko opisy w `Platforms.xml`); zdjęcia „Device” są wyłącznie na
+  stronach serwisu, bez API — nieużywane.
+
+Zmiany (kolejność):
+1. Podgląd: konsola z Commons jako tło Kroniki i Horyzontu (prawdziwy CSS Lumena, nośniki logo) — decyzja użytkownika.
+2. Serwer: media platformy (logo, konsola, tło) z zapisem źródła, autora i licencji; automatycznie tylko źródła z jasną
+   licencją (wbudowane, CC0, domena publiczna, CC BY-SA z autorem); do ręcznego wyboru w panelu również motywy ES-DE i
+   Playnite (z widocznym źródłem i licencją, także „brak licencji”) i wgranie własnego pliku. **Paczka dla wszystkich
+   systemów naraz** (użytkownik, 2026-11-03): wybór jednego zestawu logo (np. Canvas, Art Book Next, Aniki Lite) zmienia
+   logo wszystkich systemów, które ten zestaw ma — jednolity wygląd; system, którego paczka nie ma, zostaje przy swoim;
+   ręczny wybór dla jednego systemu zostaje wyjątkiem.
+3. Lumen: tło z konsolą wybranej platformy w Kronice i Horyzoncie; autor zdjęcia w opisie systemu, gdy licencja tego
+   wymaga. Motyw EmuStart bez zmian.
+
+Moduły: serwer (pobieranie, magazyn, panel), klient Windows / Lumen (silnik: odczyt mediów jak logo), Lumen (tło);
+APK — media dostępne tak jak logo, użycie w interfejsie telefonu osobno.
+
 ## [0.55.1] — 2026-11-02
 
 Zakres: serwer (`remote.py`, `savesync.py` — nowy `POST /v1/savesync/manifests`, dotychczasowe adresy bez zmian),
