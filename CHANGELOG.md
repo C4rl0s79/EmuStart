@@ -11,6 +11,33 @@ nowym urządzeniu — do sprawdzenia na żywo), Play! (miejsce kart), APK (te sa
 budowania), adaptery pozostałych samodzielnych emulatorów przy pierwszym użyciu, sprawdzenie na żywo (niżej);
 jedno zapytanie przygotowujące grę — po pomiarach kroków z prawdziwych startów.
 
+## [0.56.4] — 2026-11-03
+
+Zakres: serwer (`logos.py`, `srvapi.py`, `remote.py`, panel), klient Windows i Lumen (silnik: `libsync.py`, `api.py` —
+przekazanie znacznika pixel-artu). APK bez zmian (dostaje te same pliki logo co dotąd; znacznik w `/systems`, nieużywany).
+Nie dotyka: logo wbudowanych, pobieranych automatycznie (Carbon / RetroArch systematic) ani logo SVG.
+
+### Poprawione
+- **Paczki logo „takie same”:** Art Book Next, Alekfull NX i Canvas mają te same pliki logo (sprawdzone sha1) — jedna
+  paczka „Art Book Next / Alekfull NX / Canvas” (Alekfull NX i Canvas jako zapasowe adresy dla logo, których ABN nie ma).
+  Carbon / Simple / Pixel / SNES Mini oraz Aniki Lite / Jonos ReMix to styl oficjalnych logo producentów — tak wyglądają
+  te motywy (nie błąd).
+- **Jonos ReMix (i Aniki Lite) dawały SNES-owi logo NES:** z nazwy „Super Nintendo Entertainment System” odcinane było
+  pierwsze słowo jak nazwa producenta; teraz tylko prawdziwi producenci (Sony, Nintendo, Sega…).
+- **Playnite Platform Logos usunięte:** kwadrat 256×256 z małą plakietką — w ramce logo wyglądały jak kropka.
+
+### Dodane
+- **Ikony RetroArcha jako paczki logo** (systematic, monochrome, flatui, flatux, retrosystem, pixel, dot-art, daite,
+  automatic; CC BY 4.0) — naprawdę różne style.
+- **Pixel-art pokazywany piksel w piksel:** serwer rozpoznaje pixel-art po pliku (twarda przezroczystość, najwyżej 64
+  kolory; RetroArch dot-art — bloki 8×8, motyw Pixel / SNES Mini — rozmiar natywny), przycina przezroczysty margines
+  po siatce pikseli i podaje rozmiar piksela grafiki (`logo_pixel`). Plik zostaje w pełnym rozmiarze (klienci bez
+  znacznika — jak dotąd). Logo wybrane wcześniej rozpoznawane z pliku.
+
+### Sprawdzone
+- pytest (cały zestaw); wykrywanie na prawdziwych plikach (dot-art 8, ES Pixel 1, SNES Mini 1, RetroArch pixel /
+  systematic i Aniki 0); arkusz porównawczy wszystkich źródeł; przegląd kodu (/code-review) z wdrożonymi poprawkami.
+
 ## [0.56.3] — 2026-11-03
 
 Zakres: serwer i klienci (Windows, Lumen — silnik): `server.py`, `logos.py`, `libsync.py`, `consoles.py`,

@@ -278,7 +278,7 @@ async function refreshSysLook() {
   const r = await admin("systems_look").catch(() => null);
   if (!r?.ok) return;
   $("sysLook").innerHTML = r.systems.map((s) =>
-    `<tr><td>${s.logo ? `<img class="syslogo" src="${esc(s.logo)}" alt="" style="${s.glow ? "filter:drop-shadow(0 0 6px #fff8)" : ""}">` : '<span class="muted">bez logo</span>'}` +
+    `<tr><td>${s.logo ? `<img class="syslogo" src="${esc(s.logo)}" alt="" style="${s.glow ? "filter:drop-shadow(0 0 6px #fff8);" : ""}${s.pixel ? "image-rendering:pixelated;" : ""}">` : '<span class="muted">bez logo</span>'}` +
     `${s.console ? `<img class="syslogo" src="${esc(s.console)}" alt="konsola" title="${esc(s.console_credit || "")}" style="max-height:34px;margin-left:6px">` : ""}</td>` +
     `<td><input data-name="${esc(s.es)}" value="${esc(s.display)}" placeholder="${esc(s.default_name)}" style="width:100%">` +
     `<div class="sysdirs">${esc(s.es)} · ${(s.dirs || []).map(esc).join(" · ") || "brak folderu"}` +

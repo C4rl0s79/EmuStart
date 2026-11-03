@@ -326,7 +326,7 @@ def handle(handler) -> None:
             from emustart import emucatalog, emulators, systems
             out = []
             for s_ in API.list_systems():
-                d = {k: s_.get(k) for k in ("es", "display", "games", "logo", "logo_glow", "kind")}
+                d = {k: s_.get(k) for k in ("es", "display", "games", "logo", "logo_glow", "logo_pixel", "kind")}
                 plat = systems.info(s_["es"])["plat"]
                 d["plat"] = plat
                 sc = (API._cfg.get("systems") or {}).get(s_["es"]) or {}

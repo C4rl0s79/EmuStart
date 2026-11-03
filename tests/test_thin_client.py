@@ -190,3 +190,14 @@ def test_missing_media_is_asked_again_when_its_version_changes(srv, monkeypatch,
     (media / "snes" / "Nowa (USA).box.png").write_bytes(b"\x89PNG\r\n\x1a\nnowa")
     assert not libsync.fetch_media(cfg, rel, tmp_path / "a.png", key="/media/" + rel + "?v=1")   # ta sama wersja
     assert libsync.fetch_media(cfg, rel, tmp_path / "a.png", key="/media/" + rel + "?v=2")       # nowa — od razu
+
+
+def test_pixel_logo_flag_reaches_the_device(srv, monkeypatch):
+    """Logo pixel-art (natywny rozmiar) — urządzenie wie, że ma je powiększać o całkowitą wielokrotność."""
+    cfg, _media = srv
+    monkeypatch.setattr(libsync, "server_systems", lambda: [
+        {"es": "snes", "display": "SNES", "games": 1, "scanned": 1.0, "emu_rec": "", "core": "",
+         "logo": "/media/_systems/snes.custom.png?v=3", "logo_glow": False, "logo_pixel": 8}])
+    monkeypatch.setattr(libsync, "server_games", lambda es, since=0: SERVER_GAMES.get(es, []))
+    assert libsync.sync(cfg)["ok"]
+    assert libsync.logo_for("snes") == {"url": "/media/_systems/snes.custom.png?v=3", "glow": False, "pixel": 8}
