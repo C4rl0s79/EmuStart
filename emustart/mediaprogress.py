@@ -22,13 +22,16 @@ class Progress:
     @staticmethod
     def _empty() -> dict:
         return {"running": False, "done": 0, "total": 0, "current": "", "found": 0, "none": 0, "retry": 0,
-                "last_error": "", "slowest": 0.0, "seconds": 0.0, "started": 0.0}
+                "last_error": "", "slowest": 0.0, "seconds": 0.0, "started": 0.0, "label": ""}
 
-    def start(self, n: int) -> None:
+    def start(self, n: int, label: str = "") -> None:
+        """`label` — co trwa (np. „paczka Canvas”); bez niego pobieranie brakujących w tle."""
         with self._lock:
             if not self._d["running"]:
                 self._d = {**self._empty(), "running": True, "started": time.time()}
             self._d["total"] += n
+            if label:
+                self._d["label"] = label
 
     def begin(self, es: str) -> float:
         with self._lock:
@@ -48,6 +51,11 @@ class Progress:
             if d["done"] >= d["total"]:
                 d.update(running=False, current="")
         self.log.info("%s %s: %s w %.1f s%s", self.what, es, result, dt, f" ({error})" if error else "")
+
+    def finish(self) -> None:
+        """Koniec partii także wtedy, gdy przerwał ją błąd (pasek nie zostaje „w toku”)."""
+        with self._lock:
+            self._d.update(running=False, current="")
 
     def snapshot(self) -> dict:
         with self._lock:

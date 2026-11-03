@@ -275,10 +275,11 @@ class _Handler(BaseHTTPRequestHandler):
                     cfg = MEDIA_CFG() if MEDIA_CFG else getattr(DEV_API, "_cfg", None)
                     if cfg:
                         from emustart import libsync   # PC: lokalna kopia z serwera
-                        libsync.fetch_media(cfg, rel, target)
+                        libsync.fetch_media(cfg, rel, target, key=self.path)
                         got = mediastore.get(*where)
                 if got is not None:
-                    return self._send_bytes(got[0], mimetypes.guess_type(where[1])[0] or "image/png")
+                    ctype = mimetypes.guess_type(where[1])[0] or "image/png"
+                    return self._send_bytes(_sized(rel, got[0], ctype), ctype)
                 if not target.is_file():
                     return self.send_error(404)
                 # stary plik grafiki, jeszcze nieprzeniesiony do pliku systemu — jak dotąd
@@ -286,13 +287,13 @@ class _Handler(BaseHTTPRequestHandler):
             cfg = MEDIA_CFG() if MEDIA_CFG else getattr(DEV_API, "_cfg", None)
             if cfg:
                 from emustart import libsync       # komputer z biblioteką z serwera — grafika z serwera
-                libsync.fetch_media(cfg, rel, target)
+                libsync.fetch_media(cfg, rel, target, key=self.path)
         if not target.is_file():
             return self.send_error(404)
-        data = target.read_bytes()
+        ctype = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+        data = _sized(rel, target.read_bytes(), ctype) if base == ROUTES.get("/media/") else target.read_bytes()
         self.send_response(200)
-        self.send_header("Content-Type", mimetypes.guess_type(target.name)[0]
-                         or "application/octet-stream")
+        self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-cache" if base == paths.WEB else "max-age=86400")
         if base == paths.WEB:
@@ -300,6 +301,14 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Referrer-Policy", "no-referrer")
         self.end_headers()
         self.wfile.write(data)
+
+
+def _sized(rel: str, data: bytes, ctype: str) -> bytes:
+    """Logo systemu (media/_systems) w SVG bez rozmiaru — rozmiar z viewBox (logos.svg_sized); inne pliki bez zmian."""
+    if ctype == "image/svg+xml" and rel.startswith("_systems/"):
+        from emustart import logos
+        return logos.svg_sized(data)
+    return data
 
 
 def _send_bytes(self, data: bytes, ctype: str) -> None:

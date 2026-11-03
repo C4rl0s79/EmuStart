@@ -64,10 +64,13 @@ def bundled(plat: str) -> str:
     return ""
 
 
+SVG_FMT = "s=1"     # SVG podawane z rozmiarem (svg_sized) — inny adres niż dawne 0×0 w pamięci przeglądarek
+
+
 def downloaded(es: str) -> str:
     for ext in ("svg", "png"):
         if _has(f"{es}.{ext}"):
-            return f"/media/_systems/{es}.{ext}"
+            return f"/media/_systems/{es}.{ext}" + ("?" + SVG_FMT if ext == "svg" else "")
     return ""
 
 
@@ -76,7 +79,7 @@ def custom(es: str) -> str:
     for ext in ("svg", "png", "jpg", "webp"):
         t = mediastore.mtime(STORE, f"{es}.custom.{ext}")
         if t:
-            return f"/media/_systems/{es}.custom.{ext}?v={int(t)}"
+            return f"/media/_systems/{es}.custom.{ext}?v={int(t)}" + ("&" + SVG_FMT if ext == "svg" else "")
     return ""
 
 
@@ -165,15 +168,32 @@ def pack_sources() -> list:
             for src, _tpl in ES_THEMES + PN_CODE_THEMES + PN_NAME_THEMES]
 
 
-def apply_pack(cfg: dict, source: str, es_list) -> dict:
+def apply_pack(cfg: dict, source: str, es_list, started: bool = False) -> dict:
     """Logo wszystkich systemów z jednej paczki (jednolity wygląd): system, którego paczka nie ma,
     zostaje przy swoim. {ok, changed, missing}. Zapis ustawień — wywołujący."""
     if source not in {p["id"] for p in pack_sources()}:
         return {"ok": False, "reason": "Nie ma takiej paczki logo."}
     changed, missing = [], []
+    es_list = list(es_list)
+    if es_list and not started:
+        PACK.start(len(es_list), f"paczka {source}")           # osobny pasek w panelu (nie pobieranie w tle)
     for es in es_list:
-        hit = next((u for _s, u, _l in _web(es, source) if _exists(u)), None)
-        (changed if hit and choose(cfg, es, "url:" + hit) else missing).append(es)
+        t0, result, err = PACK.begin(es), "retry", ""
+        art_sources.clear_error()
+        try:
+            hit = next((u for _s, u, _l in _web(es, source) if _exists(u)), None)
+            if not hit:
+                result = "none"                                  # paczka nie ma tego systemu
+            elif choose(cfg, es, "url:" + hit):
+                result = "found"
+            else:
+                err = art_sources.last_error() or "nie udało się pobrać logo"
+        except Exception as ex:
+            log.exception("paczka logo %s: %s", source, es)
+            err = str(ex)[:120]
+        finally:
+            PACK.end(es, t0, result, err)                      # licznik kończy się także po błędzie
+            (changed if result == "found" else missing).append(es)
     return {"ok": True, "changed": changed, "missing": missing}
 
 
@@ -345,6 +365,45 @@ def choose(cfg: dict, es: str, cid: str) -> bool:
     return True
 
 
+_SVG_TAG = re.compile(rb"<svg\b[^>]*>", re.S)
+
+
+def svg_sized(data: bytes) -> bytes:
+    """Logo SVG bez własnego rozmiaru (bez width / height albo w %) dostaje go z viewBox: obraz bez rozmiaru
+    ma w ramce logo 0×0 (Lumen, karuzela). Podany wymiar zostaje, brakujący — z proporcji viewBox. Wołane
+    przy serwowaniu logo systemów, więc działa też dla zapisanych wcześniej. Inne pliki — bez zmian."""
+    m = _SVG_TAG.search(data[:5000])
+    if not m:
+        return data
+    tag = m.group(0)
+
+    def size(name: bytes) -> float | None:
+        v = re.search(rb"\s" + name + rb"""\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>/]+))""", tag)
+        raw = (v.group(1) or v.group(2) or v.group(3) or b"").strip() if v else b""
+        num = re.fullmatch(rb"([0-9]*\.?[0-9]+)(px)?", raw)               # %, em, puste — nie rozmiar
+        return float(num.group(1)) if num and float(num.group(1)) > 0 else None
+    w, h = size(b"width"), size(b"height")
+    if w and h:
+        return data
+    vb = re.search(rb"""viewBox\s*=\s*["']([^"']+)["']""", tag)
+    nums = re.split(rb"[\s,]+", vb.group(1).strip()) if vb else []
+    try:
+        vw, vh = float(nums[2]), float(nums[3])
+    except (IndexError, ValueError):
+        return data
+    if vw <= 0 or vh <= 0:
+        return data
+    if w:
+        h = w * vh / vw
+    elif h:
+        w = h * vw / vh
+    else:
+        w, h = vw, vh
+    tag2 = re.sub(rb"""\s(?:width|height)\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>/]+)""", b"", tag)
+    tag2 = tag2.replace(b"<svg", f'<svg width="{w:g}" height="{h:g}"'.encode(), 1)
+    return data[:m.start()] + tag2 + data[m.end():]
+
+
 def _store_custom(es: str, data: bytes, ext: str) -> None:
     from emustart import mediastore
     for old in mediastore.files(STORE):
@@ -354,6 +413,7 @@ def _store_custom(es: str, data: bytes, ext: str) -> None:
 
 
 PROGRESS = mediaprogress.Progress("logo")            # pobieranie w tle — pasek w panelu serwera
+PACK = mediaprogress.Progress("paczka logo")         # zmiana paczki logo — osobny pasek
 _retry_at: dict = {}              # es → kiedy znowu próbować po błędzie sieci (nie przy każdym zapytaniu urządzenia)
 RETRY_AFTER = 600
 

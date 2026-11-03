@@ -334,26 +334,31 @@ async function refreshSysLook() {
 }
 
 /* ── pobieranie logo i zdjęć konsol w tle: postęp, bieżący system, ostatni błąd ── */
-let mediaRunning = false, mediaSeen = null, mediaRedraw = false;
+let mediaRunning = false, mediaSeen = null, mediaRedraw = false, mediaTimer = null, mediaBusy = false;
 function mediaLine(label, p) {
   if (!p.total) return "";
+  if (p.label) label += ` (${p.label})`;                         // zmiana paczki — ten sam pasek
   const head = p.running ? `${label}: ${p.done} z ${p.total}` + (p.current ? ` — teraz ${p.current}` : "")
                          : `${label}: gotowe (${p.done} w ${Math.round(p.seconds)} s)`;
-  return head + ` · pobrane ${p.found}, brak w źródłach ${p.none}` + (p.retry ? `, do ponowienia ${p.retry}` : "") +
+  return head + (p.label ? ` · zmienione ${p.found}, paczka nie ma ${p.none}` : ` · pobrane ${p.found}, brak w źródłach ${p.none}`) +
+    (p.retry ? `, do ponowienia ${p.retry}` : "") +
     (p.slowest >= 10 ? ` · najdłużej ${p.slowest} s na system` : "") + (p.last_error ? ` · ostatni błąd: ${p.last_error}` : "");
 }
 async function mediaProgTick() {
+  mediaBusy = true;
   const r = curTab === "konfig" ? await admin("systems_media_progress").catch(() => null) : null;   // tylko na tej zakładce
   if (r?.ok) {
-    mediaRunning = r.logos.running || r.consoles.running;
-    $("mediaProg").hidden = !(r.logos.total || r.consoles.total);
-    for (const [k, label, p] of [["logo", "Logo", r.logos], ["con", "Konsole", r.consoles]]) {
+    const rows = [["logo", "Logo", r.logos], ["con", "Konsole", r.consoles],
+                  ["logoPack", "Logo", r.logo_pack || {}], ["conPack", "Konsole", r.console_pack || {}]];
+    mediaRunning = rows.some(([, , p]) => p.running);
+    $("mediaProg").hidden = !rows.some(([, , p]) => p.total);
+    for (const [k, label, p] of rows) {
       $(k + "ProgText").textContent = mediaLine(label, p);
-      $(k + "ProgBar").parentElement.hidden = !p.total;
+      $(k + "ProgText").hidden = $(k + "ProgBar").parentElement.hidden = !p.total;
       $(k + "ProgBar").style.width = p.total ? (100 * p.done / p.total).toFixed(0) + "%" : "0%";
     }
     // coś doszło od ostatniego razu (także krótka partia między odczytami) — nowe grafiki w wierszach systemów
-    const seen = [r.logos, r.consoles].map((p) => `${p.started}:${p.done}`).join("|");
+    const seen = rows.map(([, , p]) => `${p.started}:${p.done}`).join("|");
     if (mediaSeen !== null && seen !== mediaSeen) mediaRedraw = true;
     mediaSeen = seen;
   }
@@ -362,7 +367,13 @@ async function mediaProgTick() {
     mediaRedraw = false;
     refreshSysLook();
   }
-  setTimeout(mediaProgTick, mediaRunning ? 1500 : 5000);
+  mediaBusy = false;
+  mediaTimer = setTimeout(mediaProgTick, mediaRunning ? 1500 : 5000);
+}
+function mediaKick() {            // zmiana paczki ruszyła — pasek od razu, nie przy kolejnym odczycie
+  if (mediaBusy) return;          // odczyt w toku — jeden cykl odpytywania, nie dwa
+  clearTimeout(mediaTimer);
+  mediaProgTick();
 }
 mediaProgTick();
 
@@ -373,6 +384,7 @@ $("bConPackApply").addEventListener("click", async () => {
   const r = await admin("system_console_pack_apply", { id }).catch(() => null);
   if (!r?.ok) return sysMsg(r?.reason || "Serwer nie odpowiada.", false);
   $("conPackStatus").textContent = "Zmieniam grafiki konsol…";
+  mediaKick();
   const poll = async () => {
     const st = await admin("system_console_pack_status").catch(() => null);
     if (st?.running) return setTimeout(poll, 1500);
@@ -389,6 +401,7 @@ $("bPackApply").addEventListener("click", async () => {
   const r = await admin("system_logo_pack_apply", { id }).catch(() => null);
   if (!r?.ok) return sysMsg(r?.reason || "Serwer nie odpowiada.", false);
   $("packStatus").textContent = "Zmieniam logo…";
+  mediaKick();
   const poll = async () => {
     const st = await admin("system_logo_pack_status").catch(() => null);
     if (st?.running) return setTimeout(poll, 1500);

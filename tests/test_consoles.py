@@ -301,8 +301,13 @@ def test_pack_sets_every_system_it_has_and_others_keep_theirs(env, monkeypatch):
     monkeypatch.setattr(consoles, "_exists", lambda u: "retrorama" in u and u.endswith("/snes.png"))
     monkeypatch.setattr(consoles.art_sources, "fetch", lambda u, timeout=20: _png(600, 300, (200, 30, 30, 255)))
     assert consoles.upload("psx", _png(), "moje")                           # psx ma własne — paczka go nie ma
+    monkeypatch.setattr(consoles, "PACK", consoles.mediaprogress.Progress("paczka konsol"))
+    monkeypatch.setattr(consoles, "PROGRESS", consoles.mediaprogress.Progress("konsola"))
     r = consoles.apply_pack(src, ["snes", "psx"])
     assert r == {"ok": True, "changed": ["snes"], "missing": ["psx"]}
+    p = consoles.PACK.snapshot()                                            # osobny pasek paczki w panelu
+    assert (p["done"], p["total"], p["found"], p["none"], p["running"]) == (2, 2, 1, 1, False)
+    assert p["label"] == f"paczka {src}" and not consoles.PROGRESS.snapshot()["total"]
     snes = consoles.url_for("snes")
     assert snes["url"] and "Retrorama" in snes["credit"] and "GPL-3.0" in snes["credit"]
     assert consoles.url_for("psx")["credit"] == "moje"
@@ -416,3 +421,35 @@ def test_panel_shows_media_progress(env):
     s = srvapi.ServerApi(start_background=False)
     r = srvadmin.ACTIONS_ARGS["systems_media_progress"](s, {})
     assert r["ok"] and {"running", "done", "total", "current", "last_error"} <= set(r["consoles"]) <= set(r["logos"]) | set(r["consoles"])
+
+
+def test_pack_progress_ends_after_errors_and_counts_failed_downloads(env, monkeypatch):
+    """Pasek paczki nie zostaje „w toku”: wyjątek przy systemie, pusta lista; pobranie nieudane — błąd, nie „paczka nie ma”."""
+    src = _pack("Retrorama")
+    monkeypatch.setattr(consoles, "PACK", consoles.mediaprogress.Progress("paczka konsol"))
+    assert consoles.apply_pack(src, [])["changed"] == [] and not consoles.PACK.snapshot()["running"]
+    monkeypatch.setattr(consoles, "_exists", lambda u: True)
+
+    def fetch_theme(es, source, url):
+        if es == "snes":
+            raise OSError("dysk pełny")
+        return False                                                        # pobranie się nie udało
+    monkeypatch.setattr(consoles, "_fetch_theme", fetch_theme)
+    r = consoles.apply_pack(src, ["snes", "psx"])
+    p = consoles.PACK.snapshot()
+    assert r["missing"] == ["snes", "psx"] and not p["running"]
+    assert (p["retry"], p["none"]) == (2, 0) and p["last_error"]
+
+
+def test_panel_pack_progress_starts_before_the_answer(env, monkeypatch):
+    from emustart import scanner, srvadmin, srvapi
+    from test_core import _write
+    _, _roms, tmp = env
+    _write(tmp / "roms" / "snes" / "B (USA).sfc")
+    scanner.scan_system("snes", tmp / "roms" / "snes")
+    s = srvapi.ServerApi(start_background=False)
+    monkeypatch.setattr(consoles, "PACK", consoles.mediaprogress.Progress("paczka konsol"))
+    monkeypatch.setattr(consoles.threading, "Thread", lambda *a, **k: type("T", (), {"start": lambda self: None})())
+    assert srvadmin.ACTIONS_ARGS["system_console_pack_apply"](s, {"id": _pack("Analogue 3D")})["ok"]
+    pr = srvadmin.ACTIONS_ARGS["systems_media_progress"](s, {})
+    assert pr["console_pack"]["running"] and pr["console_pack"]["total"] == 1     # panel widzi pasek od razu

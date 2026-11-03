@@ -247,7 +247,7 @@ def test_window_mode_fetches_missing_media_from_server(env, tmp_path, monkeypatc
     monkeypatch.setattr(server, "DEV_API", None)
     asked = []
 
-    def fake(cfg, rel, target):
+    def fake(cfg, rel, target, key=None):
         asked.append((cfg.get("x"), rel))
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(b"svg")
@@ -257,3 +257,10 @@ def test_window_mode_fetches_missing_media_from_server(env, tmp_path, monkeypatc
     base = server.start(0)
     body = urllib.request.urlopen(base + "/media/_systems/amiga.custom.svg?v=5", timeout=10).read()
     assert body == b"svg" and asked == [(1, "_systems/amiga.custom.svg")]
+    # logo SVG bez width/height (sam viewBox) dostaje rozmiar z viewBox — inaczej <img> w ramce ma 0×0 (Lumen)
+    from emustart import mediastore
+    mediastore.put("_systems", "pc98.custom.svg",
+                   b'<?xml version="1.0"?>\n<svg viewBox="-6 159 525 184" xmlns="http://www.w3.org/2000/svg"><path d="M0 0"/></svg>')
+    resp = urllib.request.urlopen(base + "/media/_systems/pc98.custom.svg?v=1", timeout=10)
+    body = resp.read()
+    assert resp.headers["Content-Type"] == "image/svg+xml" and b'width="525" height="184"' in body

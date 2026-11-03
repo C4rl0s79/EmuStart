@@ -71,3 +71,30 @@ def test_panel_applies_a_pack_in_the_background_and_saves_settings(env, monkeypa
         time.sleep(0.05)
     assert st["changed"] == ["psx"] and st["missing"] == ["snes"] and saved
     assert not srvadmin.ACTIONS_ARGS["system_logo_pack_apply"](s, {"id": "nie ma"})["ok"]
+
+
+def test_svg_without_size_gets_it_from_viewbox():
+    from emustart import logos
+    only_vb = b'<?xml version="1.0"?>\n<svg version="1.1" id="Ebene_1" viewBox="0 0 264 45" xmlns="http://www.w3.org/2000/svg"><g/></svg>'
+    out = logos.svg_sized(only_vb)
+    assert b'<svg width="264" height="45" version="1.1"' in out and out.endswith(b"<g/></svg>")
+    sized = b'<svg width="100" height="20" viewBox="0 0 264 45"><g/></svg>'
+    assert logos.svg_sized(sized) == sized                                  # ma rozmiar — bez zmian
+    assert logos.svg_sized(b'<svg viewBox="0,0,52.5,18.4"/>').startswith(b'<svg width="52.5" height="18.4"')
+    assert logos.svg_sized(b"<svg><g/></svg>") == b"<svg><g/></svg>"        # bez viewBox — nic do dopisania
+    assert logos.svg_sized(b"\x89PNG") == b"\x89PNG"
+
+
+def test_svg_size_keeps_given_dimension_and_ignores_percent():
+    from emustart import logos
+    assert logos.svg_sized(b'<svg width="200" viewBox="0 0 2000 500"/>') == b'<svg width="200" height="50" viewBox="0 0 2000 500"/>'
+    assert logos.svg_sized(b'<svg width=200 viewBox="0 0 2000 500"/>') == b'<svg width="200" height="50" viewBox="0 0 2000 500"/>'
+    assert logos.svg_sized(b'<svg width="100%" height="100%" viewBox="0 0 264 45"/>') == b'<svg width="264" height="45" viewBox="0 0 264 45"/>'
+
+
+def test_svg_logo_address_changes_once_for_the_sized_format(env):
+    from emustart import logos, mediastore
+    mediastore.put(logos.STORE, "pc98.custom.svg", b"<svg/>")
+    mediastore.put(logos.STORE, "nes.custom.png", b"png")
+    assert logos.custom("pc98").endswith("&" + logos.SVG_FMT)              # dawne 0×0 w pamięci — nowy adres
+    assert "s=" not in logos.custom("nes")

@@ -11,7 +11,29 @@ nowym urządzeniu — do sprawdzenia na żywo), Play! (miejsce kart), APK (te sa
 budowania), adaptery pozostałych samodzielnych emulatorów przy pierwszym użyciu, sprawdzenie na żywo (niżej);
 jedno zapytanie przygotowujące grę — po pomiarach kroków z prawdziwych startów.
 
-## [0.56.2] — 2026-11-04
+## [0.56.3] — 2026-11-03
+
+Zakres: serwer i klienci (Windows, Lumen — silnik): `server.py`, `logos.py`, `libsync.py`, `consoles.py`,
+`mediaprogress.py`, panel `web/server.js`. APK bez zmian (dostaje logo z poprawionym rozmiarem z serwera).
+
+### Poprawione
+- **Część logo z paczek się nie wyświetlała (np. Xbox 360, PC-9801, PC-8801):** SVG z samym `viewBox` (bez
+  `width` / `height`, albo w %) ma w ramce logo rozmiar 0×0. Serwer i silnik podają logo systemów w SVG z rozmiarem
+  z `viewBox` (podany wymiar zostaje, brakujący — z proporcji) — działa też dla logo zapisanych wcześniej, bez
+  ponownego wyboru; adres logo SVG zmienia się raz (`s=1`), więc stara kopia 0×0 nie wraca z pamięci przeglądarki.
+  (Sprawdzone na plikach z biblioteki użytkownika: 0×0 → 264×93.)
+- **Nowe logo / zdjęcie trzeba było ściągać ręcznie („pobierz wszystko”):** urządzenie pamiętało „nie ma na
+  serwerze” 10 minut niezależnie od wersji pliku; teraz nowa wersja (`?v=…`) pobiera się od razu.
+
+### Dodane
+- **Pasek postępu także dla zmiany paczki** logo i grafik konsol — osobny wiersz („Logo (paczka Canvas): 17 z 44 —
+  teraz psx · zmienione 15, paczka nie ma 2”), od razu po kliknięciu; nieudane pobranie z paczki liczone jako błąd.
+
+### Sprawdzone
+- pytest: 511 ✓; przegląd kodu (/code-review high: 10 uwag, wdrożone); panel w przeglądarce na danych testowych;
+  rozmiar logo na prawdziwym CSS Lumena z plikami SVG użytkownika.
+
+## [0.56.2] — 2026-11-03
 
 Zakres: serwer (`consoles.py`, `logos.py`, `art_sources.py`, nowy `mediaprogress.py`, `srvapi.py`, `srvadmin.py`,
 panel `web/server.*`), klient Windows i Lumen (silnik): `libsync.py`, `api.py`. APK bez zmian.
