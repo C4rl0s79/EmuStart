@@ -446,6 +446,9 @@ def pixel_native(data: bytes) -> bytes:
             continue
         small = im.resize((w // b, h // b), Image.NEAREST)
         if small.resize((w, h), Image.NEAREST).tobytes() == im.tobytes():
+            box = small.getbbox()                      # bez przezroczystego marginesu — większe całkowite powiększenie
+            if box:
+                small = small.crop(box)
             buf = io.BytesIO()
             small.save(buf, "PNG")
             return buf.getvalue()
