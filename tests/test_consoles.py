@@ -98,6 +98,15 @@ def test_arcade_has_no_console_and_nothing_found_is_remembered(env, monkeypatch)
     assert mediastore.exists(consoles.STORE, "ps2.console.none") and consoles.url_for("ps2")["url"] == ""
 
 
+def test_found_but_download_failed_is_tried_again_later(env, monkeypatch):
+    # Commons ma kandydata, ale pobranie obrazka się nie udało (sieć) — bez znacznika „brak”, następnym razem od nowa
+    monkeypatch.setattr(consoles, "search", lambda es: [{"title": "File:PS2-Versions.jpg", "thumb": "x"}])
+    monkeypatch.setattr(consoles, "fetch", lambda es, cand: False)
+    monkeypatch.setattr(consoles.art_sources, "online", lambda: True)
+    consoles._run(["ps2"])
+    assert not mediastore.exists(consoles.STORE, "ps2.console.none")
+
+
 def test_choose_none_and_auto(env, monkeypatch):
     fetch, _asked = _fake_fetch(PS2_HITS, _jpeg_on_white())
     monkeypatch.setattr(consoles.art_sources, "fetch", fetch)
@@ -169,8 +178,14 @@ def test_server_systems_carry_console_and_missing_ones_are_fetched(env, monkeypa
     assert row["console_credit"].startswith("Evan-Amos") and asked == ["snes"]
     remote.API = s
     try:
+        # komputery i Lumen pytają /v1/library (server_systems), panel — systems_look: obie drogi też pobierają brakujące
+        asked.clear()
         rec = {x["es"]: x for x in libsync.server_systems()}["snes"]
         assert rec["console"] == row["console"] and rec["console_credit"] == row["console_credit"]
+        assert asked == ["snes"]
+        asked.clear()
+        assert {x["es"]: x for x in s.systems_look()}["snes"]["console"] == row["console"]
+        assert asked == ["snes"]
     finally:
         remote.API = None
 
@@ -192,6 +207,7 @@ def test_panel_actions_candidates_choose_and_upload(env, monkeypatch):
     from emustart import srvadmin, srvapi
     fetch, _asked = _fake_fetch(PS2_HITS, _jpeg_on_white())
     monkeypatch.setattr(consoles.art_sources, "fetch", fetch)
+    monkeypatch.setattr(consoles, "_exists", lambda u: False)               # motywy: bez sieci
     s = srvapi.ServerApi(start_background=False)
     r = srvadmin.ACTIONS_ARGS["system_console_candidates"](s, {"es": "ps2"})
     assert r["ok"] and [c["id"] for c in r["list"]][:2] == ["commons:File:PS2-Slim-Console-Set.png",
@@ -225,3 +241,78 @@ def test_panel_upload_body_may_be_larger_than_other_actions(monkeypatch):
     monkeypatch.setattr(srvadmin, "ENABLED", True)
     srvadmin.handle(H(), None)
     assert len(got.get("data", "")) == 300_000
+
+
+# ── paczki grafik konsol z motywów ES / ES-DE (jak paczki logo) ──
+
+def _pack(name_part: str) -> str:
+    return next(p["id"] for p in consoles.pack_sources() if name_part in p["id"])
+
+
+def test_theme_packs_are_listed_with_licences():
+    packs = {p["id"]: p["license"] for p in consoles.pack_sources()}
+    assert packs[_pack("Retrorama")] == "GPL-3.0"
+    assert packs[_pack("PlayStation X")] == packs[_pack("Analogue 3D")] == "brak licencji w repozytorium"
+
+
+def test_pack_sets_every_system_it_has_and_others_keep_theirs(env, monkeypatch):
+    src = _pack("Retrorama")
+    monkeypatch.setattr(consoles, "_exists", lambda u: "retrorama" in u and u.endswith("/snes.png"))
+    monkeypatch.setattr(consoles.art_sources, "fetch", lambda u, timeout=20: _png(600, 300, (200, 30, 30, 255)))
+    assert consoles.upload("psx", _png(), "moje")                           # psx ma własne — paczka go nie ma
+    r = consoles.apply_pack(src, ["snes", "psx"])
+    assert r == {"ok": True, "changed": ["snes"], "missing": ["psx"]}
+    snes = consoles.url_for("snes")
+    assert snes["url"] and "Retrorama" in snes["credit"] and "GPL-3.0" in snes["credit"]
+    assert consoles.url_for("psx")["credit"] == "moje"
+    assert not consoles.apply_pack("nie ma takiej", ["snes"])["ok"]
+
+
+def test_theme_candidates_and_choose_only_from_proposals(env, monkeypatch):
+    monkeypatch.setattr(consoles, "_exists", lambda u: u.endswith("/megadrive.webp") or u.endswith("/megadrive.png"))
+    monkeypatch.setattr(consoles.art_sources, "fetch", lambda u, timeout=20: _png(424, 238))
+    cands = consoles.theme_candidates("megadrive")
+    assert {c["source"] for c in cands} == {p["id"] for p in consoles.pack_sources()}
+    assert all(c["url"].startswith("https://raw.githubusercontent.com/") and c["license"] for c in cands)
+    assert consoles.choose("megadrive", "theme:" + cands[0]["url"])
+    assert not consoles.choose("megadrive", "theme:https://raw.githubusercontent.com/obcy/repo/main/megadrive.png")
+
+
+def test_pixel_art_is_enlarged_with_sharp_pixels():
+    im = Image.new("RGBA", (40, 20), (0, 0, 0, 0))
+    for x in range(40):
+        for y in range(20):
+            if (x + y) % 2:
+                im.putpixel((x, y), (250, 40, 40, 255))
+    buf = io.BytesIO()
+    im.save(buf, "PNG")
+    out, _lum = consoles.prepare(buf.getvalue(), pixel=True)
+    big = Image.open(io.BytesIO(out)).convert("RGBA")
+    assert big.size[0] >= 800                                               # tło pełnego ekranu, bez rozmycia
+    opaque = {c for _n, c in big.getcolors(1 << 20) if c[3] > 0}
+    assert len(opaque) <= 3                                                 # bez nowych, uśrednionych kolorów
+
+
+def test_panel_lists_and_applies_console_packs(env, monkeypatch):
+    import time
+    from emustart import scanner, srvadmin, srvapi
+    from test_core import _write
+    _, _roms, tmp = env
+    for es, f in (("psx", "A (USA).cue"), ("snes", "B (USA).sfc")):
+        _write(tmp / "roms" / es / f)
+        scanner.scan_system(es, tmp / "roms" / es)
+    s = srvapi.ServerApi(start_background=False)
+    monkeypatch.setattr(consoles, "fetch_missing", lambda es_list: None)
+    monkeypatch.setattr(consoles, "_exists", lambda u: "analogue-3d" in u and u.endswith("/psx.png"))
+    monkeypatch.setattr(consoles.art_sources, "fetch", lambda u, timeout=20: _png(450, 246))
+    packs = srvadmin.ACTIONS_ARGS["system_console_packs"](s, {})
+    assert packs["ok"] and len(packs["list"]) == 3
+    src = _pack("Analogue 3D")
+    assert srvadmin.ACTIONS_ARGS["system_console_pack_apply"](s, {"id": src})["ok"]
+    for _ in range(100):
+        st = srvadmin.ACTIONS_ARGS["system_console_pack_status"](s, {})
+        if not st["running"]:
+            break
+        time.sleep(0.05)
+    assert st["changed"] == ["psx"] and st["missing"] == ["snes"]
+    assert not srvadmin.ACTIONS_ARGS["system_console_pack_apply"](s, {"id": "nie ma"})["ok"]

@@ -221,8 +221,12 @@
     <div class="actions" style="margin-top:8px">
       <label>Paczka logo dla wszystkich systemów: <select id="packSel"></select></label>
       <button id="bPackApply">Zmień logo wszystkich</button> <span id="packStatus" class="muted"></span></div>
-    <div class="muted">Systemy, których paczka nie ma, zostają przy swoim logo. Pojedyncze logo zmienisz dalej przyciskiem
-      „Logo…” w wierszu systemu. Konsola to zdjęcie w tle platformy w motywach Lumena (Kronika, Horyzont).</div>
+    <div class="actions" style="margin-top:8px">
+      <label>Grafiki konsol dla wszystkich systemów: <select id="conPackSel"></select></label>
+      <button id="bConPackApply">Zmień konsole wszystkich</button> <span id="conPackStatus" class="muted"></span></div>
+    <div class="muted">Systemy, których paczka nie ma, zostają przy swoim logo (albo konsoli). Pojedyncze zmienisz dalej
+      przyciskami „Logo…” i „Konsola…” w wierszu systemu. Konsola to grafika w tle platformy w motywach Lumena
+      (Kronika, Horyzont); bez wyboru serwer sam pobiera zdjęcie z Wikimedia Commons.</div>
     <table style="margin-top:8px"><tbody id="sysLook"></tbody></table>
     <div id="sysPick" hidden style="margin-top:8px">
       <div class="muted" id="sysPickInfo"></div><div id="sysPickList" class="picks logos"></div>
@@ -250,18 +254,6 @@
     <div class="actions" style="margin-top:8px"><button id="bMigrate">Przenieś profile do katalogu serwera</button></div>
     <div id="migrText" class="muted" style="margin-top:8px"></div>
     <div id="migrBarBox" class="bar" hidden><div id="migrBar"></div></div>
-  </section>
-  <section data-in="konfig">
-    <h2>Zapisy sprzed 0.46 → synchronizacja zapisów</h2>
-    <div class="muted">EmuStart do 0.45 trzymał zapisy i stany w folderach profili; od 0.46 urządzenia
-      synchronizują je paczkami. Migracja przenosi stare zapisy do paczek (dopasowanie do gier biblioteki).
-      Paczki, które już są (z urządzeń z 0.46), <b>nie są nadpisywane</b> — stara wersja trafia do ich historii
-      i można ją przywrócić niżej. Ze starych folderów nic nie znika; ponowne uruchomienie niczego nie dubluje.</div>
-    <div class="actions" style="margin-top:8px"><button id="bSmDry">Sprawdź (bez zmian)</button>
-      <button id="bSmRun" class="primary">Przenieś zapisy</button></div>
-    <div id="smText" class="muted" style="margin-top:8px"></div>
-    <div id="smItems" style="margin-top:8px"></div>
-    <div id="smLegacy" style="margin-top:8px"></div>
   </section>
   <section data-in="konfig">
     <h2>Dostęp z internetu</h2>

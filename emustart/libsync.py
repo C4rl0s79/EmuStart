@@ -330,6 +330,9 @@ def server_systems() -> list:
                     "emu_rec": sc.get("emu_rec", ""), "core": sc.get("core_rec", ""),
                     "logo": lg["url"], "logo_glow": bool(lg["glow"]),
                     "console": cn["url"], "console_credit": cn["credit"], "console_lum": cn["lum"]})
+    # urządzenia pytają tędy (/v1/library) — brakujące zdjęcia konsol serwer pobiera w tle, jak logo
+    from emustart import consoles
+    consoles.fetch_missing([s["es"] for s in out])
     return out
 
 

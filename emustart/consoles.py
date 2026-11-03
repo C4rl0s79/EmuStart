@@ -1,8 +1,9 @@
 """consoles — zdjęcia konsol platform (serwer), do tła platformy w motywach Lumena.
 
-Źródło: Wikimedia Commons przez oficjalne API — studyjne zdjęcia Evana-Amosa (jeden styl dla prawie
-każdej konsoli, domena publiczna albo CC BY-SA). Sprawdzone 2026-11-03: motywy ES-DE i Playnite nie mają
-zdjęć konsol, a LaunchBox ma je tylko na stronach serwisu, bez API.
+Źródło automatyczne: Wikimedia Commons przez oficjalne API — studyjne zdjęcia Evana-Amosa (jeden styl
+dla prawie każdej konsoli, domena publiczna albo CC BY-SA). Do wyboru w panelu (też jako paczka dla
+wszystkich systemów): grafiki konsol z motywów ES / ES-DE (THEMES; część bez licencji — widać ją przy
+źródle). LaunchBox ma zdjęcia urządzeń tylko na stronach serwisu, bez API.
 
 Plik musi pokazywać konsolę tej platformy (nazwa systemu w nazwie pliku; „PlayStation” to nie
 „PlayStation 3”), nie jej wnętrze ani karton, i mieć licencję pozwalającą go pokazać (domena publiczna,
@@ -34,6 +35,19 @@ _NOT_CONSOLE = {"motherboard", "inside", "board", "pcb", "cartridge", "cart", "d
                 "bottom", "controller", "controllers", "accessory", "packaging", "breakdown"}
 _busy: set = set()
 _lock = threading.Lock()
+
+# motywy ES / ES-DE z grafikami konsol (sprawdzone 2026-11-03 na liście ES-DE i najpopularniejszych
+# es-theme-* z GitHuba; pliki nazwane kodami ES jak logo). Trzy różne style; ten sam zestaw renderów
+# ma też kilka innych motywów (PlayStation X, RELOAD, Animetaverse). Pominięte: A Touch of Glass,
+# rq-full (w folderze „consoles” są pady), NeoGeoClassic (ikony 256 px).
+GH = "https://raw.githubusercontent.com/"
+THEMES = (    # (nazwa paczki, adres z {name}, licencja z repozytorium, pixel-art)
+    ("Rendery — PlayStation X (ES-DE)", GH + "RobZombie9043/playstation-x-es-de/main/_inc/systems/consoles/{name}.webp",
+     "brak licencji w repozytorium", False),
+    ("Ilustracje — Retrorama CE", GH + "lipebello/es-theme-retrorama-ce/master/art/console/{name}.png", "GPL-3.0", False),
+    ("Pixel-art — Analogue 3D (ES-DE)", GH + "seanfletchr/analogue-3d-menu-es-de/main/system/console-isometric/{name}.png",
+     "brak licencji w repozytorium", True),
+)
 
 
 def _norm(s: str) -> str:
@@ -149,9 +163,10 @@ def search(es: str) -> list:
     return out
 
 
-def prepare(data: bytes) -> tuple[bytes, float] | None:
+def prepare(data: bytes, pixel: bool = False) -> tuple[bytes, float] | None:
     """Obraz → (WebP z przezroczystym tłem, przycięty do konsoli; średnia jasność 0–1). Białe tło studia
-    (od krawędzi) staje się przezroczyste. None — to nie obraz."""
+    (od krawędzi) staje się przezroczyste. `pixel` — pixel-art powiększony całkowitą wielokrotnością
+    (ostre piksele na tle pełnego ekranu). None — to nie obraz."""
     from PIL import Image, ImageDraw
     try:
         im = Image.open(io.BytesIO(data))
@@ -168,18 +183,21 @@ def prepare(data: bytes) -> tuple[bytes, float] | None:
     if not box:
         return None
     im = im.crop(box)
-    im.thumbnail((WIDTH, 1000))
+    if pixel and im.width < WIDTH // 2:
+        k = max(1, (WIDTH // 2 + im.width - 1) // im.width)
+        im = im.resize((im.width * k, im.height * k), Image.NEAREST)
+    im.thumbnail((WIDTH, 1000), Image.NEAREST if pixel else Image.BICUBIC)
     from PIL import ImageStat
     mask = im.getchannel("A").point(lambda a: 255 if a > 128 else 0)
     lum = ImageStat.Stat(im.convert("L"), mask=mask).mean[0] / 255 if mask.getbbox() else 0.5
     buf = io.BytesIO()
-    im.save(buf, "WEBP", quality=82)
+    im.save(buf, "WEBP", quality=82, lossless=pixel)          # pixel-art bez przekłamanych kolorów
     return buf.getvalue(), round(lum, 3)
 
 
-def _store(es: str, data: bytes, meta: dict) -> bool:
+def _store(es: str, data: bytes, meta: dict, pixel: bool = False) -> bool:
     from emustart import mediastore
-    got = prepare(data)
+    got = prepare(data, pixel)
     if not got:
         return False
     img, lum = got
@@ -217,7 +235,64 @@ def choose(es: str, cid: str) -> bool:
     if cid.startswith("commons:"):
         hit = next((c for c in search(es) if c["title"] == cid[8:]), None)     # tylko z propozycji
         return bool(hit) and fetch(es, hit)
+    if cid.startswith("theme:"):
+        hit = next((t for t in _theme_urls(es) if t[1] == cid[6:]), None)      # tylko adresy z motywów
+        return bool(hit) and _fetch_theme(es, *hit)
     return False
+
+
+# ── grafiki z motywów (THEMES): propozycje w panelu i paczka dla wszystkich systemów ──
+
+def _exists(url: str) -> bool:
+    from emustart import logos
+    return logos._exists(url)
+
+
+def _theme_urls(es: str, only: str = "") -> list:
+    """[(paczka, adres)] — wszystkie nazwy systemu w stylu ES (jak logo: „gc”, „genesis”…)."""
+    from emustart import logos
+    return [(src, tpl.format(name=n)) for src, tpl, _lic, _px in THEMES if not only or src == only
+            for n in logos.theme_names(es)]
+
+
+def _fetch_theme(es: str, src: str, url: str) -> bool:
+    _name, tpl, lic, pixel = next(t for t in THEMES if t[0] == src)
+    data = art_sources.fetch(url, timeout=20)
+    if not data:
+        return False
+    repo = "https://github.com/" + "/".join(tpl[len(GH):].split("/")[:2])
+    return _store(es, data, {"title": src, "credit": f"{src} — motyw ES ({lic})", "license": lic, "page": repo}, pixel)
+
+
+def theme_candidates(es: str) -> list:
+    """Propozycje z motywów: [{source, url, license}] — z każdej paczki pierwsza istniejąca nazwa."""
+    from concurrent.futures import ThreadPoolExecutor
+    urls = _theme_urls(es)
+    with ThreadPoolExecutor(max_workers=8) as ex:          # pustych (404) nie pokazujemy
+        found = list(ex.map(lambda t: _exists(t[1]), urls))
+    out, seen = [], set()
+    for (src, url), ok in zip(urls, found):
+        if ok and src not in seen:
+            seen.add(src)
+            out.append({"source": src, "url": url, "license": next(t[2] for t in THEMES if t[0] == src)})
+    return out
+
+
+def pack_sources() -> list:
+    """Paczki grafik konsol do zmiany wszystkich systemów naraz: [{id, license}]."""
+    return [{"id": src, "license": lic} for src, _tpl, lic, _px in THEMES]
+
+
+def apply_pack(source: str, es_list) -> dict:
+    """Grafiki konsol wszystkich systemów z jednej paczki (jednolity wygląd); system, którego paczka
+    nie ma, zostaje przy swoim. {ok, changed, missing}."""
+    if source not in {s for s, *_ in THEMES}:
+        return {"ok": False, "reason": "Nie ma takiej paczki grafik konsol."}
+    changed, missing = [], []
+    for es in es_list:
+        hit = next((u for _s, u in _theme_urls(es, source) if _exists(u)), None)
+        (changed if hit and _fetch_theme(es, source, hit) else missing).append(es)
+    return {"ok": True, "changed": changed, "missing": missing}
 
 
 def url_for(es: str) -> dict:
@@ -257,7 +332,8 @@ def _run(todo: list) -> None:
             found = search(es)
             if any(fetch(es, c) for c in found[:3]):
                 continue
-            if found or art_sources.online() or systems.info(es)["kind"] == "arcade":
+            # znalezione, ale pobranie się nie udało (sieć) — bez znacznika, następna lista systemów spróbuje znowu
+            if not found and (art_sources.online() or systems.info(es)["kind"] == "arcade"):
                 mediastore.put(STORE, f"{es}.console.none", b"")          # sprawdzone — zdjęcia nie ma
         except Exception:
             log.exception("konsola %s", es)
