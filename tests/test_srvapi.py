@@ -286,7 +286,7 @@ def test_logo_candidates_from_web_themes_without_local_files(monkeypatch):
     c = logos.candidates({}, "psx")
     assert [x["source"] for x in c if x["id"].startswith("url:")] == ["Carbon", "RetroArch (systematic)"]
     assert any("Sony%20-%20PlayStation.png" in u for u in asked)
-    assert len(asked) == len(logos.ES_THEMES) * len(logos.theme_names("psx")) + len(logos.RA_THEMES)
+    assert len(asked) == len(logos._web("psx")) + len(logos.RA_THEMES)               # motywy ES-DE, Playnite, RetroArch
     assert not logos.choose({}, "psx", "url:http://10.0.0.1/admin")              # dowolny adres — nie
 
 

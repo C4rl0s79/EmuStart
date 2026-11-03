@@ -391,6 +391,37 @@ class ServerApi:
         config.save(self._cfg)
         return {"ok": True, **logos.url_for(es, self._cfg)}
 
+    # ── paczka logo dla wszystkich systemów naraz (jednolity wygląd; w tle — sprawdza adresy) ──
+    def system_logo_packs(self) -> list:
+        return logos.pack_sources()
+
+    def system_logo_pack_apply(self, source: str) -> dict:
+        import threading
+        if source not in {p["id"] for p in logos.pack_sources()}:
+            return {"ok": False, "reason": "Nie ma takiej paczki logo."}
+        job = getattr(self, "_pack_job", None)
+        if job and job["running"]:
+            return {"ok": False, "reason": "Zmiana logo już trwa."}
+        self._pack_job = {"running": True, "source": source, "changed": [], "missing": []}
+
+        def run():
+            try:
+                es_list = [s["es"] for s in library.systems_summary()]
+                r = logos.apply_pack(self._cfg, source, es_list)
+                for es in r.get("changed", []):
+                    self._cfg["systems"][es].setdefault("logo_glow", False)
+                config.save(self._cfg)
+                self._pack_job.update(changed=r.get("changed", []), missing=r.get("missing", []))
+            except Exception:
+                log.exception("paczka logo %s", source)
+            finally:
+                self._pack_job["running"] = False
+        threading.Thread(target=run, daemon=True, name="paczka-logo").start()
+        return {"ok": True}
+
+    def system_logo_pack_status(self) -> dict:
+        return dict(getattr(self, "_pack_job", None) or {"running": False, "source": "", "changed": [], "missing": []})
+
     # ── zdjęcie konsoli systemu (tło platformy w motywach Lumena; emustart/consoles.py) ──
     def system_console_candidates(self, es: str) -> list:
         return [{"id": "commons:" + c["title"], "thumb": c["thumb"], "title": c["title"].removeprefix("File:"),
