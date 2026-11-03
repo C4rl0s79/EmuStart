@@ -11,6 +11,8 @@ nowym urządzeniu — do sprawdzenia na żywo), Play! (miejsce kart), APK (te sa
 budowania), adaptery pozostałych samodzielnych emulatorów przy pierwszym użyciu, sprawdzenie na żywo (niżej);
 jedno zapytanie przygotowujące grę — po pomiarach kroków z prawdziwych startów.
 
+## [0.56.1] — 2026-11-03
+
 Zakres (serwer): `consoles.py`, `libsync.py`, `srvapi.py`, `srvadmin.py`, panel `web/server.*`, `savemigrate.py`,
 `savesync.py`. Klienci i APK bez zmian.
 
@@ -29,6 +31,14 @@ Zakres (serwer): `consoles.py`, `libsync.py`, `srvapi.py`, `srvadmin.py`, panel 
 ### Usunięte
 - **Migracja zapisów sprzed 0.46** (sekcja panelu, `savemigrate.run`, import paczek): nikt już nie używa tych wersji.
   Wersje dodane przez nią do historii paczek i stare foldery profili zostają w danych.
+
+### Sprawdzone
+- pytest: 498 ✓ (pobieranie zdjęć przy `/v1/library` i w panelu, ponowna próba po błędzie sieci, paczki z
+  motywów, pixel-art bez rozmycia); paczki na żywo z GitHuba (psx, megadrive, n64, gc, ps2, nds); panel w
+  przeglądarce na danych testowych.
+
+### Niesprawdzone
+- serwer na żywo: pobieranie zdjęć z Commons w tle dla prawdziwej biblioteki, paczka na prawdziwym serwerze.
 
 ## [0.56.0] — 2026-11-03
 
