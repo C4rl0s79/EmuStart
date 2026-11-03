@@ -257,7 +257,8 @@ def _run(todo: list) -> None:
             found = search(es)
             if any(fetch(es, c) for c in found[:3]):
                 continue
-            if found or art_sources.online() or systems.info(es)["kind"] == "arcade":
+            # znalezione, ale pobranie się nie udało (sieć) — bez znacznika, następna lista systemów spróbuje znowu
+            if not found and (art_sources.online() or systems.info(es)["kind"] == "arcade"):
                 mediastore.put(STORE, f"{es}.console.none", b"")          # sprawdzone — zdjęcia nie ma
         except Exception:
             log.exception("konsola %s", es)

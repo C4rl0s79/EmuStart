@@ -329,6 +329,7 @@ class ServerApi:
                         "core_default": emucatalog.CORES.get(plat, ""), "cores": list(dict.fromkeys(emulators.cores_for(plat) + emustore.alt_cores(store_idx, es))),
                         "dirs": _json.loads(dirs.get(es) or "[]"),
                         "merged": sorted(k for k, v in merge.items() if v == es)})
+        consoles.fetch_missing([s["es"] for s in out])          # panel: brakujące zdjęcia konsol w tle
         return out
 
     def system_merge(self, src: str, dst: str) -> dict:

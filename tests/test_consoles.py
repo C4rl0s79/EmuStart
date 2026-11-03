@@ -98,6 +98,15 @@ def test_arcade_has_no_console_and_nothing_found_is_remembered(env, monkeypatch)
     assert mediastore.exists(consoles.STORE, "ps2.console.none") and consoles.url_for("ps2")["url"] == ""
 
 
+def test_found_but_download_failed_is_tried_again_later(env, monkeypatch):
+    # Commons ma kandydata, ale pobranie obrazka się nie udało (sieć) — bez znacznika „brak”, następnym razem od nowa
+    monkeypatch.setattr(consoles, "search", lambda es: [{"title": "File:PS2-Versions.jpg", "thumb": "x"}])
+    monkeypatch.setattr(consoles, "fetch", lambda es, cand: False)
+    monkeypatch.setattr(consoles.art_sources, "online", lambda: True)
+    consoles._run(["ps2"])
+    assert not mediastore.exists(consoles.STORE, "ps2.console.none")
+
+
 def test_choose_none_and_auto(env, monkeypatch):
     fetch, _asked = _fake_fetch(PS2_HITS, _jpeg_on_white())
     monkeypatch.setattr(consoles.art_sources, "fetch", fetch)
@@ -169,8 +178,14 @@ def test_server_systems_carry_console_and_missing_ones_are_fetched(env, monkeypa
     assert row["console_credit"].startswith("Evan-Amos") and asked == ["snes"]
     remote.API = s
     try:
+        # komputery i Lumen pytają /v1/library (server_systems), panel — systems_look: obie drogi też pobierają brakujące
+        asked.clear()
         rec = {x["es"]: x for x in libsync.server_systems()}["snes"]
         assert rec["console"] == row["console"] and rec["console_credit"] == row["console_credit"]
+        assert asked == ["snes"]
+        asked.clear()
+        assert {x["es"]: x for x in s.systems_look()}["snes"]["console"] == row["console"]
+        assert asked == ["snes"]
     finally:
         remote.API = None
 
