@@ -326,7 +326,28 @@ async function refreshSysLook() {
     $("packSel").innerHTML = (p?.list || []).map((x) =>
       `<option value="${esc(x.id)}">${esc(x.id)}${x.license ? " — " + esc(x.license) : ""}</option>`).join("");
   }
+  if (!$("conPackSel").options.length) {
+    const p = await admin("system_console_packs").catch(() => null);
+    $("conPackSel").innerHTML = (p?.list || []).map((x) =>
+      `<option value="${esc(x.id)}">${esc(x.id)}${x.license ? " — " + esc(x.license) : ""}</option>`).join("");
+  }
 }
+
+/* ── paczka grafik konsol dla wszystkich systemów (w tle — serwer pobiera z motywu) ── */
+$("bConPackApply").addEventListener("click", async () => {
+  const id = $("conPackSel").value;
+  if (!id || !confirm(`Zmienić grafiki konsol wszystkich systemów na paczkę „${id}”? Systemy, których ta paczka nie ma, zostaną przy swoich.`)) return;
+  const r = await admin("system_console_pack_apply", { id }).catch(() => null);
+  if (!r?.ok) return sysMsg(r?.reason || "Serwer nie odpowiada.", false);
+  $("conPackStatus").textContent = "Zmieniam grafiki konsol…";
+  const poll = async () => {
+    const st = await admin("system_console_pack_status").catch(() => null);
+    if (st?.running) return setTimeout(poll, 1500);
+    $("conPackStatus").textContent = st ? `Zmieniono ${st.changed.length}, bez zmian ${st.missing.length} (paczka ich nie ma).` : "";
+    refreshSysLook();
+  };
+  setTimeout(poll, 800);
+});
 
 /* ── paczka logo dla wszystkich systemów (w tle — serwer sprawdza adresy w motywach) ── */
 $("bPackApply").addEventListener("click", async () => {
@@ -354,7 +375,7 @@ async function consolePick(es) {
   const r = await admin("system_console_candidates", { es }).catch(() => null);
   const list = [...(r?.list || []), { id: "auto", title: "automatycznie (najlepsze z propozycji)" },
                 { id: "none", title: "bez zdjęcia" }];
-  $("sysPickInfo").textContent = `Konsola ${es} — ${list.length - 2} zdjęć z Wikimedia Commons, kliknij, żeby wybrać (Esc — zamknij).`;
+  $("sysPickInfo").textContent = `Konsola ${es} — ${list.length - 2} propozycji (zdjęcia z Wikimedia Commons, grafiki z motywów), kliknij, żeby wybrać (Esc — zamknij).`;
   $("sysPickList").innerHTML = list.map((c, i) =>
     `<button data-i="${i}">${c.thumb ? `<img src="${esc(c.thumb)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ""}` +
     `<span>${esc(c.title || "")}${c.credit ? " · " + esc(c.credit) : ""}</span></button>`).join("");

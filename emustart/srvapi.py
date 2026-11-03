@@ -426,8 +426,36 @@ class ServerApi:
 
     # ── zdjęcie konsoli systemu (tło platformy w motywach Lumena; emustart/consoles.py) ──
     def system_console_candidates(self, es: str) -> list:
-        return [{"id": "commons:" + c["title"], "thumb": c["thumb"], "title": c["title"].removeprefix("File:"),
-                 "credit": c["credit"], "page": c["page"]} for c in consoles.search(es)]
+        out = [{"id": "commons:" + c["title"], "thumb": c["thumb"], "title": c["title"].removeprefix("File:"),
+                "credit": c["credit"], "page": c["page"]} for c in consoles.search(es)]
+        return out + [{"id": "theme:" + t["url"], "thumb": t["url"], "title": t["source"], "credit": t["license"],
+                       "page": ""} for t in consoles.theme_candidates(es)]
+
+    def system_console_packs(self) -> list:
+        return consoles.pack_sources()
+
+    def system_console_pack_apply(self, source: str) -> dict:
+        import threading
+        if source not in {p["id"] for p in consoles.pack_sources()}:
+            return {"ok": False, "reason": "Nie ma takiej paczki grafik konsol."}
+        job = getattr(self, "_con_pack_job", None)
+        if job and job["running"]:
+            return {"ok": False, "reason": "Zmiana grafik konsol już trwa."}
+        self._con_pack_job = {"running": True, "source": source, "changed": [], "missing": []}
+
+        def run():
+            try:
+                r = consoles.apply_pack(source, [s["es"] for s in library.systems_summary()])
+                self._con_pack_job.update(changed=r.get("changed", []), missing=r.get("missing", []))
+            except Exception:
+                log.exception("paczka grafik konsol %s", source)
+            finally:
+                self._con_pack_job["running"] = False
+        threading.Thread(target=run, daemon=True, name="paczka-konsol").start()
+        return {"ok": True}
+
+    def system_console_pack_status(self) -> dict:
+        return dict(getattr(self, "_con_pack_job", None) or {"running": False, "source": "", "changed": [], "missing": []})
 
     def system_console_choose(self, es: str, cid: str) -> dict:
         if not consoles.choose(es, cid):
