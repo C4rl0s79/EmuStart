@@ -12,7 +12,7 @@ import re
 import threading
 from pathlib import Path
 
-from emustart import (art, catalog, config, launchbox, library, logos, metadata, scanner,
+from emustart import (art, catalog, config, consoles, launchbox, library, logos, metadata, scanner,
                       sysinfo, systems)
 
 log = logging.getLogger("emustart.srvapi")
@@ -48,6 +48,7 @@ class ServerApi:
     def list_systems(self) -> list:
         summary = library.systems_summary()
         logos.fetch_missing(self._cfg, [s["es"] for s in summary])
+        consoles.fetch_missing([s["es"] for s in summary])
         counts = catalog.visible_counts(self._cfg, summary)
         out = []
         for s in summary:
@@ -57,8 +58,10 @@ class ServerApi:
             if not emu.get("enabled", True) or not s["games"]:
                 continue
             lg = logos.url_for(s["es"], self._cfg)
+            cn = consoles.url_for(s["es"])
             out.append({"es": s["es"], "display": emu.get("name") or s["display"], "games": s["games"],
                         "cached": 0, "logo": lg["url"], "logo_glow": lg["glow"],
+                        "console": cn["url"], "console_credit": cn["credit"], "console_lum": cn["lum"],
                         "emulator": emu.get("label", ""), "kind": systems.info(s["es"])["kind"]})
         return out
 
@@ -387,6 +390,27 @@ class ServerApi:
         self._cfg["systems"][es].setdefault("logo_glow", False)
         config.save(self._cfg)
         return {"ok": True, **logos.url_for(es, self._cfg)}
+
+    # ── zdjęcie konsoli systemu (tło platformy w motywach Lumena; emustart/consoles.py) ──
+    def system_console_candidates(self, es: str) -> list:
+        return [{"id": "commons:" + c["title"], "thumb": c["thumb"], "title": c["title"].removeprefix("File:"),
+                 "credit": c["credit"], "page": c["page"]} for c in consoles.search(es)]
+
+    def system_console_choose(self, es: str, cid: str) -> dict:
+        if not consoles.choose(es, cid):
+            return {"ok": False, "reason": "Nie udało się pobrać tego zdjęcia."}
+        return {"ok": True, **consoles.url_for(es)}
+
+    def system_console_upload(self, es: str, data: str, credit: str = "") -> dict:
+        import base64
+        import binascii
+        try:
+            raw = base64.b64decode(data or "", validate=True)
+        except (binascii.Error, ValueError):
+            raw = b""
+        if not raw or not consoles.upload(es, raw, credit):
+            return {"ok": False, "reason": "To nie jest obraz (PNG, JPG albo WebP)."}
+        return {"ok": True, **consoles.url_for(es)}
 
 
 META_FIELDS = ("title", "developer", "publisher", "year", "genre", "players", "description")

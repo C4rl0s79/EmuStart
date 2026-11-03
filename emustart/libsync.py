@@ -80,7 +80,9 @@ def sync(cfg: dict, progress=None, force: bool = False) -> dict:
         for i, s in enumerate(remote):
             es = s["es"]
             rec[es] = {"emu": s.get("emu_rec", ""), "core": s.get("core", ""),
-                       "logo": s.get("logo", ""), "glow": bool(s.get("logo_glow"))}
+                       "logo": s.get("logo", ""), "glow": bool(s.get("logo_glow")),
+                       "console": s.get("console", ""), "console_credit": s.get("console_credit", ""),
+                       "console_lum": s.get("console_lum", 0.5)}
             if progress:
                 progress(f"Biblioteka z serwera: {s.get('display') or es}", i, len(remote))
             if not force and local.get(es, {}).get("scanned") == s.get("scanned"):
@@ -130,14 +132,15 @@ COLS = ("rel", "name", "title", "tags", "files", "size", "is_dir", "multidisc", 
 
 
 def _drop_changed_logos(old: dict, new: dict) -> None:
-    """Logo systemu zmienione na serwerze (inny adres / wersja) — lokalna kopia od nowa."""
+    """Logo albo zdjęcie konsoli systemu zmienione na serwerze (inny adres / wersja) — lokalna kopia od nowa."""
     from emustart import mediastore
     for es, r in new.items():
-        before = (old.get(es) or {}).get("logo", "")
-        if before and before != r.get("logo") and before.startswith("/media/"):
-            where = mediastore.file_name(urllib.parse.unquote(before.split("?")[0][len("/media/"):]))
-            if where:
-                mediastore.delete(*where)
+        for key in ("logo", "console"):
+            before = (old.get(es) or {}).get(key, "")
+            if before and before != r.get(key) and before.startswith("/media/"):
+                where = mediastore.file_name(urllib.parse.unquote(before.split("?")[0][len("/media/"):]))
+                if where:
+                    mediastore.delete(*where)
 
 
 def _drop_changed_art(es: str, rows: list) -> int:
@@ -244,6 +247,14 @@ def bios_list(cfg: dict, query: dict) -> list:
         return []
 
 
+def console_for(es: str) -> dict | None:
+    """Zdjęcie konsoli systemu z serwera ({url, credit, lum}); plik pobiera się sam przy pierwszym
+    wyświetleniu (fetch_media), jak logo."""
+    rec = recommended(es)
+    return {"url": rec["console"], "credit": rec.get("console_credit", ""),
+            "lum": float(rec.get("console_lum") or 0.5)} if rec.get("console") else None
+
+
 def logo_for(es: str) -> dict | None:
     """Logo systemu z serwera ({url, glow}); własne logo (/media/_systems/…) pobiera się samo
     przy pierwszym wyświetleniu (fetch_media)."""
@@ -309,13 +320,16 @@ def server_systems() -> list:
         sc = ((remote.API._cfg.get("systems") or {}).get(r["es"]) or {}) if remote.API else {}
         from emustart import logos
         lg = logos.url_for(r["es"], remote.API._cfg) if remote.API else {"url": "", "glow": False}
+        from emustart import consoles
+        cn = consoles.url_for(r["es"])
         # wersja systemu: skan albo ostatnia zmiana grafiki / opisu — urządzenia pobiorą go od nowa
         out.append({"es": r["es"], "display": sc.get("name") or r["display"], "games": r["games"],
                     "scanned": max(float(r["scanned"] or 0), library.rev(r["es"])),
                     # pełna lista potrzebna, gdy zmienił się skan albo cały system (nie pojedyncze gry)
                     "full": max(float(r["scanned"] or 0), library.full_rev(r["es"])),
                     "emu_rec": sc.get("emu_rec", ""), "core": sc.get("core_rec", ""),
-                    "logo": lg["url"], "logo_glow": bool(lg["glow"])})
+                    "logo": lg["url"], "logo_glow": bool(lg["glow"]),
+                    "console": cn["url"], "console_credit": cn["credit"], "console_lum": cn["lum"]})
     return out
 
 

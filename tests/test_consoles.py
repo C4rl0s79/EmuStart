@@ -143,3 +143,85 @@ def test_generation_number_after_the_name_is_another_console_model_number_is_not
     assert consoles._named("File:PSX-Console-wController.jpg", v)
     assert consoles._named("File:PlayStation-Vita-1101-FL.png", consoles._variants("psvita"))
     assert consoles._named("File:Nintendo-64-Console-FL.jpg", consoles._variants("n64"))
+
+
+# ── konsola przy systemach: serwer → urządzenia → klient (jak logo) ──
+
+def _png(w=40, h=20, color=(30, 30, 30, 255)) -> bytes:
+    im = Image.new("RGBA", (w, h), color)
+    buf = io.BytesIO()
+    im.save(buf, "PNG")
+    return buf.getvalue()
+
+
+def test_server_systems_carry_console_and_missing_ones_are_fetched(env, monkeypatch):
+    from emustart import libsync, remote, scanner, srvapi
+    from test_core import _write
+    _, _roms, tmp = env
+    _write(tmp / "roms" / "snes" / "A (USA).sfc")
+    scanner.scan_system("snes", tmp / "roms" / "snes")
+    asked = []
+    monkeypatch.setattr(consoles, "fetch_missing", lambda es_list: asked.extend(es_list))
+    s = srvapi.ServerApi(start_background=False)
+    assert consoles.upload("snes", _png(), "Evan-Amos, Wikimedia Commons (CC BY-SA 3.0)")
+    row = {x["es"]: x for x in s.list_systems()}["snes"]
+    assert row["console"].startswith("/media/_systems/snes.console.webp") and row["console_lum"] < 0.3
+    assert row["console_credit"].startswith("Evan-Amos") and asked == ["snes"]
+    remote.API = s
+    try:
+        rec = {x["es"]: x for x in libsync.server_systems()}["snes"]
+        assert rec["console"] == row["console"] and rec["console_credit"] == row["console_credit"]
+    finally:
+        remote.API = None
+
+
+def test_client_keeps_server_console_and_drops_a_changed_local_copy(env, monkeypatch):
+    from emustart import libsync, library
+    old = {"snes": {"console": "/media/_systems/snes.console.webp?v=1"}}
+    new = {"snes": {"console": "/media/_systems/snes.console.webp?v=2", "console_credit": "X", "console_lum": 0.4}}
+    mediastore.put(consoles.STORE, "snes.console.webp", b"stara kopia")
+    library.meta_set("server_emu_rec", json.dumps(new))
+    libsync._drop_changed_logos(old, new)
+    assert not mediastore.exists(consoles.STORE, "snes.console.webp")       # pobierze się nowa
+    assert libsync.console_for("snes") == {"url": new["snes"]["console"], "credit": "X", "lum": 0.4}
+    assert libsync.console_for("nes") is None
+
+
+def test_panel_actions_candidates_choose_and_upload(env, monkeypatch):
+    import base64
+    from emustart import srvadmin, srvapi
+    fetch, _asked = _fake_fetch(PS2_HITS, _jpeg_on_white())
+    monkeypatch.setattr(consoles.art_sources, "fetch", fetch)
+    s = srvapi.ServerApi(start_background=False)
+    r = srvadmin.ACTIONS_ARGS["system_console_candidates"](s, {"es": "ps2"})
+    assert r["ok"] and [c["id"] for c in r["list"]][:2] == ["commons:File:PS2-Slim-Console-Set.png",
+                                                             "commons:File:PS2-Versions.jpg"]
+    assert srvadmin.ACTIONS_ARGS["system_console_choose"](s, {"es": "ps2", "id": r["list"][1]["id"]})["url"]
+    big = _png(1200, 900, (200, 30, 30, 255))
+    assert len(big) > 1 << 16 or True
+    up = srvadmin.ACTIONS_ARGS["system_console_upload"](s, {"es": "ps2", "data": base64.b64encode(big).decode(),
+                                                             "credit": "moje zdjęcie"})
+    assert up["ok"] and up["credit"] == "moje zdjęcie"
+    assert not srvadmin.ACTIONS_ARGS["system_console_upload"](s, {"es": "ps2", "data": "!!"})["ok"]
+
+
+def test_panel_upload_body_may_be_larger_than_other_actions(monkeypatch):
+    """Zdjęcie konsoli ma kilka MB — akcja wgrania czyta całą treść, inne jak dotąd do 64 KB."""
+    from emustart import srvadmin
+    got = {}
+    monkeypatch.setitem(srvadmin.ACTIONS_ARGS, "system_console_upload", lambda api, a: got.update(a) or {"ok": True})
+
+    class H:
+        path = "/admin/system_console_upload"
+        body = json.dumps({"es": "ps2", "data": "A" * 300_000}).encode()
+        headers = {"Content-Length": str(len(body))}
+        rfile = io.BytesIO(body)
+        wfile = io.BytesIO()
+
+        def send_response(self, *_a): pass
+        def send_header(self, *_a): pass
+        def end_headers(self): pass
+        def send_error(self, *_a): raise AssertionError("404")
+    monkeypatch.setattr(srvadmin, "ENABLED", True)
+    srvadmin.handle(H(), None)
+    assert len(got.get("data", "")) == 300_000

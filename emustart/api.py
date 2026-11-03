@@ -23,7 +23,7 @@ import time
 import urllib.parse
 from pathlib import Path
 
-from emustart import (__version__, art, bios, cache, catalog, ingame, installer, logos, sysinfo, metadata, pads, profiles, translations, uipad, config, emulators, launcher, library,
+from emustart import (__version__, art, bios, cache, catalog, consoles, ingame, installer, logos, sysinfo, metadata, pads, profiles, translations, uipad, config, emulators, launcher, library,
                       nasfs, netsrc, paths, saveslots, syncclient, systems, winutil)
 
 log = logging.getLogger("emustart.api")
@@ -409,8 +409,10 @@ class Api:
             if not emu.get("enabled", True) or not s["games"]:
                 continue
             lg = libsync.logo_for(s["es"]) or logos.url_for(s["es"], self._cfg)
+            cn = libsync.console_for(s["es"]) or consoles.url_for(s["es"])
             out.append({"es": s["es"], "display": emu.get("name") or s["display"], "games": s["games"],
                         "cached": s["cached"], "logo": lg["url"], "logo_glow": lg["glow"],
+                        "console": cn["url"], "console_credit": cn["credit"], "console_lum": cn["lum"],
                         "emulator": emu.get("label", ""), "kind": systems.info(s["es"])["kind"]})
         return out
 
