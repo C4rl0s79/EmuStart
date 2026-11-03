@@ -43,11 +43,12 @@ SRAM): `sram-snes` (Snes9x, bsnes, Mesen-S…), `sram-nes` (FCEUmm, Nestopia, Me
 Rodzaj `saves` tych rdzeni ma `core_id` grupy; stany zostają per rdzeń. Serwer mapuje rdzeń z
 grupy na grupę także dla klientów 0.46 i pokazuje im paczkę grupy pod ich rdzeniem.
 
-## Migracja zapisów sprzed 0.46 (0.47)
+## Migracja zapisów sprzed 0.46 — usunięta (0.56.1)
 
-`emustart/savemigrate.py` — z panelu serwera, ręcznie; foldery profili → paczki. Istniejąca
-paczka nie jest nadpisywana: stara wersja idzie do historii (`imported`, `note`), przywracana
-przez `savesync.restore`. Idempotentna (porównanie zawartości), stare foldery zostają.
+Migracja folderów profili do paczek (panel serwera, 0.47–0.56) usunięta: nikt nie używa już
+wersji sprzed 0.46. Wersje, które dodała do historii paczek (`imported`, `note`), zostają w
+danych; stare foldery profili na serwerze też (nic nie jest kasowane). `savemigrate.py` ma już
+tylko `fold_all` (grupy zgodnych rdzeni sprzed 0.47).
 
 ## API
 

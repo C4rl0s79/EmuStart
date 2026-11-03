@@ -273,7 +273,7 @@ def test_active_slot_later_change_wins(srv):
 
 
 def test_removed_states_are_kept_and_not_merged_back(srv):
-    """Usunięcie stanu (tombstone) zostaje przy paczce w kolejnych wersjach; import / sumowanie
+    """Usunięcie stanu (tombstone) zostaje przy paczce w kolejnych wersjach; sumowanie
     stanów nie przywraca usuniętej treści; „cofnij” zdejmuje wpis."""
     gone = hashlib.sha256(b"stary-stan").hexdigest()
     assert upload(srv, {"game.state1": b"stary-stan", "game.state1.png": b"P", "game.state2": b"inny"}, 0,
@@ -285,17 +285,6 @@ def test_removed_states_are_kept_and_not_merged_back(srv):
     m = req(srv, "GET", "/v1/savesync/snes/g1/manifest")[1]
     node = _node(m, 1)
     assert [x["sha256"] for x in node["removed"]] == [gone] and node["removed"][0]["device"] == "pc"
-    # stany sprzed 0.46 (migracja) z usuniętym stanem — nie wraca
-    import tempfile
-    from pathlib import Path
-    zp = Path(tempfile.mkdtemp()) / "stare.zip"
-    zp.write_bytes(bundle({"game.state1": b"stary-stan", "game.state1.png": b"P", "game.state5": b"z-migracji"}))
-    assert savesync.import_bundle("Jezus", "snes", "g1", "retroarch", "snes9x", "states", zp, "pc", "", 1.0) == "merged"
-    m = req(srv, "GET", "/v1/savesync/snes/g1/manifest")[1]
-    with zipfile.ZipFile(io.BytesIO(req(srv, "GET", _node(m, 1)["download_url"])[1])) as z:
-        names = {n: z.read(n) for n in z.namelist()}
-    assert b"stary-stan" not in names.values() and "game.state1.png" not in names
-    assert b"z-migracji" in names.values() and names["game.state3"] == b"nowy"
     # cofnięcie usunięcia
     rev = _node(m, 1)["revision"]
     assert upload(srv, {"game.state1": b"stary-stan", "game.state2": b"inny"}, rev, kind="states",
