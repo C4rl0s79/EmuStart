@@ -1696,7 +1696,7 @@ class Api:
         r = libsync.sync(self._cfg, force=force)
         if r.get("ok") and self._cfg.get("emu_root"):
             self.autodetect()
-        if r.get("changed"):
+        if r.get("changed") or r.get("look"):
             self._lib_version += 1
         return r
 

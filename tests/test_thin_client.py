@@ -154,3 +154,26 @@ def test_server_changes_reach_pc_cache(srv, monkeypatch):
     assert not art.has("snes", "Gra (USA)", "box")           # pobierze się nowa przy wyświetleniu
     assert libsync.sync(cfg)["changed"] == 0                  # bez zmian — nic
     assert not mediastore.exists("_systems", "snes.custom.png")   # nowe logo systemu — też od nowa
+
+
+def test_new_logo_or_console_alone_tells_the_ui_to_redraw(srv, monkeypatch):
+    """Serwer pobrał logo albo zdjęcie konsoli (gry bez zmian): urządzenie zapisuje nowe adresy i daje
+    znać interfejsowi (Lumen przeładowuje listę systemów po lib_version), choć żaden system się nie zmienił."""
+    from emustart import api
+    cfg, _media = srv
+    _server_lib(monkeypatch, {"snes": 100.0})
+    assert libsync.sync(cfg)["ok"]
+    r = libsync.sync(cfg)
+    assert r["changed"] == 0 and not r.get("look")                    # nic nowego — bez przerysowania
+    monkeypatch.setattr(libsync, "server_systems", lambda: [
+        {"es": "snes", "display": "SNES", "games": 1, "scanned": 100.0, "emu_rec": "", "core": "",
+         "logo": "/media/_systems/snes.custom.png", "logo_glow": False,
+         "console": "/media/_systems/snes.console.webp?v=5", "console_credit": "Evan-Amos", "console_lum": 0.3}])
+    r = libsync.sync(cfg)
+    assert r["changed"] == 0 and r["look"] is True
+    assert libsync.console_for("snes")["url"] == "/media/_systems/snes.console.webp?v=5"
+    a = api.Api.__new__(api.Api)
+    a._cfg, a._lib_version = {}, 7
+    monkeypatch.setattr(libsync, "sync", lambda cfg, force=False: {"ok": True, "changed": 0, "look": True})
+    a._thin_sync()
+    assert a._lib_version == 8
