@@ -51,13 +51,31 @@ TGDB_PLATFORMS = {
 }
 
 
+_err = threading.local()           # błąd sieci fetch() w tym wątku (postęp pobierania w panelu, log)
+
+
+def last_error() -> str:
+    """Pierwszy chwilowy błąd sieci od clear_error() w tym wątku („HTTP 429”, „timed out”) — wtedy brak wyniku
+    nie znaczy „nie ma”. 404 / 410 to odpowiedź „nie ma”, nie błąd. Pusty — wszystkie zapytania odpowiedziały."""
+    return getattr(_err, "text", "")
+
+
+def clear_error() -> None:
+    """Przed nową pozycją (system): błąd poprzedniej nie przechodzi na kolejną."""
+    _err.text = ""
+
+
 def fetch(url: str, hdrs: dict | None = None, data: bytes | None = None,
           timeout: int = 20) -> bytes | None:
     try:
         req = urllib.request.Request(url, data=data, headers={**UA, **(hdrs or {})})
         with urllib.request.urlopen(req, timeout=timeout) as r:
             return r.read()
-    except Exception:
+    except Exception as ex:
+        code = getattr(ex, "code", None)
+        if code not in (404, 410) and not last_error():
+            _err.text = f"{urllib.parse.urlsplit(url).hostname}: " + (f"HTTP {code}" if code else
+                                                                       (str(ex) or type(ex).__name__)[:80])
         return None
 
 

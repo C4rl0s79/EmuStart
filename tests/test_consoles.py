@@ -103,8 +103,49 @@ def test_found_but_download_failed_is_tried_again_later(env, monkeypatch):
     monkeypatch.setattr(consoles, "search", lambda es: [{"title": "File:PS2-Versions.jpg", "thumb": "x"}])
     monkeypatch.setattr(consoles, "fetch", lambda es, cand: False)
     monkeypatch.setattr(consoles.art_sources, "online", lambda: True)
+    monkeypatch.setattr(consoles.art_sources, "last_error", lambda: "upload.wikimedia.org: HTTP 503")
     consoles._run(["ps2"])
     assert not mediastore.exists(consoles.STORE, "ps2.console.none")
+    # po błędzie sieci — przerwa: kolejne zapytania urządzeń nie szukają od nowa co chwilę
+    started = []
+    monkeypatch.setattr(consoles.threading, "Thread", lambda *a, **k: started.append(k) or type("T", (), {"start": lambda self: None})())
+    consoles.fetch_missing(["ps2"])
+    assert started == []
+    consoles.choose("ps2", "auto")                                          # ręczne „automatycznie” — od razu
+    consoles.fetch_missing(["ps2"])
+    assert len(started) == 1
+
+
+def test_candidates_that_are_not_images_mean_no_photo_not_a_network_error(env, monkeypatch):
+    monkeypatch.setattr(consoles, "search", lambda es: [{"title": "File:X.jpg", "thumb": "x"}])
+    monkeypatch.setattr(consoles.art_sources, "fetch", lambda url, timeout=20: b"to nie obraz")
+    monkeypatch.setattr(consoles, "PROGRESS", consoles.mediaprogress.Progress("konsola"))
+    consoles.PROGRESS.start(1)
+    consoles._run(["ps2"])
+    p = consoles.PROGRESS.snapshot()
+    assert mediastore.exists(consoles.STORE, "ps2.console.none") and p["none"] == 1 and not p["last_error"]
+
+
+def test_logo_network_error_is_retried_404_is_an_answer(env, monkeypatch):
+    import urllib.error
+    from emustart import art_sources, logos
+
+    def answer(code):
+        def urlopen(*a, **k):
+            raise urllib.error.HTTPError("https://raw.githubusercontent.com/x", code, "x", {}, None)
+        return urlopen
+    monkeypatch.setattr(art_sources, "online", lambda: True)
+    monkeypatch.setattr(logos, "PROGRESS", consoles.mediaprogress.Progress("logo"))
+    logos.PROGRESS.start(2)
+    monkeypatch.setattr(art_sources.urllib.request, "urlopen", answer(429))
+    logos._run({}, ["vectrex"])
+    assert not logos._has("vectrex.none")                                   # chwilowy błąd — bez znacznika
+    monkeypatch.setattr(art_sources.urllib.request, "urlopen", answer(404))
+    logos._retry_at.clear()
+    logos._run({}, ["vectrex"])
+    assert logos._has("vectrex.none")                                       # oba źródła: nie ma
+    p = logos.PROGRESS.snapshot()
+    assert (p["retry"], p["none"]) == (1, 1) and "HTTP 429" in p["last_error"]
 
 
 def test_choose_none_and_auto(env, monkeypatch):
@@ -316,3 +357,62 @@ def test_panel_lists_and_applies_console_packs(env, monkeypatch):
         time.sleep(0.05)
     assert st["changed"] == ["psx"] and st["missing"] == ["snes"]
     assert not srvadmin.ACTIONS_ARGS["system_console_pack_apply"](s, {"id": "nie ma"})["ok"]
+
+
+AMIGA_HITS = {"query": {"pages": {
+    "1": _page("File:Amiga-CD32-wController-L-TRSP.png", "Public domain"),                 # konsola CD32, nie Amiga
+    "2": _page("File:2019-08-04 Commodore Amiga personal computer.jpg", "CC BY-SA 4.0"),
+    "3": _page("File:Amiga 500 Plus (transparent background).png", "Public domain"),
+    "4": _page("File:Console videogiochi amiga 500 (milano).jpg", "CC BY 3.0")}}}
+
+
+def test_home_computers_are_searched_as_computers_not_consoles(env, monkeypatch):
+    fetch, asked = _fake_fetch(AMIGA_HITS, b"")
+    monkeypatch.setattr(consoles.art_sources, "fetch", fetch)
+    found = consoles.search("amiga")
+    assert [c["title"] for c in found][:2] == ["File:Amiga 500 Plus (transparent background).png",
+                                               "File:2019-08-04 Commodore Amiga personal computer.jpg"]
+    assert not any("CD32" in c["title"] or "Console" in c["title"] for c in found)
+    q = urllib.parse.parse_qs(urllib.parse.urlparse(asked[0]).query)["gsrsearch"][0]
+    assert q == "Amiga 500"                                                 # typowy model, bez „console Evan-Amos”
+    fetch, asked = _fake_fetch(PS2_HITS, b"")
+    monkeypatch.setattr(consoles.art_sources, "fetch", fetch)
+    consoles.search("ps2")                                                  # konsole — jak dotąd
+    assert urllib.parse.parse_qs(urllib.parse.urlparse(asked[0]).query)["gsrsearch"][0].endswith("console Evan-Amos")
+
+
+def test_background_download_reports_progress_and_network_errors(env, monkeypatch):
+    """Pasek w panelu: ile z ilu, wynik każdego systemu; błąd sieci (np. HTTP 429) — do ponowienia, z powodem,
+    bez znacznika „brak zdjęcia”."""
+    fetch, _asked = _fake_fetch(PS2_HITS, _jpeg_on_white())
+    monkeypatch.setattr(consoles.art_sources, "fetch", fetch)
+    monkeypatch.setattr(consoles.art_sources, "online", lambda: True)
+    monkeypatch.setattr(consoles, "PROGRESS", consoles.mediaprogress.Progress("konsola"))
+    consoles.PROGRESS.start(3)
+    consoles.art_sources._err.text = "stary błąd innego systemu"            # nie przechodzi na kolejny system
+    consoles._run(["ps2", "fbneo"])                                          # zdjęcie jest; automat — bez zdjęcia
+    monkeypatch.setattr(consoles, "search", lambda es: [])
+    monkeypatch.setattr(consoles.art_sources, "last_error", lambda: "commons.wikimedia.org: HTTP 429")
+    consoles._run(["snes"])
+    p = consoles.PROGRESS.snapshot()
+    assert (p["done"], p["total"], p["found"], p["none"], p["retry"], p["running"]) == (3, 3, 1, 1, 1, False)
+    assert p["last_error"] == "snes: commons.wikimedia.org: HTTP 429"
+    assert not mediastore.exists(consoles.STORE, "snes.console.none")       # następnym razem od nowa
+
+
+def test_fetch_tells_why_it_failed(monkeypatch):
+    import urllib.error
+    from emustart import art_sources
+
+    def boom(*a, **k):
+        raise urllib.error.HTTPError("https://upload.wikimedia.org/x.png", 429, "Too Many Requests", {}, None)
+    monkeypatch.setattr(art_sources.urllib.request, "urlopen", boom)
+    assert art_sources.fetch("https://upload.wikimedia.org/x.png") is None
+    assert art_sources.last_error() == "upload.wikimedia.org: HTTP 429"
+
+
+def test_panel_shows_media_progress(env):
+    from emustart import srvadmin, srvapi
+    s = srvapi.ServerApi(start_background=False)
+    r = srvadmin.ACTIONS_ARGS["systems_media_progress"](s, {})
+    assert r["ok"] and {"running", "done", "total", "current", "last_error"} <= set(r["consoles"]) <= set(r["logos"]) | set(r["consoles"])

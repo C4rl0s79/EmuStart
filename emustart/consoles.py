@@ -19,11 +19,13 @@ import json
 import logging
 import re
 import threading
+import time
 import urllib.parse
 
-from emustart import art_sources, systems
+from emustart import art_sources, mediaprogress, systems
 
 log = logging.getLogger("emustart.consoles")
+PROGRESS = mediaprogress.Progress("konsola")         # pobieranie w tle — pasek w panelu serwera
 
 STORE = "_systems"
 COMMONS_API = "https://commons.wikimedia.org/w/api.php"
@@ -32,9 +34,22 @@ _FREE = re.compile(r"^(public domain|pd\b|cc0|cc[ -]by(-sa)?\b)", re.I)
 # człony nazwy pliku: wnętrze, części, opakowanie, widok z tyłu, sam pad — nie zdjęcie konsoli
 _NOT_CONSOLE = {"motherboard", "inside", "board", "pcb", "cartridge", "cart", "disc", "box", "logo", "screenshot",
                 "manual", "chip", "adapter", "cable", "memory", "label", "teardown", "open", "back",
-                "bottom", "controller", "controllers", "accessory", "packaging", "breakdown"}
+                "bottom", "controller", "controllers", "accessory", "packaging", "breakdown", "floppy", "datasette"}
+# komputery domowe: szukane nazwą typowego modelu (Evan-Amos ich prawie nie ma, a „Amiga console” to CD32;
+# sama nazwa platformy daje zrzuty gier i zdjęcia ludzi — sprawdzone 2026-11-04)
+_COMPUTERS = {"amiga": "Amiga 500", "amigawhdgames": "Amiga 500", "amigawhddemos": "Amiga 500",
+              "c64": "Commodore 64 computer", "vic20": "Commodore VIC-20 computer", "plus4": "Commodore Plus/4 computer",
+              "zxspectrum": "Sinclair ZX Spectrum computer", "msx": "MSX computer", "msx2": "MSX2 computer",
+              "atari800": "Atari 800 computer", "atarist": "Atari 1040ST computer", "pc88": "NEC PC-8801 computer",
+              "pc98": "NEC PC-9801 computer"}
+# u komputerów: konsola tej marki (CD32, CDTV, C64GS), zrzut gry / programu, rozebrany sprzęt — nie ten komputer
+_NOT_COMPUTER = {"console", "cd32", "cdtv", "c64gs", "screen", "splash", "menu", "title", "game", "palette",
+                 "software", "word", "founder", "manager", "advert", "poster", "magazine", "emulator",
+                 "opened", "expansions", "cover", "top"}
 _busy: set = set()
 _lock = threading.Lock()
+_retry_at: dict = {}              # es → kiedy znowu próbować po błędzie sieci (nie przy każdym zapytaniu urządzenia)
+RETRY_AFTER = 600
 
 # motywy ES / ES-DE z grafikami konsol (sprawdzone 2026-11-03 na liście ES-DE i najpopularniejszych
 # es-theme-* z GitHuba; pliki nazwane kodami ES jak logo). Trzy różne style; ten sam zestaw renderów
@@ -105,7 +120,8 @@ def _parts(title: str) -> set:
 def _score(title: str) -> int:
     p, t = _parts(title), title.lower()
     return (3 * ("console-set" in t) + 2 * ("console" in p) + ("wcontroller" in p) + ("versions" in p)
-            + ("handheld" in p) + bool(p & {"fl", "fr"}) + t.endswith(".png"))
+            + ("handheld" in p) + bool(p & {"fl", "fr"}) + t.endswith(".png")
+            + 2 * ("computer" in p) + 2 * bool(p & {"transparent", "trsp"}))
 
 
 _ALL: dict = {}
@@ -135,10 +151,15 @@ def search(es: str) -> list:
         return []
     variants = _variants(es)
     others = _others(es, variants)
+    computer = es in _COMPUTERS
+    skip = _NOT_CONSOLE | (_NOT_COMPUTER if computer else set())
     out, seen = [], set()
-    for name in dict.fromkeys([info["display"]] + [n.split(" - ")[-1] for n in systems.names(es)[1:6]] + [es]):
+    names = [_COMPUTERS[es]] if computer else \
+        [info["display"]] + [n.split(" - ")[-1] for n in systems.names(es)[1:6]] + [es]
+    for name in dict.fromkeys(names):
         q = {"action": "query", "format": "json", "generator": "search", "gsrnamespace": "6", "gsrlimit": "30",
-             "gsrsearch": f"{name} console Evan-Amos", "prop": "imageinfo", "iiprop": "url|extmetadata",
+             "gsrsearch": name if computer else f"{name} console Evan-Amos",
+             "prop": "imageinfo", "iiprop": "url|extmetadata",
              "iiurlwidth": str(WIDTH)}
         raw = art_sources.fetch(COMMONS_API + "?" + urllib.parse.urlencode(q), timeout=20)
         try:
@@ -150,7 +171,7 @@ def search(es: str) -> list:
             meta = ii.get("extmetadata") or {}
             lic = _plain((meta.get("LicenseShortName") or {}).get("value", ""))
             mine = _named(title, variants, others)
-            if (title in seen or not ii.get("thumburl") or not _FREE.match(lic) or _parts(title) & _NOT_CONSOLE
+            if (title in seen or not ii.get("thumburl") or not _FREE.match(lic) or _parts(title) & skip
                     or not mine or _other_named(title, others, mine)):
                 continue
             seen.add(title)
@@ -231,6 +252,7 @@ def choose(es: str, cid: str) -> bool:
     if cid == "auto":                       # następna lista systemów (fetch_missing) pobierze od nowa
         for f in (f"{es}.console.webp", f"{es}.console.json", f"{es}.console.none"):
             mediastore.delete(STORE, f)
+        _retry_at.pop(es, None)
         return True
     if cid.startswith("commons:"):
         hit = next((c for c in search(es) if c["title"] == cid[8:]), None)     # tylko z propozycji
@@ -317,26 +339,40 @@ def fetch_missing(es_list) -> None:
     with _lock:
         for es in es_list:
             if es in _busy or mediastore.exists(STORE, f"{es}.console.webp") \
-                    or mediastore.exists(STORE, f"{es}.console.none"):
+                    or mediastore.exists(STORE, f"{es}.console.none") or _retry_at.get(es, 0) > time.monotonic():
                 continue
             _busy.add(es)
             todo.append(es)
     if todo:
+        PROGRESS.start(len(todo))
         threading.Thread(target=_run, args=(todo,), daemon=True, name="konsole").start()
 
 
 def _run(todo: list) -> None:
     from emustart import mediastore
     for es in todo:
+        t0, result, err = PROGRESS.begin(es), "retry", ""
+        art_sources.clear_error()
         try:
             found = search(es)
             if any(fetch(es, c) for c in found[:3]):
-                continue
-            # znalezione, ale pobranie się nie udało (sieć) — bez znacznika, następna lista systemów spróbuje znowu
-            if not found and (art_sources.online() or systems.info(es)["kind"] == "arcade"):
-                mediastore.put(STORE, f"{es}.console.none", b"")          # sprawdzone — zdjęcia nie ma
-        except Exception:
+                result = "found"
+            # wszystkie zapytania odpowiedziały: nic nie ma albo propozycje to nie obrazy — sprawdzone, bez zdjęcia
+            elif not art_sources.last_error() and (found or systems.info(es)["kind"] == "arcade"
+                                                   or art_sources.online()):
+                mediastore.put(STORE, f"{es}.console.none", b"")
+                result = "none"
+            else:
+                # błąd sieci (np. HTTP 429) albo brak sieci — bez znacznika; ponowna próba po przerwie
+                err = art_sources.last_error() or "brak sieci"
+        except Exception as ex:
             log.exception("konsola %s", es)
+            err = str(ex)[:120]
         finally:
+            PROGRESS.end(es, t0, result, err)
             with _lock:
                 _busy.discard(es)
+                if result == "retry":
+                    _retry_at[es] = time.monotonic() + RETRY_AFTER
+                else:
+                    _retry_at.pop(es, None)

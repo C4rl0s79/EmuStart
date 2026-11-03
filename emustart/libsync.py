@@ -119,7 +119,8 @@ def sync(cfg: dict, progress=None, force: bool = False) -> dict:
             progress("Gotowe", len(remote), len(remote))
         library.meta_set("server_full", json.dumps(fulls))
         log.info("biblioteka z serwera: %d systemów (%d zmienionych), %d gier", len(remote), changed, games)
-        return {"ok": True, "systems": len(remote), "games": games, "changed": changed}
+        # look: zmieniło się samo logo / zdjęcie konsoli / poświata (gry bez zmian) — interfejs też przerysowuje
+        return {"ok": True, "systems": len(remote), "games": games, "changed": changed, "look": rec != old_rec}
     except (OSError, ValueError) as ex:
         log.warning("biblioteka z serwera: %s", ex)
         return {"ok": False, "reason": f"Biblioteka z serwera: {ex}"}

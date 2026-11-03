@@ -11,6 +11,34 @@ nowym urządzeniu — do sprawdzenia na żywo), Play! (miejsce kart), APK (te sa
 budowania), adaptery pozostałych samodzielnych emulatorów przy pierwszym użyciu, sprawdzenie na żywo (niżej);
 jedno zapytanie przygotowujące grę — po pomiarach kroków z prawdziwych startów.
 
+## [0.56.2] — 2026-11-04
+
+Zakres: serwer (`consoles.py`, `logos.py`, `art_sources.py`, nowy `mediaprogress.py`, `srvapi.py`, `srvadmin.py`,
+panel `web/server.*`), klient Windows i Lumen (silnik): `libsync.py`, `api.py`. APK bez zmian.
+
+### Poprawione
+- **Lumen i klient PC nie pokazywały nowych logo i zdjęć konsol z serwera:** samo nowe logo / zdjęcie (gry bez
+  zmian) nie dawało interfejsowi znaku do przerysowania. Teraz daje (`lib_version`).
+- **Amiga dostawała zdjęcie CD32, C64 — C64GS:** komputery domowe (Amiga, C64, VIC-20, Plus/4, ZX Spectrum, MSX,
+  Atari 800 / ST, PC-88 / 98) są szukane nazwą typowego modelu („Amiga 500”), bez konsol tej marki, zrzutów gier
+  i rozebranego sprzętu. Zapisane już złe zdjęcie zmienia „Konsola…” → „automatycznie”.
+- **Błąd sieci przy pobieraniu logo albo zdjęcia** (np. HTTP 429, przekroczony czas) nie oznacza już systemu na
+  stałe jako „bez logo” / „bez zdjęcia”; „nie ma” tylko gdy źródła odpowiedziały (np. 404). Ponowna próba po 10
+  minutach, nie przy każdym zapytaniu urządzenia (mniej zapytań do Wikimedia).
+- **Pełne skanowanie w kliencie** też przerysowuje interfejs po nowym logo / zdjęciu (jedno miejsce po synchronizacji).
+
+### Dodane
+- **Panel: pasek postępu pobierania logo i zdjęć konsol** — ile z ilu, bieżący system, najdłuższy czas na system,
+  ostatni błąd z kodem HTTP; czas i wynik każdego systemu także w logu serwera (diagnoza powolnego pobierania).
+
+### Sprawdzone
+- pytest: 505 ✓; przegląd kodu (/code-review, poprawki wdrożone); wyszukiwanie komputerów na żywo w Commons (13 systemów); panel w przeglądarce na danych
+  testowych. Pobieranie z tego komputera: wyszukiwanie 0,1–4,5 s, obraz 0,2–1,3 s na system.
+
+### Niesprawdzone
+- Dlaczego na serwerze użytkownika pobieranie trwa ponad minutę na obraz — nie odtworzone stąd; nowy pasek i log
+  pokażą czas i błąd każdego systemu.
+
 ## [0.56.1] — 2026-11-03
 
 Zakres (serwer): `consoles.py`, `libsync.py`, `srvapi.py`, `srvadmin.py`, panel `web/server.*`, `savemigrate.py`,

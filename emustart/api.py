@@ -1693,10 +1693,14 @@ class Api:
     def _thin_sync(self, force: bool = False) -> dict:
         """Biblioteka z serwera; po pierwszej — emulatory dla nowych systemów (zalecane przez serwer)."""
         from emustart import libsync
-        r = libsync.sync(self._cfg, force=force)
+        return self._after_sync(libsync.sync(self._cfg, force=force))
+
+    def _after_sync(self, r: dict) -> dict:
+        """Po każdej synchronizacji z serwera (co 5 min i pełne skanowanie): emulatory dla nowych systemów,
+        a gdy przyszły nowe gry albo samo logo / zdjęcie konsoli — interfejs przerysowuje (lib_version)."""
         if r.get("ok") and self._cfg.get("emu_root"):
             self.autodetect()
-        if r.get("changed"):
+        if r.get("changed") or r.get("look"):
             self._lib_version += 1
         return r
 
@@ -1730,9 +1734,7 @@ class Api:
                 if not libsync.thin(self._cfg):
                     self._scan["result"] = {"ok": False, "reason": "Najpierw zaloguj się do serwera EmuStart."}
                     return
-                self._scan["result"] = libsync.sync(self._cfg, prog, force=True)
-                if self._scan["result"].get("ok") and self._cfg.get("emu_root"):
-                    self.autodetect()
+                self._scan["result"] = self._after_sync(libsync.sync(self._cfg, prog, force=True))
             except Exception as ex:
                 log.exception("scan")
                 self._scan["result"] = {"ok": False, "reason": str(ex)}
