@@ -316,3 +316,25 @@ def test_panel_lists_and_applies_console_packs(env, monkeypatch):
         time.sleep(0.05)
     assert st["changed"] == ["psx"] and st["missing"] == ["snes"]
     assert not srvadmin.ACTIONS_ARGS["system_console_pack_apply"](s, {"id": "nie ma"})["ok"]
+
+
+AMIGA_HITS = {"query": {"pages": {
+    "1": _page("File:Amiga-CD32-wController-L-TRSP.png", "Public domain"),                 # konsola CD32, nie Amiga
+    "2": _page("File:2019-08-04 Commodore Amiga personal computer.jpg", "CC BY-SA 4.0"),
+    "3": _page("File:Amiga 500 Plus (transparent background).png", "Public domain"),
+    "4": _page("File:Console videogiochi amiga 500 (milano).jpg", "CC BY 3.0")}}}
+
+
+def test_home_computers_are_searched_as_computers_not_consoles(env, monkeypatch):
+    fetch, asked = _fake_fetch(AMIGA_HITS, b"")
+    monkeypatch.setattr(consoles.art_sources, "fetch", fetch)
+    found = consoles.search("amiga")
+    assert [c["title"] for c in found][:2] == ["File:Amiga 500 Plus (transparent background).png",
+                                               "File:2019-08-04 Commodore Amiga personal computer.jpg"]
+    assert not any("CD32" in c["title"] or "Console" in c["title"] for c in found)
+    q = urllib.parse.parse_qs(urllib.parse.urlparse(asked[0]).query)["gsrsearch"][0]
+    assert q == "Amiga 500"                                                 # typowy model, bez „console Evan-Amos”
+    fetch, asked = _fake_fetch(PS2_HITS, b"")
+    monkeypatch.setattr(consoles.art_sources, "fetch", fetch)
+    consoles.search("ps2")                                                  # konsole — jak dotąd
+    assert urllib.parse.parse_qs(urllib.parse.urlparse(asked[0]).query)["gsrsearch"][0].endswith("console Evan-Amos")
