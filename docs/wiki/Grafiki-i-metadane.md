@@ -47,9 +47,11 @@ Panel serwera → Konfiguracja → **Systemy — logo i nazwy** (logo, nazwa, po
 administrator na urządzeniu: przytrzymane A na logo systemu → Logo / Poświata logo / Nazwa.
 Tak samo na wszystkich urządzeniach.
 
-Propozycje logo: wbudowane, motywy EmulationStation / ES-DE (Art Book Next, Carbon, Alekfull NX,
-Canvas, Simple, Pixel, SNES Mini), ikony z 9 motywów RetroArcha — z internetu, bez plików na
-serwerze — oraz własna paczka logo (np. `platform_logos` z PyLinks): panel → Konfiguracja →
+Propozycje logo: wbudowane, motywy EmulationStation / ES-DE (Art Book Next / Alekfull NX / Canvas —
+jeden zestaw, te same pliki; Carbon, Simple, Pixel, SNES Mini), motywy Playnite (Aniki Lite, Jonos ReMix),
+ikony z 9 motywów RetroArcha — z internetu, bez plików na serwerze; każde z nich także jako paczka dla
+wszystkich systemów naraz. Pixel-art (np. RetroArch dot-art, motyw Pixel) serwer rozpoznaje po pliku, a Lumen
+pokazuje go tylko w całkowitym powiększeniu pikseli grafiki (ostre, równe piksele). Oraz własna paczka logo (np. `platform_logos` z PyLinks): panel → Konfiguracja →
 Foldery → Paczka logo platform. Serwer wczytuje ją do jednego pliku `server\media\_logopack.media`
 (folder może potem zniknąć); ten plik można też po prostu skopiować do `server\media`. Kafelki mają szachownicę w szarościach:
 widać na niej i czarne, i białe warianty.

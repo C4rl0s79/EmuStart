@@ -412,7 +412,7 @@ class Api:
             cn = libsync.console_for(s["es"]) or consoles.url_for(s["es"])
             out.append({"es": s["es"], "display": emu.get("name") or s["display"], "games": s["games"],
                         "cached": s["cached"], "logo": lg["url"], "logo_glow": lg["glow"],
-                        "logo_pixel": bool(lg.get("pixel")),
+                        "logo_pixel": int(lg.get("pixel") or 0),
                         "console": cn["url"], "console_credit": cn["credit"], "console_lum": cn["lum"],
                         "emulator": emu.get("label", ""), "kind": systems.info(s["es"])["kind"]})
         return out

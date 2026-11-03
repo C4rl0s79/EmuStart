@@ -63,7 +63,7 @@ def test_panel_applies_a_pack_in_the_background_and_saves_settings(env, monkeypa
     monkeypatch.setattr(logos, "_exists", lambda u: "art-book-next" in u and "/psx.svg" in u)
     monkeypatch.setattr(logos.art_sources, "fetch", lambda u, timeout=20: SVG)
     packs = srvadmin.ACTIONS_ARGS["system_logo_packs"](s, {})
-    assert packs["ok"] and {"id": logos.ABN, "license": "CC BY-NC-SA"} in packs["list"]
+    assert packs["ok"] and {"id": logos.ABN, "license": "CC BY-NC-SA (Canvas: CC0)"} in packs["list"]
     assert {"id": "RetroArch (dot-art)", "license": "CC BY 4.0"} in packs["list"]
     assert srvadmin.ACTIONS_ARGS["system_logo_pack_apply"](s, {"id": logos.ABN})["ok"]
     for _ in range(100):
@@ -122,17 +122,50 @@ def _png(w, h, blocks=1):
     return buf.getvalue()
 
 
-def test_pixel_art_icons_are_stored_at_native_size_and_flagged(env, monkeypatch):
+def _smooth(w, h):
+    """Zwykłe logo: gradient i wygładzona (półprzezroczysta) krawędź — nie pixel-art."""
     import io
     from PIL import Image
-    art, smooth = _png(256, 256, blocks=8), _png(256, 256)
-    monkeypatch.setattr(logos.art_sources, "fetch", lambda u, timeout=20: art if "dot-art" in u else smooth)
-    dot = logos.RA_ICON.format(theme="dot-art", name="Sony%20-%20PlayStation")
-    assert logos.choose({}, "psx", "url:" + dot)
-    assert Image.open(io.BytesIO(mediastore.get(logos.STORE, "psx.custom.png")[0])).size == (32, 32)
-    assert logos.url_for("psx", {"systems": {"psx": {"logo": "custom"}}})["pixel"] is True
-    pix = logos.RA_ICON.format(theme="pixel", name="Sony%20-%20PlayStation")       # bez równych bloków — nie pixel-art
-    assert logos.choose({}, "snes", "url:" + pix)
-    assert logos.url_for("snes", {"systems": {"snes": {"logo": "custom"}}})["pixel"] is False
-    assert logos.choose({}, "psx", "url:" + logos.RA_ICON.format(theme="systematic", name="x"))   # inne logo — bez znacznika
-    assert logos.url_for("psx", {"systems": {"psx": {"logo": "custom"}}})["pixel"] is False
+    im = Image.new("RGBA", (w, h))
+    for x in range(w):
+        for y in range(h):
+            im.putpixel((x, y), (x % 256, y % 256, (x + y) % 256, min(255, 40 + x)))
+    buf = io.BytesIO()
+    im.save(buf, "PNG")
+    return buf.getvalue()
+
+
+def test_pixel_art_logo_keeps_its_size_and_tells_the_art_pixel(env, monkeypatch):
+    """Pixel-art: plik w pełnym rozmiarze (klienci bez znacznika — jak dotąd), bez przezroczystego marginesu
+    (po siatce pikseli); w ustawieniach rozmiar piksela grafiki — Lumen powiększa o całe piksele."""
+    import io
+    from PIL import Image
+    art, smooth = _png(256, 256, blocks=8), _smooth(256, 256)
+    native = _png(129, 33)                                                   # motyw ES „Pixel”: natywny rozmiar
+    feed = {"dot-art": art, "pixel": smooth, "es-theme-pixel": native}
+    monkeypatch.setattr(logos.art_sources, "fetch",
+                        lambda u, timeout=20: next((v for k, v in feed.items() if f"/{k}/" in u), smooth))
+    cfg = {}
+    assert logos.choose(cfg, "psx", "url:" + logos.RA_ICON.format(theme="dot-art", name="Sony%20-%20PlayStation"))
+    im = Image.open(io.BytesIO(mediastore.get(logos.STORE, "psx.custom.png")[0]))
+    assert im.size[0] % 8 == 0 and im.size[1] % 8 == 0 and im.size[0] > 32           # pełny rozmiar, po siatce
+    assert cfg["systems"]["psx"]["logo_pixel"] == 8 and logos.url_for("psx", cfg)["pixel"] == 8
+    assert logos.choose(cfg, "snes", "url:" + logos.RA_ICON.format(theme="pixel", name="x"))   # wygładzone
+    assert logos.url_for("snes", cfg)["pixel"] == 0
+    assert logos.choose(cfg, "n64", "url:" + logos.GH + "ehettervik/es-theme-pixel/master/n64/logo.png")
+    assert logos.url_for("n64", cfg)["pixel"] == 1
+
+
+def test_pixel_logo_chosen_before_is_recognised_from_the_file(env):
+    mediastore.put(logos.STORE, "gba.custom.png", _png(256, 256, blocks=8))           # wybrane przed zmianą
+    cfg = {"systems": {"gba": {"logo": "custom"}}}                                  # bez „logo_pixel”
+    assert logos.url_for("gba", cfg)["pixel"] == 8
+    assert logos.pixel_block(_smooth(64, 64)) == 0                                  # zwykłe logo
+    assert logos.pixel_block(b"<svg/>") == 0
+
+
+def test_art_book_next_pack_falls_back_to_alekfull_and_canvas(env, monkeypatch):
+    monkeypatch.setattr(logos, "_exists", lambda u: "canvas-es-de" in u and u.endswith("/vectrex.svg"))
+    c = [x for x in logos.candidates({}, "vectrex") if x["source"] == logos.ABN]
+    assert len(c) == 1 and "canvas-es-de" in c[0]["url"] and "CC0" in c[0]["license"]
+    assert [p["id"] for p in logos.pack_sources()].count(logos.ABN) == 1

@@ -197,7 +197,7 @@ def test_pixel_logo_flag_reaches_the_device(srv, monkeypatch):
     cfg, _media = srv
     monkeypatch.setattr(libsync, "server_systems", lambda: [
         {"es": "snes", "display": "SNES", "games": 1, "scanned": 1.0, "emu_rec": "", "core": "",
-         "logo": "/media/_systems/snes.custom.png?v=3", "logo_glow": False, "logo_pixel": True}])
+         "logo": "/media/_systems/snes.custom.png?v=3", "logo_glow": False, "logo_pixel": 8}])
     monkeypatch.setattr(libsync, "server_games", lambda es, since=0: SERVER_GAMES.get(es, []))
     assert libsync.sync(cfg)["ok"]
-    assert libsync.logo_for("snes") == {"url": "/media/_systems/snes.custom.png?v=3", "glow": False, "pixel": True}
+    assert libsync.logo_for("snes") == {"url": "/media/_systems/snes.custom.png?v=3", "glow": False, "pixel": 8}

@@ -80,7 +80,7 @@ def sync(cfg: dict, progress=None, force: bool = False) -> dict:
         for i, s in enumerate(remote):
             es = s["es"]
             rec[es] = {"emu": s.get("emu_rec", ""), "core": s.get("core", ""),
-                       "logo": s.get("logo", ""), "glow": bool(s.get("logo_glow")), "pixel": bool(s.get("logo_pixel")),
+                       "logo": s.get("logo", ""), "glow": bool(s.get("logo_glow")), "pixel": int(s.get("logo_pixel") or 0),
                        "console": s.get("console", ""), "console_credit": s.get("console_credit", ""),
                        "console_lum": s.get("console_lum", 0.5)}
             if progress:
@@ -260,7 +260,7 @@ def logo_for(es: str) -> dict | None:
     """Logo systemu z serwera ({url, glow}); własne logo (/media/_systems/…) pobiera się samo
     przy pierwszym wyświetleniu (fetch_media)."""
     rec = recommended(es)
-    return {"url": rec["logo"], "glow": rec.get("glow", False), "pixel": rec.get("pixel", False)} if rec.get("logo") else None
+    return {"url": rec["logo"], "glow": rec.get("glow", False), "pixel": int(rec.get("pixel") or 0)} if rec.get("logo") else None
 
 
 def fetch_media(cfg: dict, rel: str, target: Path, key: str | None = None) -> bool:
@@ -334,7 +334,7 @@ def server_systems() -> list:
                     # pełna lista potrzebna, gdy zmienił się skan albo cały system (nie pojedyncze gry)
                     "full": max(float(r["scanned"] or 0), library.full_rev(r["es"])),
                     "emu_rec": sc.get("emu_rec", ""), "core": sc.get("core_rec", ""),
-                    "logo": lg["url"], "logo_glow": bool(lg["glow"]), "logo_pixel": bool(lg.get("pixel")),
+                    "logo": lg["url"], "logo_glow": bool(lg["glow"]), "logo_pixel": int(lg.get("pixel") or 0),
                     "console": cn["url"], "console_credit": cn["credit"], "console_lum": cn["lum"]})
     # urządzenia pytają tędy (/v1/library) — brakujące zdjęcia konsol serwer pobiera w tle, jak logo
     from emustart import consoles

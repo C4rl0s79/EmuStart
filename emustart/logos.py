@@ -90,16 +90,16 @@ def url_for(es: str, cfg: dict | None = None) -> dict:
     sc = ((cfg or {}).get("systems") or {}).get(es) or {}
     choice = sc.get("logo", "")
     if choice == "none":
-        return {"url": "", "glow": False, "pixel": False}
+        return {"url": "", "glow": False, "pixel": 0}
     if choice == "custom":
         u = custom(es)
         if u:
-            return {"url": u, "glow": bool(sc.get("logo_glow", False)), "pixel": is_pixel(es)}
+            return {"url": u, "glow": bool(sc.get("logo_glow", False)), "pixel": logo_pixel(es, sc)}
     u = bundled(systems.info(es)["plat"])
     if u:
-        return {"url": u, "glow": bool(sc.get("logo_glow", False)), "pixel": False}
+        return {"url": u, "glow": bool(sc.get("logo_glow", False)), "pixel": 0}
     u = downloaded(es)
-    return {"url": u, "glow": bool(sc.get("logo_glow", bool(u))), "pixel": False}
+    return {"url": u, "glow": bool(sc.get("logo_glow", bool(u))), "pixel": 0}
 
 
 # ── ręczny wybór logo ──
@@ -110,6 +110,8 @@ def url_for(es: str, cfg: dict | None = None) -> dict:
 ABN = "Art Book Next / Alekfull NX / Canvas"
 ES_THEMES = (
     (ABN, GH + "anthonycaccese/art-book-next-es-de/main/_inc/systems/logos/{es}.svg"),
+    (ABN, GH + "anthonycaccese/alekfull-nx-es-de/main/_inc/systems/logos/{es}.svg"),     # logo, których ABN nie ma
+    (ABN, GH + "Siddy212/canvas-es-de/main/_inc/system-logo/{es}.svg"),
     ("Carbon", CARBON),
     ("Simple", GH + "RetroPie/es-theme-simple/master/{es}/art/{es}.svg"),
     ("Pixel", GH + "ehettervik/es-theme-pixel/master/{es}/logo.png"),
@@ -129,7 +131,7 @@ PN_NAME_THEMES = (
 # Playnite Platform Logos (plat_<kod>.svg) usunięte: kwadrat 256×256 z małą plakietką — w ramce logo jak kropka
 # licencje z repozytoriów (README / plik licencji); bez wpisu — nie sprawdzono
 LICENSES = {
-    ABN: "CC BY-NC-SA",
+    ABN: "CC BY-NC-SA (Canvas: CC0)",
     "Aniki Lite (Playnite)": "brak licencji w repozytorium", "Jonos ReMix (Playnite)": "brak licencji w repozytorium",
 }
 # pierwsze słowo nazwy, które można pominąć („Sony Playstation 2” → „Playstation 2”); inne zostają
@@ -173,10 +175,15 @@ def ra_source(theme: str) -> str:
     return f"RetroArch ({theme})"
 
 
+def license_of(src: str) -> str:
+    """Licencja źródła logo (z repozytorium); pusty — nie sprawdzono."""
+    return RA_LICENSE if src.startswith("RetroArch (") else LICENSES.get(src, "")
+
+
 def pack_sources() -> list:
     """Paczki logo (motywy, ikony RetroArcha) do zmiany logo wszystkich systemów naraz: [{id, license}]."""
-    return ([{"id": src, "license": LICENSES.get(src, "")} for src, _tpl in ES_THEMES + PN_NAME_THEMES]
-            + [{"id": ra_source(t), "license": RA_LICENSE} for t in RA_THEMES])
+    names = list(dict.fromkeys(src for src, _tpl in ES_THEMES + PN_NAME_THEMES)) + [ra_source(t) for t in RA_THEMES]
+    return [{"id": src, "license": license_of(src)} for src in names]
 
 
 def apply_pack(cfg: dict, source: str, es_list, started: bool = False) -> dict:
@@ -226,7 +233,6 @@ def theme_names(es: str) -> list:
 RA_ICON = GH + "libretro/retroarch-assets/master/xmb/{theme}/png/{name}.png"
 RA_THEMES = ("systematic", "monochrome", "flatui", "flatux", "retrosystem", "pixel", "dot-art", "daite", "automatic")
 RA_LICENSE = "CC BY 4.0"            # libretro/retroarch-assets (licencja repozytorium, sprawdzone 2026-11-03)
-PIXEL_THEMES = ("pixel", "dot-art")   # pixel-art: zapis w natywnej rozdzielczości, powiększanie całkowite (Lumen)
 PACK_LABELS = {"Light_Just_White": "białe", "Light_Color": "kolorowe", "Dark_Just_Black": "czarne"}
 _IMG = {".png", ".svg", ".jpg", ".jpeg", ".webp"}
 
@@ -314,7 +320,7 @@ def candidates(cfg: dict, es: str) -> list:
         if ok and src not in seen:                    # z motywu pierwsza istniejąca nazwa
             seen.add(src)
             out.append({"id": "url:" + u, "url": u, "source": src, "label": label,
-                        "license": RA_LICENSE if src.startswith("RetroArch (") else LICENSES.get(src, "")})
+                        "license": license_of(src)})
     # paczka (nazwy jak LaunchBox: „Atari Lynx”, „Sony Playstation”) — po wszystkich pełnych nazwach
     targets = [t for t in dict.fromkeys([n.replace(" - ", " ") for n in systems.names(es) if " " in n]
                                         + [info["display"], LB_NAMES.get(es, "")]) if t]
@@ -351,7 +357,7 @@ def choose(cfg: dict, es: str, cid: str) -> bool:
             for ext in ("svg", "png"):
                 data = _get(f"{es}.{ext}")
                 if data:
-                    _store_custom(es, data, ext)
+                    sc["logo_pixel"] = _store_custom(es, data, ext)
                     sc["logo"] = "custom"
         return True
     if cid == "none":
@@ -363,18 +369,14 @@ def choose(cfg: dict, es: str, cid: str) -> bool:
         data = art_sources.fetch(cid[4:], timeout=20)
         if not data or (b"<svg" not in data[:3000] and not art_sources.is_image(data)):
             return False
-        pixel = False
-        if any(f"/xmb/{t}/" in cid for t in PIXEL_THEMES):
-            native = pixel_native(data)
-            pixel, data = native != data, native          # tylko prawdziwy pixel-art (równe bloki)
-        _store_custom(es, data, "svg" if b"<svg" in data[:3000] else "png", pixel)
+        sc["logo_pixel"] = _store_custom(es, data, "svg" if b"<svg" in data[:3000] else "png")
     elif cid.startswith("pack:"):
         from emustart import mediastore
         key = cid[5:]
         got = mediastore.get(PACK_STORE, key) if Path(key).suffix.lower() in _IMG else None
         if not got:
             return False
-        _store_custom(es, got[0], Path(key).suffix.lower().lstrip("."))
+        sc["logo_pixel"] = _store_custom(es, got[0], Path(key).suffix.lower().lstrip("."))
     else:
         return False
     sc["logo"] = "custom"
@@ -420,43 +422,76 @@ def svg_sized(data: bytes) -> bytes:
     return data[:m.start()] + tag2 + data[m.end():]
 
 
-def _store_custom(es: str, data: bytes, ext: str, pixel: bool = False) -> None:
+def _store_custom(es: str, data: bytes, ext: str) -> int:
+    """Zapisuje logo wybrane ręcznie. Zwraca rozmiar piksela grafiki (pixel_block; 0 — nie pixel-art):
+    pixel-art traci przezroczysty margines (równo z siatką pikseli), rozmiar pliku zostaje — klienci,
+    którzy nie znają znacznika, pokazują go jak dotąd."""
     from emustart import mediastore
     for old in mediastore.files(STORE):
         if old.startswith(f"{es}.custom."):
             mediastore.delete(STORE, old)
+    block = pixel_block(data) if ext != "svg" else 0
+    if block:
+        data, ext = _pixel_crop(data, block), "png"
     _put(f"{es}.custom.{ext}", data)
-    if pixel:                                          # pixel-art: urządzenia powiększają o całkowitą wielokrotność
-        _put(f"{es}.custom.pixel", b"1")
+    return block
 
 
-def pixel_native(data: bytes) -> bytes:
-    """Pixel-art powiększony w pliku (ikona 256×256 z bloków 8×8) → natywna rozdzielczość (32×32), PNG.
-    Urządzenie powiększa ją o całkowitą wielokrotność (ostre, równe piksele w każdym rozmiarze ramki).
-    Obraz, który nie jest z równych bloków, zostaje jak jest."""
+def pixel_block(data: bytes) -> int:
+    """Rozmiar piksela grafiki w pikselach pliku, gdy logo to pixel-art (twarda przezroczystość, najwyżej 64
+    kolory): 8 — ikona z bloków 8×8 (RetroArch dot-art), 1 — pixel-art w natywnym rozmiarze (motyw ES Pixel).
+    0 — zwykły obraz (wygładzone krawędzie, wiele kolorów). Urządzenia (Lumen) powiększają pixel-art
+    o całe piksele grafiki — ostre i równe."""
     import io
     from PIL import Image
     try:
         im = Image.open(io.BytesIO(data)).convert("RGBA")
     except Exception:
-        return data
+        return 0
     w, h = im.size
+    if w > 1024 or h > 1024 or sum(im.getchannel("A").histogram()[1:255]) or im.getcolors(64) is None:
+        return 0
     for b in (32, 16, 8, 4, 2):
         if w % b or h % b:
             continue
-        small = im.resize((w // b, h // b), Image.NEAREST)
-        if small.resize((w, h), Image.NEAREST).tobytes() == im.tobytes():
-            box = small.getbbox()                      # bez przezroczystego marginesu — większe całkowite powiększenie
-            if box:
-                small = small.crop(box)
-            buf = io.BytesIO()
-            small.save(buf, "PNG")
-            return buf.getvalue()
-    return data
+        if im.resize((w // b, h // b), Image.NEAREST).resize((w, h), Image.NEAREST).tobytes() == im.tobytes():
+            return b
+    return 1
 
 
-def is_pixel(es: str) -> bool:
-    return _has(f"{es}.custom.pixel")
+def _pixel_crop(data: bytes, b: int) -> bytes:
+    """Pixel-art bez przezroczystego marginesu, cięcie po siatce pikseli grafiki (większe powiększenie)."""
+    import io
+    from PIL import Image
+    im = Image.open(io.BytesIO(data)).convert("RGBA")
+    box = im.getbbox()
+    if not box:
+        return data
+    left, top, right, bottom = box
+    im = im.crop((left // b * b, top // b * b, -(-right // b) * b, -(-bottom // b) * b))
+    buf = io.BytesIO()
+    im.save(buf, "PNG")
+    return buf.getvalue()
+
+
+_pixel_seen: dict = {}            # (es, czas pliku) → rozmiar piksela — logo wybrane przed 0.56.4
+
+
+def logo_pixel(es: str, sc: dict) -> int:
+    """Rozmiar piksela grafiki logo wybranego ręcznie (0 — nie pixel-art). Wybrane wcześniej, bez wpisu
+    w ustawieniach — rozpoznane z pliku raz na wersję pliku."""
+    if "logo_pixel" in sc:
+        return int(sc.get("logo_pixel") or 0)
+    from emustart import mediastore
+    for ext in ("png", "webp", "jpg"):
+        t = mediastore.mtime(STORE, f"{es}.custom.{ext}")
+        if t:
+            key = (es, t)
+            if key not in _pixel_seen:
+                got = mediastore.get(STORE, f"{es}.custom.{ext}")
+                _pixel_seen[key] = pixel_block(got[0]) if got else 0
+            return _pixel_seen[key]
+    return 0
 
 
 PROGRESS = mediaprogress.Progress("logo")            # pobieranie w tle — pasek w panelu serwera
