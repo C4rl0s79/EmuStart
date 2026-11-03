@@ -179,3 +179,14 @@ def test_new_logo_or_console_alone_tells_the_ui_to_redraw(srv, monkeypatch):
     assert a._lib_version == 8
     a._after_sync({"ok": True, "changed": 2})                                # pełne skanowanie — to samo miejsce
     assert a._lib_version == 9
+
+
+def test_missing_media_is_asked_again_when_its_version_changes(srv, monkeypatch, tmp_path):
+    """„Nie ma na serwerze” pamiętane 10 min — ale tylko dla tej wersji adresu: nowe logo / zdjęcie (?v=…)
+    pobiera się od razu, bez „pobierz wszystko”."""
+    cfg, media = srv
+    rel = "snes/Nowa (USA).box.png"
+    assert not libsync.fetch_media(cfg, rel, tmp_path / "a.png", key="/media/" + rel + "?v=1")
+    (media / "snes" / "Nowa (USA).box.png").write_bytes(b"\x89PNG\r\n\x1a\nnowa")
+    assert not libsync.fetch_media(cfg, rel, tmp_path / "a.png", key="/media/" + rel + "?v=1")   # ta sama wersja
+    assert libsync.fetch_media(cfg, rel, tmp_path / "a.png", key="/media/" + rel + "?v=2")       # nowa — od razu

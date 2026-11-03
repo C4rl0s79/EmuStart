@@ -263,11 +263,13 @@ def logo_for(es: str) -> dict | None:
     return {"url": rec["logo"], "glow": rec.get("glow", False)} if rec.get("logo") else None
 
 
-def fetch_media(cfg: dict, rel: str, target: Path) -> bool:
-    """Grafika z serwera do lokalnego folderu grafik (lokalny serwer interfejsu jej nie ma)."""
+def fetch_media(cfg: dict, rel: str, target: Path, key: str | None = None) -> bool:
+    """Grafika z serwera do lokalnego folderu grafik (lokalny serwer interfejsu jej nie ma).
+    `key` — pełny adres z wersją (?v=…): „nie ma na serwerze” pamiętane dla tej wersji, nowa pobiera się od razu."""
     if not thin(cfg) and not cfg.get("server_media", False):
         return False
-    hit = _media_miss.get(rel)
+    key = key or rel
+    hit = _media_miss.get(key)
     if hit and time.time() - hit < MISS_TTL:
         return False
     ep = netsrc.endpoint(cfg)
@@ -282,7 +284,7 @@ def fetch_media(cfg: dict, rel: str, target: Path) -> bool:
         return False
     if st != 200 or not body:
         if st == 404:
-            _media_miss[rel] = time.time()
+            _media_miss[key] = time.time()
         return False
     from emustart import mediastore
     where = mediastore.file_name(rel)

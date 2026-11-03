@@ -311,9 +311,14 @@ def apply_pack(source: str, es_list) -> dict:
     if source not in {s for s, *_ in THEMES}:
         return {"ok": False, "reason": "Nie ma takiej paczki grafik konsol."}
     changed, missing = [], []
+    es_list = list(es_list)
+    PROGRESS.start(len(es_list), f"paczka {source}")             # ten sam pasek w panelu co pobieranie w tle
     for es in es_list:
+        t0 = PROGRESS.begin(es)
         hit = next((u for _s, u in _theme_urls(es, source) if _exists(u)), None)
-        (changed if hit and _fetch_theme(es, source, hit) else missing).append(es)
+        ok = bool(hit) and _fetch_theme(es, source, hit)
+        (changed if ok else missing).append(es)
+        PROGRESS.end(es, t0, "found" if ok else "none")
     return {"ok": True, "changed": changed, "missing": missing}
 
 

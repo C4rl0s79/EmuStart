@@ -301,8 +301,12 @@ def test_pack_sets_every_system_it_has_and_others_keep_theirs(env, monkeypatch):
     monkeypatch.setattr(consoles, "_exists", lambda u: "retrorama" in u and u.endswith("/snes.png"))
     monkeypatch.setattr(consoles.art_sources, "fetch", lambda u, timeout=20: _png(600, 300, (200, 30, 30, 255)))
     assert consoles.upload("psx", _png(), "moje")                           # psx ma własne — paczka go nie ma
+    monkeypatch.setattr(consoles, "PROGRESS", consoles.mediaprogress.Progress("konsola"))
     r = consoles.apply_pack(src, ["snes", "psx"])
     assert r == {"ok": True, "changed": ["snes"], "missing": ["psx"]}
+    p = consoles.PROGRESS.snapshot()                                        # ten sam pasek w panelu
+    assert (p["done"], p["total"], p["found"], p["none"], p["running"]) == (2, 2, 1, 1, False)
+    assert p["label"] == f"paczka {src}"
     snes = consoles.url_for("snes")
     assert snes["url"] and "Retrorama" in snes["credit"] and "GPL-3.0" in snes["credit"]
     assert consoles.url_for("psx")["credit"] == "moje"

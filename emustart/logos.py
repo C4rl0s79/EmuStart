@@ -171,9 +171,14 @@ def apply_pack(cfg: dict, source: str, es_list) -> dict:
     if source not in {p["id"] for p in pack_sources()}:
         return {"ok": False, "reason": "Nie ma takiej paczki logo."}
     changed, missing = [], []
+    es_list = list(es_list)
+    PROGRESS.start(len(es_list), f"paczka {source}")             # ten sam pasek w panelu co pobieranie w tle
     for es in es_list:
+        t0 = PROGRESS.begin(es)
         hit = next((u for _s, u, _l in _web(es, source) if _exists(u)), None)
-        (changed if hit and choose(cfg, es, "url:" + hit) else missing).append(es)
+        ok = bool(hit) and choose(cfg, es, "url:" + hit)
+        (changed if ok else missing).append(es)
+        PROGRESS.end(es, t0, "found" if ok else "none")
     return {"ok": True, "changed": changed, "missing": missing}
 
 
@@ -343,6 +348,34 @@ def choose(cfg: dict, es: str, cid: str) -> bool:
         return False
     sc["logo"] = "custom"
     return True
+
+
+_SVG_TAG = re.compile(rb"<svg\b[^>]*>", re.S)
+
+
+def svg_sized(data: bytes) -> bytes:
+    """Logo SVG z samym viewBox (bez width / height) dostaje rozmiar z viewBox: obraz bez własnego rozmiaru
+    ma w ramce logo 0×0 (Lumen, karuzela). Pozostałe pliki — bez zmian. Wołane przy serwowaniu, więc działa
+    też dla logo zapisanych wcześniej."""
+    m = _SVG_TAG.search(data[:5000])
+    if not m:
+        return data
+    tag = m.group(0)
+    if re.search(rb"\swidth\s*=", tag) and re.search(rb"\sheight\s*=", tag):
+        return data
+    vb = re.search(rb'viewBox\s*=\s*["\']([^"\']+)["\']', tag)
+    nums = re.split(rb"[\s,]+", vb.group(1).strip()) if vb else []
+    if len(nums) != 4:
+        return data
+    w, h = (n.decode() for n in nums[2:])
+    try:
+        if float(w) <= 0 or float(h) <= 0:
+            return data
+    except ValueError:
+        return data
+    tag2 = re.sub(rb"\s(width|height)\s*=\s*([\"'])[^\"']*\2", b"", tag)       # jedno z dwóch — oba od nowa
+    tag2 = tag2.replace(b"<svg", f'<svg width="{w}" height="{h}"'.encode(), 1)
+    return data[:m.start()] + tag2 + data[m.end():]
 
 
 def _store_custom(es: str, data: bytes, ext: str) -> None:
