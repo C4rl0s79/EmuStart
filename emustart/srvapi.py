@@ -60,7 +60,7 @@ class ServerApi:
             lg = logos.url_for(s["es"], self._cfg)
             cn = consoles.url_for(s["es"])
             out.append({"es": s["es"], "display": emu.get("name") or s["display"], "games": s["games"],
-                        "cached": 0, "logo": lg["url"], "logo_glow": lg["glow"],
+                        "cached": 0, "logo": lg["url"], "logo_glow": lg["glow"], "logo_pixel": lg.get("pixel", False),
                         "console": cn["url"], "console_credit": cn["credit"], "console_lum": cn["lum"],
                         "emulator": emu.get("label", ""), "kind": systems.info(s["es"])["kind"]})
         return out
@@ -323,6 +323,7 @@ class ServerApi:
             out.append({"es": es, "display": sc.get("name") or systems.info(es)["display"],
                         "default_name": systems.info(es)["display"], "games": s_["games"],
                         "logo": lg["url"], "glow": bool(lg["glow"]), "logo_choice": sc.get("logo", ""),
+                        "pixel": bool(lg.get("pixel")),
                         "console": consoles.url_for(es)["url"], "console_credit": consoles.url_for(es)["credit"],
                         "enabled": sc.get("enabled", True),
                         "emu_rec": sc.get("emu_rec", ""), "core_rec": sc.get("core_rec", ""),

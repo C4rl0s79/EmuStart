@@ -90,27 +90,27 @@ def url_for(es: str, cfg: dict | None = None) -> dict:
     sc = ((cfg or {}).get("systems") or {}).get(es) or {}
     choice = sc.get("logo", "")
     if choice == "none":
-        return {"url": "", "glow": False}
+        return {"url": "", "glow": False, "pixel": False}
     if choice == "custom":
         u = custom(es)
         if u:
-            return {"url": u, "glow": bool(sc.get("logo_glow", False))}
+            return {"url": u, "glow": bool(sc.get("logo_glow", False)), "pixel": is_pixel(es)}
     u = bundled(systems.info(es)["plat"])
     if u:
-        return {"url": u, "glow": bool(sc.get("logo_glow", False))}
+        return {"url": u, "glow": bool(sc.get("logo_glow", False)), "pixel": False}
     u = downloaded(es)
-    return {"url": u, "glow": bool(sc.get("logo_glow", bool(u)))}
+    return {"url": u, "glow": bool(sc.get("logo_glow", bool(u))), "pixel": False}
 
 
 # ── ręczny wybór logo ──
 
 # motywy EmulationStation / ES-DE z logo systemów (nazwy folderów ES pasują 1:1) — pobiera
 # serwer, bez żadnych plików na dysku; propozycje sprawdzane naraz (puste ramki pomijane)
+# Alekfull NX i Canvas mają te same pliki logo co Art Book Next (sha1, sprawdzone 2026-11-03) — jedna paczka
+ABN = "Art Book Next / Alekfull NX / Canvas"
 ES_THEMES = (
-    ("Art Book Next", GH + "anthonycaccese/art-book-next-es-de/main/_inc/systems/logos/{es}.svg"),
+    (ABN, GH + "anthonycaccese/art-book-next-es-de/main/_inc/systems/logos/{es}.svg"),
     ("Carbon", CARBON),
-    ("Alekfull NX", GH + "anthonycaccese/alekfull-nx-es-de/main/_inc/systems/logos/{es}.svg"),
-    ("Canvas", GH + "Siddy212/canvas-es-de/main/_inc/system-logo/{es}.svg"),
     ("Simple", GH + "RetroPie/es-theme-simple/master/{es}/art/{es}.svg"),
     ("Pixel", GH + "ehettervik/es-theme-pixel/master/{es}/logo.png"),
     ("SNES Mini", GH + "ruckage/es-theme-snes-mini/master/art/logos/{es}.png"),
@@ -126,15 +126,17 @@ PN_NAME_THEMES = (
     ("Aniki Lite (Playnite)", GH + "Mike-Aniki/Aniki-Lite/main/Source/Icons/Platform/{name}.png"),
     ("Jonos ReMix (Playnite)", GH + "jonosellier/ReMiX_jonosellier/main/source/Icons/Filter/{name}.png"),
 )
-PN_CODE_THEMES = (
-    ("Playnite Platform Logos", GH + "itscosmyx/Playnite-Platform-Logos/main/plat_{es}.svg"),
-)
+# Playnite Platform Logos (plat_<kod>.svg) usunięte: kwadrat 256×256 z małą plakietką — w ramce logo jak kropka
 # licencje z repozytoriów (README / plik licencji); bez wpisu — nie sprawdzono
 LICENSES = {
-    "Art Book Next": "CC BY-NC-SA", "Alekfull NX": "CC BY-NC-SA", "Canvas": "CC0",
+    ABN: "CC BY-NC-SA",
     "Aniki Lite (Playnite)": "brak licencji w repozytorium", "Jonos ReMix (Playnite)": "brak licencji w repozytorium",
-    "Playnite Platform Logos": "brak licencji w repozytorium",
 }
+# pierwsze słowo nazwy, które można pominąć („Sony Playstation 2” → „Playstation 2”); inne zostają
+# („Super Nintendo Entertainment System” to nie „Nintendo Entertainment System”)
+MAKERS = {"sony", "nintendo", "sega", "microsoft", "nec", "snk", "atari", "bandai", "commodore", "sinclair",
+          "coleco", "mattel", "magnavox", "philips", "panasonic", "amstrad", "apple", "nokia", "tiger", "watara",
+          "gce", "fairchild", "epoch", "casio", "sharp", "fujitsu", "hudson", "vtech", "tandy", "acorn", "msx"}
 
 
 def playnite_names(es: str) -> list:
@@ -147,25 +149,34 @@ def playnite_names(es: str) -> list:
     out = []
     for n in base:
         words = n.split()
-        for v in (n, n.title(), " ".join(words[1:]) if len(words) > 2 else "", " ".join(words[1:]).title() if len(words) > 2 else ""):
+        bare = " ".join(words[1:]) if len(words) > 2 and words[0].lower() in MAKERS else ""
+        for v in (n, n.title(), bare, bare.title()):
             if v and v not in out:
                 out.append(v)
     return out
 
 
 def _web(es: str, only: str = "") -> list:
-    """[(źródło, adres, etykieta)] logo systemu w motywach ES / ES-DE i Playnite (`only` — jedno źródło)."""
+    """[(źródło, adres, etykieta)] logo systemu w motywach ES / ES-DE, Playnite i ikonach RetroArcha
+    (`only` — jedno źródło)."""
     import urllib.parse
     names = theme_names(es)
-    out = [(src, tpl.format(es=n), n) for src, tpl in ES_THEMES + PN_CODE_THEMES for n in names]
+    out = [(src, tpl.format(es=n), n) for src, tpl in ES_THEMES for n in names]
     out += [(src, tpl.format(name=urllib.parse.quote(n)), n) for src, tpl in PN_NAME_THEMES for n in playnite_names(es)]
+    lr = systems.info(es)["libretro"]
+    if lr:
+        out += [(ra_source(t), RA_ICON.format(theme=t, name=urllib.parse.quote(lr)), lr) for t in RA_THEMES]
     return [w for w in out if not only or w[0] == only]
 
 
+def ra_source(theme: str) -> str:
+    return f"RetroArch ({theme})"
+
+
 def pack_sources() -> list:
-    """Paczki logo (motywy) do zmiany logo wszystkich systemów naraz: [{id, license}]."""
-    return [{"id": src, "license": LICENSES.get(src, "")}
-            for src, _tpl in ES_THEMES + PN_CODE_THEMES + PN_NAME_THEMES]
+    """Paczki logo (motywy, ikony RetroArcha) do zmiany logo wszystkich systemów naraz: [{id, license}]."""
+    return ([{"id": src, "license": LICENSES.get(src, "")} for src, _tpl in ES_THEMES + PN_NAME_THEMES]
+            + [{"id": ra_source(t), "license": RA_LICENSE} for t in RA_THEMES])
 
 
 def apply_pack(cfg: dict, source: str, es_list, started: bool = False) -> dict:
@@ -214,6 +225,8 @@ def theme_names(es: str) -> list:
 # ikony systemów z motywów menu RetroArcha (repozytorium libretro/retroarch-assets)
 RA_ICON = GH + "libretro/retroarch-assets/master/xmb/{theme}/png/{name}.png"
 RA_THEMES = ("systematic", "monochrome", "flatui", "flatux", "retrosystem", "pixel", "dot-art", "daite", "automatic")
+RA_LICENSE = "CC BY 4.0"            # libretro/retroarch-assets (licencja repozytorium, sprawdzone 2026-11-03)
+PIXEL_THEMES = ("pixel", "dot-art")   # pixel-art: zapis w natywnej rozdzielczości, powiększanie całkowite (Lumen)
 PACK_LABELS = {"Light_Just_White": "białe", "Light_Color": "kolorowe", "Dark_Just_Black": "czarne"}
 _IMG = {".png", ".svg", ".jpg", ".jpeg", ".webp"}
 
@@ -293,16 +306,15 @@ def candidates(cfg: dict, es: str) -> list:
         out.append({"id": "downloaded", "url": d, "source": "pobrane wcześniej", "label": es})
     import urllib.parse
     from concurrent.futures import ThreadPoolExecutor
-    web = _web(es)
-    web += [(f"RetroArch ({t})", RA_ICON.format(theme=t, name=urllib.parse.quote(info["libretro"])),
-             info["libretro"]) for t in RA_THEMES if info["libretro"]]
+    web = _web(es)                                    # motywy ES, Playnite i ikony RetroArcha
     with ThreadPoolExecutor(max_workers=12) as ex:    # pustych ramek (404) nie pokazujemy
         found = list(ex.map(lambda w: _exists(w[1]), web))
     seen = set()
     for (src, u, label), ok in zip(web, found):
         if ok and src not in seen:                    # z motywu pierwsza istniejąca nazwa
             seen.add(src)
-            out.append({"id": "url:" + u, "url": u, "source": src, "label": label, "license": LICENSES.get(src, "")})
+            out.append({"id": "url:" + u, "url": u, "source": src, "label": label,
+                        "license": RA_LICENSE if src.startswith("RetroArch (") else LICENSES.get(src, "")})
     # paczka (nazwy jak LaunchBox: „Atari Lynx”, „Sony Playstation”) — po wszystkich pełnych nazwach
     targets = [t for t in dict.fromkeys([n.replace(" - ", " ") for n in systems.names(es) if " " in n]
                                         + [info["display"], LB_NAMES.get(es, "")]) if t]
@@ -351,7 +363,11 @@ def choose(cfg: dict, es: str, cid: str) -> bool:
         data = art_sources.fetch(cid[4:], timeout=20)
         if not data or (b"<svg" not in data[:3000] and not art_sources.is_image(data)):
             return False
-        _store_custom(es, data, "svg" if b"<svg" in data[:3000] else "png")
+        pixel = False
+        if any(f"/xmb/{t}/" in cid for t in PIXEL_THEMES):
+            native = pixel_native(data)
+            pixel, data = native != data, native          # tylko prawdziwy pixel-art (równe bloki)
+        _store_custom(es, data, "svg" if b"<svg" in data[:3000] else "png", pixel)
     elif cid.startswith("pack:"):
         from emustart import mediastore
         key = cid[5:]
@@ -404,12 +420,40 @@ def svg_sized(data: bytes) -> bytes:
     return data[:m.start()] + tag2 + data[m.end():]
 
 
-def _store_custom(es: str, data: bytes, ext: str) -> None:
+def _store_custom(es: str, data: bytes, ext: str, pixel: bool = False) -> None:
     from emustart import mediastore
     for old in mediastore.files(STORE):
         if old.startswith(f"{es}.custom."):
             mediastore.delete(STORE, old)
     _put(f"{es}.custom.{ext}", data)
+    if pixel:                                          # pixel-art: urządzenia powiększają o całkowitą wielokrotność
+        _put(f"{es}.custom.pixel", b"1")
+
+
+def pixel_native(data: bytes) -> bytes:
+    """Pixel-art powiększony w pliku (ikona 256×256 z bloków 8×8) → natywna rozdzielczość (32×32), PNG.
+    Urządzenie powiększa ją o całkowitą wielokrotność (ostre, równe piksele w każdym rozmiarze ramki).
+    Obraz, który nie jest z równych bloków, zostaje jak jest."""
+    import io
+    from PIL import Image
+    try:
+        im = Image.open(io.BytesIO(data)).convert("RGBA")
+    except Exception:
+        return data
+    w, h = im.size
+    for b in (32, 16, 8, 4, 2):
+        if w % b or h % b:
+            continue
+        small = im.resize((w // b, h // b), Image.NEAREST)
+        if small.resize((w, h), Image.NEAREST).tobytes() == im.tobytes():
+            buf = io.BytesIO()
+            small.save(buf, "PNG")
+            return buf.getvalue()
+    return data
+
+
+def is_pixel(es: str) -> bool:
+    return _has(f"{es}.custom.pixel")
 
 
 PROGRESS = mediaprogress.Progress("logo")            # pobieranie w tle — pasek w panelu serwera
