@@ -456,8 +456,15 @@ async function sysPick(es) {
   const r = await admin("system_logo_candidates", { es }).catch(() => null);
   const list = [...(r?.list || []), { id: "none", url: "", source: "bez logo (sama nazwa)" }];
   $("sysPickInfo").textContent = `Logo systemu ${es} — ${list.length - 1} propozycji, kliknij, żeby wybrać (Esc — zamknij).`;
+  const caption = (c) => `${c.source || ""}${c.label ? " · " + c.label : ""}${c.license ? " · " + c.license : ""}`;
   $("sysPickList").innerHTML = list.map((c, i) =>
-    `<button data-i="${i}">${c.url ? `<img src="${esc(c.url)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ""}<span>${esc(c.source || "")}${c.label ? " · " + esc(c.label) : ""}${c.license ? " · " + esc(c.license) : ""}</span></button>`).join("");
+    `<button data-i="${i}" title="${esc(caption(c))}"><div class="art">${c.url ? `<img src="${esc(c.url)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ""}</div><span>${esc(caption(c))}</span></button>`).join("");
+  // małe grafiki (pixel-art, ikony) powiększone bez rozmycia; wymiary pliku w podpowiedzi
+  $("sysPickList").querySelectorAll("img").forEach((img) => img.addEventListener("load", () => {
+    const w = img.naturalWidth, h = img.naturalHeight;
+    if (w && h && w <= 64 && h <= 64 && !/\.svg(\?|$)/i.test(img.src)) img.classList.add("pixel");
+    if (w && h) img.closest("button").title += ` · ${w}×${h}`;
+  }, { once: true }));
   $("sysPickList").querySelectorAll("[data-i]").forEach((b) => b.addEventListener("click", async () => {
     const res = await admin("system_logo_choose", { es, id: list[+b.dataset.i].id }).catch(() => null);
     sysMsg(res?.ok ? "Logo zapisane — urządzenia pokażą je po odświeżeniu biblioteki." : res?.reason || "Serwer nie odpowiada.", res?.ok);
@@ -506,11 +513,18 @@ document.querySelectorAll("#tabs button").forEach((b) => b.addEventListener("cli
 let cfgFields = [];
 function cfgMsg(text, ok) { toast(text, ok); }
 const stHtml = (s) => `<span class="st ${s.ok ? "ok" : "bad"}">${esc(s.text)}</span>`;
+let cfgPoll = 0;
 async function refreshConfig() {
   const r = await admin("config").catch(() => null);
   if (!r?.ok) return cfgMsg("Serwer nie odpowiada.");
   cfgFields = r.fields;
   renderConfig();
+  pollWhileBusy();
+}
+// import paczki logo w toku — pole odświeżane, aż się skończy (postęp, potem liczba logo)
+function pollWhileBusy() {
+  clearTimeout(cfgPoll);
+  if (cfgFields.some((f) => !Array.isArray(f.status) && f.status?.busy)) cfgPoll = setTimeout(refreshConfig, 2000);
 }
 function renderConfig() {
   $("cfgFields").innerHTML = cfgFields.map((f, i) => {
@@ -562,6 +576,7 @@ async function saveField(f, value) {
   if (!r?.ok) return cfgMsg(r?.reason || "Serwer nie odpowiada.");
   cfgFields = r.fields;
   renderConfig();
+  pollWhileBusy();
   cfgMsg(`Zapisano: ${f.label}.` + (f.key === "rom_roots" ? " Przeładowuję listę gier (zakładka Stan)." : ""), true);
 }
 
