@@ -11,6 +11,30 @@ nowym urządzeniu — do sprawdzenia na żywo), Play! (miejsce kart), APK (te sa
 budowania), adaptery pozostałych samodzielnych emulatorów przy pierwszym użyciu, sprawdzenie na żywo (niżej);
 jedno zapytanie przygotowujące grę — po pomiarach kroków z prawdziwych startów.
 
+## [0.56.0] — 2026-11-03
+
+Zakres: serwer (`consoles.py` — nowy, `logos.py`, `srvapi.py`, `srvadmin.py`, panel `web/server.*`), klient Windows i
+Lumen (silnik): `libsync.py`, `api.py` — zdjęcie konsoli przy systemie jak logo. APK: dane dostępne jak logo, interfejs
+telefonu bez zmian.
+
+### Dodane
+- **Zdjęcia konsol platform:** serwer sam szuka zdjęcia konsoli w Wikimedia Commons (tylko wolne licencje: domena
+  publiczna, CC0, CC BY/BY-SA z autorem), odrzuca płyty główne, wnętrza, pudełka i inne generacje, wycina białe tło,
+  zapisuje WebP z autorem, licencją i jasnością. Klienci dostają je jak logo (`/media/_systems/`), także offline.
+- **Panel serwera, Konfiguracja → systemy:** przycisk „Konsola…” — wybór z kandydatów, „auto”, „brak” albo własny plik.
+- **Logo z motywów Playnite:** Aniki Lite, Jonos ReMix, Playnite Platform Logos jako kolejne źródła; przy każdym źródle
+  widać licencję (także „brak licencji w repozytorium”).
+- **Paczka logo dla wszystkich systemów:** jeden zestaw (np. Canvas, Art Book Next, Aniki Lite) zmienia logo każdego
+  systemu, który go ma; system bez logo w paczce zostaje przy swoim.
+
+### Sprawdzone
+- pytest: 497 ✓ (wyszukiwanie i odsiew zdjęć, wycięcie tła, ręczny wybór i wgranie, przekazanie serwer → urządzenie →
+  klient, paczka logo); wyszukiwanie na żywo w Commons dla ~40 systemów; panel w przeglądarce na danych testowych.
+
+### Niesprawdzone
+- serwer na żywo (pobieranie w tle przy prawdziwej bibliotece), panel na prawdziwym serwerze.
+- Bez zdjęcia w Commons: sega32x, msx, fds, wiiu, pokemini (do wgrania ręcznie); Amiga dostaje CD32, C64 — C64GS.
+
 ### Plan (2026-11-03): media platform na serwerze — logo, konsola, tło
 Cel (użytkownik): motywy Lumena łączą się z platformą przez to, na czym stoi jej oryginalne logo (nośnik motywu), a tło
 pokazuje konsolę platformy. Grafik konsol użytkownik nie ma — serwer ma się nauczyć je szukać, tak jak logo z motywów
