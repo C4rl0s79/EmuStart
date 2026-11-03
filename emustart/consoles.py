@@ -21,9 +21,10 @@ import re
 import threading
 import urllib.parse
 
-from emustart import art_sources, systems
+from emustart import art_sources, mediaprogress, systems
 
 log = logging.getLogger("emustart.consoles")
+PROGRESS = mediaprogress.Progress("konsola")         # pobieranie w tle — pasek w panelu serwera
 
 STORE = "_systems"
 COMMONS_API = "https://commons.wikimedia.org/w/api.php"
@@ -339,21 +340,30 @@ def fetch_missing(es_list) -> None:
             _busy.add(es)
             todo.append(es)
     if todo:
+        PROGRESS.start(len(todo))
         threading.Thread(target=_run, args=(todo,), daemon=True, name="konsole").start()
 
 
 def _run(todo: list) -> None:
     from emustart import mediastore
     for es in todo:
+        t0, result, err = PROGRESS.begin(es), "retry", ""
+        art_sources.clear_error()
         try:
             found = search(es)
+            err = art_sources.last_error()
             if any(fetch(es, c) for c in found[:3]):
-                continue
-            # znalezione, ale pobranie się nie udało (sieć) — bez znacznika, następna lista systemów spróbuje znowu
-            if not found and (art_sources.online() or systems.info(es)["kind"] == "arcade"):
+                result, err = "found", ""
+            elif not found and not err and (art_sources.online() or systems.info(es)["kind"] == "arcade"):
                 mediastore.put(STORE, f"{es}.console.none", b"")          # sprawdzone — zdjęcia nie ma
-        except Exception:
+                result = "none"
+            else:
+                # błąd sieci przy szukaniu albo pobieraniu — bez znacznika, następna lista systemów spróbuje znowu
+                err = err or art_sources.last_error() or "brak odpowiedzi"
+        except Exception as ex:
             log.exception("konsola %s", es)
+            err = str(ex)[:120]
         finally:
+            PROGRESS.end(es, t0, result, err)
             with _lock:
                 _busy.discard(es)

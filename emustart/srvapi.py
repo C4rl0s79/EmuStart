@@ -431,6 +431,10 @@ class ServerApi:
         return out + [{"id": "theme:" + t["url"], "thumb": t["url"], "title": t["source"], "credit": t["license"],
                        "page": ""} for t in consoles.theme_candidates(es)]
 
+    def systems_media_progress(self) -> dict:
+        """Pobieranie logo i zdjęć konsol w tle (pasek w panelu): postęp, bieżący system, ostatni błąd."""
+        return {"logos": logos.PROGRESS.snapshot(), "consoles": consoles.PROGRESS.snapshot()}
+
     def system_console_packs(self) -> list:
         return consoles.pack_sources()
 

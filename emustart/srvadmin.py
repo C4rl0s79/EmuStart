@@ -732,6 +732,7 @@ GAME_ACTIONS = {
     "system_console_upload": lambda api, a: api.system_console_upload(str(a.get("es", "")), str(a.get("data", "")),
                                                                       str(a.get("credit", ""))),
     "system_console_packs": lambda api, a: {"ok": True, "list": api.system_console_packs()},
+    "systems_media_progress": lambda api, a: {"ok": True, **api.systems_media_progress()},
     "system_console_pack_apply": lambda api, a: api.system_console_pack_apply(str(a.get("id", ""))),
     "system_console_pack_status": lambda api, a: api.system_console_pack_status(),
     "system_merge": lambda api, a: api.system_merge(str(a.get("es", "")), str(a.get("into", ""))),

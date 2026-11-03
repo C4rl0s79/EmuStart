@@ -338,3 +338,40 @@ def test_home_computers_are_searched_as_computers_not_consoles(env, monkeypatch)
     monkeypatch.setattr(consoles.art_sources, "fetch", fetch)
     consoles.search("ps2")                                                  # konsole — jak dotąd
     assert urllib.parse.parse_qs(urllib.parse.urlparse(asked[0]).query)["gsrsearch"][0].endswith("console Evan-Amos")
+
+
+def test_background_download_reports_progress_and_network_errors(env, monkeypatch):
+    """Pasek w panelu: ile z ilu, wynik każdego systemu; błąd sieci (np. HTTP 429) — do ponowienia, z powodem,
+    bez znacznika „brak zdjęcia”."""
+    fetch, _asked = _fake_fetch(PS2_HITS, _jpeg_on_white())
+    monkeypatch.setattr(consoles.art_sources, "fetch", fetch)
+    monkeypatch.setattr(consoles.art_sources, "online", lambda: True)
+    monkeypatch.setattr(consoles, "PROGRESS", consoles.mediaprogress.Progress("konsola"))
+    consoles.PROGRESS.start(3)
+    consoles.art_sources._err.text = "stary błąd innego systemu"            # nie przechodzi na kolejny system
+    consoles._run(["ps2", "fbneo"])                                          # zdjęcie jest; automat — bez zdjęcia
+    monkeypatch.setattr(consoles, "search", lambda es: [])
+    monkeypatch.setattr(consoles.art_sources, "last_error", lambda: "commons.wikimedia.org: HTTP 429")
+    consoles._run(["snes"])
+    p = consoles.PROGRESS.snapshot()
+    assert (p["done"], p["total"], p["found"], p["none"], p["retry"], p["running"]) == (3, 3, 1, 1, 1, False)
+    assert p["last_error"] == "snes: commons.wikimedia.org: HTTP 429"
+    assert not mediastore.exists(consoles.STORE, "snes.console.none")       # następnym razem od nowa
+
+
+def test_fetch_tells_why_it_failed(monkeypatch):
+    import urllib.error
+    from emustart import art_sources
+
+    def boom(*a, **k):
+        raise urllib.error.HTTPError("https://upload.wikimedia.org/x.png", 429, "Too Many Requests", {}, None)
+    monkeypatch.setattr(art_sources.urllib.request, "urlopen", boom)
+    assert art_sources.fetch("https://upload.wikimedia.org/x.png") is None
+    assert art_sources.last_error() == "upload.wikimedia.org: HTTP 429"
+
+
+def test_panel_shows_media_progress(env):
+    from emustart import srvadmin, srvapi
+    s = srvapi.ServerApi(start_background=False)
+    r = srvadmin.ACTIONS_ARGS["systems_media_progress"](s, {})
+    assert r["ok"] and {"running", "done", "total", "current", "last_error"} <= set(r["consoles"]) <= set(r["logos"]) | set(r["consoles"])

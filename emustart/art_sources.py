@@ -51,13 +51,31 @@ TGDB_PLATFORMS = {
 }
 
 
+_err = threading.local()           # ostatni błąd fetch() w tym wątku (postęp pobierania w panelu, log)
+
+
+def last_error() -> str:
+    """Dlaczego ostatnie fetch() w tym wątku nie zwróciło danych („HTTP 429”, „timeout”); pusty — udane."""
+    return getattr(_err, "text", "")
+
+
+def clear_error() -> None:
+    """Przed nową pozycją (system): błąd poprzedniej nie przechodzi na tę, która nic nie pobiera."""
+    _err.text = ""
+
+
 def fetch(url: str, hdrs: dict | None = None, data: bytes | None = None,
           timeout: int = 20) -> bytes | None:
     try:
         req = urllib.request.Request(url, data=data, headers={**UA, **(hdrs or {})})
         with urllib.request.urlopen(req, timeout=timeout) as r:
-            return r.read()
-    except Exception:
+            body = r.read()
+        _err.text = ""
+        return body
+    except Exception as ex:
+        code = getattr(ex, "code", None)
+        _err.text = f"{urllib.parse.urlsplit(url).hostname}: " + (f"HTTP {code}" if code else
+                                                                   (str(ex) or type(ex).__name__)[:80])
         return None
 
 

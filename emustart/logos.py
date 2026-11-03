@@ -18,7 +18,7 @@ import re
 import threading
 from pathlib import Path
 
-from emustart import art_sources, systems
+from emustart import art_sources, mediaprogress, systems
 
 log = logging.getLogger("emustart.logos")
 
@@ -364,15 +364,22 @@ def fetch_missing(cfg: dict, es_list) -> None:
             _busy.add(es)
             todo.append(es)
     if todo:
+        PROGRESS.start(len(todo))
         threading.Thread(target=_run, args=(cfg, todo), daemon=True, name="logos").start()
+
+
+PROGRESS = mediaprogress.Progress("logo")            # pobieranie w tle — pasek w panelu serwera
 
 
 def _run(cfg: dict, todo: list) -> None:
     for es in todo:
+        t0, result, err = PROGRESS.begin(es), "retry", ""
+        art_sources.clear_error()
         try:
             data = art_sources.fetch(CARBON.format(es=es), timeout=15)
             if data and b"<svg" in data[:2000]:
                 _put(f"{es}.svg", data)
+                result = "found"
                 continue
             import urllib.parse
             name = systems.info(es)["libretro"]
@@ -380,10 +387,16 @@ def _run(cfg: dict, todo: list) -> None:
                                      timeout=15) if name else None
             if icon and art_sources.is_image(icon):
                 _put(f"{es}.png", icon)
+                result = "found"
             elif data is not None or art_sources.online():
                 _put(f"{es}.none", b"")                 # sprawdzone — logo nie ma
-        except Exception:
+                result = "none"
+            else:
+                err = art_sources.last_error() or "brak odpowiedzi"
+        except Exception as ex:
             log.exception("logo %s", es)
+            err = str(ex)[:120]
         finally:
+            PROGRESS.end(es, t0, result, err)
             with _lock:
                 _busy.discard(es)

@@ -333,6 +333,32 @@ async function refreshSysLook() {
   }
 }
 
+/* ── pobieranie logo i zdjęć konsol w tle: postęp, bieżący system, ostatni błąd ── */
+let mediaWasRunning = false;
+function mediaLine(label, p) {
+  if (!p.total) return "";
+  const head = p.running ? `${label}: ${p.done} z ${p.total}` + (p.current ? ` — teraz ${p.current}` : "")
+                         : `${label}: gotowe (${p.done} w ${Math.round(p.seconds)} s)`;
+  return head + ` · pobrane ${p.found}, brak w źródłach ${p.none}` + (p.retry ? `, do ponowienia ${p.retry}` : "") +
+    (p.slowest >= 10 ? ` · najdłużej ${p.slowest} s na system` : "") + (p.last_error ? ` · ostatni błąd: ${p.last_error}` : "");
+}
+async function mediaProgTick() {
+  const r = await admin("systems_media_progress").catch(() => null);
+  if (r?.ok) {
+    const running = r.logos.running || r.consoles.running;
+    $("mediaProg").hidden = !(r.logos.total || r.consoles.total);
+    for (const [k, label, p] of [["logo", "Logo", r.logos], ["con", "Konsole", r.consoles]]) {
+      $(k + "ProgText").textContent = mediaLine(label, p);
+      $(k + "ProgBar").parentElement.hidden = !p.total;
+      $(k + "ProgBar").style.width = p.total ? (100 * p.done / p.total).toFixed(0) + "%" : "0%";
+    }
+    if (mediaWasRunning && !running) refreshSysLook();          // nowe grafiki w wierszach systemów
+    mediaWasRunning = running;
+  }
+  setTimeout(mediaProgTick, mediaWasRunning ? 1500 : 5000);
+}
+mediaProgTick();
+
 /* ── paczka grafik konsol dla wszystkich systemów (w tle — serwer pobiera z motywu) ── */
 $("bConPackApply").addEventListener("click", async () => {
   const id = $("conPackSel").value;
