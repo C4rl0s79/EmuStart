@@ -26,6 +26,7 @@ from emustart import art_sources, mediaprogress, systems
 
 log = logging.getLogger("emustart.consoles")
 PROGRESS = mediaprogress.Progress("konsola")         # pobieranie w tle — pasek w panelu serwera
+PACK = mediaprogress.Progress("paczka konsol")       # zmiana paczki grafik konsol — osobny pasek
 
 STORE = "_systems"
 COMMONS_API = "https://commons.wikimedia.org/w/api.php"
@@ -305,20 +306,32 @@ def pack_sources() -> list:
     return [{"id": src, "license": lic} for src, _tpl, lic, _px in THEMES]
 
 
-def apply_pack(source: str, es_list) -> dict:
+def apply_pack(source: str, es_list, started: bool = False) -> dict:
     """Grafiki konsol wszystkich systemów z jednej paczki (jednolity wygląd); system, którego paczka
     nie ma, zostaje przy swoim. {ok, changed, missing}."""
     if source not in {s for s, *_ in THEMES}:
         return {"ok": False, "reason": "Nie ma takiej paczki grafik konsol."}
     changed, missing = [], []
     es_list = list(es_list)
-    PROGRESS.start(len(es_list), f"paczka {source}")             # ten sam pasek w panelu co pobieranie w tle
+    if es_list and not started:
+        PACK.start(len(es_list), f"paczka {source}")           # osobny pasek w panelu (nie pobieranie w tle)
     for es in es_list:
-        t0 = PROGRESS.begin(es)
-        hit = next((u for _s, u in _theme_urls(es, source) if _exists(u)), None)
-        ok = bool(hit) and _fetch_theme(es, source, hit)
-        (changed if ok else missing).append(es)
-        PROGRESS.end(es, t0, "found" if ok else "none")
+        t0, result, err = PACK.begin(es), "retry", ""
+        art_sources.clear_error()
+        try:
+            hit = next((u for _s, u in _theme_urls(es, source) if _exists(u)), None)
+            if not hit:
+                result = "none"                                  # paczka nie ma tego systemu
+            elif _fetch_theme(es, source, hit):
+                result = "found"
+            else:
+                err = art_sources.last_error() or "nie udało się pobrać grafiki"
+        except Exception as ex:
+            log.exception("paczka grafik konsol %s: %s", source, es)
+            err = str(ex)[:120]
+        finally:
+            PACK.end(es, t0, result, err)                      # licznik kończy się także po błędzie
+            (changed if result == "found" else missing).append(es)
     return {"ok": True, "changed": changed, "missing": missing}
 
 

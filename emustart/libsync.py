@@ -284,7 +284,10 @@ def fetch_media(cfg: dict, rel: str, target: Path, key: str | None = None) -> bo
         return False
     if st != 200 or not body:
         if st == 404:
-            _media_miss[key] = time.time()
+            now = time.time()
+            for k in [k for k, t in _media_miss.items() if now - t >= MISS_TTL]:
+                del _media_miss[k]                         # stare wpisy (każda wersja adresu to osobny klucz)
+            _media_miss[key] = now
         return False
     from emustart import mediastore
     where = mediastore.file_name(rel)

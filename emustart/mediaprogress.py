@@ -52,6 +52,11 @@ class Progress:
                 d.update(running=False, current="")
         self.log.info("%s %s: %s w %.1f s%s", self.what, es, result, dt, f" ({error})" if error else "")
 
+    def finish(self) -> None:
+        """Koniec partii także wtedy, gdy przerwał ją błąd (pasek nie zostaje „w toku”)."""
+        with self._lock:
+            self._d.update(running=False, current="")
+
     def snapshot(self) -> dict:
         with self._lock:
             return dict(self._d)

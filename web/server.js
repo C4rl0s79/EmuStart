@@ -348,15 +348,17 @@ async function mediaProgTick() {
   mediaBusy = true;
   const r = curTab === "konfig" ? await admin("systems_media_progress").catch(() => null) : null;   // tylko na tej zakładce
   if (r?.ok) {
-    mediaRunning = r.logos.running || r.consoles.running;
-    $("mediaProg").hidden = !(r.logos.total || r.consoles.total);
-    for (const [k, label, p] of [["logo", "Logo", r.logos], ["con", "Konsole", r.consoles]]) {
+    const rows = [["logo", "Logo", r.logos], ["con", "Konsole", r.consoles],
+                  ["logoPack", "Logo", r.logo_pack || {}], ["conPack", "Konsole", r.console_pack || {}]];
+    mediaRunning = rows.some(([, , p]) => p.running);
+    $("mediaProg").hidden = !rows.some(([, , p]) => p.total);
+    for (const [k, label, p] of rows) {
       $(k + "ProgText").textContent = mediaLine(label, p);
-      $(k + "ProgBar").parentElement.hidden = !p.total;
+      $(k + "ProgText").hidden = $(k + "ProgBar").parentElement.hidden = !p.total;
       $(k + "ProgBar").style.width = p.total ? (100 * p.done / p.total).toFixed(0) + "%" : "0%";
     }
     // coś doszło od ostatniego razu (także krótka partia między odczytami) — nowe grafiki w wierszach systemów
-    const seen = [r.logos, r.consoles].map((p) => `${p.started}:${p.done}`).join("|");
+    const seen = rows.map(([, , p]) => `${p.started}:${p.done}`).join("|");
     if (mediaSeen !== null && seen !== mediaSeen) mediaRedraw = true;
     mediaSeen = seen;
   }

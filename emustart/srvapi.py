@@ -404,12 +404,15 @@ class ServerApi:
         job = getattr(self, "_pack_job", None)
         if job and job["running"]:
             return {"ok": False, "reason": "Zmiana logo już trwa."}
+        es_list = [s["es"] for s in library.systems_summary()]
+        if not es_list:
+            return {"ok": False, "reason": "Na serwerze nie ma jeszcze systemów."}
         self._pack_job = {"running": True, "source": source, "changed": [], "missing": []}
+        logos.PACK.start(len(es_list), f"paczka {source}")      # pasek od razu, zanim panel zapyta o postęp
 
         def run():
             try:
-                es_list = [s["es"] for s in library.systems_summary()]
-                r = logos.apply_pack(self._cfg, source, es_list)
+                r = logos.apply_pack(self._cfg, source, es_list, started=True)
                 for es in r.get("changed", []):
                     self._cfg["systems"][es].setdefault("logo_glow", False)
                 config.save(self._cfg)
@@ -418,6 +421,7 @@ class ServerApi:
                 log.exception("paczka logo %s", source)
             finally:
                 self._pack_job["running"] = False
+                logos.PACK.finish()
         threading.Thread(target=run, daemon=True, name="paczka-logo").start()
         return {"ok": True}
 
@@ -433,7 +437,8 @@ class ServerApi:
 
     def systems_media_progress(self) -> dict:
         """Pobieranie logo i zdjęć konsol w tle (pasek w panelu): postęp, bieżący system, ostatni błąd."""
-        return {"logos": logos.PROGRESS.snapshot(), "consoles": consoles.PROGRESS.snapshot()}
+        return {"logos": logos.PROGRESS.snapshot(), "consoles": consoles.PROGRESS.snapshot(),
+                "logo_pack": logos.PACK.snapshot(), "console_pack": consoles.PACK.snapshot()}
 
     def system_console_packs(self) -> list:
         return consoles.pack_sources()
@@ -445,16 +450,21 @@ class ServerApi:
         job = getattr(self, "_con_pack_job", None)
         if job and job["running"]:
             return {"ok": False, "reason": "Zmiana grafik konsol już trwa."}
+        es_list = [s["es"] for s in library.systems_summary()]
+        if not es_list:
+            return {"ok": False, "reason": "Na serwerze nie ma jeszcze systemów."}
         self._con_pack_job = {"running": True, "source": source, "changed": [], "missing": []}
+        consoles.PACK.start(len(es_list), f"paczka {source}")   # pasek od razu, zanim panel zapyta o postęp
 
         def run():
             try:
-                r = consoles.apply_pack(source, [s["es"] for s in library.systems_summary()])
+                r = consoles.apply_pack(source, es_list, started=True)
                 self._con_pack_job.update(changed=r.get("changed", []), missing=r.get("missing", []))
             except Exception:
                 log.exception("paczka grafik konsol %s", source)
             finally:
                 self._con_pack_job["running"] = False
+                consoles.PACK.finish()
         threading.Thread(target=run, daemon=True, name="paczka-konsol").start()
         return {"ok": True}
 
