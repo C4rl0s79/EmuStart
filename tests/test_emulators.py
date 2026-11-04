@@ -545,3 +545,54 @@ def test_dolphin_hotkeys_on_keyboard_even_when_device_is_pad(tmp_path):
     sec = ingame.ini_section(ini, "Hotkeys")
     assert sec["General/Toggle Pause"] == "F10"
     assert sec["Other State Hotkeys/Increase Selected State Slot"] == "@(`DInput/0/Keyboard Mouse:Ctrl`+`DInput/0/Keyboard Mouse:F11`)"
+
+
+def test_dolphin_hotkeys_no_collisions_and_only_conflicting_lb_removed(tmp_path):
+    """Z przeglądu PR #113: klawisz gracza spoza listy EmuStart (NUMPAD1) nie dostaje obok klawisza, który ma
+    już inny skrót (F1 = zrzut); kombinacja LB w skrócie EmuStart znika także obok klawiatury; skróty
+    Dolphina na LB, które nie zderzają się z LB + … EmuStart (LB + Start), zostają."""
+    from emustart import ingame
+    home = tmp_path / "Dolphin"
+    cfg = home / "User" / "Config"
+    cfg.mkdir(parents=True)
+    (home / "portable.txt").write_text("", encoding="utf-8")
+    ini = cfg / "Hotkeys.ini"
+    ini.write_text(chr(10).join([
+        "[Hotkeys]", "Device = DInput/0/Keyboard Mouse",
+        "Load State/Load State Slot 1 = NUMPAD1", "General/Take Screenshot = F1",
+        "Save State/Save State Slot 1 = @(LSHIFT+F1)",
+        "Other State Hotkeys/Increase Selected State Slot = @(`XInput/0/Gamepad:Shoulder L`+`XInput/0/Gamepad:Shoulder R`) | @(Ctrl+F11)",
+        "General/Toggle Fullscreen = @(`XInput/0/Gamepad:Shoulder L`+`XInput/0/Gamepad:Start`)",
+        "Other State Hotkeys/Undo Load State = `XInput/0/Gamepad:Shoulder L`", ""]), encoding="utf-8")
+    d = ingame.Dolphin.__new__(ingame.Dolphin)
+    d.home = home
+    d.prepare_hotkeys()
+    sec = ingame.ini_section(ini, "Hotkeys")
+    assert sec["Load State/Load State Slot 1"] == "NUMPAD1"                 # F1 zajęty przez zrzut — bez zmian
+    assert sec["General/Take Screenshot"] == "F1"
+    assert sec["Save State/Save State Slot 1"] == "@(LSHIFT+F1)" and d.save_key() == "SHIFT+F1"
+    assert sec["Other State Hotkeys/Increase Selected State Slot"] == "@(Ctrl+F11)"
+    assert sec["General/Toggle Fullscreen"].endswith("Start`)")             # LB + Start nie koliduje
+    assert sec["Other State Hotkeys/Undo Load State"] == ""                 # samo LB — koliduje z każdym LB + …
+
+
+def test_menu_dpad_to_stick_roll_is_one_press(monkeypatch):
+    """W menu przejście z krzyżaka na gałkę (ten sam kierunek) nie jest drugim naciśnięciem."""
+    from emustart import hotkey, xinput
+    frames = iter([0, xinput.DOWN, xinput.DOWN | xinput.STICK_DOWN, xinput.STICK_DOWN, 0])
+    inputs = []
+
+    class Proc:
+        def poll(self):
+            return None if frames.__length_hint__() else 0
+
+    m = hotkey.GameMenu.__new__(hotkey.GameMenu)
+    m.s = type("S", (), {"proc": Proc()})()
+    m.open, m.busy = True, False
+    m.ui = type("U", (), {"menu_input": staticmethod(inputs.append)})()
+    monkeypatch.setattr(hotkey, "_buttons", lambda: next(frames))
+    monkeypatch.setattr(hotkey.time, "sleep", lambda s: None)
+    t = iter(range(100))
+    monkeypatch.setattr(hotkey.time, "monotonic", lambda: next(t) * 0.01)
+    m._loop()
+    assert inputs == ["down"]

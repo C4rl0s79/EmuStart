@@ -24,8 +24,9 @@ i APK bez zmian. RetroArch bez zmian (skróty pada ustawia sam w `retroarch.cfg`
   (`Device = XInput/0/Gamepad`), Dolphin szukał klawiszy wysyłanych przez EmuStart na padzie — zapis i wczytanie
   slotu, wybór slotu (z komunikatem slotu na ekranie), pauza i przyspieszenie nie działały. Przed każdą grą te
   skróty dostają klawiaturę z urządzeniem podanym wprost (klawisze gracza zostają, skrót gracza na padzie zostaje
-  obok), a skróty Dolphina na LB (np. LB + RB = następny slot, LB + Y) są wyłączane — LB + … należy do EmuStart,
-  jak w RetroArchu.
+  obok; domyślny klawisz EmuStart nie zajmuje klawisza innego skrótu), a skróty Dolphina na LB, które zderzają się
+  z LB + … EmuStart (samo LB, LB + A/X/Y/↑/↓/RB/R3/L3 — np. LB + RB = następny slot), są wyłączane (stare wartości
+  w logu); inne, np. LB + Start, zostają.
 
 ## [0.56.5] — 2026-11-03
 
