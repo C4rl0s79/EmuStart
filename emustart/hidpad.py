@@ -78,7 +78,7 @@ def hat_direction(value: int, lo: int, hi: int):
 
 
 def to_mask(layout: str, pressed, x: float = 0.0, y: float = 0.0, hat=None) -> int:
-    """Wciśnięte numery przycisków + gałka (-1..1, Y w dół) + hat → maska XInput (+ LT/RT)."""
+    """Wciśnięte numery przycisków + gałka (-1..1, Y w dół) + hat → maska XInput (+ LT/RT, gałka STICK_*)."""
     m = 0
     lay = LAYOUTS[layout]
     for b in pressed:
@@ -87,13 +87,13 @@ def to_mask(layout: str, pressed, x: float = 0.0, y: float = 0.0, hat=None) -> i
         m |= _HAT[hat]
     dz = 0.5
     if y < -dz:
-        m |= xinput.UP
+        m |= xinput.STICK_UP
     elif y > dz:
-        m |= xinput.DOWN
+        m |= xinput.STICK_DOWN
     if x < -dz:
-        m |= xinput.LEFT
+        m |= xinput.STICK_LEFT
     elif x > dz:
-        m |= xinput.RIGHT
+        m |= xinput.STICK_RIGHT
     return m
 
 
@@ -484,11 +484,11 @@ def states() -> list:
 
 
 def all_buttons() -> int:
-    """Suma przycisków wszystkich padów HID (maska XInput, bez spustów)."""
+    """Suma przycisków wszystkich padów HID (maska XInput i gałka, bez spustów)."""
     out = 0
     for _p, m in states():
         out |= m
-    return out & 0xFFFF
+    return out & (0xFFFF | xinput.STICK)
 
 
 # ── DirectInput: kolejność urządzeń (numery padów w RetroArchu, sterownik xinput = XInput + DirectInput) ──

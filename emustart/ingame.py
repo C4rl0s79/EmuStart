@@ -78,6 +78,65 @@ def _bind_missing(path: Path, section: str, wanted: dict) -> None:
             log.exception("skróty pada: %s", path)
 
 
+# Dolphin: przypisanie skrótu to wyrażenie: `F10`, @(Ctrl+F12), @(`Shoulder L`+`Button Y`),
+# z urządzeniem wprost: `DInput/0/Keyboard Mouse:F10`; alternatywy rozdziela „|”
+_DOLPHIN_NAMES = {"CONTROL": "CTRL", "LCONTROL": "CTRL", "RCONTROL": "CTRL", "LSHIFT": "SHIFT", "RSHIFT": "SHIFT",
+                  "MENU": "ALT", "LMENU": "ALT", "RMENU": "ALT", "RETURN": "ENTER"}
+_DOLPHIN_OUT = {"CTRL": "Ctrl", "SHIFT": "Shift", "ALT": "Alt", "ENTER": "RETURN"}
+# przyciski, które EmuStart łączy z LB (hotkey.COMBOS) — nazwy Dolphina dla XInput i SDL
+_DOLPHIN_LB_COMBO = {"BUTTON A", "BUTTON X", "BUTTON Y", "BUTTON S", "BUTTON W", "BUTTON N", "PAD N", "PAD S",
+                     "SHOULDER R", "THUMB L", "THUMB R"}
+
+
+def _dolphin_alts(raw: str) -> list:
+    return [a.strip() for a in (raw or "").split("|") if a.strip()]
+
+
+def _dolphin_tokens(alt: str) -> list:
+    """Jedna alternatywa → [(urządzenie albo "", nazwa)]."""
+    alt = alt.strip()
+    if alt.startswith("@(") and alt.endswith(")"):
+        alt = alt[2:-1]
+    out = []
+    for tok in alt.split("+"):
+        dev, _sep, name = tok.strip().strip("`").strip().rpartition(":")
+        out.append((dev, name))
+    return out
+
+
+def _dolphin_lb_conflict(alt: str) -> bool:
+    """Skrót Dolphina na LB, który zderza się z LB + … EmuStart (samo LB albo LB + A/X/Y/↑/↓/RB/R3/L3)."""
+    names = {n.upper() for _d, n in _dolphin_tokens(alt)}
+    return "SHOULDER L" in names and (len(names) == 1 or bool(names & _DOLPHIN_LB_COMBO))
+
+
+def _dolphin_keys(raw: str, device_is_keyboard: bool | None = None) -> str:
+    """Przypisanie skrótu Dolphina → klawisze dla winutil.send_keys ('CTRL+F11'); "" — EmuStart ich nie
+    naciśnie (pad albo klawisz spoza winutil.VK). device_is_keyboard=False: urządzeniem skrótów jest pad,
+    więc liczą się tylko klawisze z urządzeniem podanym wprost (`DInput/0/Keyboard Mouse:F10`);
+    None — urządzenie bez znaczenia."""
+    for alt in _dolphin_alts(raw):
+        keys = []
+        for dev, name in _dolphin_tokens(alt):
+            if dev and "keyboard" not in dev.lower():
+                break
+            if not dev and device_is_keyboard is False:
+                break
+            name = _DOLPHIN_NAMES.get(name.upper(), name.upper())
+            if name not in winutil.VK:
+                break
+            keys.append(name)
+        else:
+            if keys:
+                return "+".join(keys)
+    return ""
+
+
+def _dolphin_expr(keys: str, device: str) -> str:
+    """'CTRL+F11' → @(`DInput/0/Keyboard Mouse:Ctrl`+`DInput/0/Keyboard Mouse:F11`)."""
+    parts = [f"`{device}:{_DOLPHIN_OUT.get(k, k)}`" for k in keys.split("+")]
+    return parts[0] if len(parts) == 1 else "@(" + "+".join(parts) + ")"
+
 def _serial(meta: dict) -> str:
     """Numer seryjny w formie, jakiej używają emulatory: 'SCUS-94228'
     (baza RetroArcha bywa z sufiksem: 'SCUS-94228CE', '51131-0')."""
@@ -1358,22 +1417,89 @@ class Dolphin(Adapter):
                 return d
         return self.home / "User"
 
+    def _hotkeys_ini(self) -> Path:
+        return self._user() / "Config" / "Hotkeys.ini"
+
     def _hotkey(self, name: str, default: str) -> str:
-        raw = _ini_value(self._user() / "Config" / "Hotkeys.ini", name)
-        raw = raw.strip("@()`").replace("`", "")
-        keys = [k.strip().upper() for k in raw.split("+") if k.strip()]
-        return "+".join(keys) if keys and all(k in winutil.VK for k in keys) else default
+        return _dolphin_keys(ini_section(self._hotkeys_ini(), "Hotkeys").get(name, "")) or default
 
     def save_key(self) -> str:
         return self._hotkey("Save State/Save State Slot 1", "SHIFT+F1")
 
-    _HK = {"Other State Hotkeys/Increase Selected State Slot": "@(Ctrl+F11)",
-           "Other State Hotkeys/Decrease Selected State Slot": "@(Ctrl+F10)",
-           "Save State/Save to Selected Slot": "@(Ctrl+F12)",
-           "Load State/Load from Selected Slot": "@(Ctrl+F9)"}
+    # klawisze, które naciska EmuStart (LB + …, pauza na czas menu) — {skrót Dolphina: domyślne}
+    _HK = {"Other State Hotkeys/Increase Selected State Slot": "CTRL+F11",
+           "Other State Hotkeys/Decrease Selected State Slot": "CTRL+F10",
+           "Save State/Save to Selected Slot": "CTRL+F12",
+           "Load State/Load from Selected Slot": "CTRL+F9",
+           "Save State/Save State Slot 1": "SHIFT+F1",
+           "Load State/Load State Slot 1": "F1",
+           "General/Toggle Pause": "F10",
+           "General/Take Screenshot": "F9",
+           "Emulation Speed/Disable Emulation Speed Limit": "TAB"}
+    KEYBOARD = "DInput/0/Keyboard Mouse"
 
     def prepare_hotkeys(self) -> None:
-        _bind_missing(self._user() / "Config" / "Hotkeys.ini", "Hotkeys", self._HK)
+        """Skróty Dolphina spójne z pozostałymi emulatorami (przed każdą grą):
+          * skróty, które naciska EmuStart, muszą być na klawiaturze. Gdy urządzeniem skrótów w
+            Hotkeys.ini jest pad (Device = XInput/0/Gamepad), Dolphin szukał „F10” na padzie i nic
+            nie działało — przypisanie dostaje wtedy urządzenie wprost (`DInput/0/Keyboard Mouse:F10`),
+            klawisze gracza zostają;
+          * skróty Dolphina na LB, które zderzają się z LB + … EmuStart (samo LB, LB + A/X/Y/↑/↓/RB/R3/L3,
+            np. LB + RB = następny slot) — wyłączone, stare wartości w logu: LB + … należy do EmuStart
+            we wszystkich emulatorach (hotkey.py), jak w RetroArchu. Inne skróty na LB (np. LB + Start) zostają;
+          * domyślny klawisz EmuStart nie zajmuje klawisza, który już coś robi w Dolphinie."""
+        path = self._hotkeys_ini()
+        if not path.parent.is_dir():
+            return
+        sec = ini_section(path, "Hotkeys") if path.is_file() else {}
+        device = (sec.get("Device") or "").strip()
+        on_keyboard = not device or "keyboard" in device.lower()
+        dev = device if device and on_keyboard else self.KEYBOARD
+        changes, dropped = {}, []
+        # klawisze, które już coś robią w Dolphinie — domyślny klawisz EmuStart ich nie zajmie
+        used: dict = {}
+        for n, r in sec.items():
+            for alt in _dolphin_alts(r) if n != "Device" else []:
+                k = _dolphin_keys(alt, device_is_keyboard=on_keyboard)
+                if k:
+                    used.setdefault(k, set()).add(n)
+        for name, default in self._HK.items():
+            raw = (sec.get(name) or "").strip()
+            alts = [a for a in _dolphin_alts(raw) if not _dolphin_lb_conflict(a)]     # LB należy do EmuStart
+            cleaned = " | ".join(alts)
+            if any(_dolphin_keys(a, device_is_keyboard=on_keyboard) for a in alts):
+                if cleaned != raw:
+                    changes[("Hotkeys", name)] = cleaned
+                    dropped.append(f"{name} = {raw}")
+                continue
+            keys = next((k for k in map(_dolphin_keys, alts) if k), "") or default
+            if used.get(keys, set()) - {name}:
+                log.warning("Dolphin: %s — klawisz %s ma już %s; skrót bez zmian", name, keys,
+                            ", ".join(sorted(used[keys] - {name})))
+                if cleaned != raw:
+                    changes[("Hotkeys", name)] = cleaned
+                    dropped.append(f"{name} = {raw}")
+                continue
+            # przypisania, których EmuStart nie naciśnie (pad bez LB, klawisz spoza VK), zostają obok
+            others = [a for a in alts if not _dolphin_keys(a)]
+            changes[("Hotkeys", name)] = " | ".join(others + [_dolphin_expr(keys, dev)])
+            used.setdefault(keys, set()).add(name)
+        for name, raw in sec.items():
+            if name == "Device" or name in self._HK:
+                continue
+            alts = _dolphin_alts(raw)
+            keep = [a for a in alts if not _dolphin_lb_conflict(a)]
+            if len(keep) != len(alts):
+                changes[("Hotkeys", name)] = " | ".join(keep)
+                dropped.append(f"{name} = {raw.strip()}")
+        if dropped:
+            log.info("Dolphin: skróty na LB wyłączone (zderzały się z LB + … EmuStart): %s", "; ".join(dropped))
+        if changes:
+            try:
+                ini_set(path, changes)
+                log.info("Dolphin: skróty LB + … w Hotkeys.ini (%s)", ", ".join(sorted(k for _s, k in changes)))
+            except OSError:
+                log.exception("Dolphin: skróty")
 
     def slot_keys(self) -> tuple:
         return (self._hotkey("Other State Hotkeys/Increase Selected State Slot", "CTRL+F11"),

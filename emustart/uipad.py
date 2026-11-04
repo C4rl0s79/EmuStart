@@ -32,6 +32,7 @@ def _actions() -> set:
     """Wciśnięte akcje ze wszystkich padów (spusty jako lt/rt)."""
     out = set()
     for _pad, b in hidpad.states():          # pady HID (PS, Switch, GameSir w trybie HID…)
+        b = xinput.stick_as_dpad(b)          # gałka steruje interfejsem jak krzyżak
         out |= {a for mask, a in _BUTTONS if b & mask}
         if b & hidpad.LT:
             out.add("lt")

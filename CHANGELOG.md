@@ -11,6 +11,23 @@ nowym urządzeniu — do sprawdzenia na żywo), Play! (miejsce kart), APK (te sa
 budowania), adaptery pozostałych samodzielnych emulatorów przy pierwszym użyciu, sprawdzenie na żywo (niżej);
 jedno zapytanie przygotowujące grę — po pomiarach kroków z prawdziwych startów.
 
+## [0.56.6] — 2026-11-04
+
+Zakres: klient Windows i Lumen (skróty pada w grze, `hotkey.py`, `xinput.py`, `hidpad.py`, `ingame.Dolphin`). Serwer
+i APK bez zmian. RetroArch bez zmian (skróty pada ustawia sam w `retroarch.cfg`).
+
+### Poprawione
+- Skróty LB + ↑/↓ (wybór slotu) reagują tylko na krzyżak. Lewa gałka liczyła się jak krzyżak, więc jej drgnięcie
+  w grze z wciśniętym LB przełączało sloty (PCSX2, DuckStation, PPSSPP, Dolphin). W menu EmuStart i w interfejsie
+  gałka dalej działa jak krzyżak.
+- Dolphin: skróty spójne z pozostałymi emulatorami. Gdy urządzeniem skrótów w `Hotkeys.ini` był pad
+  (`Device = XInput/0/Gamepad`), Dolphin szukał klawiszy wysyłanych przez EmuStart na padzie — zapis i wczytanie
+  slotu, wybór slotu (z komunikatem slotu na ekranie), pauza i przyspieszenie nie działały. Przed każdą grą te
+  skróty dostają klawiaturę z urządzeniem podanym wprost (klawisze gracza zostają, skrót gracza na padzie zostaje
+  obok; domyślny klawisz EmuStart nie zajmuje klawisza innego skrótu), a skróty Dolphina na LB, które zderzają się
+  z LB + … EmuStart (samo LB, LB + A/X/Y/↑/↓/RB/R3/L3 — np. LB + RB = następny slot), są wyłączane (stare wartości
+  w logu); inne, np. LB + Start, zostają.
+
 ## [0.56.5] — 2026-11-03
 
 Zakres: serwer (`logos.py`, `srvconfig.py`, panel `web/server.*`). Klient Windows i Lumen — nowy silnik bez zmian
