@@ -11,6 +11,8 @@ nowym urządzeniu — do sprawdzenia na żywo), Play! (miejsce kart), APK (te sa
 budowania), adaptery pozostałych samodzielnych emulatorów przy pierwszym użyciu, sprawdzenie na żywo (niżej);
 jedno zapytanie przygotowujące grę — po pomiarach kroków z prawdziwych startów.
 
+## [0.56.6] — 2026-11-04
+
 Zakres: klient Windows i Lumen (skróty pada w grze, `hotkey.py`, `xinput.py`, `hidpad.py`, `ingame.Dolphin`). Serwer
 i APK bez zmian. RetroArch bez zmian (skróty pada ustawia sam w `retroarch.cfg`).
 
