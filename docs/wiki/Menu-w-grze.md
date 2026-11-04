@@ -26,6 +26,14 @@ Pozycje niedostępne dla danego emulatora są wyszarzone (tabela w [Emulatory](E
   pozostałych.
 - Wybrany zapis można też wczytać ręcznie: przytrzymane A na grze → Wczytaj zapis.
 
+## Skróty pada (LB + …)
+
+Jednakowe w każdym emulatorze: LB + Y zapis w kolejnym slocie, LB + X zapis w wybranym, LB + ↑/↓ wybór slotu
+(tylko krzyżak — lewa gałka nie przełącza slotów), LB + RB przyspieszenie, LB + R3 zrzut ekranu, LB + L3
+nagrywanie. W emulatorach samodzielnych EmuStart naciska ich skróty klawiszowe; brakujące dopisuje do ich ustawień.
+Dolphin: skróty, których używa EmuStart, są zawsze na klawiaturze (także gdy urządzeniem skrótów jest pad), a jego
+własne skróty na LB są wyłączane.
+
 ## Uwagi
 
 - Menu nie działa, gdy obsługa padów w menu jest wyłączona (`--pady=brak`).

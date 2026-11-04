@@ -138,7 +138,8 @@ class GameMenu:
                                       (xinput.START, "b")):
                         if pressed & mask:
                             self.ui.menu_input(act)
-                    for mask, act in ((xinput.UP, "up"), (xinput.DOWN, "down")):
+                    # w menu gałka działa jak krzyżak (w skrótach LB + ↑/↓ — tylko krzyżak)
+                    for mask, act in ((xinput.UP | xinput.STICK_UP, "up"), (xinput.DOWN | xinput.STICK_DOWN, "down")):
                         if pressed & mask:
                             self.ui.menu_input(act)
                             repeat_at = now + 0.4

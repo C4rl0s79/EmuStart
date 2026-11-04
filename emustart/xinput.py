@@ -13,6 +13,18 @@ A, B, X, Y = 0x1000, 0x2000, 0x4000, 0x8000
 UP, DOWN, LEFT, RIGHT = 0x1, 0x2, 0x4, 0x8
 START, BACK = 0x10, 0x20
 L3, R3, LB, RB = 0x40, 0x80, 0x100, 0x200
+# lewa gałka — osobne bity (poza maską XInput i spustami hidpad): w menu działa jak krzyżak,
+# w skrótach LB + ↑/↓ nie (drgnięcie gałki w grze z wciśniętym LB przełączało sloty)
+STICK_UP, STICK_DOWN, STICK_LEFT, STICK_RIGHT = 0x100000, 0x200000, 0x400000, 0x800000
+STICK = STICK_UP | STICK_DOWN | STICK_LEFT | STICK_RIGHT
+
+
+def stick_as_dpad(b: int) -> int:
+    """Maska z gałką dołożoną do krzyżaka — do sterowania menu i interfejsem."""
+    for s, d in ((STICK_UP, UP), (STICK_DOWN, DOWN), (STICK_LEFT, LEFT), (STICK_RIGHT, RIGHT)):
+        if b & s:
+            b |= d
+    return b
 
 
 class _Pad(ctypes.Structure):
@@ -41,7 +53,7 @@ def available() -> bool:
 
 
 def buttons(index: int) -> int | None:
-    """Maska przycisków pada 0–3 (gałka liczy się jako krzyżak); None = brak pada."""
+    """Maska przycisków pada 0–3 (gałka — bity STICK_*, nie krzyżak); None = brak pada."""
     if not _dll:
         return None
     st = _State()
@@ -51,13 +63,13 @@ def buttons(index: int) -> int | None:
     b = g.wButtons
     dz = 16000
     if g.sThumbLY > dz:
-        b |= UP
+        b |= STICK_UP
     elif g.sThumbLY < -dz:
-        b |= DOWN
+        b |= STICK_DOWN
     if g.sThumbLX < -dz:
-        b |= LEFT
+        b |= STICK_LEFT
     elif g.sThumbLX > dz:
-        b |= RIGHT
+        b |= STICK_RIGHT
     return b
 
 

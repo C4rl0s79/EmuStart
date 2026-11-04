@@ -78,6 +78,44 @@ def _bind_missing(path: Path, section: str, wanted: dict) -> None:
             log.exception("skróty pada: %s", path)
 
 
+# Dolphin: przypisanie skrótu to wyrażenie: `F10`, @(Ctrl+F12), @(`Shoulder L`+`Button Y`),
+# z urządzeniem wprost: `DInput/0/Keyboard Mouse:F10`; alternatywy rozdziela „|”
+_DOLPHIN_LB = re.compile(r"Shoulder L\b")
+_DOLPHIN_NAMES = {"CONTROL": "CTRL", "RETURN": "ENTER"}
+_DOLPHIN_OUT = {"CTRL": "Ctrl", "SHIFT": "Shift", "ALT": "Alt", "ENTER": "RETURN"}
+
+
+def _dolphin_keys(raw: str, device_is_keyboard: bool | None = None) -> str:
+    """Przypisanie skrótu Dolphina → klawisze dla winutil.send_keys ('CTRL+F11'); "" — nie z klawiatury.
+    device_is_keyboard=False: urządzeniem skrótów jest pad, więc liczą się tylko klawisze z urządzeniem
+    podanym wprost (`DInput/0/Keyboard Mouse:F10`); None — urządzenie bez znaczenia."""
+    for alt in (raw or "").split("|"):
+        alt = alt.strip()
+        if alt.startswith("@(") and alt.endswith(")"):
+            alt = alt[2:-1]
+        keys = []
+        for tok in alt.split("+"):
+            tok = tok.strip().strip("`").strip()
+            dev, sep, name = tok.rpartition(":")
+            if sep and "keyboard" not in dev.lower():
+                break
+            if not sep and device_is_keyboard is False:
+                break
+            name = _DOLPHIN_NAMES.get(name.upper(), name.upper())
+            if name not in winutil.VK:
+                break
+            keys.append(name)
+        else:
+            if keys:
+                return "+".join(keys)
+    return ""
+
+
+def _dolphin_expr(keys: str, device: str) -> str:
+    """'CTRL+F11' → @(`DInput/0/Keyboard Mouse:Ctrl`+`DInput/0/Keyboard Mouse:F11`)."""
+    parts = [f"`{device}:{_DOLPHIN_OUT.get(k, k)}`" for k in keys.split("+")]
+    return parts[0] if len(parts) == 1 else "@(" + "+".join(parts) + ")"
+
 def _serial(meta: dict) -> str:
     """Numer seryjny w formie, jakiej używają emulatory: 'SCUS-94228'
     (baza RetroArcha bywa z sufiksem: 'SCUS-94228CE', '51131-0')."""
@@ -1358,22 +1396,61 @@ class Dolphin(Adapter):
                 return d
         return self.home / "User"
 
+    def _hotkeys_ini(self) -> Path:
+        return self._user() / "Config" / "Hotkeys.ini"
+
     def _hotkey(self, name: str, default: str) -> str:
-        raw = _ini_value(self._user() / "Config" / "Hotkeys.ini", name)
-        raw = raw.strip("@()`").replace("`", "")
-        keys = [k.strip().upper() for k in raw.split("+") if k.strip()]
-        return "+".join(keys) if keys and all(k in winutil.VK for k in keys) else default
+        return _dolphin_keys(ini_section(self._hotkeys_ini(), "Hotkeys").get(name, "")) or default
 
     def save_key(self) -> str:
         return self._hotkey("Save State/Save State Slot 1", "SHIFT+F1")
 
-    _HK = {"Other State Hotkeys/Increase Selected State Slot": "@(Ctrl+F11)",
-           "Other State Hotkeys/Decrease Selected State Slot": "@(Ctrl+F10)",
-           "Save State/Save to Selected Slot": "@(Ctrl+F12)",
-           "Load State/Load from Selected Slot": "@(Ctrl+F9)"}
+    # klawisze, które naciska EmuStart (LB + …, pauza na czas menu) — {skrót Dolphina: domyślne}
+    _HK = {"Other State Hotkeys/Increase Selected State Slot": "CTRL+F11",
+           "Other State Hotkeys/Decrease Selected State Slot": "CTRL+F10",
+           "Save State/Save to Selected Slot": "CTRL+F12",
+           "Load State/Load from Selected Slot": "CTRL+F9",
+           "Save State/Save State Slot 1": "SHIFT+F1",
+           "Load State/Load State Slot 1": "F1",
+           "General/Toggle Pause": "F10",
+           "General/Take Screenshot": "F9",
+           "Emulation Speed/Disable Emulation Speed Limit": "TAB"}
+    KEYBOARD = "DInput/0/Keyboard Mouse"
 
     def prepare_hotkeys(self) -> None:
-        _bind_missing(self._user() / "Config" / "Hotkeys.ini", "Hotkeys", self._HK)
+        """Skróty Dolphina spójne z pozostałymi emulatorami (przed każdą grą):
+          * skróty, które naciska EmuStart, muszą być na klawiaturze. Gdy urządzeniem skrótów w
+            Hotkeys.ini jest pad (Device = XInput/0/Gamepad), Dolphin szukał „F10” na padzie i nic
+            nie działało — przypisanie dostaje wtedy urządzenie wprost (`DInput/0/Keyboard Mouse:F10`),
+            klawisze gracza zostają;
+          * inne skróty Dolphina na LB (np. LB + RB = następny slot) — wyłączone: LB + … należy do
+            EmuStart we wszystkich emulatorach (hotkey.py), jak w RetroArchu."""
+        path = self._hotkeys_ini()
+        if not path.parent.is_dir():
+            return
+        sec = ini_section(path, "Hotkeys") if path.is_file() else {}
+        device = (sec.get("Device") or "").strip()
+        on_keyboard = not device or "keyboard" in device.lower()
+        dev = device if device and on_keyboard else self.KEYBOARD
+        changes = {}
+        for name, default in self._HK.items():
+            raw = sec.get(name, "")
+            if _dolphin_keys(raw, device_is_keyboard=on_keyboard):
+                continue
+            keys = _dolphin_keys(raw)
+            expr = _dolphin_expr(keys or default, dev)
+            # skrót gracza na padzie (bez LB) zostaje obok klawiatury: `Start` | `…Keyboard Mouse:F10`
+            keep = raw.strip() and not keys and not _DOLPHIN_LB.search(raw)
+            changes[("Hotkeys", name)] = f"{raw.strip()} | {expr}" if keep else expr
+        for name, raw in sec.items():
+            if name != "Device" and name not in self._HK and _DOLPHIN_LB.search(raw):
+                changes[("Hotkeys", name)] = ""
+        if changes:
+            try:
+                ini_set(path, changes)
+                log.info("Dolphin: skróty LB + … w Hotkeys.ini (%s)", ", ".join(sorted(k for _s, k in changes)))
+            except OSError:
+                log.exception("Dolphin: skróty")
 
     def slot_keys(self) -> tuple:
         return (self._hotkey("Other State Hotkeys/Increase Selected State Slot", "CTRL+F11"),

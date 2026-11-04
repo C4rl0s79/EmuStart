@@ -1557,7 +1557,7 @@ class Api:
         lst = pads.connected(battery=bool(battery))
         hid = {pad.id: m & 0xFFFF for pad, m in hidpad.states()} if any(p.get("hid") for p in lst) else {}
         for p in lst:
-            p["buttons"] = hid.get(p["slot"], 0) if p.get("hid") else xinput.buttons(p["slot"]) or 0
+            p["buttons"] = hid.get(p["slot"], 0) if p.get("hid") else (xinput.buttons(p["slot"]) or 0) & 0xFFFF
         po = self._cfg.get("pad_order") or {}
         return {"pads": lst, "order": pads.order(self._cfg, lst),
                 "mode": po.get("mode", "windows"), "manual": po.get("manual", [])}
