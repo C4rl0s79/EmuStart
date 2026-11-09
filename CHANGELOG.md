@@ -44,6 +44,32 @@ dokumentacji Lumena, wydanie.
     przełącza się między nimi bez końca.
 11. Tryb TV: gdy po filtrowaniu jest mało gier, powielać okładki, żeby wypełnić ekran.
 
+## [0.62.0] — 2026-11-09
+
+Zakres: klient Windows (skróty pada w grze), serwer i silnik w Lumen (nazwy gier w LaunchBox). APK bez zmian (RetroArch
+na Androidzie ma już Select jako przycisk skrótów). Serwer trzeba zaktualizować, żeby Lumen mógł zapisywać nazwy.
+
+### Zmienione
+- **Skróty pada w grze: przytrzymany Select zamiast LB** we wszystkich emulatorach: Select + A menu, Select + Y / X
+  zapis, Select + ↑ / ↓ slot, Select + RB przyspieszenie, Select + R3 zrzut, Select + L3 nagrywanie. Akcje bez zmian.
+  - DuckStation, PCSX2, PPSSPP, Dolphin: wątek pada EmuStart (`hotkey.py`).
+  - RetroArch: przycisk skrótów 7 (Back/Select) w `retroarch.cfg` — wpisany jeszcze raz przy pierwszej grze (własne
+    zmiany skrótów w `retroarch.cfg` trzeba wtedy powtórzyć). Zapisana w panelu serwera stara wartość 4 (LB) jest
+    czytana jako 7.
+  - Dolphin: z `Hotkeys.ini` zdejmowane są teraz skróty zderzające się z Select + …, skróty na LB zostają.
+  - Select trafia też do gry (emulator czyta pada sam), tak jak wcześniej LB.
+
+### Dodane
+- **Nazwy gier w LaunchBox ustalane przez administratora:** Lumen szuka opisów gier GOG i skrótów spoza Steama w bazie
+  LaunchBox po nazwie, a polska albo inna nazwa ze sklepu się nie znajduje. Administrator wpisuje w Lumenie nazwę z
+  LaunchBox, serwer ją trzyma i rozsyła wszystkim urządzeniom: `GET /v1/userart/titles`, `PUT /v1/admin/titles`
+  (tylko urządzenie administratora), silnik: `art_lb_titles`, `art_lb_title_set`. Gry EmuStart bez zmian (mają
+  identyfikator LaunchBox z serwera); edycji w panelu serwera nie ma.
+
+### Nie sprawdzone na żywo
+- Skróty Select na prawdziwym padzie w RetroArchu i emulatorach samodzielnych; zapis nazwy LaunchBox z Lumena na
+  prawdziwym serwerze.
+
 ## [0.61.0] — 2026-11-09
 
 Zakres: serwer, silnik w Lumen. Klient Windows i APK bez zmian zachowania, emulatory bez zmian. Serwer trzeba zaktualizować.

@@ -29,13 +29,13 @@ DEFAULTS = {
         "quit_on_close_content": "2",           # „Zamknij grę” = wyjście (uruchomienie z EmuStart)
         "savestate_auto_index": "true",         # każdy zapis stanu = nowy numer, nic się nie nadpisuje
         # pad (numery przycisków sterownika XInput, jak w autoconfig/xinput RetroArcha: A=0, Y=3,
-        # LB=4, RB=5) — dlatego też sterownik; skróty jak w pozostałych emulatorach (hotkey.py),
+        # RB=5, Back=7) — dlatego też sterownik; skróty jak w pozostałych emulatorach (hotkey.py),
         # ustawia je też sesja EmuStart (ingame.RetroArch.launch_args)
         "input_joypad_driver": "xinput",
-        "input_enable_hotkey_btn": "4",          # LB = przycisk skrótów
-        "input_menu_toggle_btn": "0",            # LB + A = menu RetroArcha
-        "input_toggle_fast_forward_btn": "5",    # LB + RB = przyspieszenie (wł./wył.)
-        "input_save_state_btn": "3",             # LB + Y = zapis stanu (kolejny numer)
+        "input_enable_hotkey_btn": "7",          # Select = przycisk skrótów
+        "input_menu_toggle_btn": "0",            # Select + A = menu RetroArcha
+        "input_toggle_fast_forward_btn": "5",    # Select + RB = przyspieszenie (wł./wył.)
+        "input_save_state_btn": "3",             # Select + Y = zapis stanu (kolejny numer)
     },
     "duckstation": {"Main|ConfirmPowerOff": "false"},   # wyjście z gry bez okna z pytaniem
     "pcsx2": {"UI|ConfirmShutdown": "false"},
@@ -73,7 +73,10 @@ def format_values(values: dict) -> str:
 def effective(cfg: dict) -> dict:
     """{rodzina: {klucz: wartość}} — ustawione w panelu albo domyślne."""
     own = cfg.get("emu_policy") or {}
-    return {f: dict(own[f]) if isinstance(own.get(f), dict) else dict(DEFAULTS.get(f, {})) for f in FAMILIES}
+    out = {f: dict(own[f]) if isinstance(own.get(f), dict) else dict(DEFAULTS.get(f, {})) for f in FAMILIES}
+    if out["retroarch"].get("input_enable_hotkey_btn") == "4":     # zapisane w panelu, gdy skrótem było LB
+        out["retroarch"]["input_enable_hotkey_btn"] = "7"
+    return out
 
 
 def ini_changes(values: dict) -> dict:

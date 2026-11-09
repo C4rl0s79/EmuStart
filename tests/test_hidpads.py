@@ -37,7 +37,7 @@ def test_layouts_by_position():
     # krzyżak (hat) i gałka
     assert hidpad.to_mask("android", [], hat=hidpad.hat_direction(2, 0, 7)) == xinput.RIGHT
     assert hidpad.hat_direction(8, 0, 7) is None and hidpad.hat_direction(15, 0, 7) is None
-    # gałka ma własne bity (skróty LB + ↑/↓ tylko z krzyżaka); w menu działa jak krzyżak
+    # gałka ma własne bity (skróty Select + ↑/↓ tylko z krzyżaka); w menu działa jak krzyżak
     assert hidpad.to_mask("android", [], x=0.0, y=-1.0) == xinput.STICK_UP
     assert xinput.stick_as_dpad(xinput.STICK_UP | xinput.A) == xinput.STICK_UP | xinput.UP | xinput.A
 

@@ -351,6 +351,7 @@ def test_admin_device_edits_art_and_look_for_everyone(srv, monkeypatch, tmp_path
     gid = library.db().execute("SELECT id FROM games").fetchone()["id"]
     assert _req(srv, "GET", "/v1/info", tok)[1]["admin"] is False
     assert _req(srv, "PUT", f"/v1/admin/games/{gid}/meta", tok, body={"edits": {"description": "x"}})[0] == 403
+    assert _req(srv, "PUT", "/v1/admin/titles", tok, body={"game": "gog:1", "name": "x"})[0] == 403
     accounts.set_admin("Test", True)
     assert _req(srv, "GET", "/v1/info", tok)[1]["admin"] is True
     v1 = libsync.server_systems()[0]["scanned"]
@@ -367,4 +368,7 @@ def test_admin_device_edits_art_and_look_for_everyone(srv, monkeypatch, tmp_path
     assert _req(srv, "DELETE", f"/v1/admin/games/{gid}/art?kind=box", tok)[1]["ok"]
     st, r = _req(srv, "PUT", "/v1/admin/systems/snes", tok, body={"name": "Moje SNES"})
     assert st == 200 and r["ok"] and libsync.server_systems()[0]["display"] == "Moje SNES"
+    st, r = _req(srv, "PUT", "/v1/admin/titles", tok, body={"game": "gog:1", "name": "Wiedźmin"})
+    assert st == 200 and r["ok"] and _req(srv, "GET", "/v1/userart/titles", tok)[1]["titles"] == {"gog:1": "Wiedźmin"}
+    assert not _req(srv, "PUT", "/v1/admin/titles", tok, body={"game": "emu:1", "name": "x"})[1]["ok"]
     assert _req(srv, "PUT", "/v1/admin/nieznane", tok, body={})[0] == 404

@@ -610,7 +610,8 @@ def _admin_route(handler, method: str, p: list) -> None:
         PUT    admin/games/<id>/meta/fetch?full=1  opis z sieci (w tle)
         GET    admin/systems/<es>/logos         propozycje logo systemu
         PUT    admin/systems/<es>/logo?id=      wybór logo
-        PUT    admin/systems/<es>               {"name", "glow", "enabled", "emu_rec", "core_rec"}"""
+        PUT    admin/systems/<es>               {"name", "glow", "enabled", "emu_rec", "core_rec"}
+        PUT    admin/titles                     {"game", "name"} nazwa gry w LaunchBox (Lumen: GOG, skróty)"""
     n = int(handler.headers.get("Content-Length") or 0)
     if n > (1 << 20):
         handler.close_connection = True
@@ -648,6 +649,12 @@ def _admin_route(handler, method: str, p: list) -> None:
             out = API.system_logo_choose(es, q.get("id", ""))
         elif not p[2:] and method == "PUT":
             out = API.system_set(es, {k: body[k] for k in ("name", "glow", "enabled", "emu_rec", "core_rec") if k in body})
+    elif p == ["titles"] and method == "PUT":
+        from emustart import userart
+        try:
+            out = userart.set_title(str(body.get("game") or ""), str(body.get("name") or ""))
+        except userart.ArtError as ex:
+            out = {"ok": False, "reason": str(ex)}
     if out is None:
         return _json(handler, {"error": "nieznany adres"}, 404)
     _games_cache.clear()
@@ -1055,6 +1062,8 @@ def userart_call(handler, method: str, parts: list) -> None:
         acc, _dev = _sync_identity(handler)
         if method == "GET" and parts == ["defaults"]:
             return userart.defaults()
+        if method == "GET" and parts == ["titles"]:
+            return userart.titles()
         if method == "GET" and parts == ["gallery"]:
             return userart.gallery(acc, q.get("game", ""), q.get("kind", ""))
         if method == "POST" and parts == ["upload"]:

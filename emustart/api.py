@@ -507,6 +507,15 @@ class Api:
     def art_user_defaults(self) -> dict:
         return self._art_user("defaults")
 
+    def art_lb_titles(self) -> dict:
+        """Nazwy gier w LaunchBox ustawione przez administratora (Lumen) i czy to urządzenie może je zmieniać."""
+        return {**self._art_user("titles"), "admin": self._is_admin()}
+
+    def art_lb_title_set(self, game: str, name: str) -> dict:
+        if not self._is_admin():
+            return {"ok": False, "reason": "Nazwy gier w LaunchBox ustala administrator serwera."}
+        return self._admin_call("PUT", "titles", {"game": str(game), "name": str(name)})
+
     def art_user_remove(self, game: str, kind: str, sha: str) -> dict:
         return self._art_user("remove", str(game), str(kind), str(sha))
 

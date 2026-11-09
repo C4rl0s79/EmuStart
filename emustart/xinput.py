@@ -14,7 +14,7 @@ UP, DOWN, LEFT, RIGHT = 0x1, 0x2, 0x4, 0x8
 START, BACK = 0x10, 0x20
 L3, R3, LB, RB = 0x40, 0x80, 0x100, 0x200
 # lewa gałka — osobne bity (poza maską XInput i spustami hidpad): w menu działa jak krzyżak,
-# w skrótach LB + ↑/↓ nie (drgnięcie gałki w grze z wciśniętym LB przełączało sloty)
+# w skrótach Select + ↑/↓ nie (drgnięcie gałki w grze z wciśniętym Select przełączało sloty)
 STICK_UP, STICK_DOWN, STICK_LEFT, STICK_RIGHT = 0x100000, 0x200000, 0x400000, 0x800000
 STICK = STICK_UP | STICK_DOWN | STICK_LEFT | STICK_RIGHT
 

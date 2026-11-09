@@ -113,3 +113,15 @@ def test_panel_preview_served_locally(data):
     base = server.start()
     with urllib.request.urlopen(f"{base}/panel-art/{up['sha']}") as r:
         assert r.status == 200 and r.headers["Content-Type"] == "image/png"
+
+
+def test_launchbox_titles_set_by_admin(data):
+    assert userart.titles()["titles"] == {}
+    assert userart.set_title("gog:1207658924", "  Wiedźmin  3 ")["titles"] == {"gog:1207658924": "Wiedźmin 3"}
+    userart.set_title("shortcut:3456", "The Witcher 2: Assassins of Kings")
+    assert userart.titles()["titles"]["shortcut:3456"] == "The Witcher 2: Assassins of Kings"
+    userart.set_title("gog:1207658924", "")
+    assert "gog:1207658924" not in userart.titles()["titles"]
+    for game, name in (("emu:5", "x"), ("gog:../x", "x"), ("gog:1", "a" * 201), ("gog:1", "a\x01b")):
+        with pytest.raises(userart.ArtError):
+            userart.set_title(game, name)

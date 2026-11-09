@@ -55,6 +55,10 @@ def defaults(cfg: dict, pid: int) -> dict:
     return sc._Client(cfg, pid).json("GET", "/v1/userart/defaults")
 
 
+def titles(cfg: dict, pid: int) -> dict:
+    return sc._Client(cfg, pid).json("GET", "/v1/userart/titles")
+
+
 def remove(cfg: dict, pid: int, game: str, kind: str, sha: str) -> dict:
     return sc._Client(cfg, pid).json("POST", "/v1/userart/remove", {"game": game, "kind": kind, "sha": sha})
 

@@ -64,7 +64,7 @@ def _qt_key(binding: str) -> str:
 
 
 def _bind_missing(path: Path, section: str, wanted: dict) -> None:
-    """Skróty potrzebne do LB + … (hotkey.py), których emulator nie ma przypisanych — dopisane do jego
+    """Skróty potrzebne do Select + … (hotkey.py), których emulator nie ma przypisanych — dopisane do jego
     ustawień; przypisane przez gracza zostają."""
     if not path.parent.is_dir():
         return
@@ -83,8 +83,8 @@ def _bind_missing(path: Path, section: str, wanted: dict) -> None:
 _DOLPHIN_NAMES = {"CONTROL": "CTRL", "LCONTROL": "CTRL", "RCONTROL": "CTRL", "LSHIFT": "SHIFT", "RSHIFT": "SHIFT",
                   "MENU": "ALT", "LMENU": "ALT", "RMENU": "ALT", "RETURN": "ENTER"}
 _DOLPHIN_OUT = {"CTRL": "Ctrl", "SHIFT": "Shift", "ALT": "Alt", "ENTER": "RETURN"}
-# przyciski, które EmuStart łączy z LB (hotkey.COMBOS) — nazwy Dolphina dla XInput i SDL
-_DOLPHIN_LB_COMBO = {"BUTTON A", "BUTTON X", "BUTTON Y", "BUTTON S", "BUTTON W", "BUTTON N", "PAD N", "PAD S",
+# przyciski, które EmuStart łączy z Select (hotkey.COMBOS) — nazwy Dolphina dla XInput i SDL
+_DOLPHIN_HOTKEY_COMBO = {"BUTTON A", "BUTTON X", "BUTTON Y", "BUTTON S", "BUTTON W", "BUTTON N", "PAD N", "PAD S",
                      "SHOULDER R", "THUMB L", "THUMB R"}
 
 
@@ -104,10 +104,10 @@ def _dolphin_tokens(alt: str) -> list:
     return out
 
 
-def _dolphin_lb_conflict(alt: str) -> bool:
-    """Skrót Dolphina na LB, który zderza się z LB + … EmuStart (samo LB albo LB + A/X/Y/↑/↓/RB/R3/L3)."""
+def _dolphin_hotkey_conflict(alt: str) -> bool:
+    """Skrót Dolphina na Select, który zderza się z Select + … EmuStart (samo Select albo Select + A/X/Y/↑/↓/RB/R3/L3)."""
     names = {n.upper() for _d, n in _dolphin_tokens(alt)}
-    return "SHOULDER L" in names and (len(names) == 1 or bool(names & _DOLPHIN_LB_COMBO))
+    return "BACK" in names and (len(names) == 1 or bool(names & _DOLPHIN_HOTKEY_COMBO))
 
 
 def _dolphin_keys(raw: str, device_is_keyboard: bool | None = None) -> str:
@@ -579,7 +579,7 @@ class Adapter:
     def load_key(self) -> str:
         return ""
 
-    # ── skróty pada LB + … (hotkey.py): klawisze emulatora; "" — emulator nie ma takiego skrótu ──
+    # ── skróty pada Select + … (hotkey.py): klawisze emulatora; "" — emulator nie ma takiego skrótu ──
     def menu_key(self) -> str:
         """Własne menu emulatora na pada (pauza z menu); "" — menu EmuStart."""
         return ""
@@ -603,11 +603,11 @@ class Adapter:
         return ""
 
     def ff_hold(self) -> bool:
-        """Przyspieszenie działa, dopóki klawisz jest wciśnięty (LB + RB: wciśnij / puść)."""
+        """Przyspieszenie działa, dopóki klawisz jest wciśnięty (Select + RB: wciśnij / puść)."""
         return False
 
     def prepare_hotkeys(self) -> None:
-        """Przed grą: brakujące skróty emulatora do LB + … dopisane do jego ustawień."""
+        """Przed grą: brakujące skróty emulatora do Select + … dopisane do jego ustawień."""
 
     def state_dirs(self) -> list:
         return []
@@ -837,7 +837,7 @@ class RetroArch(Adapter):
             # (prawy Shift = Select → w PUAE klawiatura ekranowa, strzałki = joystick)
             # i przechwytuje F1 (menu) oraz Esc (wyjście). Na czas sesji: game focus
             # (klawiatura dla rdzenia, skróty wyłączone) i bez przypisań klawiszy do pada.
-            # Wyjście z gry: menu EmuStart (LB + A), przełączanie: Scroll Lock.
+            # Wyjście z gry: menu EmuStart (Select + A), przełączanie: Scroll Lock.
             lines.append('input_auto_game_focus = "1"')
             for p in (1, 2):
                 for b in ("a", "b", "x", "y", "l", "r", "l2", "r2", "l3", "r3", "start", "select",
@@ -928,23 +928,23 @@ class RetroArch(Adapter):
         (d / f"EmuStart {name}.cfg").write_text("\n".join(lines) + "\n", encoding="utf-8")
         log.info("RetroArch: profil przycisków pada HID %s → %s", pad.name, d / f"EmuStart {name}.cfg")
 
-    # skróty pada jak w pozostałych emulatorach (hotkey.py): przytrzymany LB + A menu, Y zapis
+    # skróty pada jak w pozostałych emulatorach (hotkey.py): przytrzymany Select + A menu, Y zapis
     # (kolejny numer), ↑/↓ slot (↑ = niższy numer, jak wyżej na liście), RB przyspieszenie,
-    # R3 zrzut, L3 nagrywanie (XInput w RetroArchu: A=0, Y=3, LB=4, RB=5, L3=8, R3=9)
-    PAD_HOTKEYS = {"input_enable_hotkey_btn": "4", "input_menu_toggle_btn": "0", "input_save_state_btn": "3",
+    # R3 zrzut, L3 nagrywanie (XInput w RetroArchu: A=0, Y=3, RB=5, Back=7, L3=8, R3=9)
+    PAD_HOTKEYS = {"input_enable_hotkey_btn": "7", "input_menu_toggle_btn": "0", "input_save_state_btn": "3",
                    "input_state_slot_increase_btn": "h0down", "input_state_slot_decrease_btn": "h0up",
                    "input_toggle_fast_forward_btn": "5", "input_screenshot_btn": "9",
                    "input_recording_toggle_btn": "8", "savestate_auto_index": "true"}
-    _HOTKEYS_MARK = "emustart-skroty-lb-2.txt"     # -2: odwrócone ↑/↓ (0.54.0)
+    _HOTKEYS_MARK = "emustart-skroty-lb-3.txt"     # -2: odwrócone ↑/↓ (0.54.0), -3: Select zamiast LB
 
     def _pad_hotkeys(self) -> None:
         """Domyślna konfiguracja EmuStart w retroarch.cfg — raz (znacznik obok retroarch.cfg); potem
         gracz może ją zmienić w RetroArchu. Inne skróty RetroArcha na tych samych przyciskach (np.
-        input_exit_emulator_btn = "0" — LB + A wychodziło z gry) — wyłączone."""
+        input_exit_emulator_btn = "0" — Select + A wychodziło z gry) — wyłączone."""
         cfg, mark = self.home / "retroarch.cfg", self.home / self._HOTKEYS_MARK
         if mark.exists() or not cfg.is_file():
             return
-        used = set(self.PAD_HOTKEYS.values()) - {"4", "true"}
+        used = set(self.PAD_HOTKEYS.values()) - {"7", "true"}
         changes = {(None, k): f'"{v}"' for k, v in self.PAD_HOTKEYS.items()}
         for k, v in _cfg_map(cfg).items():
             if (k.endswith("_btn") and not k.startswith("input_player") and k not in self.PAD_HOTKEYS
@@ -952,8 +952,8 @@ class RetroArch(Adapter):
                 changes[(None, k)] = '"nul"'
         try:
             ini_set(cfg, changes)
-            mark.write_text("skróty pada LB + … wpisane do retroarch.cfg\n", encoding="utf-8")
-            log.info("RetroArch: skróty pada LB + … w retroarch.cfg (%s)", ", ".join(sorted(k for _s, k in changes)))
+            mark.write_text("skróty pada Select + … wpisane do retroarch.cfg\n", encoding="utf-8")
+            log.info("RetroArch: skróty pada Select + … w retroarch.cfg (%s)", ", ".join(sorted(k for _s, k in changes)))
         except OSError:
             log.exception("RetroArch: skróty pada")
 
@@ -1426,7 +1426,7 @@ class Dolphin(Adapter):
     def save_key(self) -> str:
         return self._hotkey("Save State/Save State Slot 1", "SHIFT+F1")
 
-    # klawisze, które naciska EmuStart (LB + …, pauza na czas menu) — {skrót Dolphina: domyślne}
+    # klawisze, które naciska EmuStart (Select + …, pauza na czas menu) — {skrót Dolphina: domyślne}
     _HK = {"Other State Hotkeys/Increase Selected State Slot": "CTRL+F11",
            "Other State Hotkeys/Decrease Selected State Slot": "CTRL+F10",
            "Save State/Save to Selected Slot": "CTRL+F12",
@@ -1444,9 +1444,9 @@ class Dolphin(Adapter):
             Hotkeys.ini jest pad (Device = XInput/0/Gamepad), Dolphin szukał „F10” na padzie i nic
             nie działało — przypisanie dostaje wtedy urządzenie wprost (`DInput/0/Keyboard Mouse:F10`),
             klawisze gracza zostają;
-          * skróty Dolphina na LB, które zderzają się z LB + … EmuStart (samo LB, LB + A/X/Y/↑/↓/RB/R3/L3,
-            np. LB + RB = następny slot) — wyłączone, stare wartości w logu: LB + … należy do EmuStart
-            we wszystkich emulatorach (hotkey.py), jak w RetroArchu. Inne skróty na LB (np. LB + Start) zostają;
+          * skróty Dolphina na Select, które zderzają się z Select + … EmuStart (samo Select, Select + A/X/Y/↑/↓/RB/R3/L3,
+            np. Select + RB = następny slot) — wyłączone, stare wartości w logu: Select + … należy do EmuStart
+            we wszystkich emulatorach (hotkey.py), jak w RetroArchu. Inne skróty na Select (np. Select + Start) zostają;
           * domyślny klawisz EmuStart nie zajmuje klawisza, który już coś robi w Dolphinie."""
         path = self._hotkeys_ini()
         if not path.parent.is_dir():
@@ -1465,7 +1465,7 @@ class Dolphin(Adapter):
                     used.setdefault(k, set()).add(n)
         for name, default in self._HK.items():
             raw = (sec.get(name) or "").strip()
-            alts = [a for a in _dolphin_alts(raw) if not _dolphin_lb_conflict(a)]     # LB należy do EmuStart
+            alts = [a for a in _dolphin_alts(raw) if not _dolphin_hotkey_conflict(a)]     # Select należy do EmuStart
             cleaned = " | ".join(alts)
             if any(_dolphin_keys(a, device_is_keyboard=on_keyboard) for a in alts):
                 if cleaned != raw:
@@ -1480,7 +1480,7 @@ class Dolphin(Adapter):
                     changes[("Hotkeys", name)] = cleaned
                     dropped.append(f"{name} = {raw}")
                 continue
-            # przypisania, których EmuStart nie naciśnie (pad bez LB, klawisz spoza VK), zostają obok
+            # przypisania, których EmuStart nie naciśnie (pad bez Select, klawisz spoza VK), zostają obok
             others = [a for a in alts if not _dolphin_keys(a)]
             changes[("Hotkeys", name)] = " | ".join(others + [_dolphin_expr(keys, dev)])
             used.setdefault(keys, set()).add(name)
@@ -1488,16 +1488,16 @@ class Dolphin(Adapter):
             if name == "Device" or name in self._HK:
                 continue
             alts = _dolphin_alts(raw)
-            keep = [a for a in alts if not _dolphin_lb_conflict(a)]
+            keep = [a for a in alts if not _dolphin_hotkey_conflict(a)]
             if len(keep) != len(alts):
                 changes[("Hotkeys", name)] = " | ".join(keep)
                 dropped.append(f"{name} = {raw.strip()}")
         if dropped:
-            log.info("Dolphin: skróty na LB wyłączone (zderzały się z LB + … EmuStart): %s", "; ".join(dropped))
+            log.info("Dolphin: skróty na Select wyłączone (zderzały się z Select + … EmuStart): %s", "; ".join(dropped))
         if changes:
             try:
                 ini_set(path, changes)
-                log.info("Dolphin: skróty LB + … w Hotkeys.ini (%s)", ", ".join(sorted(k for _s, k in changes)))
+                log.info("Dolphin: skróty Select + … w Hotkeys.ini (%s)", ", ".join(sorted(k for _s, k in changes)))
             except OSError:
                 log.exception("Dolphin: skróty")
 

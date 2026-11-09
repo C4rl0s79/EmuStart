@@ -1,4 +1,4 @@
-"""hotkey — skróty pada w trakcie gry, jednakowe w każdym emulatorze: przytrzymany LB +
+"""hotkey — skróty pada w trakcie gry, jednakowe w każdym emulatorze: przytrzymany Select +
 
     A        menu (własne menu emulatora, gdy je ma na pada — inaczej menu EmuStart)
     Y        zapisz w kolejnym slocie        X   zapisz w wybranym slocie
@@ -9,7 +9,7 @@
 
 RetroArch robi to sam (ustawienia sesji, ingame.RetroArch.launch_args) — tu nic.
 Pozostałe: pad czytamy przez XInput i hidpad (pady HID: PS, Switch, GameSir w trybie HID) w osobnym wątku (fokus ma emulator, nie nasze okno)
-i naciskamy skróty klawiszowe emulatora (Adapter.menu_key, slot_keys…). LB trafia też do
+i naciskamy skróty klawiszowe emulatora (Adapter.menu_key, slot_keys…). Select trafia też do
 gry — emulator czyta pada sam.
 
 Gdy menu jest otwarte, ten sam wątek steruje menu (krzyżak, A, B) i podaje
@@ -28,13 +28,13 @@ from emustart import hidpad, ingame, library, winutil, xinput
 log = logging.getLogger("emustart.hotkey")
 
 POLL = 1 / 60
-PICK = 3.0          # po LB + ↑/↓: tyle sekund A = wczytaj, Y = zapisz, B = anuluj (lista slotów na ekranie)
+PICK = 3.0          # po Select + ↑/↓: tyle sekund A = wczytaj, Y = zapisz, B = anuluj (lista slotów na ekranie)
 
 
 def _buttons() -> int:
     """Przyciski wszystkich padów: XInput + HID (maska XInput)."""
     return xinput.all_buttons() | hidpad.all_buttons()
-# LB + przycisk → akcja (kolejność: pierwsze wciśnięte wygrywa)
+# Select + przycisk → akcja (kolejność: pierwsze wciśnięte wygrywa)
 COMBOS = ((xinput.A, "menu"), (xinput.Y, "save_next"), (xinput.X, "save_here"), (xinput.UP, "slot_up"),
           (xinput.DOWN, "slot_down"), (xinput.RB, "ff"), (xinput.R3, "screenshot"), (xinput.L3, "record"))
 
@@ -55,10 +55,10 @@ class GameMenu:
     def start(self) -> None:
         backend = getattr(self.ui, "pad_backend", lambda: "python")()
         if backend == "none":
-            log.info("obsługa padów wyłączona — skróty LB + … nieaktywne")
+            log.info("obsługa padów wyłączona — skróty Select + … nieaktywne")
             return
         if self.adapter.family == "retroarch":
-            return                   # RetroArch: skróty LB w ustawieniach sesji
+            return                   # RetroArch: skróty Select w ustawieniach sesji
         if xinput.available() or hidpad.available():
             self._thread.start()
         else:
@@ -100,8 +100,8 @@ class GameMenu:
             now = time.monotonic()
             if not self.open:
                 pressed = b & ~prev
-                if getattr(self, "_pick_until", 0) > now and pressed and not b & xinput.LB and not self.busy:
-                    # lista slotów z LB + ↑/↓ na ekranie: A wczytuje wybrany slot, Y zapisuje, B zamyka
+                if getattr(self, "_pick_until", 0) > now and pressed and not b & xinput.BACK and not self.busy:
+                    # lista slotów z Select + ↑/↓ na ekranie: A wczytuje wybrany slot, Y zapisuje, B zamyka
                     act = next((a for m, a in ((xinput.A, "load_here"), (xinput.Y, "save_here"),
                                                (xinput.B, "cancel")) if pressed & m), "")
                     if act:
@@ -110,16 +110,16 @@ class GameMenu:
                             self._shortcut(act)
                         else:
                             log.info("skrót: wybór slotu anulowany")
-                elif b & xinput.LB and pressed and not self.busy:
+                elif b & xinput.BACK and pressed and not self.busy:
                     act = next((a for m, a in COMBOS if pressed & m), "")
                     if act == "menu" and not self.adapter.menu_key():
-                        wait_release = True          # LB + A wciąż wciśnięte po otwarciu menu
+                        wait_release = True          # Select + A wciąż wciśnięte po otwarciu menu
                         quiet_since = 0.0
                         self._open()
                     elif act:
                         self._shortcut(act)
             else:
-                if wait_release:              # LB + A wciąż wciśnięte po otwarciu menu
+                if wait_release:              # Select + A wciąż wciśnięte po otwarciu menu
                     release_since = release_since or now
                     if b:
                         quiet_since = 0.0
@@ -138,7 +138,7 @@ class GameMenu:
                                       (xinput.START, "b")):
                         if pressed & mask:
                             self.ui.menu_input(act)
-                    # w menu gałka działa jak krzyżak (w skrótach LB + ↑/↓ — tylko krzyżak); krawędź po
+                    # w menu gałka działa jak krzyżak (w skrótach Select + ↑/↓ — tylko krzyżak); krawędź po
                     # złączeniu, żeby przejście z krzyżaka na gałkę nie było drugim naciśnięciem
                     nav = xinput.stick_as_dpad(b)
                     nav_pressed = nav & ~xinput.stick_as_dpad(prev)
@@ -153,7 +153,7 @@ class GameMenu:
             time.sleep(POLL)
 
     def _shortcut(self, act: str) -> None:
-        """LB + przycisk: skrót klawiszowy emulatora (fokus ma emulator)."""
+        """Select + przycisk: skrót klawiszowy emulatora (fokus ma emulator)."""
         a = self.adapter
         nxt, prv = a.slot_keys()
         if act == "menu":
@@ -182,14 +182,14 @@ class GameMenu:
             keys = prv if act == "slot_up" else nxt
             self._pick_until = time.monotonic() + PICK
         elif act == "ff" and a.ff_hold():
-            # przyspieszenie „trzymane” (Dolphin): LB + RB wciska klawisz, kolejne LB + RB puszcza
+            # przyspieszenie „trzymane” (Dolphin): Select + RB wciska klawisz, kolejne Select + RB puszcza
             self._ff_down = not getattr(self, "_ff_down", False)
-            log.info("skrót LB + ff: %s %s", a.ff_key(), "wciśnięty" if self._ff_down else "puszczony")
+            log.info("skrót Select + ff: %s %s", a.ff_key(), "wciśnięty" if self._ff_down else "puszczony")
             winutil.key_state(a.ff_key(), self._ff_down)
             return
         else:
             keys = {"ff": a.ff_key, "screenshot": a.screenshot_key, "record": a.record_key}[act]()
-        log.info("skrót LB + %s: %s", act, keys or "(emulator nie ma takiego skrótu)")
+        log.info("skrót Select + %s: %s", act, keys or "(emulator nie ma takiego skrótu)")
         winutil.send_keys(keys)
 
     def _emu_window(self) -> int:
