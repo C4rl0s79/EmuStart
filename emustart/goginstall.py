@@ -830,7 +830,8 @@ def uninstall(pid: str, remove_hkcu=None) -> dict:
         for rel in sorted(dirs, key=lambda d: d.count("/"), reverse=True):
             try:
                 p = safe_join(root, rel)
-                if not protected(p) and not _has_link(root, p) and p.is_dir() and not any(p.iterdir()):
+                # puste katalogi (także pusty folder zapisów) — w niepustym nic nie ruszamy
+                if not _has_link(root, p) and p.is_dir() and not any(p.iterdir()):
                     p.rmdir()
             except (OSError, UnsafePath):
                 pass

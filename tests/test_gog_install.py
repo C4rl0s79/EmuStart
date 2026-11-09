@@ -411,3 +411,9 @@ def test_play_task_choice(env, monkeypatch):
             return None
     monkeypatch.setattr(gogfinal, "start", lambda spec: started.append(spec) or P())
     assert svc.launch(PID, 0)["ok"] and started[0]["exe"].endswith("Launcher.exe")
+
+
+def test_uninstall_removes_whole_folder_when_nothing_of_the_player_is_left(env):
+    _e, target, _ = _install(env)
+    r = gi.uninstall(PID, remove_hkcu=lambda a: None)
+    assert r["left"] == 0 and r["dir_removed"] and not target.exists() and target.parent.exists()
