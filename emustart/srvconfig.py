@@ -133,6 +133,8 @@ def gog_status() -> dict:
     from emustart import saverules
     rs = saverules.status()
     text = f"gry GOG: {st['games']} (buildów: {st['builds']})"
+    from emustart import gogmeta
+    text += f" · opisy gier: {len(gogmeta.META['games'])}"
     text += (f" · reguły zapisów: {rs['version']} ({rs['games']} gier GOG)" if rs["version"]
              else " · reguły zapisów: pobieram…" if rs["running"] else " · reguły zapisów: brak (" + (rs["error"] or "jeszcze nie pobrane") + ")")
     if st["rejected"]:
