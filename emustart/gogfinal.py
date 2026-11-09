@@ -132,6 +132,25 @@ def set_hkcu(a: dict) -> None:
         winreg.SetValueEx(k, a["name"], 0, typ, val)
 
 
+def remove_hkcu(actions: list) -> int:
+    """Odinstalowanie: wartości HKCU ustawione przez finalizację (tylko te; klucz znika, gdy jest pusty)."""
+    if os.name != "nt":
+        return 0
+    import winreg
+    n = 0
+    for a in actions:
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, a["subkey"], 0, winreg.KEY_SET_VALUE | winreg.KEY_READ) as k:
+                winreg.DeleteValue(k, a["name"])
+                n += 1
+                empty = winreg.QueryInfoKey(k)[0] == 0 and winreg.QueryInfoKey(k)[1] == 0
+            if empty:
+                winreg.DeleteKey(winreg.HKEY_CURRENT_USER, a["subkey"])
+        except OSError:
+            continue
+    return n
+
+
 def reg_file(actions: list) -> str:
     """Plik .reg dla kroków HKLM (wykonywany za zgodą użytkownika przez regedit z UAC)."""
     import base64
@@ -162,7 +181,7 @@ def read_script(app: Path, pid: str) -> dict | None:
 def apply_script(app: Path, pid: str, hkcu=None, docs: Path | None = None) -> dict:
     """Akcje instalacyjne `goggame-<pid>.script`. Zwraca {"done", "admin" (kroki HKLM), "skipped", "saves",
     "created" (pliki utworzone kopią — do odinstalowania)}; błąd akcji, która musi się udać → FinalizeError."""
-    res = {"done": [], "admin": [], "skipped": [], "saves": [], "created": []}
+    res = {"done": [], "admin": [], "skipped": [], "saves": [], "created": [], "hkcu": []}
     hkcu = hkcu or set_hkcu
     data = read_script(app, pid)
     if not data:
@@ -204,12 +223,15 @@ def apply_script(app: Path, pid: str, hkcu=None, docs: Path | None = None) -> di
             fn = resolve(args.get("filename"))
             if not _inside(fn, app, docs_dir):
                 raise FinalizeError(f"setIni poza katalogiem gry i Dokumentami: {args.get('filename')}")
+            if not fn.exists() and _inside(fn, app):
+                res["created"].append(str(fn))       # plik w katalogu gry utworzony przez instalację
             ini_set(fn, str(args.get("section") or ""), str(args.get("keyName") or ""), str(args.get("keyValue") or ""))
             res["done"].append(f"setIni {fn.name} [{args.get('section')}] {args.get('keyName')}")
         elif kind == "setRegistry":
             a = registry_action(args, app)
             if a["root"] == "HKCU":
                 hkcu(a)
+                res["hkcu"].append(a)
                 res["done"].append(f"rejestr HKCU\\{a['subkey']} {a['name']}")
             else:
                 res["admin"].append(a)

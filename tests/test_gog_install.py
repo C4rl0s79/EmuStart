@@ -68,6 +68,7 @@ def env(tmp_path, monkeypatch):
     build_archive(root)
     regs = []
     monkeypatch.setattr(gogfinal, "set_hkcu", regs.append)        # nigdy prawdziwy rejestr w testach
+    monkeypatch.setattr(gogfinal, "remove_hkcu", lambda acts: 0)
     monkeypatch.setattr(gogfinal, "user_documents", lambda: tmp_path / "Dokumenty")
     yield {"root": root, "games": tmp_path / "GOG Games", "regs": regs, "tmp": tmp_path}
     ga.INDEX.update(root="", builds={}, rejected=[], error="", running=False)
@@ -341,8 +342,11 @@ def test_uninstall_keeps_saves_user_files_and_neighbours(env):
     neighbour = env["games"] / "Inna Gra"
     neighbour.mkdir()
     (neighbour / "plik.dat").write_text("x")
-    r = gi.uninstall(PID)
-    assert r["removed"] > 5 and not r["dir_removed"]
+    removed_reg = []
+    r = gi.uninstall(PID, remove_hkcu=removed_reg.extend)
+    assert r["removed"] > 5 and not r["dir_removed"] and r["left"] == 2         # zapis i plik gracza
+    assert removed_reg and removed_reg[0]["subkey"] == "Software\\EmuStartTest\\Game1001"
+    assert not (target / "settings.ini").exists()                               # utworzony przez setIni
     assert (target / "saves" / "slot1.sav").read_text() == "zapis"
     assert (target / "moje_notatki.txt").exists()
     assert not (target / "bin").exists() and not (target / "dosbox.conf").exists()
@@ -367,7 +371,7 @@ def test_uninstall_does_not_follow_links(env, tmp_path):
         subprocess.run([str(cmd), "/c", "mklink", "/J", str(target / "bin"), str(outside)], check=True,
                        capture_output=True, stdin=subprocess.DEVNULL)
     assert gi._has_link(target, target / "bin" / "game.exe")
-    gi.uninstall(PID)
+    gi.uninstall(PID, remove_hkcu=lambda a: None)
     assert (outside / "game.exe").read_text() == "nie ruszać"
 
 

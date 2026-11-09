@@ -665,7 +665,7 @@ def finalize(e: dict, plan: dict, bundle: dict, dlc_only: bool = False, hkcu=Non
                 info.write_text(json.dumps({"gameId": did, "rootGameId": pid, "name": names.get(did, did),
                                             "buildId": e["build_id"], "playTasks": []}, indent=2), encoding="utf-8")
                 e.setdefault("created_files", []).append(str(info))
-        fin = {"done": [], "admin": [], "skipped": [], "saves": [], "created": []}
+        fin = {"done": [], "admin": [], "skipped": [], "saves": [], "created": [], "hkcu": []}
         for prod in ([pid] if not dlc_only else []) + list(plan["dlcs"]):
             r = gogfinal.apply_script(root, prod, **({"hkcu": hkcu} if hkcu else {}))
             for k in fin:
@@ -693,6 +693,7 @@ def finalize(e: dict, plan: dict, bundle: dict, dlc_only: bool = False, hkcu=Non
         e["finalize"]["saves"] = sorted(set(e["finalize"]["saves"]) | set(fin["saves"]))
         e["finalize"].setdefault("admin", [])
         e["finalize"]["admin"] += fin["admin"]
+        e["finalize"]["hkcu"] = (e["finalize"].get("hkcu") or []) + fin["hkcu"]
         if fin["admin"]:
             e["state"] = ST_NEEDS_ADMIN
     else:
@@ -782,7 +783,7 @@ def repair(source, pid: str, cancel=None, on_progress=None, on_phase=None) -> di
                    cancel, on_progress, on_phase)
 
 
-def uninstall(pid: str) -> dict:
+def uninstall(pid: str, remove_hkcu=None) -> dict:
     """Usuwa tylko pliki zarządzane przez EmuStart (z manifestu i utworzone przy finalizacji), puste katalogi
     z manifestu i pusty katalog gry. Zapisy (savePath), pliki dodane przez grę lub gracza i wszystko poza
     katalogiem gry zostają. Archiwum na serwerze nie jest dotykane."""
@@ -833,8 +834,8 @@ def uninstall(pid: str) -> dict:
                     p.rmdir()
             except (OSError, UnsafePath):
                 pass
-    left = sum(1 for _ in root.rglob("*")) if root.is_dir() else 0
-    if root.is_dir() and not left and not root.is_symlink():
+    left = sum(1 for p in root.rglob("*") if p.is_file()) if root.is_dir() else 0
+    if root.is_dir() and not any(root.iterdir()) and not root.is_symlink():
         try:
             root.rmdir()
         except OSError:
@@ -843,6 +844,8 @@ def uninstall(pid: str) -> dict:
         e["error"] = f"Nie usunięto {len(kept_errors)} plików (np. {kept_errors[0]}) — zamknij grę i spróbuj ponownie."
         save_entry(e)
         raise GogError(e["error"])
+    # wartości rejestru HKCU ustawione przez finalizację tej gry
+    (remove_hkcu or gogfinal.remove_hkcu)((e.get("finalize") or {}).get("hkcu") or [])
     try:
         _entry_path(pid).unlink()
     except FileNotFoundError:
