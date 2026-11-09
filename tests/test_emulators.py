@@ -274,8 +274,8 @@ def test_all_retroarch_cores_on_server_and_alternatives_on_pc(emu_server, tmp_pa
 
 
 def test_retroarch_default_pad_and_auto_index(tmp_path):
-    """Domyślnie: każdy zapis stanu z nowym numerem, LB — skróty: LB+A menu, LB+RB przyspieszenie,
-    LB+Y zapis stanu, LB+↑/↓ slot, LB+R3 zrzut, LB+L3 nagrywanie (sterownik XInput)."""
+    """Domyślnie: każdy zapis stanu z nowym numerem, Select — skróty: Select+A menu, Select+RB przyspieszenie,
+    Select+Y zapis stanu, Select+↑/↓ slot, Select+R3 zrzut, Select+L3 nagrywanie (sterownik XInput)."""
     from emustart import emupolicy, ingame
     home = tmp_path / "RetroArch"
     home.mkdir()
@@ -285,7 +285,7 @@ def test_retroarch_default_pad_and_auto_index(tmp_path):
     ra.launch_args(tmp_path / "run", resume=False)
     lines = set((tmp_path / "run" / "emustart_ra.cfg").read_text(encoding="utf-8").splitlines())
     for line in ('savestate_auto_index = "true"', 'input_joypad_driver = "xinput"',
-                 'input_menu_toggle_btn = "0"', 'input_enable_hotkey_btn = "4"',
+                 'input_menu_toggle_btn = "0"', 'input_enable_hotkey_btn = "7"',
                  'input_toggle_fast_forward_btn = "5"', 'input_save_state_btn = "3"'):
         assert line in lines, line
 
@@ -393,7 +393,7 @@ def test_server_lists_bios_folder(emu_server, tmp_path, monkeypatch):
 
 
 def test_pad_shortcuts_lb(monkeypatch):
-    """LB + przycisk → skrót klawiszowy emulatora (Dolphin: skróty slotu dopisane przez EmuStart,
+    """Select + przycisk → skrót klawiszowy emulatora (Dolphin: skróty slotu dopisane przez EmuStart,
     przyspieszenie trzymane)."""
     from emustart import hotkey, ingame, winutil
     sent = []
@@ -430,7 +430,7 @@ def test_pad_shortcuts_lb(monkeypatch):
 
 
 def test_retroarch_pad_hotkeys_default_once(tmp_path):
-    """Skróty LB + … to domyślna konfiguracja: raz wpisane do retroarch.cfg (inne skróty na tych
+    """Skróty Select + … to domyślna konfiguracja: raz wpisane do retroarch.cfg (inne skróty na tych
     przyciskach — np. wyjście na A — wyłączone); potem zmiana gracza w retroarch.cfg zostaje."""
     from emustart import ingame
     home = tmp_path / "RetroArch"
@@ -440,17 +440,17 @@ def test_retroarch_pad_hotkeys_default_once(tmp_path):
     ra = ingame.RetroArch(str(home / "retroarch.exe"))
     ra.launch_args(tmp_path / "run", resume=False)
     cfg = ingame._cfg_map(home / "retroarch.cfg")
-    assert cfg["input_enable_hotkey_btn"] == '"4"' and cfg["input_menu_toggle_btn"] == '"0"'
+    assert cfg["input_enable_hotkey_btn"] == '"7"' and cfg["input_menu_toggle_btn"] == '"0"'
     assert cfg["input_state_slot_increase_btn"] == '"h0down"' and cfg["input_screenshot_btn"] == '"9"'
     assert cfg["input_exit_emulator_btn"] == '"nul"'
     assert cfg["input_rewind_btn"] == '"6"' and cfg["input_player1_a_btn"] == '"0"'
-    ingame.ini_set(home / "retroarch.cfg", {(None, "input_enable_hotkey_btn"): '"7"'})   # gracz zmienił
+    ingame.ini_set(home / "retroarch.cfg", {(None, "input_enable_hotkey_btn"): '"4"'})   # gracz zmienił
     ra.launch_args(tmp_path / "run2", resume=False)
-    assert ingame._cfg_map(home / "retroarch.cfg")["input_enable_hotkey_btn"] == '"7"'
+    assert ingame._cfg_map(home / "retroarch.cfg")["input_enable_hotkey_btn"] == '"4"'
 
 
 def test_missing_emulator_hotkeys_bound_once(tmp_path):
-    """Brakujące skróty emulatora do LB + … dopisane do jego ustawień; przypisane przez gracza zostają.
+    """Brakujące skróty emulatora do Select + … dopisane do jego ustawień; przypisane przez gracza zostają.
     Kombinacje z ustawień DuckStation / PCSX2 („Keyboard/Shift & Keyboard/F2”) czytane w całości."""
     from emustart import ingame
     ini = tmp_path / "PCSX2.ini"
@@ -471,7 +471,7 @@ def test_missing_emulator_hotkeys_bound_once(tmp_path):
 
 
 def test_lb_slot_shortcut_from_dpad_only_stick_still_drives_menu(monkeypatch):
-    """LB + ↑/↓ zmienia slot tylko z krzyżaka — drgnięcie lewej gałki z wciśniętym LB w grze nic nie
+    """Select + ↑/↓ zmienia slot tylko z krzyżaka — drgnięcie lewej gałki z wciśniętym Select w grze nic nie
     przełącza; w otwartym menu gałka dalej działa jak krzyżak."""
     from emustart import hotkey, xinput
 
@@ -493,16 +493,16 @@ def test_lb_slot_shortcut_from_dpad_only_stick_still_drives_menu(monkeypatch):
         m._loop()
         return acts, inputs
 
-    LB = xinput.LB
-    assert run([LB, LB | xinput.STICK_UP, LB, LB | xinput.STICK_DOWN, 0]) == ([], [])
-    assert run([LB, LB | xinput.UP, LB, LB | xinput.DOWN, 0])[0] == ["slot_up", "slot_down"]
+    Select = xinput.BACK
+    assert run([Select, Select | xinput.STICK_UP, Select, Select | xinput.STICK_DOWN, 0]) == ([], [])
+    assert run([Select, Select | xinput.UP, Select, Select | xinput.DOWN, 0])[0] == ["slot_up", "slot_down"]
     assert run([0, xinput.STICK_DOWN, 0], open_menu=True)[1] == ["down"]
 
 
 def test_dolphin_hotkeys_on_keyboard_even_when_device_is_pad(tmp_path):
     """Dolphin z Device = XInput/0/Gamepad w Hotkeys.ini szukał „F10” i „Ctrl+F12” na padzie — klawisze
     wysyłane przez EmuStart nic nie robiły. Skróty EmuStart dostają klawiaturę z urządzeniem wprost
-    (klawisze gracza zostają), skróty Dolphina na LB są zdejmowane, inne skróty pada zostają obok."""
+    (klawisze gracza zostają), skróty Dolphina na Select są zdejmowane, inne skróty pada zostają obok."""
     from emustart import ingame
     home = tmp_path / "Dolphin"
     cfg = home / "User" / "Config"
@@ -514,9 +514,9 @@ def test_dolphin_hotkeys_on_keyboard_even_when_device_is_pad(tmp_path):
         "General/Toggle Pause = F10", "General/Take Screenshot = `Button X`",
         "Emulation Speed/Disable Emulation Speed Limit = TAB",
         "Load State/Load State Slot 1 = F1", "Save State/Save State Slot 1 = @(Shift+F1)",
-        "Other State Hotkeys/Increase Selected State Slot = @(`Shoulder L`+`Shoulder R`)",
-        "Other State Hotkeys/Decrease Selected State Slot = @(`Shoulder L`+`Trigger R`)",
-        "Other State Hotkeys/Save Oldest State = @(`Shoulder L`+`Button Y`)",
+        "Other State Hotkeys/Increase Selected State Slot = @(`Back`+`Shoulder R`)",
+        "Other State Hotkeys/Decrease Selected State Slot = @(`Back`+`Trigger R`)",
+        "Other State Hotkeys/Save Oldest State = @(`Back`+`Button Y`)",
         "Save State/Save to Selected Slot = @(Ctrl+F5)",
         "General/Stop = ESCAPE", ""]), encoding="utf-8")
     d = ingame.Dolphin.__new__(ingame.Dolphin)
@@ -531,7 +531,7 @@ def test_dolphin_hotkeys_on_keyboard_even_when_device_is_pad(tmp_path):
     assert sec["Other State Hotkeys/Increase Selected State Slot"] == f"@(`{kb}:Ctrl`+`{kb}:F11`)"
     assert sec["Load State/Load from Selected Slot"] == f"@(`{kb}:Ctrl`+`{kb}:F9`)"   # dopisany
     assert sec["General/Take Screenshot"] == f"`Button X` | `{kb}:F9`"                 # pad gracza zostaje
-    assert sec["Other State Hotkeys/Save Oldest State"] == ""                           # LB należy do EmuStart
+    assert sec["Other State Hotkeys/Save Oldest State"] == ""                           # Select należy do EmuStart
     assert sec["General/Stop"] == "ESCAPE"                                              # nieużywany — bez zmian
     # EmuStart czyta te przypisania jako klawisze; drugi start niczego już nie zmienia
     assert d.slot_keys() == ("CTRL+F11", "CTRL+F10") and d.save_here_key() == "CTRL+F5"
@@ -549,8 +549,8 @@ def test_dolphin_hotkeys_on_keyboard_even_when_device_is_pad(tmp_path):
 
 def test_dolphin_hotkeys_no_collisions_and_only_conflicting_lb_removed(tmp_path):
     """Z przeglądu PR #113: klawisz gracza spoza listy EmuStart (NUMPAD1) nie dostaje obok klawisza, który ma
-    już inny skrót (F1 = zrzut); kombinacja LB w skrócie EmuStart znika także obok klawiatury; skróty
-    Dolphina na LB, które nie zderzają się z LB + … EmuStart (LB + Start), zostają."""
+    już inny skrót (F1 = zrzut); kombinacja Select w skrócie EmuStart znika także obok klawiatury; skróty
+    Dolphina na Select, które nie zderzają się z Select + … EmuStart (Select + Start), zostają."""
     from emustart import ingame
     home = tmp_path / "Dolphin"
     cfg = home / "User" / "Config"
@@ -561,9 +561,9 @@ def test_dolphin_hotkeys_no_collisions_and_only_conflicting_lb_removed(tmp_path)
         "[Hotkeys]", "Device = DInput/0/Keyboard Mouse",
         "Load State/Load State Slot 1 = NUMPAD1", "General/Take Screenshot = F1",
         "Save State/Save State Slot 1 = @(LSHIFT+F1)",
-        "Other State Hotkeys/Increase Selected State Slot = @(`XInput/0/Gamepad:Shoulder L`+`XInput/0/Gamepad:Shoulder R`) | @(Ctrl+F11)",
-        "General/Toggle Fullscreen = @(`XInput/0/Gamepad:Shoulder L`+`XInput/0/Gamepad:Start`)",
-        "Other State Hotkeys/Undo Load State = `XInput/0/Gamepad:Shoulder L`", ""]), encoding="utf-8")
+        "Other State Hotkeys/Increase Selected State Slot = @(`XInput/0/Gamepad:Back`+`XInput/0/Gamepad:Shoulder R`) | @(Ctrl+F11)",
+        "General/Toggle Fullscreen = @(`XInput/0/Gamepad:Back`+`XInput/0/Gamepad:Start`)",
+        "Other State Hotkeys/Undo Load State = `XInput/0/Gamepad:Back`", ""]), encoding="utf-8")
     d = ingame.Dolphin.__new__(ingame.Dolphin)
     d.home = home
     d.prepare_hotkeys()
@@ -572,8 +572,8 @@ def test_dolphin_hotkeys_no_collisions_and_only_conflicting_lb_removed(tmp_path)
     assert sec["General/Take Screenshot"] == "F1"
     assert sec["Save State/Save State Slot 1"] == "@(LSHIFT+F1)" and d.save_key() == "SHIFT+F1"
     assert sec["Other State Hotkeys/Increase Selected State Slot"] == "@(Ctrl+F11)"
-    assert sec["General/Toggle Fullscreen"].endswith("Start`)")             # LB + Start nie koliduje
-    assert sec["Other State Hotkeys/Undo Load State"] == ""                 # samo LB — koliduje z każdym LB + …
+    assert sec["General/Toggle Fullscreen"].endswith("Start`)")             # Select + Start nie koliduje
+    assert sec["Other State Hotkeys/Undo Load State"] == ""                 # samo Select — koliduje z każdym Select + …
 
 
 def test_menu_dpad_to_stick_roll_is_one_press(monkeypatch):

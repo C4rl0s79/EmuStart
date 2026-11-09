@@ -161,6 +161,33 @@ def set_default(game: str, kind: str, sha: str = "", ext: str = "") -> dict:
     return {"ok": True}
 
 
+TITLE_GAME = re.compile(r"^(gog|shortcut):[A-Za-z0-9_.-]{1,64}$")
+
+
+def titles() -> dict:
+    """Nazwy gier w bazie LaunchBox ustawione przez administratora — dla gier, których nazwa w sklepie różni się od
+    LaunchBox (polskie nazwy GOG, skróty spoza Steama): {gra Lumena: nazwa}. Dostają je wszystkie urządzenia."""
+    return {"ok": True, "titles": _load().get("lb_titles") or {}}
+
+
+def set_title(game: str, name: str) -> dict:
+    """Administrator: nazwa gry w LaunchBox; pusta — usuwa (Lumen szuka znowu po nazwie ze sklepu)."""
+    if not TITLE_GAME.fullmatch(game or ""):
+        raise ArtError("nieznana gra")
+    name = " ".join(str(name or "").split())
+    if len(name) > 200 or not name.isprintable() or any(c in name for c in "​‌‍‎‏⁠﻿"):
+        raise ArtError("niedozwolona nazwa")
+    with _lock:
+        d = _load()
+        cur = d.setdefault("lb_titles", {})
+        if name:
+            cur[game] = name
+        else:
+            cur.pop(game, None)
+        _save(d)
+        return {"ok": True, "titles": dict(cur)}
+
+
 def file_path(sha: str) -> tuple:
     """(plik, typ) albo (None, '')."""
     if SHA.match(str(sha or "")):

@@ -41,17 +41,17 @@ Podpowiedzi przycisków na dole ekranu można klikać — wszystko da się zrobi
 
 ## W grze
 
-| Pad (przytrzymany LB +) | Działanie |
+| Pad (przytrzymany Select +) | Działanie |
 |---|---|
-| **LB + A** | menu (własne menu emulatora, gdy je ma na pada — RetroArch, DuckStation, PCSX2, PPSSPP; inaczej [menu w grze](Menu-w-grze) EmuStart) |
-| **LB + Y** | zapisz w kolejnym slocie |
-| **LB + X** | zapisz w wybranym slocie |
-| **LB + ↑ / ↓** | slot zapisu w górę / w dół |
-| **LB + RB** | przyspieszenie |
-| **LB + R3** | zrzut ekranu |
-| **LB + L3** | nagrywanie (gdzie emulator je ma) |
+| **Select + A** | menu (własne menu emulatora, gdy je ma na pada — RetroArch, DuckStation, PCSX2, PPSSPP; inaczej [menu w grze](Menu-w-grze) EmuStart) |
+| **Select + Y** | zapisz w kolejnym slocie |
+| **Select + X** | zapisz w wybranym slocie |
+| **Select + ↑ / ↓** | slot zapisu w górę / w dół |
+| **Select + RB** | przyspieszenie |
+| **Select + R3** | zrzut ekranu |
+| **Select + L3** | nagrywanie (gdzie emulator je ma) |
 
-LB trafia też do gry (emulator czyta pada sam).
+Select trafia też do gry (emulator czyta pada sam).
 
 Przycisk Xbox/PS nie jest używany — przechwytują go emulatory i Windows.
 
