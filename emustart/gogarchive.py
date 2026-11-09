@@ -391,6 +391,8 @@ def build_index(root: str, deep: bool = False, publish=None) -> dict:
         res["rejected"].append({k: e.get(k) for k in ("product_id", "build_id", "title", "reason")})
         log.info("GOG: pomijam %s/%s (%s): %s", e.get("product_id"), e.get("build_id"), e.get("title"), e.get("reason"))
 
+    from emustart import gogmeta
+    gogmeta.load(str(Path(root).parent))          # opisy i grafiki z folderów gier GOG Managera
     INDEX.update(total=len(recs), done=0, phase="records")
     quick = []
     for pid, build in recs:
@@ -424,6 +426,8 @@ def refresh(root: str, deep: bool = False, wait: bool = False) -> None:
         _want.update(root=root, deep=deep, gen=_want["gen"] + 1)
         if not root:                                  # wyłączenie: od razu nic nie udostępniamy
             INDEX.update(root="", builds={}, rejected=[], error="")
+            from emustart import gogmeta
+            gogmeta.clear()
         if INDEX["running"]:
             return                                    # wątek indeksu podejmie nowe żądanie
         if not root:
@@ -491,8 +495,9 @@ def catalog() -> list:
     out = []
     for pid, builds in by_pid.items():
         builds.sort(key=lambda e: (e["created"], int(e["build_id"])), reverse=True)
+        from emustart import gogmeta
         out.append({"product_id": pid, "title": builds[0]["title"], "slug": builds[0]["slug"],
-                    "builds": [_public_build(e) for e in builds]})
+                    "builds": [_public_build(e) for e in builds], "info": gogmeta.info(pid)})
     out.sort(key=lambda g: g["title"].lower())
     return out
 

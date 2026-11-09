@@ -11,6 +11,13 @@ nowym urządzeniu — do sprawdzenia na żywo), Play! (miejsce kart), APK (te sa
 budowania), adaptery pozostałych samodzielnych emulatorów przy pierwszym użyciu, sprawdzenie na żywo (niżej);
 jedno zapytanie przygotowujące grę — po pomiarach kroków z prawdziwych startów.
 
+### Plan i stan: opisy i grafiki gier GOG (gałąź `gog-meta`)
+- **Serwer:** opisy (opis, data wydania, producent, wydawca, gatunki) i grafiki (okładka, tło, logo, ikona) gier
+  GOG z folderów GOG Managera obok `_depots` (`<katalog GOG>/<slug>/`); `GET /v1/gog/games/<pid>/art/<rodzaj>`.
+  Klucze CD (`game-details.json`) nie są czytane.
+- **Silnik (Lumen):** `Api.gog_art` — grafika z serwera z kopią na dysku (bez serwera: kopia).
+- **Czego NIE dotyka:** archiwum depotów, instalator, przypięcie buildu, APK, klient Windows bez Lumena.
+
 ## [0.57.1] — 2026-11-09
 
 Zakres: serwer (indeks archiwum GOG); silnik w Lumen bez zmian zachowania. Klient Windows, APK i emulatory bez zmian.

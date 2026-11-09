@@ -100,6 +100,13 @@ class ServerSource:
     def catalog(self) -> list:
         return self._get_json("/v1/gog/games", 30).get("games") or []
 
+    def art(self, pid: str, kind: str) -> tuple:
+        """(bajty, typ) grafiki gry z serwera albo (None, "") — brak grafiki / błąd."""
+        st, body, _t = self.netsrc._request(self.ep, f"/v1/gog/games/{pid}/art/{kind}", timeout=60)
+        if st != 200 or not body:
+            return None, ""
+        return body, ("image/png" if body[:8] == b"\x89PNG\r\n\x1a\n" else "image/jpeg")
+
     def manifest(self, pid: str, build: str) -> dict:
         return self._get_json(f"/v1/gog/games/{pid}/builds/{build}/manifest", 120)
 

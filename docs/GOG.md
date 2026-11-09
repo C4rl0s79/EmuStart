@@ -43,12 +43,20 @@ albo wyczyszczenie ścieżki w trakcie indeksowania nie przepada: bieżący wyni
 dla ostatniej ścieżki (pusta ścieżka = od razu nic nie jest udostępniane). Ponowny zapis rekordu przez GOG Managera
 (np. ponowna weryfikacja — zmienia tylko daty) nie przerywa instalacji: serwer porównuje hash zawartości.
 
+**Opisy i grafiki** (`emustart/gogmeta.py`): foldery gier GOG Managera w katalogu nadrzędnym `_depots`
+(`<katalog GOG>/<slug>/`): `product_<slug>.json` (identyfikator, opis), `galaxy_<slug>.json` (producent, wydawca,
+gatunki, data wydania), `boxart_<slug>.jpg` (okładka), `background_<slug>.jpg` (tło), `titlelogo_<slug>.png` /
+`logo_<slug>.jpg`, `iconsquare_<slug>.png` / `icon_<slug>.png`. Czytane przy każdym indeksowaniu; gra przypisana po
+identyfikatorze z `product_*.json`. Opis (HTML → tekst) trafia do katalogu (`info`), grafiki — tylko gier z archiwum,
+tylko z ich folderu i stałych wzorców nazw. `game-details.json` (klucze CD) nie jest czytany.
+
 **API** (styl `/v1/…`, `Authorization: Bearer <token urządzenia>`, tylko konta z prawem pobierania gier):
 
 | Zapytanie | Odpowiedź |
 |---|---|
 | `GET /v1/gog/games` | gry z kompletnym buildem: buildy, kompletne języki, DLC, zależności, rozmiary, `hash` |
-| `GET /v1/gog/games/<pid>` | jedna gra |
+| `GET /v1/gog/games/<pid>` | jedna gra (z `info`: opis, data wydania, producent, wydawca, gatunki, dostępne grafiki) |
+| `GET /v1/gog/games/<pid>/art/<grid\|hero\|logo\|icon>` | grafika gry z folderu GOG Managera (klient trzyma kopię — biblioteka działa bez serwera) |
 | `GET /v1/gog/games/<pid>/builds/<build>/manifest` | rekord + meta bez sekretów + manifesty depotów i zależności, `hash` buildu |
 | `GET /v1/gog/chunks/<md5>?pid=&build=&hash=` | skompresowany chunk — tylko gdy należy do tego buildu, hash się zgadza, MD5 pliku jest poprawne |
 

@@ -1142,6 +1142,7 @@ def _gog(handler, p: list) -> None:
         GET gog/games                                lista gier z kompletnym archiwum (buildy, języki, DLC)
         GET gog/games/<pid>                          jedna gra
         GET gog/games/<pid>/builds/<build>/manifest  rekord + meta (bez sekretów) + manifesty, z hashem buildu
+        GET gog/games/<pid>/art/<grid|hero|logo|icon>  grafika gry z folderu GOG Managera (emustart/gogmeta.py)
         GET gog/chunks/<md5>?pid=&build=&hash=       skompresowany chunk przypiętego buildu"""
     from emustart import gogarchive as ga
     if not _games_ok(handler):
@@ -1154,6 +1155,19 @@ def _gog(handler, p: list) -> None:
         if len(p) == 2 and p[0] == "games" and pid_ok(p[1]):
             g = ga.game(p[1])
             return _json(handler, g) if g else _json(handler, {"error": "nie ma takiej gry GOG"}, 404)
+        if len(p) == 4 and p[0] == "games" and pid_ok(p[1]) and p[2] == "art":
+            from emustart import gogmeta
+            f = gogmeta.art_path(p[1], p[3]) if ga.game(p[1]) else None     # tylko gry z archiwum
+            if not f:
+                return _json(handler, {"error": "brak grafiki"}, 404)
+            data = f.read_bytes()
+            handler.send_response(200)
+            handler.send_header("Content-Type", gogmeta.CTYPE.get(f.suffix.lower(), "application/octet-stream"))
+            handler.send_header("Content-Length", str(len(data)))
+            handler.send_header("Cache-Control", "max-age=86400")
+            handler.end_headers()
+            handler.wfile.write(data)
+            return None
         if len(p) == 5 and p[0] == "games" and pid_ok(p[1]) and p[2] == "builds" and ga.BUILD_ID.match(p[3]) \
                 and p[4] == "manifest":
             return _json(handler, ga.build_manifest(p[1], p[3]))
