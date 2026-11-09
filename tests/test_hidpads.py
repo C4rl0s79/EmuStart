@@ -96,8 +96,9 @@ def test_retroarch_hid_player1_hotkeys(tmp_path, gamesir, monkeypatch):
     args = ra.launch_args(tmp_path / "run", False, [gamesir.id])
     text = Path(args[args.index("--appendconfig") + 1]).read_text()
     assert 'input_player1_joypad_index = "0"' in text
-    # numeracja XInput → przyciski GameSira (DirectInput = numer HID − 1): LB 7→6, A 1→0, R3 15→14
-    assert 'input_enable_hotkey_btn = "6"' in text and 'input_enable_hotkey_btn = "4"' not in text
+    # numeracja XInput → przyciski GameSira (DirectInput = numer HID − 1): Select 11→10, A 1→0, R3 15→14;
+    # LB (4) z polityki starszego serwera to już Select
+    assert 'input_enable_hotkey_btn = "10"' in text and 'input_enable_hotkey_btn = "4"' not in text
     assert 'input_menu_toggle_btn = "0"' in text and 'input_screenshot_btn = "14"' in text
     assert "input_state_slot_increase_btn" not in text              # krzyżak (hat) bez zmian
     prof = (home / "autoconfig" / "dinput" / "EmuStart GameSir-Nova 2 Lite.cfg").read_text()
@@ -109,7 +110,7 @@ def test_retroarch_hid_player1_hotkeys(tmp_path, gamesir, monkeypatch):
     # profil tylko raz; pady XInput — jak dotąd
     args = ra.launch_args(tmp_path / "run", False, [0])
     text = Path(args[args.index("--appendconfig") + 1]).read_text()
-    assert 'input_enable_hotkey_btn = "4"' in text and 'input_player1_joypad_index = "0"' in text
+    assert 'input_enable_hotkey_btn = "7"' in text and 'input_player1_joypad_index = "0"' in text     # Select (XInput)
 
 
 def test_retroarch_keeps_existing_autoconfig(tmp_path, gamesir, monkeypatch):
