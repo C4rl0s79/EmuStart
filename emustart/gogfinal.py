@@ -19,6 +19,7 @@ który uruchamia grę i kończy się, nie kończy sesji).
 
 from __future__ import annotations
 
+import getpass
 import json
 import logging
 import os
@@ -91,24 +92,43 @@ _REG_TYPES = {"string", "dword", "binary", "expandstring"}
 _SUBKEY = re.compile(r"^Software\\[^\x00-\x1f]{1,240}$", re.I)
 
 
-def registry_action(args: dict, app: Path) -> dict:
+_GUID = re.compile(r"\{(?:[0-9A-Fa-f]{32}|[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12})\}")   # dosłowny identyfikator
+
+
+def _symbols(s: str, app: Path, pid: str, f: dict) -> str:
+    """Symbole skryptów GOG (nazwy jak w Inno Setup) → wartości na tym komputerze. Nieznane zostają (błąd u wołającego)."""
+    s = str(s or "").replace("{app}", str(app)).replace("{supportDir}", str(app)).replace("{productID}", str(pid))
+    for name, key in (("userdocs", "winDocuments"), ("userappdata", "winAppData"), ("localappdata", "winLocalAppData"),
+                      ("commonappdata", "winProgramData"), ("userprofile", "home")):
+        if f.get(key):
+            s = s.replace("{%s}" % name, f[key])
+    if "{username}" in s:
+        s = s.replace("{username}", getpass.getuser())
+    s = s.replace("{{", "{")                                  # Inno Setup: {{ = dosłowny nawias
+    # {drive:C:\Gry\X} → C:
+    return re.sub(r"\{drive:([^{}]*)\}", lambda m: os.path.splitdrive(m.group(1))[0], s)
+
+
+def registry_action(args: dict, app: Path, pid: str = "", folders: dict | None = None) -> dict:
     """Sprawdzona akcja setRegistry → {"root": "HKCU"|"HKLM", "subkey", "name", "type", "data"} albo
     FinalizeError. Tylko gałąź Software, znane typy, {app} = katalog gry."""
     root = str(args.get("root") or "").upper()
     hive = {"HKEY_CURRENT_USER": "HKCU", "HKCU": "HKCU", "HKEY_LOCAL_MACHINE": "HKLM", "HKLM": "HKLM"}.get(root)
     if not hive:
         raise FinalizeError(f"setRegistry: nieobsługiwana gałąź {root!r}")
-    sub = str(args.get("subkey") or "").replace("/", "\\").strip("\\")
+    sub = _symbols(str(args.get("subkey") or ""), app, pid, folders or {}).replace("/", "\\").strip("\\")
+    if "{" in _GUID.sub("", sub) or "}" in _GUID.sub("", sub):
+        raise FinalizeError(f"setRegistry: nieznany symbol w kluczu {sub!r}")
     if not _SUBKEY.match(sub) or "\\..\\" in f"\\{sub}\\":
         raise FinalizeError(f"setRegistry: klucz poza Software\\…: {sub!r}")
     typ = str(args.get("valueType") or "string").lower()
     if typ not in _REG_TYPES:
         raise FinalizeError(f"setRegistry: nieobsługiwany typ {typ!r}")
-    name = str(args.get("valueName") or "")
+    name = str(args.get("valueName") or "").replace("{productID}", str(pid))
     if len(name) > 255 or any(ord(c) < 32 for c in name):
         raise FinalizeError("setRegistry: zła nazwa wartości")
-    data = str(args.get("valueData") or "").replace("{app}", str(app))
-    if "{" in data and "}" in data:
+    data = _symbols(str(args.get("valueData") or ""), app, pid, folders or {})
+    if "{" in _GUID.sub("", data) and "}" in _GUID.sub("", data):
         raise FinalizeError(f"setRegistry: nieznany symbol w wartości {data!r}")
     if typ == "dword":
         data = str(_dword(data))
@@ -122,7 +142,7 @@ def _dword(data: str) -> int:
     finalizacji (nie wyjątek w połowie zapisu rejestru)."""
     s = (data or "").strip() or "0"
     try:
-        v = int(s[2:], 16) if s.lower().startswith("0x") else int(s, 10)
+        v = int(s[1:], 16) if s.startswith("$") else int(s[2:], 16) if s.lower().startswith("0x") else int(s, 10)
     except ValueError:
         raise FinalizeError(f"setRegistry: zła wartość dword {data!r}")
     if not 0 <= v <= 0xFFFFFFFF:
@@ -133,8 +153,9 @@ def _dword(data: str) -> int:
 def _binary(data: str) -> bytes:
     import base64
     import binascii
+    s = (data or "").strip().rstrip("=")
     try:
-        return base64.b64decode(data or "", validate=True)
+        return base64.b64decode(s + "=" * (-len(s) % 4), validate=True)
     except (binascii.Error, ValueError):
         raise FinalizeError(f"setRegistry: zła wartość binary {data[:40]!r}")
 
@@ -222,57 +243,97 @@ def read_script(app: Path, pid: str) -> dict | None:
         raise FinalizeError(f"goggame-{pid}.script: zły JSON ({ex})")
 
 
-def apply_script(app: Path, pid: str, hkcu=None, docs: Path | None = None) -> dict:
+def _same(a: Path, b: Path) -> bool:
+    """skrypt wskazał ten sam plik jako źródło i cel — kopiowanie nie ma sensu (i kończy się błędem)"""
+    return os.path.normcase(os.path.abspath(a)) == os.path.normcase(os.path.abspath(b))
+
+
+_UNINSTALL = re.compile(r"\\Windows\\CurrentVersion\\Uninstall\\", re.I)
+
+
+def apply_script(app: Path, pid: str, hkcu=None, docs: Path | None = None, known: set | None = None,
+                 folders: dict | None = None) -> dict:
     """Akcje instalacyjne `goggame-<pid>.script`. Zwraca {"done", "admin" (kroki HKLM), "skipped", "saves",
-    "created" (pliki utworzone kopią — do odinstalowania)}; błąd akcji, która musi się udać → FinalizeError."""
-    res = {"done": [], "admin": [], "skipped": [], "saves": [], "created": [], "hkcu": []}
+    "created" (pliki utworzone kopią — do odinstalowania), "dirs" (puste foldery utworzone przez skrypt)}; błąd akcji,
+    która musi się udać → FinalizeError. `known` — pliki gry z manifestu (małe litery, względne): kopia poza nimi
+    należy do instalacji także wtedy, gdy powstała w przerwanej wcześniej finalizacji."""
+    res = {"done": [], "admin": [], "skipped": [], "saves": [], "created": [], "hkcu": [], "dirs": []}
     hkcu = hkcu or set_hkcu
     data = read_script(app, pid)
     if not data:
         return res
     docs_dir = docs or user_documents()
+    if folders is None:
+        from emustart import gogsaves
+        folders = gogsaves.system_folders()
+    sysf = {**folders, "winDocuments": str(docs_dir)}
+    # poza katalogiem gry skrypt może pisać tylko w folderach użytkownika (Dokumenty, AppData, ProgramData)
+    user_dirs = [docs_dir] + [Path(sysf[k]) for k in ("winAppData", "winLocalAppData", "winProgramData") if sysf.get(k)]
 
     def resolve(s: str) -> Path:
-        s = str(s or "").replace("{app}", str(app)).replace("{supportDir}", str(app)).replace("{userdocs}", str(docs_dir))
+        s = _symbols(s, app, pid, sysf)
         if "{" in s:
             raise FinalizeError(f"nieznany symbol w ścieżce {s!r}")
         return Path(s.replace("\\", os.sep).replace("/", os.sep))
 
+    def is_new(t: Path) -> bool:
+        if known is None:
+            return not t.exists()
+        return os.path.relpath(t, app).replace("\\", "/").lower() not in known
+
     for act in data.get("actions") or []:
         ins = (act or {}).get("install") or {}
         kind, args = ins.get("action"), ins.get("arguments") or {}
-        if kind == "supportData":
+        if kind == "supportData" and not args.get("source"):
+            # bez źródła: instalator tworzy pusty folder (np. {app}/cloud_saves)
+            dst = resolve(args.get("target"))
+            if str(args.get("type") or "").lower() != "folder" or not args.get("target") or not _inside(dst, app, *user_dirs):
+                raise FinalizeError(f"supportData bez źródła: {args.get('target')}")
+            dst.mkdir(parents=True, exist_ok=True)
+            if _inside(dst, app):
+                res["dirs"].append(os.path.relpath(dst, app).replace("\\", "/"))
+            res["done"].append(f"folder {dst.name}")
+        elif kind == "supportData":
             src, dst = resolve(args.get("source")), resolve(args.get("target"))
-            if not (_inside(src, app) and _inside(dst, app)):
+            if not (_inside(src, app) and _inside(dst, app, *user_dirs)):
                 raise FinalizeError(f"supportData poza katalogiem gry: {args.get('source')} → {args.get('target')}")
             typ = str(args.get("type") or "").lower()
+            if typ == "file" and not src.is_file():
+                # skrypt wskazuje miejsce sprzed przebudowy paczki (Control, Fallout: London): ten sam plik gdzie indziej w grze
+                src = next(iter(sorted(p for p in app.rglob(src.name) if p.is_file())), src)
             if typ == "folder" and src.is_dir():
                 for f in src.rglob("*"):
                     if f.is_file():
                         t = dst / f.relative_to(src)
                         t.parent.mkdir(parents=True, exist_ok=True)
-                        if not t.exists():
+                        if _same(f, t):
+                            continue
+                        if is_new(t):
                             res["created"].append(str(t))
                         shutil.copy2(f, t)
             elif typ == "file" and src.is_file():
                 t = (dst / src.name) if (dst.is_dir() or not dst.suffix) else dst
                 t.parent.mkdir(parents=True, exist_ok=True)
-                if not t.exists():
-                    res["created"].append(str(t))
-                shutil.copy2(src, t)
+                if not _same(src, t):
+                    if is_new(t):
+                        res["created"].append(str(t))
+                    shutil.copy2(src, t)
             else:
                 raise FinalizeError(f"supportData: brak źródła {args.get('source')}")
             res["done"].append(f"supportData {src.name}")
         elif kind == "setIni":
             fn = resolve(args.get("filename"))
-            if not _inside(fn, app, docs_dir):
-                raise FinalizeError(f"setIni poza katalogiem gry i Dokumentami: {args.get('filename')}")
+            if not _inside(fn, app, *user_dirs):
+                raise FinalizeError(f"setIni poza katalogiem gry i folderami użytkownika: {args.get('filename')}")
             if not fn.exists() and _inside(fn, app):
                 res["created"].append(str(fn))       # plik w katalogu gry utworzony przez instalację
             ini_set(fn, str(args.get("section") or ""), str(args.get("keyName") or ""), str(args.get("keyValue") or ""))
             res["done"].append(f"setIni {fn.name} [{args.get('section')}] {args.get('keyName')}")
         elif kind == "setRegistry":
-            a = registry_action(args, app)
+            if _UNINSTALL.search(str(args.get("subkey") or "").replace("/", "\\")):
+                res["skipped"].append("wpis deinstalatora w rejestrze")   # gra nie ma deinstalatora Windows
+                continue
+            a = registry_action(args, app, pid, sysf)
             if a["root"] == "HKCU":
                 hkcu(a)
                 res["hkcu"].append(a)
@@ -388,6 +449,7 @@ def pick_play_task(tasks: list):
     """Zadanie gry przed launcherem zewnętrznym (np. REDprelauncher Wiedźmina 3 wymaga instalatora GOG):
     główne zadanie gry → dowolne zadanie gry → główne zadanie → pierwsze z plikiem."""
     fts = [t for t in tasks or [] if t.get("path") and (t.get("type") or "FileTask") == "FileTask"]
+    fts = [t for t in fts if not t.get("isHidden")] or fts    # ukryte „launcher process” — tylko gdy nie ma innych
     game = [t for t in fts if (t.get("category") or "").lower() == "game"]
     return (next((t for t in game if t.get("isPrimary")), None) or (game[0] if game else None)
             or next((t for t in fts if t.get("isPrimary")), None) or (fts[0] if fts else None))
@@ -412,10 +474,21 @@ def play_tasks(app: Path, pid: str) -> list:
             exe = safe_join(app, t["path"])
         except UnsafePath:
             continue
-        if exe.suffix.lower() == ".exe":
+        if exe.suffix.lower() == ".exe" and exe.is_file() and not t.get("isHidden"):
             out.append({"index": i, "name": str(t.get("name") or exe.stem), "category": str(t.get("category") or ""),
                         "default": t is best})
     return out
+
+
+def _args_in_root(args: str, app: Path, exe_dir: Path) -> bool:
+    """Zadanie bez workingDir, a pliki z argumentów (DOSBox: -conf x.conf) leżą w głównym folderze gry, nie obok programu."""
+    names = [a or b for a, b in re.findall(r'"([^"]+)"|(\S+)', args) if "." in (a or b) and not (a or b).startswith("-")]
+    def inside(base: Path, n: str) -> bool:
+        try:
+            return safe_join(base, n).is_file()
+        except UnsafePath:
+            return False
+    return any(inside(app, n) and not inside(exe_dir, n) for n in names)
 
 
 def launch_spec(app: Path, pid: str, task: int | None = None) -> dict:
@@ -428,7 +501,12 @@ def launch_spec(app: Path, pid: str, task: int | None = None) -> dict:
             raise FinalizeError("nie ma takiego zadania uruchamiania")
         t = tasks[task]
     else:
-        t = pick_play_task(tasks)
+        def on_disk(x: dict) -> bool:
+            try:
+                return safe_join(app, x["path"]).is_file()
+            except UnsafePath:
+                return True                  # niebezpieczna ścieżka — błąd niżej, nie cicha zamiana zadania
+        t = pick_play_task([x for x in tasks if on_disk(x)])
     if not t:
         raise FinalizeError("goggame-*.info nie ma zadania uruchamiania gry")
     try:
@@ -443,6 +521,8 @@ def launch_spec(app: Path, pid: str, task: int | None = None) -> dict:
     args = str(t.get("arguments") or "")
     if any(ord(c) < 32 for c in args):
         raise FinalizeError("argumenty uruchamiania zawierają znaki sterujące")
+    if not t.get("workingDir") and _args_in_root(args, app, exe.parent):
+        cwd = app
     return {"exe": str(exe), "args": args, "cwd": str(cwd if cwd.is_dir() else exe.parent),
             "name": str(t.get("name") or data.get("name") or "")}
 

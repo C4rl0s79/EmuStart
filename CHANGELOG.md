@@ -45,6 +45,16 @@ dokumentacji Lumena, wydanie.
     przełącza się między nimi bez końca.
 11. Tryb TV: gdy po filtrowaniu jest mało gier, powielać okładki, żeby wypełnić ekran.
 
+### Poprawione: finalizacja i uruchamianie gier GOG (gałąź `gog-finalize-fix`, klient / silnik Lumen)
+Z audytu prawdziwych skryptów i opisów uruchamiania wszystkich gier archiwum (340, w tym 50 z DOSBoksem):
+- `supportData` bez źródła = pusty folder (Al-Qadim: „supportData poza katalogiem gry”), także w folderach użytkownika;
+  plik źródłowy przeniesiony w paczce; źródło i cel to ten sam plik.
+- Symbole `{productID}`, `{userappdata}`, `{localappdata}`, `{commonappdata}`, `{drive:…}`, `{username}`, `{{`, GUID-y;
+  liczby `$hex`; base64 z błędnym dopełnieniem; wpisy deinstalatora w rejestrze są pomijane.
+- Uruchamianie: bez `workingDir` start z folderu, w którym są pliki z argumentów (DOSBox: `-conf`); domyślne zadanie
+  nie jest ukryte i ma plik na dysku; lista „Uruchom…” bez ukrytych i nieistniejących pozycji.
+- Pliki skopiowane przed nieudaną finalizacją należą do instalacji także po wznowieniu.
+
 ## [0.59.0] — 2026-11-09
 
 Zakres: serwer (reguły zapisów GOG, dodatki GOG, panel, nowa zależność PyYAML), silnik w Lumen (synchronizacja zapisów
