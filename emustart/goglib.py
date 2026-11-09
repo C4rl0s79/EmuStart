@@ -10,13 +10,14 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import threading
 import time
 from collections import deque
 from pathlib import Path
 
 from emustart import config, gogfinal, goginstall as gi
-from emustart.gogarchive import BUILD_ID, PRODUCT_ID
+from emustart.gogarchive import BUILD_ID, PRODUCT_ID, UnsafePath, safe_rel
 
 log = logging.getLogger("emustart.goglib")
 
@@ -142,6 +143,61 @@ class GogService:
         gi._atomic(out, data)
         return {"path": str(out)}
 
+    # ── dodatki (extras) z folderu gry na serwerze ─────────────────────────
+    def title_of(self, pid: str) -> str:
+        return self._game(_pid(pid)).get("title") or pid
+
+    def _game(self, pid: str) -> dict:
+        return next((g for g in self.catalog(refresh=False)["games"] if g["product_id"] == pid), {})
+
+    @staticmethod
+    def _extras_dir(base: str, g: dict, pid: str) -> Path:
+        """`<wspólny folder GOG>/_extras/<gra>` — osobno od gry: instalacja i odinstalowanie ich nie dotyczą."""
+        slug = str(g.get("slug") or "")
+        return Path(base) / "_extras" / (slug if re.fullmatch(r"[a-z0-9][a-z0-9_\-]{0,120}", slug) else pid)
+
+    @staticmethod
+    def _safe_file(name: str) -> bool:
+        try:
+            return "/" not in safe_rel(name)
+        except UnsafePath:
+            return False
+
+    def extras(self, pid: str, base: str) -> dict:
+        """Dodatki gry: co jest na serwerze, co już pobrane, co domyślnie wybrane."""
+        pid = _pid(pid)
+        g = self._game(pid)
+        items = [x for x in ((g.get("info") or {}).get("extras") or []) if self._safe_file(str(x.get("file") or ""))]
+        d = self._extras_dir(base, g, pid) if base else None
+        for x in items:
+            f = d / x["file"] if d else None
+            x["have"] = bool(f and f.is_file() and f.stat().st_size == x["size"])
+        return {"ok": True, "items": items, "target": str(d or "")}
+
+    def _download_extras(self, src, pid: str, a: dict, prog, phase) -> int:
+        g = self._game(pid)
+        d = self._extras_dir(a["base"], g, pid)
+        want = set(a.get("ids") or [])
+        items = [x for x in ((g.get("info") or {}).get("extras") or []) if x.get("id") in want and self._safe_file(str(x.get("file") or ""))]
+        todo = [x for x in items if not ((d / x["file"]).is_file() and (d / x["file"]).stat().st_size == x["size"])]
+        if not items:
+            raise gi.GogError("Serwer nie ma wybranych dodatków.")
+        total = sum(x["size"] for x in todo)
+        need, free = total, gi.free_bytes(d)
+        if free is not None and free < need:
+            raise gi.NoSpace("Za mało miejsca na dodatki.")
+        d.mkdir(parents=True, exist_ok=True)
+        phase("download")
+        done = [0]
+
+        def add(n):
+            done[0] += n
+            prog(done[0], total)
+        prog(0, total)
+        for x in todo:
+            src.download_extra(pid, x["id"], d / x["file"], x["size"], self._cancel, add)
+        return len(todo)
+
     # ── kolejka ────────────────────────────────────────────────────────────
     def enqueue(self, kind: str, pid: str, **args) -> dict:
         pid = _pid(pid)
@@ -189,6 +245,11 @@ class GogService:
 
         try:
             src = self._source_fn()
+            if job["kind"] == "extras":
+                n = self._download_extras(src, pid, a, prog, phase)
+                self._last[pid] = {"ok": True, "message": f"Pobrano dodatki: {n}.", "at": time.time()}
+                job["phase"] = "done"
+                return
             if job["kind"] == "install" and a.get("resume"):
                 e = gi.resume(src, pid, self._cancel, prog, phase)
             elif job["kind"] == "install":

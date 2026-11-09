@@ -12,6 +12,7 @@ konta) nie jest czytany wcale.
 
 from __future__ import annotations
 
+import hashlib
 import html
 import json
 import logging
@@ -32,6 +33,11 @@ ART_FILES = {
     "icon": ("iconsquare_{s}.png", "icon_{s}.png"),
 }
 CTYPE = {".jpg": "image/jpeg", ".png": "image/png"}
+# dodatki domyślnie niewybierane — ta sama reguła co w GOG Managerze (stare wersje gry, poprawki językowe, paczki części)
+HEAVY = re.compile(r"(part\s*\d+|language\s+patch|\bclassic\b|\(dos version|\(floppy version|"
+                   r"original\b.*\bgame\b|\b1998\b|hotfix|re-?installer|\brom\b|\(definitive edition)", re.I)
+EXTRA_ID = re.compile(r"^[0-9a-f]{16}$")
+_NOT_EXTRA = (".part", ".tmp", ".crdownload")
 
 _lock = threading.Lock()
 META: dict = {"root": "", "games": {}}
@@ -63,6 +69,35 @@ def _read_json(p: Path) -> dict | None:
         return None
 
 
+def _extras(folder: Path, prod: dict) -> list:
+    """Dodatki gry: pliki z `<folder>/extras`; nazwa i rodzaj z opisu GOG, gdy rozmiar pliku wskazuje jeden wpis."""
+    d = folder / "extras"
+    try:
+        if not d.is_dir() or d.is_symlink():
+            return []
+        files = sorted((f for f in d.iterdir() if f.is_file() and not f.is_symlink()), key=lambda f: f.name.lower())
+    except OSError:
+        return []
+    by_size: dict = {}
+    dl = prod.get("downloads") if isinstance(prod.get("downloads"), dict) else {}
+    for b in dl.get("bonus_content") or []:
+        if isinstance(b, dict) and b.get("total_size"):
+            by_size.setdefault(int(b["total_size"]), []).append(b)
+    out = []
+    for f in files:
+        if f.name.lower().endswith(_NOT_EXTRA) or f.name.lower() == "thumbs.db":
+            continue
+        size = f.stat().st_size
+        known = by_size.get(size) or []
+        meta = known[0] if len(known) == 1 else {}
+        name = str(meta.get("name") or re.sub(r"[_\s]+", " ", f.stem).strip() or f.name)
+        typ = str(meta.get("type") or "")
+        heavy = bool(HEAVY.search(name) or HEAVY.search(f.name)) or (typ == "game add-ons" and size > 1_000_000_000)
+        out.append({"id": hashlib.sha1(f.name.encode("utf-8")).hexdigest()[:16], "file": f.name, "name": name,
+                    "type": typ, "size": size, "default": not heavy})
+    return out
+
+
 def _entry(folder: Path) -> tuple | None:
     slug = folder.name
     if not SAFE_SLUG.match(slug):
@@ -88,7 +123,7 @@ def _entry(folder: Path) -> tuple | None:
                  "lead": html_to_text(desc.get("lead") or "", 1500),
                  "release": str(gal.get("releaseDate") or prod.get("release_date") or "")[:10],
                  "developers": names(gal.get("developers")), "publishers": names(gal.get("publishers")),
-                 "tags": names(gal.get("tags")), "art": art}
+                 "tags": names(gal.get("tags")), "art": art, "extras": _extras(folder, prod)}
 
 
 def load(root: str) -> int:
@@ -119,8 +154,24 @@ def info(pid: str) -> dict:
     e = META["games"].get(str(pid))
     if not e:
         return {}
-    return {k: e[k] for k in ("description", "lead", "release", "developers", "publishers", "tags")} | {
+    return {k: e[k] for k in ("description", "lead", "release", "developers", "publishers", "tags", "extras")} | {
         "art": sorted(e["art"])}
+
+
+def extra_path(pid: str, extra_id: str) -> Path | None:
+    """Plik dodatku — tylko z listy tej gry, tylko bezpośrednio w jej folderze extras."""
+    e = META["games"].get(str(pid))
+    x = next((i for i in (e or {}).get("extras") or [] if i["id"] == extra_id), None)
+    if not x:
+        return None
+    d = Path(e["dir"]) / "extras"
+    f = d / x["file"]
+    try:
+        if f.is_symlink() or f.resolve().parent != d.resolve() or not f.is_file():
+            return None
+    except OSError:
+        return None
+    return f
 
 
 def art_path(pid: str, kind: str) -> Path | None:

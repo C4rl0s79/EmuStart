@@ -14,7 +14,9 @@ jedno zapytanie przygotowujące grę — po pomiarach kroków z prawdziwych star
 ### Do zrobienia (zgłoszone 2026-11-09)
 
 Stan: zrobione lokalnie (bez wydania): 1, 5, 6, 7, 9, 10, 11. Grafiki grup (2): prompty gotowe, czekają na pliki.
-Czeka na decyzję: 3 (Family Sharing wymaga logowania do Steam), 4 (dodatki w Lumenie). 8 (grafiki): log wolnych
+Zrobione lokalnie: 3 (Family Sharing: klucz Web API dostaje 401, potrzebne logowanie w oknie Steam w Lumenie; bez
+testu na prawdziwej rodzinie), 4 (dodatki: lista w szczegółach, wybór, `GET /v1/gog/games/<pid>/extras/<id>`, pliki w
+`<folder GOG>/_extras/<gra>`, reguła pomijania jak w GOG Managerze). 8 (grafiki): log wolnych
 grafik (`slow … ms` w lumen.log), do zmierzenia na prawdziwej bibliotece.
 Na żywo nie sprawdzono: pasek w szczegółach gry GOG przy prawdziwej instalacji, siatka na pulpicie, pad.
 

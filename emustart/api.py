@@ -464,6 +464,24 @@ class Api:
         except ValueError as ex:
             return {"path": "", "reason": str(ex)}
 
+    def gog_extras(self, pid: str, base: str) -> dict:
+        """Dodatki gry GOG: lista z serwera, co pobrane, co domyślnie wybrane."""
+        try:
+            return self._gog.extras(pid, str(base or ""))
+        except ValueError as ex:
+            return {"ok": False, "reason": str(ex)}
+
+    def gog_extras_download(self, pid: str, ids: list, base: str) -> dict:
+        """Wybrane dodatki do `<folder GOG>/_extras/<gra>` — zadanie w kolejce (postęp w gog_status)."""
+        from emustart import goglib
+        why = goglib.check_target(self._cfg, str(base or ""))
+        if why:
+            return {"ok": False, "reason": why}
+        try:
+            return self._gog.enqueue("extras", pid, ids=[str(x) for x in ids or []], base=str(base), title=self._gog.title_of(pid))
+        except ValueError as ex:
+            return {"ok": False, "reason": str(ex)}
+
     def gog_resume(self, pid: str) -> dict:
         """Wznowienie przerwanej instalacji albo naprawa uszkodzonej (dane i wybór z rejestru)."""
         from emustart import goginstall as gi
