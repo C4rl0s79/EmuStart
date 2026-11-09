@@ -45,7 +45,11 @@ dokumentacji Lumena, wydanie.
     przełącza się między nimi bez końca.
 11. Tryb TV: gdy po filtrowaniu jest mało gier, powielać okładki, żeby wypełnić ekran.
 
-### Poprawione: finalizacja i uruchamianie gier GOG (gałąź `gog-finalize-fix`, klient / silnik Lumen)
+## [0.59.1] — 2026-11-09
+
+Zakres: silnik w Lumen (gry GOG). Serwer, klient Windows bez Lumena, APK i emulatory bez zmian zachowania.
+
+### Poprawione: finalizacja i uruchamianie gier GOG
 Z audytu prawdziwych skryptów i opisów uruchamiania wszystkich gier archiwum (340, w tym 50 z DOSBoksem):
 - `supportData` bez źródła = pusty folder (Al-Qadim: „supportData poza katalogiem gry”), także w folderach użytkownika;
   plik źródłowy przeniesiony w paczce; źródło i cel to ten sam plik.
