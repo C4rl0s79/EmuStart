@@ -470,7 +470,7 @@ class Api:
                 return self._gog.enqueue("dlc", pid, dlcs=e["pending_dlc"]["dlcs"], title=e.get("title"))
             if e.get("state") not in gi.RESUMABLE:
                 return {"ok": False, "reason": "Ta instalacja nie wymaga wznowienia."}
-            return self._gog.enqueue("install", pid, title=e.get("title"))
+            return self._gog.enqueue("install", pid, title=e.get("title"), resume=True)
         except (ValueError, gi.GogError) as ex:
             return {"ok": False, "reason": str(ex)}
 

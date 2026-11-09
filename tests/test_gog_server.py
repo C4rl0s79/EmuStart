@@ -155,3 +155,65 @@ def test_http_corrupt_chunk_on_server_is_reported(srv, arc):  # noqa: F811
     p.write_bytes(bytes(len(p.read_bytes())))               # ten sam rozmiar, zła treść
     st, body = _req(srv, "GET", f"/v1/gog/chunks/{c['compressedMd5']}?pid={PID}&build={BUILD}&hash={man['hash']}", tok)
     assert st == 409 and "uszkodzony" in body["error"]
+
+
+# ── poprawki z przeglądu kodu ──
+
+def _wait_index():
+    import time
+    for _ in range(250):
+        if not ga.status()["running"]:
+            return
+        time.sleep(0.02)
+    raise AssertionError("indeks nie skończył się")
+
+
+def test_reverified_record_keeps_pinned_build(arc):
+    root, _ = arc
+    _index(root)
+    h = ga.INDEX["builds"][(PID, BUILD)]["hash"]
+    rp = root / "products" / PID / f"{BUILD}.json"
+    rec = json.loads(rp.read_text())
+    rec["verified"] = "2030-01-01T00:00:00"                          # GOG Manager: ponowna weryfikacja
+    rp.write_text(json.dumps(rec, indent=1))
+    os.utime(rp, (2, 2))
+    assert ga.pinned(PID, BUILD, h)["hash"] == h                    # ten sam build — instalacje trwają dalej
+    assert ga.build_manifest(PID, BUILD)["hash"] == h
+
+
+def test_path_change_during_indexing_is_not_lost(arc, tmp_path, monkeypatch):
+    import threading
+    root, _ = arc
+    other = tmp_path / "_depots2"
+    build_archive(other)
+    gate = threading.Event()
+    real = ga.build_index
+
+    def slow(r, deep=False):
+        if r == str(root):
+            gate.wait(5)
+        return real(r, deep)
+    monkeypatch.setattr(ga, "build_index", slow)
+    ga.refresh(str(root))                       # indeksowanie A trwa…
+    ga.refresh(str(other))                      # …admin zmienia ścieżkę na B
+    gate.set()
+    _wait_index()
+    assert ga.status()["root"] == str(other) and ga.status()["builds"] == 1
+
+
+def test_clearing_path_during_indexing_unpublishes(arc, monkeypatch):
+    import threading
+    root, _ = arc
+    gate = threading.Event()
+    real = ga.build_index
+
+    def slow(r, deep=False):
+        gate.wait(5)
+        return real(r, deep)
+    monkeypatch.setattr(ga, "build_index", slow)
+    ga.refresh(str(root))
+    ga.refresh("")                              # admin wyłącza GOG w trakcie indeksowania
+    assert ga.status()["builds"] == 0
+    gate.set()
+    _wait_index()
+    assert ga.status()["root"] == "" and ga.status()["builds"] == 0 and ga.catalog() == []

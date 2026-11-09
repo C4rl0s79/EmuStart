@@ -60,7 +60,8 @@ class GogService:
                 games = json.loads(_catalog_path().read_text(encoding="utf-8")).get("games") or []
             except (OSError, ValueError):
                 games = []
-        installs = {e["product_id"]: self.summary(e) for e in gi.entries()}
+        running = set(self.running_ids())                  # jeden przegląd procesów na cały katalog
+        installs = {e["product_id"]: self.summary(e, running) for e in gi.entries()}
         # zainstalowana gra, której serwer już nie ma (albo nie znamy katalogu) — nadal w bibliotece
         known = {g["product_id"] for g in games}
         for pid, s in installs.items():
@@ -68,8 +69,9 @@ class GogService:
                 games.append({"product_id": pid, "title": s["title"], "slug": "", "builds": [], "local_only": True})
         return {"games": games, "installs": installs, "fresh": fresh, "error": self.catalog_error}
 
-    def summary(self, e: dict) -> dict:
+    def summary(self, e: dict, running=None) -> dict:
         pid = e["product_id"]
+        running = set(self.running_ids()) if running is None else running
         return {"product_id": pid, "title": e.get("title") or pid, "state": e.get("state"),
                 "build_id": e.get("build_id"), "version": e.get("version") or "", "hash": e.get("hash"),
                 "install_dir": e.get("install_dir"), "languages": e.get("languages") or [],
@@ -77,7 +79,7 @@ class GogService:
                 "admin_steps": len((e.get("finalize") or {}).get("admin") or []),
                 "runtimes": e.get("runtimes") or [], "pending_dlc": (e.get("pending_dlc") or {}).get("dlcs") or [],
                 "installed_at": e.get("installed_at") or 0, "last_played": e.get("last_played") or 0,
-                "launch": (e.get("launch") or {}).get("name") or "", "running": pid in self.running_ids()}
+                "launch": (e.get("launch") or {}).get("name") or "", "running": pid in running}
 
     def options(self, pid: str, base_dir: str = "", langs_pref=()) -> dict:
         """Co można wybrać przy instalacji: buildy z serwera, ich kompletne języki i DLC, katalog, miejsce."""
@@ -151,7 +153,9 @@ class GogService:
 
         try:
             src = self._source_fn()
-            if job["kind"] == "install":
+            if job["kind"] == "install" and a.get("resume"):
+                e = gi.resume(src, pid, self._cancel, prog, phase)
+            elif job["kind"] == "install":
                 e = gi.install(src, pid, a.get("build", ""), a.get("langs") or [], a.get("primary", ""),
                                a.get("dlcs") or [], a.get("target", ""), self._cancel, prog, phase)
             elif job["kind"] == "dlc":

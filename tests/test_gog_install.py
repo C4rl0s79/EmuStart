@@ -222,7 +222,7 @@ def test_cancel_and_resume_after_restart(env):
     assert e["state"] == gi.ST_CANCELLED and 0 < len(e["done"]) < len(e["files"])
     total_chunks = sum(len(f["chunks"]) for f in gi.make_plan(src.manifest(PID, BUILD), ["en", "pl"]).get("files"))
     src2 = FakeServer(env["root"])                       # „po restarcie”: nowe źródło, stan z rejestru
-    e2 = gi.install(src2, PID, BUILD, [], "", [], "")
+    e2 = gi.resume(src2, PID)
     assert e2["state"] == gi.ST_INSTALLED and e2["languages"] == ["en", "pl"]
     assert src2.calls < total_chunks                     # ukończone pliki nie są pobierane ponownie
 
@@ -238,7 +238,7 @@ def test_resume_refuses_changed_build(env):
     rec["version_name"] = "1.1"
     rp.write_text(json.dumps(rec))
     with pytest.raises(gi.SourceChanged):
-        gi.install(FakeServer(env["root"]), PID, BUILD, [], "", [], "")
+        gi.resume(FakeServer(env["root"]), PID)
     assert gi.load_entry(PID)["state"] == gi.ST_CANCELLED
 
 
@@ -417,3 +417,141 @@ def test_uninstall_removes_whole_folder_when_nothing_of_the_player_is_left(env):
     _e, target, _ = _install(env)
     r = gi.uninstall(PID, remove_hkcu=lambda a: None)
     assert r["left"] == 0 and r["dir_removed"] and not target.exists() and target.parent.exists()
+
+
+# ── poprawki z przeglądu kodu ──
+
+def test_hklm_is_written_to_both_registry_views():
+    acts = [{"root": "HKLM", "subkey": "Software\\GOG.com\\Games\\1001", "name": "path", "type": "string", "data": "C:\\G"}]
+    reg64 = gogfinal.reg_file(acts, wow64=True)
+    assert "[HKEY_LOCAL_MACHINE\\Software\\GOG.com\\Games\\1001]" in reg64
+    assert "[HKEY_LOCAL_MACHINE\\Software\\WOW6432Node\\GOG.com\\Games\\1001]" in reg64    # gry 32-bitowe
+    reg32 = gogfinal.reg_file(acts, wow64=False)
+    assert "WOW6432Node" not in reg32
+
+
+def test_expandstring_and_dword_in_reg_file():
+    acts = [{"root": "HKLM", "subkey": "Software\\T", "name": "p", "type": "expandstring", "data": "%A%"},
+            {"root": "HKLM", "subkey": "Software\\T", "name": "n", "type": "dword", "data": "0001"}]
+    reg = gogfinal.reg_file(acts, wow64=False)
+    assert '"p"=hex(2):25,00,41,00,25,00,00,00' in reg            # REG_EXPAND_SZ, nie REG_SZ
+    assert '"n"=dword:00000001' in reg
+
+
+@pytest.mark.parametrize("typ,data,ok", [("dword", "0001", "1"), ("dword", "0x10", "16"), ("dword", "abc", None),
+                                         ("dword", "99999999999", None), ("binary", "AAEC", "AAEC"),
+                                         ("binary", "nie base64!", None)])
+def test_registry_values_are_validated_before_writing(typ, data, ok, tmp_path):
+    args = {"root": "HKEY_CURRENT_USER", "subkey": "Software\\x", "valueName": "a", "valueData": data, "valueType": typ}
+    if ok is None:
+        with pytest.raises(gogfinal.FinalizeError):
+            gogfinal.registry_action(args, tmp_path)
+    else:
+        assert gogfinal.registry_action(args, tmp_path)["data"] == ok
+
+
+def test_bad_registry_value_fails_install_with_message(env, monkeypatch):
+    env["root"] = env["tmp"] / "_d4"
+    s = json.loads(json.dumps(SCRIPT))
+    s["actions"].append({"install": {"action": "setRegistry", "arguments": {
+        "root": "HKEY_CURRENT_USER", "subkey": "Software\\T", "valueName": "X", "valueData": "1", "valueType": "dword"}}})
+    build_archive(env["root"], script=s)
+    # wartość, której walidacja nie złapie, a zapis do rejestru odrzuci (np. ValueError z winreg)
+    monkeypatch.setattr(gogfinal, "set_hkcu", lambda a: (_ for _ in ()).throw(ValueError("zła wartość dword")))
+    with pytest.raises(gi.GogError, match="Finalizacja"):
+        _install(env)
+    e = gi.load_entry(PID)
+    assert e["state"] == gi.ST_FAILED and "dword" in e["error"]
+
+
+def test_new_choice_after_cancel_starts_over_and_removes_old_files(env):
+    cancel = threading.Event()
+    src = FakeServer(env["root"])
+    src.on_chunk = lambda n, md5: cancel.set() if n == 4 else None
+    with pytest.raises(gi.Cancelled):
+        _install(env, langs=("en",), src=src, cancel=cancel)
+    old = env["games"] / "Testowa Gra"
+    assert any(p.is_file() for p in old.rglob("*"))
+    (old / ".emustart-gog-sfc-0.tmp").write_bytes(b"x")              # pozostałość przerwanego kontenera
+    new = env["games"] / "Nowy Folder"
+    e = gi.install(FakeServer(env["root"]), PID, BUILD, ["pl"], "", [], str(new))
+    assert e["state"] == gi.ST_INSTALLED and e["languages"] == ["pl"] and e["install_dir"] == str(new)
+    assert not old.exists()                                           # pliki porzuconej instalacji usunięte
+    assert (new / "lang" / "pl.txt").exists() and not (new / "lang" / "en.txt").exists()
+
+
+def test_same_choice_after_cancel_resumes(env):
+    cancel = threading.Event()
+    src = FakeServer(env["root"])
+    src.on_chunk = lambda n, md5: cancel.set() if n == 4 else None
+    with pytest.raises(gi.Cancelled):
+        _install(env, langs=("en", "pl"), src=src, cancel=cancel)
+    done = len(gi.load_entry(PID)["done"])
+    src2 = FakeServer(env["root"])
+    e, _t, _ = _install(env, langs=("pl", "en"), primary="en", src=src2)   # ten sam wybór, inna kolejność
+    total = sum(len(f["chunks"]) for f in gi.make_plan(src2.manifest(PID, BUILD), ["en", "pl"])["files"])
+    assert e["state"] == gi.ST_INSTALLED and done > 0 and src2.calls < total
+
+
+def test_damaged_install_is_not_overwritten_by_install(env):
+    _e, target, _ = _install(env)
+    (target / "data" / "big.dat").write_bytes(b"zle")
+    gi.verify(PID)
+    with pytest.raises(gi.GogError, match="uszkodzona"):
+        _install(env, langs=("pl",))
+    assert gi.load_entry(PID)["state"] == gi.ST_DAMAGED
+
+
+def test_failed_repair_keeps_install_record(env):
+    _e, target, _ = _install(env)
+    e0 = gi.load_entry(PID)
+    e0["finalize"]["admin_done"] = [{"root": "HKLM", "subkey": "Software\\T", "name": "x", "type": "string", "data": "1"}]
+    gi.save_entry(e0)
+    (target / "data" / "big.dat").write_bytes(b"zle")
+    gi.verify(PID)
+    src = FakeServer(env["root"])
+
+    def boom(n, md5):
+        raise gi.GogError("sieć")
+    src.on_chunk = boom
+    with pytest.raises(gi.GogError):
+        gi.repair(src, PID)
+    e = gi.load_entry(PID)
+    assert e["state"] == gi.ST_DAMAGED
+    assert e["finalize"]["hkcu"] == e0["finalize"]["hkcu"] and e["finalize"]["saves"] == e0["finalize"]["saves"]
+    assert e["installed_at"] == e0["installed_at"] and e["launch"] == e0["launch"]
+    e = gi.repair(FakeServer(env["root"]), PID)
+    assert e["state"] == gi.ST_INSTALLED and e["finalize"] == e0["finalize"]       # bez ponownego kroku UAC
+    assert (target / "data" / "big.dat").read_bytes() == BIG
+
+
+def test_uninstall_removes_files_of_unfinished_dlc(env, monkeypatch):
+    _e, target, src = _install(env)
+    real = gi.verify_file
+    monkeypatch.setattr(gi, "verify_file", lambda root, f: "zły" if f["path"].startswith("dlc/") else real(root, f))
+    with pytest.raises(gi.GogError, match="Weryfikacja"):
+        gi.add_dlc(src, PID, [DLC_FILES])
+    assert (target / "dlc" / "extra.pak").exists()
+    monkeypatch.setattr(gi, "verify_file", real)
+    r = gi.uninstall(PID, remove_hkcu=lambda a: None)
+    assert not (target / "dlc").exists() and r["dir_removed"]
+
+
+def test_uninstall_removes_any_sfc_temp_file(env):
+    _e, target, _ = _install(env)
+    (target / ".emustart-gog-sfc-70.tmp").write_bytes(b"x")
+    (target / ".emustart-gog-sfc-x.tmp").write_bytes(b"obcy")         # nie nasz wzór — zostaje
+    r = gi.uninstall(PID, remove_hkcu=lambda a: None)
+    assert not (target / ".emustart-gog-sfc-70.tmp").exists()
+    assert (target / ".emustart-gog-sfc-x.tmp").exists() and r["left"] == 1
+
+
+def test_catalog_scans_processes_once(env, monkeypatch):
+    _install(env)
+    for pid in ("2", "3"):                                             # kilka zainstalowanych gier
+        gi.save_entry({**gi.load_entry(PID), "product_id": pid})
+    svc = goglib.GogService(lambda: {})
+    calls = []
+    monkeypatch.setattr(svc, "running_ids", lambda: calls.append(1) or [])
+    svc.catalog(refresh=False)
+    assert len(calls) == 1

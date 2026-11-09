@@ -24,6 +24,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import shutil
 import threading
 import time
@@ -41,6 +42,7 @@ WORKERS = 4                 # równoległe pobieranie chunków
 INFLIGHT = 2                # chunków w toku na wątek (ograniczenie pamięci)
 SPACE_MARGIN = 64 << 20
 SFC_TMP = ".emustart-gog-sfc-{}.tmp"
+_SFC_TMP_RE = re.compile(r"\.emustart-gog-sfc-\d+\.tmp")
 
 ST_INSTALLING = "installing"
 ST_INSTALLED = "installed"
@@ -558,39 +560,37 @@ def target_for(base_dir: str, bundle_or_game: dict) -> Path:
 
 def install(source, pid: str, build: str, langs: list, primary: str, dlcs: list, install_dir: str,
             cancel: threading.Event | None = None, on_progress=None, on_phase=None) -> dict:
-    """Nowa instalacja albo wznowienie przerwanej (te same: build, hash, wybór i katalog z rejestru)."""
+    """Nowa instalacja. Przerwana instalacja z tym samym wyborem (build, języki, język główny, DLC, katalog)
+    jest wznawiana; z innym wyborem — jej pliki są usuwane i instalacja zaczyna się od nowa."""
     cancel = cancel or threading.Event()
     phase = on_phase or (lambda *_a: None)
     e = load_entry(pid)
     if e and e.get("state") in (ST_INSTALLED, ST_NEEDS_ADMIN):
         raise GogError("Ta gra jest już zainstalowana.")
-    resume = bool(e and e.get("state") in RESUMABLE)
-    if resume:
-        build, langs, primary, dlcs, install_dir = (e["build_id"], e["languages"], e["primary"], e["dlcs"],
-                                                    e["install_dir"])
+    if e and e.get("state") == ST_DAMAGED:
+        raise GogError("Ta gra jest zainstalowana, ale uszkodzona — napraw ją albo usuń przed ponowną instalacją.")
     phase("manifest")
     bundle = source.manifest(pid, build)
     if str(bundle.get("product_id")) != str(pid) or str(bundle.get("build_id")) != str(build):
         raise GogError("serwer zwrócił manifest innej gry")
-    if resume and bundle.get("hash") != e.get("hash"):
-        raise SourceChanged("Build na serwerze zmienił się od rozpoczęcia instalacji — przerwanej instalacji nie da "
-                            "się dokończyć innymi danymi. Usuń ją i zainstaluj ponownie.")
     plan = make_plan(bundle, langs, primary, dlcs)
     root = Path(install_dir)
     if not root.is_absolute():
         raise GogError("Katalog instalacji musi być pełną ścieżką.")
+    resume = False
+    if e and e.get("state") in RESUMABLE:
+        if _same_choice(e, build, plan, root):
+            if bundle.get("hash") != e.get("hash"):
+                raise SourceChanged("Build na serwerze zmienił się od rozpoczęcia instalacji — przerwanej instalacji "
+                                    "nie da się dokończyć innymi danymi. Usuń ją i zainstaluj ponownie.")
+            resume = True
+        else:
+            log.info("GOG %s: inny wybór niż w przerwanej instalacji — usuwam jej pliki i zaczynam od nowa", pid)
+            discard(pid)
+            e = None
     if not resume and not _empty_or_ours(root, pid):
         raise GogError(f"Katalog {root} nie jest pusty — wybierz inny.")
-    done = set(e.get("done") or []) if resume else set()
-    done &= {f["path"] for f in plan["files"]}
-    # ukończone wcześniej pliki muszą nadal mieć rozmiar z planu (reszta pobiera się od nowa)
-    sizes = {f["path"]: f["size"] for f in plan["files"]}
-    for rel in list(done):
-        try:
-            if safe_join(root, rel).stat().st_size != sizes[rel]:
-                done.discard(rel)
-        except OSError:
-            done.discard(rel)
+    done = _still_done(root, plan, e.get("done") if resume else None)
     need, free = space_needed(plan, done), free_bytes(root)
     if free is not None and free < need:
         raise NoSpace(f"Za mało miejsca: potrzeba {_human(need)} (z plikiem tymczasowym {_human(plan['sfc_tmp'])}), "
@@ -607,10 +607,42 @@ def install(source, pid: str, build: str, langs: list, primary: str, dlcs: list,
     return _run(source, e, plan, bundle, done, cancel, on_progress, phase)
 
 
-def _run(source, e: dict, plan: dict, bundle: dict, done: set, cancel, on_progress, phase, dlc_only=False) -> dict:
+def resume(source, pid: str, cancel=None, on_progress=None, on_phase=None) -> dict:
+    """Wznowienie przerwanej instalacji z wyborem zapisanym w rejestrze."""
+    e = load_entry(pid)
+    if not e or e.get("state") not in (ST_INSTALLING, ST_FAILED, ST_CANCELLED):
+        raise GogError("Brak przerwanej instalacji tej gry.")
+    return install(source, pid, e["build_id"], e["languages"], e["primary"], e["dlcs"], e["install_dir"],
+                   cancel, on_progress, on_phase)
+
+
+def _same_choice(e: dict, build: str, plan: dict, root: Path) -> bool:
+    return (str(e.get("build_id")) == str(build)
+            and os.path.normcase(os.path.abspath(e.get("install_dir") or "")) == os.path.normcase(os.path.abspath(root))
+            and set(e.get("languages") or []) == set(plan["languages"])
+            and (e.get("primary") or "") == plan["primary"]
+            and set(e.get("dlcs") or []) == set(plan["dlcs"]))
+
+
+def _still_done(root: Path, plan: dict, done_list) -> set:
+    """Ukończone wcześniej pliki planu, które nadal mają rozmiar z planu (reszta pobiera się od nowa)."""
+    sizes = {f["path"]: f["size"] for f in plan["files"]}
+    done = set(done_list or []) & set(sizes)
+    for rel in list(done):
+        try:
+            if safe_join(root, rel).stat().st_size != sizes[rel]:
+                done.discard(rel)
+        except (OSError, UnsafePath):
+            done.discard(rel)
+    return done
+
+
+def _run(source, e: dict, plan: dict, bundle: dict, done: set, cancel, on_progress, phase, mode: str = "install") -> dict:
+    """mode: install | dlc | repair. Błąd albo przerwanie DLC/naprawy nie zmienia stanu zainstalowanej gry."""
     root = Path(e["install_dir"])
     prog = Progress(plan["total"], on_progress)
     prog.add(sum(f["size"] for f in plan["files"] if f["path"] in done))
+    dlc_only = mode == "dlc"
 
     def persist():
         if dlc_only:
@@ -631,12 +663,20 @@ def _run(source, e: dict, plan: dict, bundle: dict, done: set, cancel, on_progre
                            "wznów instalację, aby je pobrać ponownie.")
     except Cancelled:
         persist()
-        _set(e, ST_CANCELLED if not dlc_only else None, "Przerwano — postęp zapisany, instalację można wznowić.")
+        _set(e, ST_CANCELLED if mode == "install" else None,
+             "Przerwano — postęp zapisany, " + ("naprawę" if mode == "repair" else "instalację") + " można wznowić.")
         raise
     except Exception as ex:
         persist()
-        _set(e, ST_FAILED if not dlc_only else None, str(ex))
+        _set(e, ST_FAILED if mode == "install" else None, str(ex))
         raise
+    if mode == "repair":
+        # pliki znów zgodne z manifestem; finalizacja (rejestr, zapisy, krok administratora) zostaje bez zmian
+        e["state"] = e.pop("state_before_damage", ST_INSTALLED)
+        e["done"], e["error"] = [], ""
+        save_entry(e)
+        log.info("GOG %s: naprawiono (%s)", e["product_id"], root)
+        return e
     phase("finalize")
     return finalize(e, plan, bundle, dlc_only)
 
@@ -676,7 +716,7 @@ def finalize(e: dict, plan: dict, bundle: dict, dlc_only: bool = False, hkcu=Non
                 raise gogfinal.FinalizeError(f"build nie ma goggame-{pid}.info — brak opisu uruchamiania")
             e["launch"] = gogfinal.launch_spec(root, pid)
             e["runtimes"] = [{"id": s["id"], "done": False} for s in gogfinal.runtime_steps(root, e.get("dependencies") or [])]
-    except (gogfinal.FinalizeError, OSError) as ex:
+    except (gogfinal.FinalizeError, OSError, ValueError) as ex:
         if dlc_only:
             e["error"] = f"Finalizacja DLC nie powiodła się: {ex}"
         else:
@@ -736,9 +776,11 @@ def add_dlc(source, pid: str, dlcs: list, cancel: threading.Event | None = None,
     need, free = space_needed(plan, done), free_bytes(root)
     if free is not None and free < need:
         raise NoSpace(f"Za mało miejsca na DLC: potrzeba {_human(need)}, wolne {_human(free)}.")
-    e["pending_dlc"] = {"dlcs": want, "done": sorted(done)}
+    e["pending_dlc"] = {"dlcs": want, "done": sorted(done),
+                        "files": [[f["path"], f["size"]] for f in plan["files"] if f["path"].lower() not in have],
+                        "dirs": plan["dirs"]}
     save_entry(e)
-    return _run(source, e, plan, bundle, done, cancel, on_progress, phase, dlc_only=True)
+    return _run(source, e, plan, bundle, done, cancel, on_progress, phase, mode="dlc")
 
 
 def verify(pid: str, deep: bool = True) -> dict:
@@ -776,11 +818,23 @@ def _size_ok(root: Path, f: dict) -> bool:
 
 def repair(source, pid: str, cancel=None, on_progress=None, on_phase=None) -> dict:
     """Naprawa uszkodzonej instalacji: pobiera z serwera tylko niezgodne pliki (ten sam przypięty build)."""
+    cancel = cancel or threading.Event()
+    phase = on_phase or (lambda *_a: None)
     e = load_entry(pid)
     if not e or e.get("state") != ST_DAMAGED:
         raise GogError("Najpierw sprawdź pliki gry (weryfikacja).")
-    return install(source, pid, e["build_id"], e["languages"], e["primary"], e["dlcs"], e["install_dir"],
-                   cancel, on_progress, on_phase)
+    phase("manifest")
+    bundle = source.manifest(pid, e["build_id"])
+    if bundle.get("hash") != e.get("hash"):
+        raise SourceChanged("Serwer ma inny build tej gry niż zainstalowany — naprawa pobrałaby pliki innej wersji. "
+                            "Usuń grę i zainstaluj ponownie (zapisy w folderze zapisów zostają).")
+    plan = make_plan(bundle, e["languages"], e["primary"], e["dlcs"])
+    root = Path(e["install_dir"])
+    done = _still_done(root, plan, e.get("done"))
+    need, free = space_needed(plan, done), free_bytes(root)
+    if free is not None and free < need:
+        raise NoSpace(f"Za mało miejsca na naprawę: potrzeba {_human(need)}, wolne {_human(free)}.")
+    return _run(source, e, plan, bundle, done, cancel, on_progress, phase, mode="repair")
 
 
 def uninstall(pid: str, remove_hkcu=None) -> dict:
@@ -791,7 +845,43 @@ def uninstall(pid: str, remove_hkcu=None) -> dict:
     if not e:
         raise GogError("Ta gra nie jest zainstalowana.")
     root = Path(e["install_dir"])
+    removed, left, kept_errors = _remove_managed(e)
+    if kept_errors:
+        e["error"] = f"Nie usunięto {len(kept_errors)} plików (np. {kept_errors[0]}) — zamknij grę i spróbuj ponownie."
+        save_entry(e)
+        raise GogError(e["error"])
+    _forget(e, remove_hkcu)
+    return {"removed": removed, "left": left, "dir": str(root), "dir_removed": not root.exists()}
+
+
+def discard(pid: str, remove_hkcu=None) -> None:
+    """Porzucenie przerwanej instalacji (przed instalacją z innym wyborem): jej pliki jak przy odinstalowaniu."""
+    e = load_entry(pid)
+    if not e:
+        return
+    _removed, _left, errors = _remove_managed(e)
+    if errors:
+        raise GogError(f"Nie usunięto plików przerwanej instalacji ({len(errors)}, np. {errors[0]}) — "
+                       "zamknij programy, które ich używają, i spróbuj ponownie.")
+    _forget(e, remove_hkcu)
+
+
+def _forget(e: dict, remove_hkcu=None) -> None:
+    # wartości rejestru HKCU ustawione przez finalizację tej gry
+    (remove_hkcu or gogfinal.remove_hkcu)((e.get("finalize") or {}).get("hkcu") or [])
+    try:
+        _entry_path(e["product_id"]).unlink()
+    except FileNotFoundError:
+        pass
+    shutil.rmtree(gog_dir() / "manifests" / str(e["product_id"]), ignore_errors=True)
+
+
+def _remove_managed(e: dict) -> tuple:
+    """(usunięte, pozostałe pliki, błędy). Pliki z rejestru (gra, niedokończone DLC, utworzone przy finalizacji,
+    pliki tymczasowe SFC), potem puste katalogi z manifestu i pusty katalog gry."""
+    root = Path(e["install_dir"])
     saves = [Path(s) for s in (e.get("finalize") or {}).get("saves") or []]
+    pend = e.get("pending_dlc") or {}
     removed, kept_errors = 0, []
 
     def protected(p: Path) -> bool:
@@ -805,10 +895,10 @@ def uninstall(pid: str, remove_hkcu=None) -> dict:
         return False
 
     if root.is_dir() and not root.is_symlink():
-        rels = [p for p, _s in e.get("files") or []]
+        rels = [p for p, _s in (e.get("files") or []) + (pend.get("files") or [])]
         rels += [os.path.relpath(c, root).replace("\\", "/") for c in e.get("created_files") or []
                  if _is_inside(Path(c), root)]
-        rels += [SFC_TMP.format(i) for i in range(64)]
+        rels += [p.name for p in root.glob(".emustart-gog-sfc-*.tmp") if _SFC_TMP_RE.fullmatch(p.name)]
         for rel in rels:
             try:
                 p = safe_join(root, rel)
@@ -822,8 +912,8 @@ def uninstall(pid: str, remove_hkcu=None) -> dict:
                     removed += 1
             except OSError as ex:
                 kept_errors.append(f"{rel}: {ex}")
-        dirs = set(e.get("dirs") or [])
-        for rel, _s in e.get("files") or []:
+        dirs = set(e.get("dirs") or []) | set(pend.get("dirs") or [])
+        for rel, _s in (e.get("files") or []) + (pend.get("files") or []):
             parts = rel.split("/")[:-1]
             for i in range(1, len(parts) + 1):
                 dirs.add("/".join(parts[:i]))
@@ -841,18 +931,7 @@ def uninstall(pid: str, remove_hkcu=None) -> dict:
             root.rmdir()
         except OSError:
             pass
-    if kept_errors:
-        e["error"] = f"Nie usunięto {len(kept_errors)} plików (np. {kept_errors[0]}) — zamknij grę i spróbuj ponownie."
-        save_entry(e)
-        raise GogError(e["error"])
-    # wartości rejestru HKCU ustawione przez finalizację tej gry
-    (remove_hkcu or gogfinal.remove_hkcu)((e.get("finalize") or {}).get("hkcu") or [])
-    try:
-        _entry_path(pid).unlink()
-    except FileNotFoundError:
-        pass
-    shutil.rmtree(gog_dir() / "manifests" / str(pid), ignore_errors=True)
-    return {"removed": removed, "left": left, "dir": str(root), "dir_removed": not root.exists()}
+    return removed, left, kept_errors
 
 
 def _is_inside(p: Path, root: Path) -> bool:

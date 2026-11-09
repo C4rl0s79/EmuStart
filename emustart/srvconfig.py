@@ -208,10 +208,8 @@ def _apply(api, key: str) -> None:
         remote.init_nas(api._cfg)
     elif key == "gog_depots_dir":
         from emustart import gogarchive
-        if api._cfg.get("gog_depots_dir"):
-            gogarchive.refresh(api._cfg["gog_depots_dir"])
-        else:
-            gogarchive.INDEX.update(root="", builds={}, rejected=[], error="")   # nic nie udostępniamy
+        # pusta ścieżka = nic nie udostępniamy (także gdy w tle trwa indeksowanie poprzedniej)
+        gogarchive.refresh(api._cfg.get("gog_depots_dir") or "")
     elif key == "logo_pack_dir" and api._cfg.get("logo_pack_dir"):
         if logos_import()["running"]:
             return

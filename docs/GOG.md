@@ -38,7 +38,10 @@ publikowany (panel pokazuje powód).
 **Konfiguracja:** panel serwera → Konfiguracja → **„Archiwum depotów GOG (opcjonalnie)”** — folder `_depots`
 GOG Managera (konto SYSTEM nie widzi dysków sieciowych z literą — ścieżka UNC). Przycisk **„Odśwież indeks”**
 (albo ponowny zapis ścieżki) odczytuje archiwum od nowa (np. po migracji kolejnych gier w GOG Managerze). Indeks
-(`emustart/gogarchive.py`) jest w pamięci, odtwarzany przy starcie serwera; archiwum nie jest zmieniane.
+(`emustart/gogarchive.py`) jest w pamięci, odtwarzany przy starcie serwera; archiwum nie jest zmieniane. Zmiana
+albo wyczyszczenie ścieżki w trakcie indeksowania nie przepada: bieżący wynik jest odrzucany i indeks buduje się
+dla ostatniej ścieżki (pusta ścieżka = od razu nic nie jest udostępniane). Ponowny zapis rekordu przez GOG Managera
+(np. ponowna weryfikacja — zmienia tylko daty) nie przerywa instalacji: serwer porównuje hash zawartości.
 
 **API** (styl `/v1/…`, `Authorization: Bearer <token urządzenia>`, tylko konta z prawem pobierania gier):
 
@@ -71,6 +74,11 @@ chunki z serwera (4 wątki × 2 chunki w pamięci) → MD5 skompresowanych → d
 MD5 danych → zapis pod offset w pliku docelowym → weryfikacja wszystkich plików (MD5 każdego fragmentu) →
 finalizacja → stan `installed`.
 
+**Przerwana instalacja:** ten sam wybór (build, języki, język główny, DLC, katalog) — wznowienie od ukończonych
+plików; inny wybór — pliki przerwanej instalacji są usuwane (jak przy odinstalowaniu) i instalacja zaczyna się
+od nowa. **Naprawa** (stan `damaged`) pobiera tylko niezgodne pliki i nie zmienia reszty rejestru instalacji
+(finalizacja, zapisy, wartości HKCU, wykonany krok administratora); nieudana naprawa zostawia stan `damaged`.
+
 **Rejestr lokalny:** `<dane>/gog/installs/<pid>.json` — productId, buildId, hash manifestu, katalog, języki
 (i główny), DLC, stan (`installing`, `installed`, `needs_admin`, `failed`, `cancelled`, `damaged`), ukończone pliki
 (wznowienie), lista plików instalacji, kroki finalizacji, foldery zapisów, wartości HKCU, sposób uruchamiania.
@@ -79,8 +87,10 @@ bez serwera. Katalog serwera (offline): `<dane>/gog/catalog.json`.
 
 **Finalizacja (tylko znane akcje, nic z manifestu nie jest uruchamiane):** `supportData` (kopia wewnątrz katalogu
 gry), `setIni` (katalog gry albo Dokumenty), `setRegistry` HKCU `Software\…` (typy string/dword/binary/expandstring,
-`{app}` = katalog gry), HKLM → stan `needs_admin`: gra **nie jest** zainstalowana, dopóki gracz nie zatwierdzi
-kroku (plik `.reg` + `regedit /s` z oknem UAC; po nim sprawdzenie wartości). Biblioteki z zależności (Visual C++,
+`{app}` = katalog gry; złe dane dword/binary = błąd finalizacji z komunikatem), HKLM → stan `needs_admin`: gra
+**nie jest** zainstalowana, dopóki gracz nie zatwierdzi kroku (plik `.reg` + `regedit /s` z oknem UAC; po nim
+sprawdzenie wartości). Na 64-bitowym Windows wpis HKLM trafia do obu widoków rejestru (natywnego
+i `Software\WOW6432Node`, który czytają gry 32-bitowe); `expandstring` jako `REG_EXPAND_SZ`. Biblioteki z zależności (Visual C++,
 DirectX) — osobny, jawny krok „Biblioteki systemowe” (każdy instalator z UAC, znane parametry ciche); pliki
 zależności są zawsze instalowane i weryfikowane. Brak `goggame-<pid>.info` albo błąd akcji = `failed`.
 
@@ -90,8 +100,8 @@ Tylko `.exe` wewnątrz katalogu gry, bez powłoki. Gra „działa”, dopóki ż
 w katalogu gry** (launcher, który uruchamia grę i się zamyka, nie kończy sesji). Ograniczenie: gra, która uruchamia
 program spoza swojego katalogu i sama się kończy, jest uznana za zakończoną.
 
-**Odinstalowanie:** tylko pliki z listy instalacji i utworzone przy finalizacji (kopie `supportData`, nowe pliki
-`setIni` w katalogu gry), puste katalogi, pusty katalog gry; wartości HKCU ustawione przez finalizację (klucz gry,
+**Odinstalowanie:** tylko pliki z listy instalacji (także niedokończonego DLC) i utworzone przy finalizacji (kopie
+`supportData`, nowe pliki `setIni` w katalogu gry), pliki tymczasowe SFC, puste katalogi, pusty katalog gry; wartości HKCU ustawione przez finalizację (klucz gry,
 gdy pusty; klucze nadrzędne wydawcy zostają). Zostają: zapisy (`savePath`), pliki dodane przez grę lub gracza,
 pliki `setIni` w Dokumentach, wszystko poza katalogiem gry; dowiązania i punkty połączenia nie są śledzone.
 Archiwum na serwerze nie jest dotykane. Cache gier emulowanych (`cache.py`) nie zna gier GOG; katalog gier GOG
@@ -104,7 +114,8 @@ w cache jest odrzucany.
 - Tylko Galaxy content-system v2, Windows (`os: windows`). Gry bez depotów v2 GOG Manager pomija sam.
 - Opisów i grafik archiwum nie ma: opis z bazy LaunchBox (Windows), grafiki ze SteamGridDB po nazwie.
 - Brak synchronizacji zapisów gier PC (świadomie poza zakresem); stany emulatorów nie dotyczą gier GOG.
-- `setRegistry` HKLM wymaga zgody administratora (UAC) — bez obchodzenia.
+- `setRegistry` HKLM wymaga zgody administratora (UAC) — bez obchodzenia. Odinstalowanie nie usuwa wpisów HKLM
+  (wymagałoby ponownego UAC).
 - Pełnej instalacji prawdziwej gry nie wykonano (testy: syntetyczne archiwum, prawdziwe archiwum — plan obu gier
   i 589 małych plików z prawdziwych chunków).
 

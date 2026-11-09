@@ -315,6 +315,8 @@ def index_record(arc: Archive, pid: str, build: str, deep: bool = False) -> dict
 _lock = threading.Lock()
 INDEX: dict = {"root": "", "builds": {}, "rejected": [], "error": "", "built": 0.0, "running": False,
                "done": 0, "total": 0}
+_want: dict = {"root": "", "deep": False, "gen": 0}     # ostatnie żądanie (panel / start serwera)
+_pin_lock = threading.Lock()
 
 
 def build_index(root: str, deep: bool = False) -> dict:
@@ -344,23 +346,37 @@ def build_index(root: str, deep: bool = False) -> dict:
 
 
 def refresh(root: str, deep: bool = False, wait: bool = False) -> None:
-    """Odbudowa indeksu w tle (jedna naraz)."""
+    """Odbudowa indeksu w tle (jedna naraz). Żądanie w trakcie indeksowania nie przepada: bieżący wynik jest
+    odrzucany i indeks buduje się od nowa dla ostatniej ścieżki (także pustej = nic nie udostępniamy)."""
     with _lock:
+        _want.update(root=root, deep=deep, gen=_want["gen"] + 1)
+        if not root:                                  # wyłączenie: od razu nic nie udostępniamy
+            INDEX.update(root="", builds={}, rejected=[], error="")
         if INDEX["running"]:
+            return                                    # wątek indeksu podejmie nowe żądanie
+        if not root:
             return
         INDEX["running"] = True
 
     def run():
         try:
-            res = build_index(root, deep)
-            with _lock:
-                INDEX.update(res)
-        except Exception as ex:
-            log.exception("GOG: indeks")
-            with _lock:
-                INDEX.update(error=str(ex))
+            while True:
+                with _lock:
+                    r, d, gen = _want["root"], _want["deep"], _want["gen"]
+                try:
+                    res = build_index(r, d) if r else {"root": "", "builds": {}, "rejected": [], "error": ""}
+                except Exception as ex:
+                    log.exception("GOG: indeks")
+                    res = {"root": r, "builds": {}, "rejected": [], "error": str(ex)}
+                with _lock:
+                    if gen != _want["gen"]:
+                        continue                      # w międzyczasie inna ścieżka — ten wynik jest nieaktualny
+                    INDEX.update(res)
+                    INDEX["running"] = False
+                    return
         finally:
-            INDEX["running"] = False
+            with _lock:
+                INDEX["running"] = False
 
     if wait:
         run()
@@ -416,14 +432,22 @@ def pinned(pid: str, build: str, want_hash: str = "") -> dict:
     except (OSError, ArchiveError):
         raise Changed("rekord buildu zniknął z archiwum serwera")
     if st.st_mtime != e["mtime"] or st.st_size != e["size_rec"]:
-        raise Changed("rekord buildu zmienił się na serwerze — odśwież indeks GOG w panelu serwera")
+        # plik rekordu zapisany ponownie (np. ponowna weryfikacja w GOG Managerze zmienia tylko daty) —
+        # build jest ten sam, dopóki zgadza się hash zawartości
+        with _pin_lock:
+            if st.st_mtime != e["mtime"] or st.st_size != e["size_rec"]:
+                try:
+                    same = _on_disk(arc, pid, build)[0] == e["hash"]
+                except (ArchiveError, OSError, KeyError, TypeError):
+                    same = False
+                if not same:
+                    raise Changed("rekord buildu zmienił się na serwerze — odśwież indeks GOG w panelu serwera")
+                e["mtime"], e["size_rec"] = st.st_mtime, st.st_size
     return e
 
 
-def build_manifest(pid: str, build: str) -> dict:
-    """Wszystko, czego instalator potrzebuje do planu: rekord, meta (bez sekretów) i manifesty depotów."""
-    e = pinned(pid, build)
-    arc = Archive(Path(INDEX["root"]))
+def _on_disk(arc: Archive, pid: str, build: str) -> tuple:
+    """(hash zawartości, rekord, meta, manifesty {depot, dep}) — odczyt z archiwum."""
     rec = arc.read_json(arc.record_path(pid, build))
     meta = arc.read_json(arc.record_path(pid, build, ".meta.json"))
     mans = {"depot": {}, "dep": {}}
@@ -432,7 +456,15 @@ def build_manifest(pid: str, build: str) -> dict:
         mans["depot"][d["manifest"]] = flat[f"depot:{d['manifest']}"] = arc.manifest("depot", d["manifest"])
     for d in rec.get("dependencies") or []:
         mans["dep"][d["manifest"]] = flat[f"dep:{d['manifest']}"] = arc.manifest("dep", d["manifest"])
-    if content_hash(rec, meta, flat) != e["hash"]:
+    return content_hash(rec, meta, flat), rec, meta, mans
+
+
+def build_manifest(pid: str, build: str) -> dict:
+    """Wszystko, czego instalator potrzebuje do planu: rekord, meta (bez sekretów) i manifesty depotów."""
+    e = pinned(pid, build)
+    arc = Archive(Path(INDEX["root"]))
+    h, rec, meta, mans = _on_disk(arc, pid, build)
+    if h != e["hash"]:
         raise Changed("zawartość buildu zmieniła się na serwerze — odśwież indeks GOG w panelu serwera")
     pub_rec = strip_secrets({k: v for k, v in rec.items() if k not in ("migration",)})
     return {"format": 1, "product_id": str(pid), "build_id": str(build), "hash": e["hash"],

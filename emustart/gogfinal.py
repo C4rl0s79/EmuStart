@@ -110,16 +110,41 @@ def registry_action(args: dict, app: Path) -> dict:
     data = str(args.get("valueData") or "").replace("{app}", str(app))
     if "{" in data and "}" in data:
         raise FinalizeError(f"setRegistry: nieznany symbol w wartości {data!r}")
+    if typ == "dword":
+        data = str(_dword(data))
+    elif typ == "binary":
+        _binary(data)
     return {"root": hive, "subkey": sub, "name": name, "type": typ, "data": data}
 
 
-def _reg_value(a: dict):
+def _dword(data: str) -> int:
+    """Liczba DWORD ze skryptu: dziesiętnie (także z zerami na początku, np. „0001”) albo 0x…; inaczej błąd
+    finalizacji (nie wyjątek w połowie zapisu rejestru)."""
+    s = (data or "").strip() or "0"
+    try:
+        v = int(s[2:], 16) if s.lower().startswith("0x") else int(s, 10)
+    except ValueError:
+        raise FinalizeError(f"setRegistry: zła wartość dword {data!r}")
+    if not 0 <= v <= 0xFFFFFFFF:
+        raise FinalizeError(f"setRegistry: wartość dword poza zakresem {data!r}")
+    return v
+
+
+def _binary(data: str) -> bytes:
     import base64
+    import binascii
+    try:
+        return base64.b64decode(data or "", validate=True)
+    except (binascii.Error, ValueError):
+        raise FinalizeError(f"setRegistry: zła wartość binary {data[:40]!r}")
+
+
+def _reg_value(a: dict):
     import winreg
     if a["type"] == "dword":
-        return winreg.REG_DWORD, int(a["data"] or "0", 0)
+        return winreg.REG_DWORD, _dword(a["data"])
     if a["type"] == "binary":
-        return winreg.REG_BINARY, base64.b64decode(a["data"] or "")
+        return winreg.REG_BINARY, _binary(a["data"])
     if a["type"] == "expandstring":
         return winreg.REG_EXPAND_SZ, a["data"]
     return winreg.REG_SZ, a["data"]
@@ -151,20 +176,39 @@ def remove_hkcu(actions: list) -> int:
     return n
 
 
-def reg_file(actions: list) -> str:
+def windows_64() -> bool:
+    """64-bitowy Windows: HKLM\\Software ma osobny widok dla programów 32-bitowych (WOW6432Node)."""
+    import platform
+    return os.name == "nt" and (platform.machine().endswith("64") or "PROCESSOR_ARCHITEW6432" in os.environ)
+
+
+def _views(subkey: str, wow64: bool) -> list:
+    """Klucze do zapisu przez 64-bitowy regedit: widok natywny i — na 64-bitowym Windows — widok 32-bitowy
+    (Software\\WOW6432Node\\…), bo większość gier GOG to programy 32-bitowe i czyta właśnie ten."""
+    out = [subkey]
+    if wow64:
+        rest = subkey.split("\\", 1)[1]
+        if not rest.lower().startswith("wow6432node\\"):
+            out.append(f"Software\\WOW6432Node\\{rest}")
+    return out
+
+
+def reg_file(actions: list, wow64: bool | None = None) -> str:
     """Plik .reg dla kroków HKLM (wykonywany za zgodą użytkownika przez regedit z UAC)."""
-    import base64
+    wow64 = windows_64() if wow64 is None else wow64
     out = ["Windows Registry Editor Version 5.00", ""]
     for a in actions:
-        out.append(f"[HKEY_LOCAL_MACHINE\\{a['subkey']}]")
         name = "@" if not a["name"] else '"' + a["name"].replace("\\", "\\\\").replace('"', '\\"') + '"'
         if a["type"] == "dword":
-            out.append(f"{name}=dword:{int(a['data'] or '0', 0):08x}")
+            line = f"{name}=dword:{_dword(a['data']):08x}"
         elif a["type"] == "binary":
-            out.append(f"{name}=hex:" + ",".join(f"{b:02x}" for b in base64.b64decode(a["data"] or "")))
+            line = f"{name}=hex:" + ",".join(f"{b:02x}" for b in _binary(a["data"]))
+        elif a["type"] == "expandstring":           # REG_EXPAND_SZ: w .reg tylko jako hex(2) (UTF-16LE z \0)
+            line = f"{name}=hex(2):" + ",".join(f"{b:02x}" for b in (a["data"] + "\0").encode("utf-16-le"))
         else:
-            out.append(f'{name}="' + a["data"].replace("\\", "\\\\").replace('"', '\\"') + '"')
-        out.append("")
+            line = f'{name}="' + a["data"].replace("\\", "\\\\").replace('"', '\\"') + '"'
+        for sub in _views(a["subkey"], wow64):
+            out += [f"[HKEY_LOCAL_MACHINE\\{sub}]", line, ""]
     return "\r\n".join(out)
 
 
@@ -260,18 +304,19 @@ def run_admin_registry(actions: list, work: Path, elevate=None) -> bool:
 
 
 def _hklm_has(a: dict) -> bool:
+    """Wartość jest w każdym widoku, który gra może czytać (na 64-bitowym Windows: w obu)."""
     try:
         import winreg
-        for view in (winreg.KEY_WOW64_64KEY, winreg.KEY_WOW64_32KEY):
-            try:
-                with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, a["subkey"], 0, winreg.KEY_READ | view) as k:
-                    winreg.QueryValueEx(k, a["name"])
-                    return True
-            except OSError:
-                continue
     except ImportError:
-        pass
-    return False
+        return False
+    views = (winreg.KEY_WOW64_64KEY, winreg.KEY_WOW64_32KEY) if windows_64() else (0,)
+    for view in views:
+        try:
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, a["subkey"], 0, winreg.KEY_READ | view) as k:
+                winreg.QueryValueEx(k, a["name"])
+        except OSError:
+            return False
+    return True
 
 
 def _shell_runas(exe: str, params: str, cwd: str | None = None) -> bool:

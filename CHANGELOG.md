@@ -42,6 +42,17 @@ Opis: [docs/GOG.md](docs/GOG.md).
 - **Systemy:** rodzina platformy (`systems.family`: komputer / konsola / arcade / pozostałe) w `/v1/systems`
   i bibliotece silnika.
 
+### Poprawione po przeglądzie kodu (gałąź `gog-library`)
+- HKLM: wpis do obu widoków rejestru na 64-bitowym Windows (gry 32-bitowe czytają `WOW6432Node`); `expandstring`
+  jako `REG_EXPAND_SZ`; złe dane dword/binary w skrypcie = błąd finalizacji z komunikatem (nie zawieszony stan).
+- Przerwana instalacja z innym wyborem (build, języki, DLC, katalog) zaczyna od nowa i usuwa pliki poprzedniej;
+  ten sam wybór — wznowienie. Uszkodzonej gry instalacja nie nadpisuje (naprawa albo usunięcie).
+- Naprawa nie kasuje rejestru instalacji (finalizacja, HKCU, zapisy, wykonany krok UAC); nieudana zostawia `damaged`.
+- Odinstalowanie usuwa pliki niedokończonego DLC i każdy plik tymczasowy SFC.
+- Serwer: zmiana/wyczyszczenie ścieżki archiwum w trakcie indeksowania nie przepada; ponowna weryfikacja buildu
+  w GOG Managerze (tylko daty w rekordzie) nie przerywa instalacji.
+- Katalog gier w kliencie: jeden przegląd procesów na odświeżenie zamiast jednego na grę.
+
 **Czego NIE dotyka.** Steam (wykrywanie, instalacja, uruchamianie), zapisy i stany emulatorów (gry GOG nie mają
 synchronizacji zapisów), cache ROM-ów (gry GOG są poza nim), istniejące identyfikatory gier, ulubione, kolekcje
 Steam, własne kategorie, grafiki, archiwum GOG na serwerze (tylko odczyt), APK (brak klienta GOG na Androidzie —
@@ -56,7 +67,7 @@ gry PC Windows), aktualizacja zainstalowanej gry GOG do nowego buildu (pierwsza 
 | 5 | wznowienie, weryfikacja, odinstalowanie, uruchamianie | `test_gog_install.py` (34: przerwanie/wznowienie, zmieniony build, uszkodzony/brakujący obiekt, miejsce, naprawa, uruchamianie bez serwera, launcher, punkty połączenia, cache) | Lumen + serwer testowy (syntetyczna gra): weryfikacja bez serwera, odinstalowanie (zapisy zostają, HKCU usunięte); uruchomienie prawdziwej gry — nie | czeka na prawdziwą grę |
 | 6 | Lumen: model, biblioteka, zadania, akcje, IPC | Lumen `libraryNav.test.ts`, `gog.test.ts` (233 razem) | klasyfikacja 70 prawdziwych gier Steam/skrótów (odczyt), instalacja przez IPC | zrobione |
 | 7 | Lumen: pulpit i TV | typy + testy | pulpit: PC › Wszystkie/Steam/GOG/Skróty, okno instalacji, szczegóły; TV: grupy → podgrupy → gry, przypięcie Y (klawiatura przez CDP); padem — nie | czeka na sprawdzenie padem |
-| 8 | regresja, dokumentacja | EmuStart 584, silnik w Lumen 640, Lumen 233 | — | zrobione (`docs/GOG.md`) |
+| 8 | regresja, dokumentacja | EmuStart 603, silnik w Lumen 640, Lumen 233 | — | zrobione (`docs/GOG.md`) |
 
 ## [0.56.6] — 2026-11-04
 
