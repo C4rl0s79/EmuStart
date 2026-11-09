@@ -357,7 +357,7 @@ def test_uninstall_does_not_follow_links(env, tmp_path):
     _e, target, _ = _install(env)
     outside = tmp_path / "poza"
     outside.mkdir()
-    (outside / "game.exe").write_text("nie ruszać")
+    (outside / "game.exe").write_text("nie ruszać", encoding="utf-8")
     import shutil
     shutil.rmtree(target / "bin")
     try:
@@ -372,7 +372,7 @@ def test_uninstall_does_not_follow_links(env, tmp_path):
                        capture_output=True, stdin=subprocess.DEVNULL)
     assert gi._has_link(target, target / "bin" / "game.exe")
     gi.uninstall(PID, remove_hkcu=lambda a: None)
-    assert (outside / "game.exe").read_text() == "nie ruszać"
+    assert (outside / "game.exe").read_text(encoding="utf-8") == "nie ruszać"
 
 
 def test_install_dir_inside_rom_cache_is_refused(tmp_path):
