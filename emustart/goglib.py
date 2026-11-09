@@ -106,6 +106,39 @@ class GogService:
                     "folderze zapisów zostają).")
         return ""
 
+    ART_KINDS = ("grid", "hero", "logo", "icon")
+    ART_MAX_AGE = 7 * 86400
+
+    def art(self, pid: str, kind: str) -> dict:
+        """Grafika gry z serwera (okładka, tło, logo, ikona z folderu GOG Managera) — kopia na dysku, żeby
+        biblioteka działała bez serwera. {"path": plik} albo {"path": ""}."""
+        pid = _pid(pid)
+        if kind not in self.ART_KINDS:
+            raise ValueError("zły rodzaj grafiki")
+        d = gi.gog_dir() / "art" / pid
+        have = next((p for p in (d / f"{kind}.jpg", d / f"{kind}.png") if p.is_file()), None)
+        miss = d / f"{kind}.none"
+        fresh = lambda p: time.time() - p.stat().st_mtime < self.ART_MAX_AGE      # noqa: E731
+        if have and fresh(have):
+            return {"path": str(have)}
+        if not have and miss.is_file() and fresh(miss):
+            return {"path": ""}
+        try:
+            data, ctype = self._source_fn().art(pid, kind)
+        except Exception as ex:                        # serwer niedostępny — stara kopia albo nic
+            log.info("GOG %s: grafika %s: %s", pid, kind, ex)
+            return {"path": str(have) if have else ""}
+        d.mkdir(parents=True, exist_ok=True)
+        if data is None:
+            miss.write_bytes(b"")
+            return {"path": str(have) if have else ""}
+        out = d / f"{kind}{'.png' if ctype == 'image/png' else '.jpg'}"
+        for p in (d / f"{kind}.jpg", d / f"{kind}.png", miss):
+            if p != out:
+                p.unlink(missing_ok=True)
+        gi._atomic(out, data)
+        return {"path": str(out)}
+
     # ── kolejka ────────────────────────────────────────────────────────────
     def enqueue(self, kind: str, pid: str, **args) -> dict:
         pid = _pid(pid)

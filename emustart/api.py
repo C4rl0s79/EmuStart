@@ -457,6 +457,13 @@ class Api:
         except ValueError as ex:
             return {"ok": False, "reason": str(ex)}
 
+    def gog_art(self, pid: str, kind: str) -> dict:
+        """Grafika gry GOG z serwera (kopia lokalna): {"path": plik albo ""}."""
+        try:
+            return self._gog.art(pid, kind)
+        except ValueError as ex:
+            return {"path": "", "reason": str(ex)}
+
     def gog_resume(self, pid: str) -> dict:
         """Wznowienie przerwanej instalacji albo naprawa uszkodzonej (dane i wybór z rejestru)."""
         from emustart import goginstall as gi
