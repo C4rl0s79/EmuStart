@@ -376,6 +376,8 @@ def handle(handler) -> None:
             return _json(handler, {"error": "To konto nie pobiera gier z serwera."}, 403)
         if len(parts) >= 4 and parts[0] == "games" and parts[1].isdigit() and parts[2] == "file":
             return _send_file(handler, int(parts[1]), "/".join(parts[3:]))
+        if parts and parts[0] == "userart":
+            return userart_call(handler, "GET", parts[1:])
         if parts and parts[0] == "gog":
             return _gog(handler, parts[1:])
         return _json(handler, {"error": "nieznany adres"}, 404)
@@ -1035,6 +1037,50 @@ def _device_names(out: dict) -> dict:
         did = b.get("updated_by_device_id") or ""
         b["updated_by_device_name"] = (devices.name_of(did) if did and did != "serwer" else did) or did
     return out
+
+
+def userart_call(handler, method: str, parts: list) -> None:
+    """Grafiki użytkowników i wybory grafik konta (emustart/userart.py). Konto — z tokenu, jak przy zapisach.
+
+        POST userart/upload?game=&kind=   treść: obraz          GET userart/gallery?game=&kind=
+        POST userart/choices {items}                            GET userart/file/<sha>
+        POST userart/remove {game, kind, sha}"""
+    from emustart import userart
+    if not authorized(handler):
+        return _json(handler, {"error": "brak lub zły klucz serwera"}, 401)
+    _seen(handler)
+    q = {k: (v or [""])[0] for k, v in urllib.parse.parse_qs(urllib.parse.urlsplit(handler.path).query).items()}
+    n = int(handler.headers.get("Content-Length") or 0)
+    if method == "POST" and n > userart.MAX_FILE + (1 << 20):
+        handler.close_connection = True
+        return _json(handler, {"ok": False, "reason": "za duży plik"}, 413)
+    body = handler.rfile.read(n) if method == "POST" and n else b""
+
+    def run():
+        acc, _dev = _sync_identity(handler)
+        if method == "GET" and parts == ["gallery"]:
+            return userart.gallery(acc, q.get("game", ""), q.get("kind", ""))
+        if method == "POST" and parts == ["upload"]:
+            return userart.upload(acc, q.get("game", ""), q.get("kind", ""), body)
+        d = json.loads(body or b"{}") if method == "POST" else {}
+        if method == "POST" and parts == ["choices"]:
+            return userart.sync(acc, d.get("items"))
+        if method == "POST" and parts == ["remove"]:
+            return userart.remove(acc, str(d.get("game") or ""), str(d.get("kind") or ""), str(d.get("sha") or ""))
+        raise ValueError("nieznany adres")
+    if method == "GET" and len(parts) == 2 and parts[0] == "file":
+        f, ctype = userart.file_path(parts[1])
+        if not f:
+            return _json(handler, {"error": "nie ma takiego pliku"}, 404)
+        data = f.read_bytes()
+        handler.send_response(200)
+        handler.send_header("Content-Type", ctype)
+        handler.send_header("Content-Length", str(len(data)))
+        handler.send_header("Cache-Control", "max-age=31536000, immutable")
+        handler.end_headers()
+        handler.wfile.write(data)
+        return None
+    return _sync_errors(handler, run)
 
 
 def savesync_post(handler) -> None:

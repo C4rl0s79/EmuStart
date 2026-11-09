@@ -45,6 +45,13 @@ dokumentacji Lumena, wydanie.
     przełącza się między nimi bez końca.
 11. Tryb TV: gdy po filtrowaniu jest mało gier, powielać okładki, żeby wypełnić ekran.
 
+### Plan: grafiki użytkowników na serwerze i synchronizacja wyborów grafik (gałąź `user-art`)
+**Co się zmieni.** Serwer: `emustart/userart.py` — pliki wgrane przez konta (po skrócie, tylko obrazy), wybory grafik konta
+(nowszy wygrywa), galeria grafik gry dla wszystkich kont; `/v1/userart/…`. Silnik: `artsync.py`, `Api.art_user_*`. Lumen:
+własny plik grafiki wgrywa się na serwer (typ wyboru `user`), wybory (także tryb TV i grupy) synchronizują się między
+urządzeniami, w oknie wyboru i „Grafice grupy” nowe źródło „Wgrane przez użytkowników”.
+**Czego NIE dotyka.** Grafiki gier z panelu serwera, SteamGridDB, LaunchBox, cache grafik; bez serwera wszystko działa jak dotąd.
+
 ## [0.59.1] — 2026-11-09
 
 Zakres: silnik w Lumen (gry GOG). Serwer, klient Windows bez Lumena, APK i emulatory bez zmian zachowania.

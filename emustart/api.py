@@ -464,6 +464,29 @@ class Api:
         except ValueError as ex:
             return {"path": "", "reason": str(ex)}
 
+    # ── grafiki użytkowników i wybory grafik konta (emustart/artsync.py, serwer: userart.py) ──
+    def _art_user(self, fn, *args) -> dict:
+        from emustart import artsync, syncclient
+        try:
+            return getattr(artsync, fn)(self._cfg, self._profile, *args)
+        except (syncclient.Offline, syncclient.ConflictError, OSError, ValueError) as ex:
+            return {"ok": False, "reason": str(ex)}
+
+    def art_user_upload(self, path: str, game: str, kind: str) -> dict:
+        return self._art_user("upload", str(path), str(game), str(kind))
+
+    def art_user_sync(self, items: list) -> dict:
+        return self._art_user("sync", items if isinstance(items, list) else [])
+
+    def art_user_gallery(self, game: str, kind: str) -> dict:
+        return self._art_user("gallery", str(game), str(kind))
+
+    def art_user_remove(self, game: str, kind: str, sha: str) -> dict:
+        return self._art_user("remove", str(game), str(kind), str(sha))
+
+    def art_user_file(self, sha: str, ext: str) -> dict:
+        return self._art_user("file", str(sha), str(ext))
+
     def gog_extras(self, pid: str, base: str) -> dict:
         """Dodatki gry GOG: lista z serwera, co pobrane, co domyślnie wybrane."""
         try:
