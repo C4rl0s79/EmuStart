@@ -11,6 +11,70 @@ nowym urządzeniu — do sprawdzenia na żywo), Play! (miejsce kart), APK (te sa
 budowania), adaptery pozostałych samodzielnych emulatorów przy pierwszym użyciu, sprawdzenie na żywo (niżej);
 jedno zapytanie przygotowujące grę — po pomiarach kroków z prawdziwych startów.
 
+## [0.57.0] — 2026-11-09
+
+Zakres: serwer (archiwum depotów GOG, `/v1/gog`, rodzina platformy w `/v1/systems`), klient Windows i Lumen
+(silnik: instalacja gier GOG z serwera, `Api.gog_*`). APK bez zmian (gry GOG to gry PC Windows); emulatory bez zmian.
+Samodzielny interfejs EmuStart nie ma jeszcze ekranu GOG — gry GOG obsługuje Lumen.
+
+### Plan: biblioteka hierarchiczna i gry GOG z serwera (gałąź `gog-library`, EmuStart + Lumen)
+
+**Co się zmieni.**
+- *Serwer:* nowe ustawienie w panelu „Archiwum depotów GOG” (`gog_depots_dir`) + „Odśwież indeks”; indeks
+  istniejącego archiwum `goggui-depot-archive` v1 (tworzy je GOG Manager, `D:\GIT\GogGui\depot_archive.py`) — tylko
+  odczyt, odtwarzalny; autoryzowane `GET /v1/gog/…` (lista, szczegóły, manifest buildu przypięty hashem, chunki
+  wyłącznie z przypiętego buildu). Serwer nie łączy się z GOG.
+- *Silnik (klient Windows / Lumen):* instalator GOG z serwera (`emustart/gog*.py`): plan → chunk z serwera →
+  MD5 → dekompresja → zapis wprost do katalogu gry → weryfikacja → finalizacja (`supportData`, `setIni`, rejestr
+  HKCU; HKLM tylko jawnie, z UAC) → rejestr instalacji. Wznowienie, anulowanie, weryfikacja, uruchamianie bez
+  serwera, odinstalowanie tylko plików z manifestu. Metody `gog_*` w `Api`.
+- *Systemy:* rodzina platformy (`pc` / `computer` / `console` / `arcade` / `other`) w katalogu `systems.py`,
+  podawana w `/v1/systems` i bibliotece Lumen.
+- *Lumen:* źródło `gog`, hierarchia PC / Komputery / Konsole / Arcade / Pozostałe / Kolekcje / Ulubione /
+  Ostatnio grane w obu trybach, przypinanie podgrup, ustawienia GOG (katalog, języki), zadania, akcja główna,
+  szczegóły, ręczna klasyfikacja skrótów Steam.
+
+Opis: [docs/GOG.md](docs/GOG.md).
+
+### Dodane (gałąź `gog-library`, bez wydania)
+- **Serwer:** archiwum depotów GOG (panel → Konfiguracja → „Archiwum depotów GOG”, „Odśwież indeks”); `GET
+  /v1/gog/games`, `…/games/<pid>`, `…/builds/<build>/manifest`, `…/chunks/<md5>` — tylko zalogowane urządzenia
+  kont z prawem pobierania gier, tylko kompletne buildy, chunki tylko z przypiętego buildu, bez sekretów
+  (`clientSecret` z meta buildu nie wychodzi z serwera).
+- **Silnik:** instalacja gier GOG z serwera (języki, język główny, DLC z plikami i bez, zależności), wznowienie po
+  restarcie, anulowanie, weryfikacja i naprawa, finalizacja (`supportData`, `setIni`, HKCU; HKLM i biblioteki
+  systemowe tylko jawnie z UAC), uruchamianie bez serwera z wyborem zadania, śledzenie gry po zamknięciu launchera,
+  odinstalowanie tylko plików instalacji. `Api.gog_*`, `Api.platform_catalog`.
+- **Systemy:** rodzina platformy (`systems.family`: komputer / konsola / arcade / pozostałe) w `/v1/systems`
+  i bibliotece silnika.
+
+### Poprawione po przeglądzie kodu (gałąź `gog-library`)
+- HKLM: wpis do obu widoków rejestru na 64-bitowym Windows (gry 32-bitowe czytają `WOW6432Node`); `expandstring`
+  jako `REG_EXPAND_SZ`; złe dane dword/binary w skrypcie = błąd finalizacji z komunikatem (nie zawieszony stan).
+- Przerwana instalacja z innym wyborem (build, języki, DLC, katalog) zaczyna od nowa i usuwa pliki poprzedniej;
+  ten sam wybór — wznowienie. Uszkodzonej gry instalacja nie nadpisuje (naprawa albo usunięcie).
+- Naprawa nie kasuje rejestru instalacji (finalizacja, HKCU, zapisy, wykonany krok UAC); nieudana zostawia `damaged`.
+- Odinstalowanie usuwa pliki niedokończonego DLC i każdy plik tymczasowy SFC.
+- Serwer: zmiana/wyczyszczenie ścieżki archiwum w trakcie indeksowania nie przepada; ponowna weryfikacja buildu
+  w GOG Managerze (tylko daty w rekordzie) nie przerywa instalacji.
+- Katalog gier w kliencie: jeden przegląd procesów na odświeżenie zamiast jednego na grę.
+
+**Czego NIE dotyka.** Steam (wykrywanie, instalacja, uruchamianie), zapisy i stany emulatorów (gry GOG nie mają
+synchronizacji zapisów), cache ROM-ów (gry GOG są poza nim), istniejące identyfikatory gier, ulubione, kolekcje
+Steam, własne kategorie, grafiki, archiwum GOG na serwerze (tylko odczyt), APK (brak klienta GOG na Androidzie —
+gry PC Windows), aktualizacja zainstalowanej gry GOG do nowego buildu (pierwsza wersja: uczciwy komunikat).
+
+| Etap | Zakres | Testy (fixture'y) | Na żywo | Stan |
+|---|---|---|---|---|
+| 1 | analiza archiwum, kontrakt formatu | — | archiwum `D:\GOGInstall\_depots` (2 gry) przeczytane | zrobione |
+| 2 | rodzina platformy w `systems.py`, `/v1/systems` | `test_platform_family.py` (3) | — | zrobione |
+| 3 | indeks GOG + API serwera + panel | `test_gog_server.py` (22) | indeks prawdziwego archiwum: 2 gry, 0 pominiętych, bez sekretów; panel — nie oglądany | testy zrobione |
+| 4 | instalator jednej gry bez UI (pionowy przepływ) | `test_gog_install.py` (pionowy przepływ przez HTTP, języki, DLC, zależności, finalizacja, bufor) | prawdziwe archiwum: plan obu gier, 589 małych plików z prawdziwych chunków zgodnych MD5, 26 wpisów HKCU WC (atrapa rejestru); pełnej prawdziwej gry nie instalowano | czeka na pełną instalację prawdziwej gry |
+| 5 | wznowienie, weryfikacja, odinstalowanie, uruchamianie | `test_gog_install.py` (34: przerwanie/wznowienie, zmieniony build, uszkodzony/brakujący obiekt, miejsce, naprawa, uruchamianie bez serwera, launcher, punkty połączenia, cache) | Lumen + serwer testowy (syntetyczna gra): weryfikacja bez serwera, odinstalowanie (zapisy zostają, HKCU usunięte); uruchomienie prawdziwej gry — nie | czeka na prawdziwą grę |
+| 6 | Lumen: model, biblioteka, zadania, akcje, IPC | Lumen `libraryNav.test.ts`, `gog.test.ts` (233 razem) | klasyfikacja 70 prawdziwych gier Steam/skrótów (odczyt), instalacja przez IPC | zrobione |
+| 7 | Lumen: pulpit i TV | typy + testy | pulpit: PC › Wszystkie/Steam/GOG/Skróty, okno instalacji, szczegóły; TV: grupy → podgrupy → gry, przypięcie Y (klawiatura przez CDP); padem — nie | czeka na sprawdzenie padem |
+| 8 | regresja, dokumentacja | EmuStart 603, silnik w Lumen 660, Lumen 233 | — | zrobione (`docs/GOG.md`) |
+
 ## [0.56.6] — 2026-11-04
 
 Zakres: klient Windows i Lumen (skróty pada w grze, `hotkey.py`, `xinput.py`, `hidpad.py`, `ingame.Dolphin`). Serwer

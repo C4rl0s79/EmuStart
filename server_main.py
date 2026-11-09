@@ -103,6 +103,9 @@ def _server_mode() -> None:
         return _message(("Serwer będzie startował razem z Windows." if ok else
                          "Nie wszystko się udało — uruchom jako administrator.") + "\n\n" + "\n".join(lines))
     remote.init_nas(api._cfg)             # folder profili (zapisy klientów przez serwer)
+    from emustart import gogarchive
+    if api._cfg.get("gog_depots_dir"):
+        gogarchive.refresh(api._cfg["gog_depots_dir"])   # indeks archiwum depotów GOG (w tle, tylko odczyt)
     from emustart import acctbackup
     acctbackup.start_auto(lambda: api._cfg)   # kopie kont raz dziennie
     from emustart import emustore
