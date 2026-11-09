@@ -124,3 +124,86 @@ def test_vertical_art_over_http(srv, arc, tmp_path, monkeypatch):  # noqa: F811
     assert open(p, "rb").read() == JPG
     svc._source_fn = lambda: (_ for _ in ()).throw(OSError("brak serwera"))
     assert svc.art(PID, "grid")["path"] == p
+
+
+def test_http_saverules_requires_auth(srv, arc, tmp_path, monkeypatch):  # noqa: F811
+    from emustart import saverules
+    monkeypatch.setattr(paths, "DATA", tmp_path / "srvdata")
+    monkeypatch.setattr(saverules, "MIN_ENTRIES", 1)
+    monkeypatch.setattr(saverules, "_index", None)
+    saverules.install(f"Testowa Gra:\n  files:\n    <base>/save: {{tags: [save]}}\n  gog: {{id: {PID}}}\n".encode())
+    assert _req(srv, "GET", f"/v1/gog/games/{PID}/saverules")[0] == 401
+    _did, tok = keyhelp.device("Gracz", games=True)
+    st, r = _req(srv, "GET", f"/v1/gog/games/{PID}/saverules", tok)
+    assert st == 200 and r["source"] == "ludusavi" and r["files"][0]["path"] == "<base>/save"
+    assert _req(srv, "GET", "/v1/gog/games/..%2fx/saverules", tok)[0] == 404
+
+
+@pytest.fixture()
+def extras(arc):
+    root, game = arc
+    d = game / "extras"
+    d.mkdir()
+    (d / "soundtrack_mp3.zip").write_bytes(b"S" * 5000)
+    (d / "manual.pdf").write_bytes(b"M" * 300)
+    (d / "game_classic_1998_part1.zip").write_bytes(b"O" * 700)
+    (d / "pobierane.zip.part").write_bytes(b"x")
+    (d / "Thumbs.db").write_bytes(b"x")
+    prod = json.loads((game / "product_testowa_gra.json").read_text(encoding="utf-8"))
+    prod["downloads"] = {"bonus_content": [{"name": "Oryginalny soundtrack", "type": "audio", "total_size": 5000}]}
+    (game / "product_testowa_gra.json").write_text(json.dumps(prod), encoding="utf-8")
+    ga.refresh(str(root), wait=True)
+    return root, game
+
+
+def test_extras_listed_with_defaults_like_gog_manager(extras):
+    items = {x["file"]: x for x in ga.game(PID)["info"]["extras"]}
+    assert set(items) == {"soundtrack_mp3.zip", "manual.pdf", "game_classic_1998_part1.zip"}
+    assert items["soundtrack_mp3.zip"]["name"] == "Oryginalny soundtrack" and items["soundtrack_mp3.zip"]["type"] == "audio"
+    assert items["manual.pdf"]["default"] and items["soundtrack_mp3.zip"]["default"]
+    assert not items["game_classic_1998_part1.zip"]["default"]                # stara wersja — domyślnie pominięta
+
+
+def test_http_extra_requires_auth_and_stays_in_folder(srv, extras):  # noqa: F811
+    x = next(i for i in ga.game(PID)["info"]["extras"] if i["file"] == "manual.pdf")
+    path = f"/v1/gog/games/{PID}/extras/{x['id']}"
+    assert _req(srv, "GET", path)[0] == 401
+    _did, tok = keyhelp.device("Gracz", games=True)
+    st, data = _req(srv, "GET", path, tok)
+    assert st == 200 and data == b"M" * 300
+    assert _req(srv, "GET", path, tok, headers={"Range": "bytes=100-"})[1] == b"M" * 200
+    for bad in (f"/v1/gog/games/{PID}/extras/..%2fgame-details", f"/v1/gog/games/{PID}/extras/{'0' * 16}", f"/v1/gog/games/999/extras/{x['id']}"):
+        assert _req(srv, "GET", bad, tok)[0] == 404, bad
+
+
+def test_extras_download_job_over_http_resume_and_cancel_state(srv, extras, tmp_path, monkeypatch):  # noqa: F811
+    import threading
+    import time
+    from emustart import netsrc
+    host, port, _nas = srv
+    _did, tok = keyhelp.device("Gracz", games=True)
+    monkeypatch.setattr(paths, "DATA", tmp_path / "dane")
+    src = gi.ServerSource.__new__(gi.ServerSource)
+    src.netsrc, src.ep, src._local = netsrc, (host, port, tok), threading.local()
+    monkeypatch.setattr(src, "catalog", ga.catalog, raising=False)
+    svc = goglib.GogService(lambda: {}, source_fn=lambda: src)
+    svc.catalog(refresh=True)
+    base = str(tmp_path / "GOG Games")
+    r = svc.extras(PID, base)
+    assert r["target"].endswith("_extras\\testowa_gra") or r["target"].endswith("_extras/testowa_gra")
+    assert not any(x["have"] for x in r["items"])
+    pick = [x["id"] for x in r["items"] if x["default"]]
+    # niedokończony plik z poprzedniej próby — dociągany od miejsca przerwania
+    d = tmp_path / "GOG Games" / "_extras" / "testowa_gra"
+    d.mkdir(parents=True)
+    (d / "soundtrack_mp3.zip.part").write_bytes(b"S" * 2000)
+    assert svc.enqueue("extras", PID, ids=pick, base=base, title="T")["ok"]
+    for _ in range(200):
+        if svc._last.get(PID):
+            break
+        time.sleep(0.02)
+    assert svc._last[PID]["ok"], svc._last[PID]
+    assert (d / "soundtrack_mp3.zip").read_bytes() == b"S" * 5000 and not (d / "soundtrack_mp3.zip.part").exists()
+    assert (d / "manual.pdf").read_bytes() == b"M" * 300
+    assert not (d / "game_classic_1998_part1.zip").exists()                   # niewybrany
+    assert {x["file"]: x["have"] for x in svc.extras(PID, base)["items"]}["manual.pdf"]

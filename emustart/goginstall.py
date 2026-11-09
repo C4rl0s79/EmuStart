@@ -28,6 +28,7 @@ import re
 import shutil
 import threading
 import time
+import urllib.parse
 import zlib
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from pathlib import Path
@@ -99,6 +100,45 @@ class ServerSource:
 
     def catalog(self) -> list:
         return self._get_json("/v1/gog/games", 30).get("games") or []
+
+    def download_extra(self, pid: str, extra_id: str, dest: Path, size: int, cancel, on_bytes) -> None:
+        """Dodatek z serwera do pliku `dest` (przez `.part`, wznawialnie). Rozmiar musi się zgadzać."""
+        part = dest.with_name(dest.name + ".part")
+        have = part.stat().st_size if part.exists() else 0
+        if have > size:
+            part.unlink()
+            have = 0
+        c = self.netsrc.conn(self.ep[0], self.ep[1], 60)
+        try:
+            headers = self.netsrc.auth_headers(self.ep[2])
+            if have:
+                headers["Range"] = f"bytes={have}-"
+            c.request("GET", f"/v1/gog/games/{pid}/extras/{extra_id}", headers=headers)
+            r = c.getresponse()
+            if r.status == 200:
+                have = 0                               # serwer wysyła całość
+            elif r.status != 206:
+                raise GogError(_loads(r.read()).get("error") or f"serwer: HTTP {r.status}")
+            on_bytes(have)
+            with open(part, "ab" if have else "wb") as fh:
+                while True:
+                    if cancel.is_set():
+                        raise Cancelled("przerwano")
+                    buf = r.read(1 << 20)
+                    if not buf:
+                        break
+                    fh.write(buf)
+                    on_bytes(len(buf))
+        finally:
+            c.close()
+        if part.stat().st_size != size:
+            raise GogError(f"{dest.name}: niepełny plik z serwera — ponów pobieranie")
+        os.replace(part, dest)
+
+    def save_rules(self, pid: str, pick: str = "") -> dict:
+        """Reguły zapisów gry z serwera (emustart/saverules.py); `pick` — tytuł wybrany z niejednoznacznych."""
+        q = f"?title={urllib.parse.quote(pick)}" if pick else ""
+        return self._get_json(f"/v1/gog/games/{pid}/saverules{q}", 30)
 
     def art(self, pid: str, kind: str) -> tuple:
         """(bajty, typ) grafiki gry z serwera albo (None, "") — brak grafiki / błąd."""

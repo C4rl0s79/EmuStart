@@ -1,4 +1,5 @@
 pywebview>=6.2,<7   # api.py: fokus WebView2 przez pola wewnętrzne pywebview 6.x
 segno==1.6.6        # kod QR parowania urządzeń (emustart/qr.py) — wchodzi do EmuStart.exe
 cryptography>=42      # certyfikat portu szyfrowanego serwera (emustart/tls.py) — wchodzi do EmuStart.exe
+PyYAML>=6.0         # reguły zapisów gier GOG (emustart/saverules.py: ludusavi-manifest) — serwer
 pytest>=8.0

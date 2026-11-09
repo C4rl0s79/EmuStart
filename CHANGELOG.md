@@ -11,6 +11,71 @@ nowym urządzeniu — do sprawdzenia na żywo), Play! (miejsce kart), APK (te sa
 budowania), adaptery pozostałych samodzielnych emulatorów przy pierwszym użyciu, sprawdzenie na żywo (niżej);
 jedno zapytanie przygotowujące grę — po pomiarach kroków z prawdziwych startów.
 
+### Do zrobienia (zgłoszone 2026-11-09)
+
+Stan: zrobione lokalnie (bez wydania): 1, 5, 6, 7, 9, 10, 11. Grafiki grup (2): prompty gotowe, czekają na pliki.
+Zrobione lokalnie: 3 (Family Sharing: klucz Web API dostaje 401, potrzebne logowanie w oknie Steam w Lumenie; bez
+testu na prawdziwej rodzinie), 4 (dodatki: lista w szczegółach, wybór, `GET /v1/gog/games/<pid>/extras/<id>`, pliki w
+`<folder GOG>/_extras/<gra>`, reguła pomijania jak w GOG Managerze). 8 (grafiki): log wolnych
+grafik (`slow … ms` w lumen.log), do zmierzenia na prawdziwej bibliotece.
+Na żywo nie sprawdzono: pasek w szczegółach gry GOG przy prawdziwej instalacji, siatka na pulpicie, pad.
+
+**Zapisy GOG (gałąź `gog-saves`, gotowe lokalnie, bez wydania):** sprawdzenie okna „Zapisy i ustawienia” na żywo,
+test na dwóch komputerach, zgoda na zależność PyYAML (serwer), obsługa rejestru Windows (~62 gry), opis w
+dokumentacji Lumena, wydanie.
+
+**Serwer / biblioteka**
+1. Panel: pokazać liczbę gier z opisami z folderów `<katalog GOG>/<slug>/`, żeby było widać, czy opisy się wczytały.
+2. Grafiki grup i platform bez platformy EmuStart (PC, Steam, GOG, Komputery, Konsole, Arcade, Pozostałe, Kolekcje,
+   Ulubione, Ostatnio grane): serwer ich nie ma, Lumen je obsługuje. Grafiki domyślne — prompt:
+   `D:\GIT\Launcher\docs\ART-PROMPTS.md`.
+3. Steam: pokazywać gry dostępne przez Family Sharing.
+4. Dodatki (extras) GOG: dziś leżą w `<katalog GOG>/<slug>/extras`; serwer ani Lumen ich nie udostępniają.
+
+**Instalacja i zadania**
+5. Brak paska postępu przy instalacji z depotów.
+6. Tryb TV: brak jakiejkolwiek informacji i paska postępu instalacji, dla każdej platformy.
+7. Gra jest i na Steam, i w GOG: przy pobieraniu z GOG interfejs pokazuje też pobieranie Steam. W grupie GOG liczy
+   się tylko GOG.
+
+**Interfejs Lumen**
+8. Blokowanie interfejsu przy wczytywaniu grafik mimo dysku lokalnego (NVMe) — zmierzyć na Twoim Lumenie.
+9. Filtry: „Resetuj filtry” o jedną pozycję wyżej, gdy włączona jest funkcja; „Sortuj” o jedną niżej po włączeniu.
+10. Zawijanie: na końcu listy gier i menu przejście na początek i odwrotnie; przefiltrowana lista z dwiema pozycjami
+    przełącza się między nimi bez końca.
+11. Tryb TV: gdy po filtrowaniu jest mało gier, powielać okładki, żeby wypełnić ekran.
+
+## [0.59.0] — 2026-11-09
+
+Zakres: serwer (reguły zapisów GOG, dodatki GOG, panel, nowa zależność PyYAML), silnik w Lumen (synchronizacja zapisów
+GOG, dodatki). Klient Windows bez Lumena, APK i emulatory bez zmian zachowania.
+
+### Dodane
+- Zapisy i ustawienia gier GOG synchronizowane przez serwer EmuStart (reguły ludusavi-manifest, bez chmury GOG).
+- Dodatki (extras) gier GOG: lista, wybór jak w GOG Managerze, pobieranie z wznawianiem.
+- Panel: liczba opisów gier GOG.
+
+### Plan: synchronizacja zapisów i ustawień gier GOG przez serwer EmuStart (gałąź `gog-saves`)
+
+**Co się zmieni.**
+- *Reguły:* serwer trzyma kopię ludusavi-manifest (MIT, dane z PCGamingWiki), aktualizowaną w tle (ETag, plik
+  tymczasowy, walidacja, poprzednia wersja zostaje), i własne poprawki (`saverules/overrides.json`). Dla gry:
+  `GET /v1/gog/games/<pid>/saverules` — źródło (poprawka serwera / ludusavi / brak / niejednoznaczne), reguły
+  plików i rejestru. Dopasowanie wyłącznie po GOG ID (`gog.id`, potem `id.gogExtra`), nigdy po tytule.
+- *Klient (silnik):* pierwszeństwo reguł: ręczne gracza → poprawka serwera → ludusavi; rozwinięcie ścieżek
+  (katalog instalacji, foldery znane systemu przez SHGetKnownFolderPath), warunki os/store, save/config, zbiory
+  plików ze stałym identyfikatorem; synchronizacja istniejącym mechanizmem (`syncclient`: wersje, konflikty,
+  kopia przed przywróceniem, offline, ponawianie) — platforma `gog`, emulator `gog`, rdzeń = zbiór, rodzaj
+  `saves`/`config` (nowy rodzaj na serwerze). Przed grą: pobranie / konflikt (decyzja gracza); po końcu gry
+  (śledzenie procesów z katalogu gry): wysłanie. Ustawienia — osobna opcja, domyślnie wyłączona.
+- *Rejestr:* w tym etapie tylko status „wymaga obsługi rejestru” (bez synchronizacji wpisów, bez fałszywego
+  komunikatu o pełnej synchronizacji).
+- *Lumen:* w szczegółach gry GOG: rozpoznane lokalizacje, źródło reguł, ścieżki, stan, włączanie zapisów /
+  ustawień, synchronizacja ręczna, ręczne reguły, przywrócenie wcześniejszej wersji; konflikt przy uruchomieniu.
+
+**Czego NIE dotyka.** Instalacja z depotów, uruchamianie gier (poza wywołaniem synchronizacji przed i po grze),
+synchronizacja zapisów gier emulowanych (rodzaje i klucze paczek bez zmian), chmura GOG (żadnych zapytań do GOG).
+
 ## [0.58.0] — 2026-11-09
 
 Zakres: serwer (opisy i grafiki gier GOG), silnik w Lumen (`Api.gog_art`). Klient Windows bez Lumena, APK i emulatory bez zmian.

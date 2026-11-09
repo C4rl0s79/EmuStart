@@ -115,13 +115,78 @@ pliki `setIni` w Dokumentach, wszystko poza katalogiem gry; dowiązania i punkty
 Archiwum na serwerze nie jest dotykane. Cache gier emulowanych (`cache.py`) nie zna gier GOG; katalog gier GOG
 w cache jest odrzucany.
 
+## 3a. Zapisy i ustawienia gier (synchronizacja przez serwer EmuStart)
+
+Bez chmury GOG i bez GOG Galaxy: GOG daje tylko identyfikator gry (productId). Kopie, wersje i konflikty — wyłącznie
+serwer EmuStart, tym samym mechanizmem co zapisy gier emulowanych (`savesync.py` / `syncclient.py`).
+
+**Reguły (co należy do gry i gdzie to jest).** Pierwszeństwo:
+1. ręczne reguły gracza (to urządzenie: `<dane>/gog/saves/<pid>.json`, okno „Zapisy i ustawienia” w Lumen),
+2. poprawka serwera: `<dane serwera>/saverules/overrides.json` — `{"<productId>": {"title": "…", "files":
+   {"<ścieżka>": {"tags": ["save"]}}, "registry": {…}}}` (pola jak w ludusavi-manifest; aktualizacja manifestu
+   ich nie zmienia),
+3. [ludusavi-manifest](https://github.com/mtkennerly/ludusavi-manifest) — licencja MIT, © Matthew T. Kennerly,
+   dane zebrane z PCGamingWiki. Kopia: `<dane serwera>/saverules/manifest.yaml` + indeks gier GOG
+   `gog-index.json` (poprzedni: `gog-index.prev.json`).
+
+Dopasowanie wyłącznie po productId: wpis z `gog.id` == productId, bez takiego — jedyny wpis z productId w
+`id.gogExtra`. Kilka kandydatów → „niejednoznaczne”: gracz wybiera wpis z listy kandydatów (nigdy automatycznie po
+tytule). Brak wpisu → „brak reguł”, gracz może wskazać ścieżkę ręcznie. `goggame-<pid>.info` nie jest źródłem
+lokalizacji zapisów.
+
+**Aktualizacja bazy reguł** (serwer, `saverules.py`): w tle przy starcie serwera (najwyżej raz na tydzień) i przy
+„Odśwież indeks” w panelu (wymusza sprawdzenie). GET z `If-None-Match` (ETag) → plik w pamięci → parsowanie YAML
+(PyYAML) i walidacja → podmiana indeksu; błąd sieci / uszkodzony plik = dalej działa poprzednia kopia. Nigdy przed
+startem gry. Status w panelu: „reguły zapisów: <wersja> (<n> gier GOG)”. API: `GET /v1/gog/games/<pid>/saverules
+[?title=<kandydat>]`. Klient trzyma kopię reguł gry (`<dane>/gog/saverules/<pid>.json`, odświeżaną raz na dobę i
+przy synchronizacji ręcznej) — bez serwera działa na ostatniej znanej wersji.
+
+**Rozwijanie ścieżek** (`gogsaves.py`): `<base>` = katalog instalacji gry na tym komputerze, `<root>` / `<game>` —
+jego rodzic i nazwa, `<home>`, `<winAppData>`, `<winLocalAppData>`, `<winLocalAppDataLow>`, `<winDocuments>`,
+`<winPublic>`, `<winProgramData>`, `<winDir>` — z Windows (`SHGetKnownFolderPath`, także przekierowane Dokumenty,
+np. OneDrive), `<storeUserId>` = `*` (dowolny użytkownik sklepu), `<storeGameId>` = productId, `<osUserName>`.
+Warunki: reguła bez `when` — zawsze; inaczej któryś warunek pasuje do `os` windows / dos (gry DOS przez DOSBox z
+paczki GOG) i `store` gog albo bez sklepu. Tagi: `save` (także bez tagów i z oboma) → zapisy, tylko `config` →
+ustawienia. Ścieżka = wzorzec (`*`, `?`, `**`); folder pasujący do wzorca — w całości. Reguła obejmująca cały folder
+systemu (profil, Dokumenty, AppData, katalog gier…) jest pomijana z powodem.
+
+**Model danych.** Każda reguła = zbiór plików: folder bazowy (stała część ścieżki po rozwinięciu) + wzorzec względny.
+Na serwer idą wyłącznie ścieżki względne wewnątrz zbioru. Klucz paczki: konto (z tokenu, nie z zapytania) + platforma
+`gog` + gra = productId + emulator `gog` + rdzeń = identyfikator zbioru (`s` + skrót szablonu reguły — ten sam na
+każdym urządzeniu) + rodzaj `saves` / `config`. Wersja (revision), SHA-256 paczki i treści, urządzenie, historia (10
+poprzednich wersji na serwerze) — jak w `savesync.py`. Drugi komputer rozwija ten sam szablon do swojej ścieżki.
+
+**Cykl.** Przed grą (`goglib.launch`): reguły → zbiory → `syncclient` (tylko na serwerze → pobranie do pliku
+tymczasowego, SHA-256 i ZIP sprawdzone, limit plików / rozmiaru po rozpakowaniu, kopia zapasowa bieżących plików,
+podmiana plik po pliku przez plik tymczasowy; tylko tutaj → wysłanie; tu i tam → konflikt). Konflikt: gra nie startuje,
+Lumen pyta: wersja z tego urządzenia (serwerowa zostaje w historii serwera) / z serwera (bieżące do kopii zapasowej) /
+na razie bez synchronizacji (konflikt wraca przy następnej grze, po grze nic nie jest wysyłane). Po faktycznym końcu
+gry (żaden proces z katalogu gry — zamknięty launcher nie kończy sesji): ponowny skan i wysłanie zmienionych zbiorów;
+serwer przyjmuje wersję dopiero po pełnym przesłaniu (init → plik → commit z `base_revision`; inna wersja na serwerze
+= 409 → konflikt przy następnej grze). Bez połączenia: zmiana oznaczona jako oczekująca, wysyła ją ponawianie w tle
+albo następna gra. Pusty skan (folder zniknął, dysk odłączony) niczego nie usuwa na serwerze. Synchronizacja ręczna i
+przywrócenie kopii — nie podczas gry.
+
+**Ustawienia gracza** (Lumen → szczegóły gry → „Zapisy…”, w TV: opcje gry → „Zapisy i ustawienia”): synchronizacja
+zapisów (domyślnie włączona), ustawień (osobno, domyślnie wyłączona — bywają zależne od urządzenia), synchronizacja
+teraz, wybór wpisu przy niejednoznacznych regułach, ręczne reguły, przywrócenie kopii zapasowej (bieżące pliki najpierw
+do nowej kopii), lokalizacje rozwiązane na tym komputerze, źródło i wersja reguł, ostatnia synchronizacja, zmiany do
+wysłania.
+
+**Rejestr Windows.** Reguły z wpisami rejestru (u Ciebie ~62 gry z archiwum) są pokazywane jako „wymaga obsługi
+rejestru — wpisy nie są synchronizowane”; pliki tej gry synchronizują się normalnie. Brak importu plików `.reg`.
+
+**Ograniczenia.** Rejestr (wyżej). Zmiana szablonu reguły w nowej wersji manifestu = nowy zbiór (stary zostaje na
+serwerze, bez automatycznej migracji). Wine/Proton — nie dotyczy (klient GOG jest tylko dla Windows). Sloty zapisów
+(jak w grach emulowanych) — nie dla gier GOG.
+
 ## 4. Ograniczenia tej wersji
 
 - **Aktualizacja** zainstalowanej gry do nowego buildu: nieobsługiwana — Lumen pokazuje, że serwer ma nowszy build;
   przycisku „Aktualizuj” nie ma. DLC dogrywa się tylko z tego samego buildu (ten sam hash).
 - Tylko Galaxy content-system v2, Windows (`os: windows`). Gry bez depotów v2 GOG Manager pomija sam.
 - Opisów i grafik archiwum nie ma: opis z bazy LaunchBox (Windows), grafiki ze SteamGridDB po nazwie.
-- Brak synchronizacji zapisów gier PC (świadomie poza zakresem); stany emulatorów nie dotyczą gier GOG.
+- Zapisy gier GOG: synchronizacja przez serwer EmuStart (sekcja 3a); rejestr Windows jeszcze bez synchronizacji.
 - `setRegistry` HKLM wymaga zgody administratora (UAC) — bez obchodzenia. Odinstalowanie nie usuwa wpisów HKLM
   (wymagałoby ponownego UAC).
 - Pełnej instalacji prawdziwej gry nie wykonano (testy: syntetyczne archiwum, prawdziwe archiwum — plan obu gier
