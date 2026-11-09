@@ -67,7 +67,7 @@ gry PC Windows), aktualizacja zainstalowanej gry GOG do nowego buildu (pierwsza 
 | 5 | wznowienie, weryfikacja, odinstalowanie, uruchamianie | `test_gog_install.py` (34: przerwanie/wznowienie, zmieniony build, uszkodzony/brakujący obiekt, miejsce, naprawa, uruchamianie bez serwera, launcher, punkty połączenia, cache) | Lumen + serwer testowy (syntetyczna gra): weryfikacja bez serwera, odinstalowanie (zapisy zostają, HKCU usunięte); uruchomienie prawdziwej gry — nie | czeka na prawdziwą grę |
 | 6 | Lumen: model, biblioteka, zadania, akcje, IPC | Lumen `libraryNav.test.ts`, `gog.test.ts` (233 razem) | klasyfikacja 70 prawdziwych gier Steam/skrótów (odczyt), instalacja przez IPC | zrobione |
 | 7 | Lumen: pulpit i TV | typy + testy | pulpit: PC › Wszystkie/Steam/GOG/Skróty, okno instalacji, szczegóły; TV: grupy → podgrupy → gry, przypięcie Y (klawiatura przez CDP); padem — nie | czeka na sprawdzenie padem |
-| 8 | regresja, dokumentacja | EmuStart 603, silnik w Lumen 640, Lumen 233 | — | zrobione (`docs/GOG.md`) |
+| 8 | regresja, dokumentacja | EmuStart 603, silnik w Lumen 660, Lumen 233 | — | zrobione (`docs/GOG.md`) |
 
 ## [0.56.6] — 2026-11-04
 
