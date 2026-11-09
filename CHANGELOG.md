@@ -28,6 +28,20 @@ jedno zapytanie przygotowujące grę — po pomiarach kroków z prawdziwych star
   Ostatnio grane w obu trybach, przypinanie podgrup, ustawienia GOG (katalog, języki), zadania, akcja główna,
   szczegóły, ręczna klasyfikacja skrótów Steam.
 
+Opis: [docs/GOG.md](docs/GOG.md).
+
+### Dodane (gałąź `gog-library`, bez wydania)
+- **Serwer:** archiwum depotów GOG (panel → Konfiguracja → „Archiwum depotów GOG”, „Odśwież indeks”); `GET
+  /v1/gog/games`, `…/games/<pid>`, `…/builds/<build>/manifest`, `…/chunks/<md5>` — tylko zalogowane urządzenia
+  kont z prawem pobierania gier, tylko kompletne buildy, chunki tylko z przypiętego buildu, bez sekretów
+  (`clientSecret` z meta buildu nie wychodzi z serwera).
+- **Silnik:** instalacja gier GOG z serwera (języki, język główny, DLC z plikami i bez, zależności), wznowienie po
+  restarcie, anulowanie, weryfikacja i naprawa, finalizacja (`supportData`, `setIni`, HKCU; HKLM i biblioteki
+  systemowe tylko jawnie z UAC), uruchamianie bez serwera z wyborem zadania, śledzenie gry po zamknięciu launchera,
+  odinstalowanie tylko plików instalacji. `Api.gog_*`, `Api.platform_catalog`.
+- **Systemy:** rodzina platformy (`systems.family`: komputer / konsola / arcade / pozostałe) w `/v1/systems`
+  i bibliotece silnika.
+
 **Czego NIE dotyka.** Steam (wykrywanie, instalacja, uruchamianie), zapisy i stany emulatorów (gry GOG nie mają
 synchronizacji zapisów), cache ROM-ów (gry GOG są poza nim), istniejące identyfikatory gier, ulubione, kolekcje
 Steam, własne kategorie, grafiki, archiwum GOG na serwerze (tylko odczyt), APK (brak klienta GOG na Androidzie —
@@ -38,11 +52,11 @@ gry PC Windows), aktualizacja zainstalowanej gry GOG do nowego buildu (pierwsza 
 | 1 | analiza archiwum, kontrakt formatu | — | archiwum `D:\GOGInstall\_depots` (2 gry) przeczytane | zrobione |
 | 2 | rodzina platformy w `systems.py`, `/v1/systems` | `test_platform_family.py` (3) | — | zrobione |
 | 3 | indeks GOG + API serwera + panel | `test_gog_server.py` (22) | indeks prawdziwego archiwum: 2 gry, 0 pominiętych, bez sekretów; panel — nie oglądany | testy zrobione |
-| 4 | instalator jednej gry bez UI (pionowy przepływ) | `test_gog_install.py` (pionowy przepływ przez HTTP, języki, DLC, zależności, finalizacja, bufor) | prawdziwe archiwum: plan obu gier, 589 małych plików z prawdziwych chunków zgodnych MD5, 26 wpisów HKCU WC (atrapa rejestru); pełnej gry nie instalowano | testy zrobione, czeka na pełną instalację na żywo |
-| 5 | wznowienie, weryfikacja, odinstalowanie, uruchamianie | `test_gog_install.py` (przerwanie/wznowienie, zmieniony build, uszkodzony/brakujący obiekt, miejsce, naprawa, uruchamianie bez serwera, launcher, punkty połączenia, cache) | — | testy zrobione, czeka na sprawdzenie na żywo |
-| 6 | Lumen: model, biblioteka, zadania, akcje, IPC | | | |
-| 7 | Lumen: pulpit i TV | | | |
-| 8 | regresja, dokumentacja | | | |
+| 4 | instalator jednej gry bez UI (pionowy przepływ) | `test_gog_install.py` (pionowy przepływ przez HTTP, języki, DLC, zależności, finalizacja, bufor) | prawdziwe archiwum: plan obu gier, 589 małych plików z prawdziwych chunków zgodnych MD5, 26 wpisów HKCU WC (atrapa rejestru); pełnej prawdziwej gry nie instalowano | czeka na pełną instalację prawdziwej gry |
+| 5 | wznowienie, weryfikacja, odinstalowanie, uruchamianie | `test_gog_install.py` (34: przerwanie/wznowienie, zmieniony build, uszkodzony/brakujący obiekt, miejsce, naprawa, uruchamianie bez serwera, launcher, punkty połączenia, cache) | Lumen + serwer testowy (syntetyczna gra): weryfikacja bez serwera, odinstalowanie (zapisy zostają, HKCU usunięte); uruchomienie prawdziwej gry — nie | czeka na prawdziwą grę |
+| 6 | Lumen: model, biblioteka, zadania, akcje, IPC | Lumen `libraryNav.test.ts`, `gog.test.ts` (233 razem) | klasyfikacja 70 prawdziwych gier Steam/skrótów (odczyt), instalacja przez IPC | zrobione |
+| 7 | Lumen: pulpit i TV | typy + testy | pulpit: PC › Wszystkie/Steam/GOG/Skróty, okno instalacji, szczegóły; TV: grupy → podgrupy → gry, przypięcie Y (klawiatura przez CDP); padem — nie | czeka na sprawdzenie padem |
+| 8 | regresja, dokumentacja | EmuStart 584, silnik w Lumen 640, Lumen 233 | — | zrobione (`docs/GOG.md`) |
 
 ## [0.56.6] — 2026-11-04
 
