@@ -11,6 +11,12 @@ nowym urządzeniu — do sprawdzenia na żywo), Play! (miejsce kart), APK (te sa
 budowania), adaptery pozostałych samodzielnych emulatorów przy pierwszym użyciu, sprawdzenie na żywo (niżej);
 jedno zapytanie przygotowujące grę — po pomiarach kroków z prawdziwych startów.
 
+## [0.57.0] — 2026-11-09
+
+Zakres: serwer (archiwum depotów GOG, `/v1/gog`, rodzina platformy w `/v1/systems`), klient Windows i Lumen
+(silnik: instalacja gier GOG z serwera, `Api.gog_*`). APK bez zmian (gry GOG to gry PC Windows); emulatory bez zmian.
+Samodzielny interfejs EmuStart nie ma jeszcze ekranu GOG — gry GOG obsługuje Lumen.
+
 ### Plan: biblioteka hierarchiczna i gry GOG z serwera (gałąź `gog-library`, EmuStart + Lumen)
 
 **Co się zmieni.**
