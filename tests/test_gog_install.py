@@ -202,7 +202,7 @@ def test_script_cannot_write_outside(tmp_path):
     (app / "goggame-1.script").write_text(json.dumps({"actions": [{"install": {"action": "setIni", "arguments": {
         "filename": "{app}\\..\\..\\evil.ini", "section": "a", "keyName": "b", "keyValue": "c"}}}]}))
     with pytest.raises(gogfinal.FinalizeError):
-        gogfinal.apply_script(app, "1", hkcu=lambda a: None, docs=tmp_path / "docs")
+        gogfinal.apply_script(app, "1", hkcu=lambda a: None, docs=tmp_path / "docs", folders={})
     assert not (tmp_path / "evil.ini").exists()
 
 
@@ -399,11 +399,11 @@ def test_registry_location_is_app_data(env):
 
 def test_play_task_choice(env, monkeypatch):
     _install(env)
+    (env["games"] / "Testowa Gra" / "Launcher.exe").write_bytes(b"MZ")
     svc = goglib.GogService(lambda: {})
     tasks = svc.play_tasks(PID)["tasks"]
     assert [t["category"] for t in tasks] == ["launcher", "game"]
     assert next(t for t in tasks if t["default"])["category"] == "game"
-    (env["games"] / "Testowa Gra" / "Launcher.exe").write_bytes(b"MZ")
     started = []
 
     class P:
@@ -587,3 +587,119 @@ def test_launch_waits_for_conflict_decision_and_uploads_after_game(env, monkeypa
             break
         time.sleep(0.02)
     assert after == [{seen[0]}] and seen[0][0] == "gog"   # pominięty konflikt nie jest wysyłany
+
+
+def test_support_data_without_source_creates_folder_and_uninstall_removes_it(env):
+    """Al-Qadim: {"target": "{app}/cloud_saves", "type": "folder"} — pusty folder, nie kopia."""
+    env["root"] = env["tmp"] / "_d5"
+    s = json.loads(json.dumps(SCRIPT))
+    s["actions"].append({"install": {"action": "supportData", "arguments": {"target": "{app}/cloud_saves", "type": "folder"}}})
+    build_archive(env["root"], script=s)
+    e, target, _ = _install(env)
+    assert e["state"] == gi.ST_INSTALLED and (target / "cloud_saves").is_dir() and "cloud_saves" in e["dirs"]
+    assert gi.uninstall(PID, remove_hkcu=lambda a: None)["dir_removed"]
+
+
+def test_support_data_without_source_cannot_leave_game_folder(tmp_path):
+    app = tmp_path / "g"
+    app.mkdir()
+    for args in ({"target": "{app}/../../poza", "type": "folder"}, {"target": "{app}/plik", "type": "file"}, {"type": "folder"}):
+        (app / "goggame-1.script").write_text(json.dumps({"actions": [{"install": {"action": "supportData", "arguments": args}}]}))
+        with pytest.raises(gogfinal.FinalizeError):
+            gogfinal.apply_script(app, "1", hkcu=lambda a: None, docs=tmp_path / "docs", folders={})
+    assert not (tmp_path / "poza").exists()
+
+
+def test_product_id_symbol_in_registry(tmp_path):
+    a = gogfinal.registry_action({"root": "HKEY_LOCAL_MACHINE", "subkey": "Software\\GOG.com\\Games\\{productID}",
+                                  "valueName": "DOSBOXFOLDER", "valueData": "{app}\\DOSBox", "valueType": "String"}, tmp_path, "1441096843")
+    assert a["subkey"] == "Software\\GOG.com\\Games\\1441096843" and a["data"] == f"{tmp_path}\\DOSBox" and a["type"] == "string"
+    with pytest.raises(gogfinal.FinalizeError):
+        gogfinal.registry_action({"root": "HKEY_CURRENT_USER", "subkey": "Software\\{cokolwiek}", "valueName": "a", "valueData": "b"}, tmp_path, "1")
+
+
+def test_retry_after_failed_finalize_still_owns_copied_files(env):
+    env["root"] = env["tmp"] / "_d6"
+    s = {"actions": [SCRIPT["actions"][0], {"install": {"action": "cokolwiek"}},
+                     {"install": {"action": "supportData", "arguments": {"type": "file", "source": "{app}\\nie_ma.conf", "target": "{app}"}}}]}
+    build_archive(env["root"], script=s)
+    with pytest.raises(gi.GogError, match="Finalizacja"):
+        _install(env)
+    target = env["games"] / "Testowa Gra"
+    assert (target / "dosbox.conf").exists()                 # skopiowany przed błędem
+    (target / "nie_ma.conf").write_text("x")
+    e = gi.resume(FakeServer(env["root"]), PID)
+    assert e["state"] == gi.ST_INSTALLED and str(target / "dosbox.conf") in e["created_files"]
+
+
+def test_inno_setup_forms_found_in_real_scripts(tmp_path):
+    """z prawdziwych skryptów archiwum: $hex, {drive:…}, {userappdata}, {commonappdata}, wpisy deinstalatora, folder w Dokumentach"""
+    app = tmp_path / "C" / "g"
+    app.mkdir(parents=True)
+    (app / "x.dat").write_bytes(b"1")
+    f = {"winAppData": str(tmp_path / "AD"), "winProgramData": str(tmp_path / "PD"), "winLocalAppData": str(tmp_path / "LA")}
+    reg = lambda t, n, d, sub="Software\\X": {"install": {"action": "setRegistry", "arguments": {
+        "root": "HKEY_CURRENT_USER", "subkey": sub, "valueName": n, "valueData": d, "valueType": t}}}
+    seen = []
+    (app / "goggame-1.script").write_text(json.dumps({"actions": [
+        reg("dword", "a", "$00000009"), reg("string", "b", "{drive:{app}}\\"), reg("string", "c", "{uninstallexe}", "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{BBF10B37-4ED3}"),
+        {"install": {"action": "supportData", "arguments": {"target": "{userdocs}/My Games/X", "type": "folder"}}},
+        {"install": {"action": "supportData", "arguments": {"source": "{app}/x.dat", "target": "{userappdata}/Gra/x.dat", "type": "file"}}},
+        {"install": {"action": "supportData", "arguments": {"target": "{commonappdata}/GraData", "type": "folder"}}}]}))
+    r = gogfinal.apply_script(app, "1", hkcu=seen.append, docs=tmp_path / "docs", folders=f)
+    assert [a["name"] for a in seen] == ["a", "b"] and seen[0]["data"] == "9" and seen[1]["data"].endswith(":\\") or seen[1]["data"] == "\\"
+    assert "wpis deinstalatora w rejestrze" in r["skipped"]
+    assert (tmp_path / "docs" / "My Games" / "X").is_dir() and (tmp_path / "AD" / "Gra" / "x.dat").is_file() and (tmp_path / "PD" / "GraData").is_dir()
+    (app / "goggame-1.script").write_text(json.dumps({"actions": [
+        {"install": {"action": "supportData", "arguments": {"source": "{app}/x.dat", "target": "{userappdata}/../../poza.dat", "type": "file"}}}]}))
+    with pytest.raises(gogfinal.FinalizeError):
+        gogfinal.apply_script(app, "1", hkcu=seen.append, docs=tmp_path / "docs", folders=f)
+
+
+def _app_with_info(tmp_path, tasks, files):
+    app = tmp_path / "g"
+    for f in files:
+        (app / f).parent.mkdir(parents=True, exist_ok=True)
+        (app / f).write_bytes(b"x")
+    (app / "goggame-1.info").write_text(json.dumps({"playTasks": tasks}))
+    return app
+
+
+def test_dosbox_without_working_dir_starts_where_its_conf_files_are(tmp_path):
+    """CyClones i inne: -conf cyclones-base.conf bez workingDir, pliki .conf w głównym folderze gry"""
+    t = [{"path": "DOSBOX/dosbox.exe", "arguments": "-noconsole -conf c-base.conf -conf c-game.conf", "category": "game", "isPrimary": True}]
+    app = _app_with_info(tmp_path, t, ["DOSBOX/dosbox.exe", "c-base.conf", "c-game.conf"])
+    assert gogfinal.launch_spec(app, "1")["cwd"] == str(app)
+    app2 = _app_with_info(tmp_path / "b", [{"path": "DOSBOX/dosbox.exe", "arguments": '-conf "..\\c.conf"', "workingDir": "DOSBOX", "category": "game"}], ["DOSBOX/dosbox.exe", "c.conf"])
+    assert gogfinal.launch_spec(app2, "1")["cwd"].endswith("DOSBOX")      # z workingDir — jak w opisie
+    app3 = _app_with_info(tmp_path / "c", [{"path": "bin/game.exe", "category": "game"}], ["bin/game.exe"])
+    assert gogfinal.launch_spec(app3, "1")["cwd"].endswith("bin")         # zwykła gra bez zmian
+
+
+def test_hidden_or_missing_tasks_are_not_started_by_default(tmp_path):
+    t = [{"path": "Show.exe", "category": "launcher", "isPrimary": True},
+         {"path": "Art/Win64/Show.exe", "category": "game", "isHidden": True},
+         {"path": "Safe.exe", "category": "launcher"}]
+    app = _app_with_info(tmp_path, t, ["Show.exe"])
+    assert gogfinal.launch_spec(app, "1")["exe"].endswith("Show.exe") and "Win64" not in gogfinal.launch_spec(app, "1")["exe"]
+    assert [x["name"] for x in gogfinal.play_tasks(app, "1")] and len(gogfinal.play_tasks(app, "1")) == 1
+
+
+def test_more_script_forms_from_the_archive(tmp_path):
+    a = gogfinal.registry_action({"root": "HKEY_CURRENT_USER", "subkey": "SOFTWARE\\1C\\{{137D91E1-2347-4EAC-BB0B-CC06C6B92A52}", "valueName": "x",
+                                  "valueData": "{685BC400-9D2C-11cf-A9CD-00AA006886E3}"}, tmp_path, "1")
+    assert a["subkey"].endswith("{137D91E1-2347-4EAC-BB0B-CC06C6B92A52}") and a["data"].startswith("{685BC400")
+    b = gogfinal.registry_action({"root": "HKEY_CURRENT_USER", "subkey": "Software\\X", "valueName": "b", "valueData": "CYoJScNIBs==", "valueType": "binary"}, tmp_path, "1")
+    assert gogfinal._binary(b["data"])
+    assert gogfinal.registry_action({"root": "HKEY_CURRENT_USER", "subkey": "Software\\X", "valueName": "u", "valueData": "{username}"}, tmp_path, "1")["data"]
+    app = tmp_path / "g"
+    (app / "app").mkdir(parents=True)
+    (app / "app" / "renderer.ini").write_text("r")
+    (app / "goggame-1.script").write_text(json.dumps({"actions": [{"install": {"action": "supportData", "arguments": {"source": "{supportDir}/add/renderer.ini", "target": "{app}", "type": "file"}}}]}))
+    gogfinal.apply_script(app, "1", hkcu=lambda a: None, docs=tmp_path / "d", folders={})
+    assert (app / "renderer.ini").read_text() == "r"
+
+
+def test_guid_without_dashes_in_registry_key(tmp_path):
+    k = "SOFTWARE\\Microsoft\\DirectPlay\\Services\\{5146ab8cb6b1ce11920c00aa006c4972}"
+    assert gogfinal.registry_action({"root": "HKEY_CURRENT_USER", "subkey": k, "valueName": "a", "valueData": "b"}, tmp_path, "1")["subkey"] == k

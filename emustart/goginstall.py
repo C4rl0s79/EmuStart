@@ -752,12 +752,14 @@ def finalize(e: dict, plan: dict, bundle: dict, dlc_only: bool = False, hkcu=Non
                 info.write_text(json.dumps({"gameId": did, "rootGameId": pid, "name": names.get(did, did),
                                             "buildId": e["build_id"], "playTasks": []}, indent=2), encoding="utf-8")
                 e.setdefault("created_files", []).append(str(info))
-        fin = {"done": [], "admin": [], "skipped": [], "saves": [], "created": [], "hkcu": []}
+        fin = {"done": [], "admin": [], "skipped": [], "saves": [], "created": [], "hkcu": [], "dirs": []}
+        known = {str(p).lower() for p, _s in e.get("files") or []} | {f["path"].lower() for f in plan["files"]}
         for prod in ([pid] if not dlc_only else []) + list(plan["dlcs"]):
-            r = gogfinal.apply_script(root, prod, **({"hkcu": hkcu} if hkcu else {}))
+            r = gogfinal.apply_script(root, prod, known=known, **({"hkcu": hkcu} if hkcu else {}))
             for k in fin:
                 fin[k] += r[k]
-        e.setdefault("created_files", []).extend(fin.pop("created"))
+        e["created_files"] = sorted(set(e.get("created_files") or []) | set(fin.pop("created")))
+        e["dirs"] = sorted(set(e.get("dirs") or []) | set(fin.pop("dirs")))
         if not dlc_only:
             if not (root / f"goggame-{pid}.info").exists():
                 raise gogfinal.FinalizeError(f"build nie ma goggame-{pid}.info — brak opisu uruchamiania")
