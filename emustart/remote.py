@@ -281,7 +281,9 @@ def handle(handler) -> None:
     parts = [p for p in path.split("/") if p][1:]           # bez „v1”
     try:
         if parts == ["info"]:
-            feats = ["find", "system", "bios", "media", "library", "emulators", "savesync", "saveslots", "lock"] + (["nas", "savemgr", "profiles"] if NAS_ROOT else [])
+            from emustart import gogarchive
+            feats = ["find", "system", "bios", "media", "library", "emulators", "savesync", "saveslots", "lock"] + (["nas", "savemgr", "profiles"] if NAS_ROOT else []) \
+                + (["gog"] if gogarchive.INDEX["builds"] else [])
             return _json(handler, {"name": socket.gethostname(), "version": __version__, "api": 1,
                                    "features": feats + ["admin"], "nas_id": NAS_ID, "endpoints": endpoints(),
                                    "admin": _admin(handler),
@@ -329,7 +331,8 @@ def handle(handler) -> None:
                 d = {k: s_.get(k) for k in ("es", "display", "games", "logo", "logo_glow", "logo_pixel", "kind")}
                 plat = systems.info(s_["es"])["plat"]
                 d["plat"] = plat
-                sc = (API._cfg.get("systems") or {}).get(s_["es"]) or {}
+                d["family"] = systems.family(s_["es"])         # computer / console / arcade / other
+                sc =(API._cfg.get("systems") or {}).get(s_["es"]) or {}
                 # rdzeń RetroArcha (Android: *_libretro_android.so) — ten, którego używa komputer, gdy go zgłosił
                 d["core"] = sc.get("core_rec") or emucatalog.CORES.get(plat, "")
                 d["emu_rec"] = sc.get("emu_rec", "")
@@ -373,6 +376,8 @@ def handle(handler) -> None:
             return _json(handler, {"error": "To konto nie pobiera gier z serwera."}, 403)
         if len(parts) >= 4 and parts[0] == "games" and parts[1].isdigit() and parts[2] == "file":
             return _send_file(handler, int(parts[1]), "/".join(parts[3:]))
+        if parts and parts[0] == "gog":
+            return _gog(handler, parts[1:])
         return _json(handler, {"error": "nieznany adres"}, 404)
     except (BrokenPipeError, ConnectionResetError):
         pass
@@ -1128,6 +1133,50 @@ def _emulators_get(handler, parts: list) -> None:
         if p:
             return _send_path(handler, p)
     return _json(handler, {"error": "nie ma takiej wersji emulatora"}, 404)
+
+
+def _gog(handler, p: list) -> None:
+    """Gry GOG z archiwum depotów serwera (emustart/gogarchive.py) — tylko odczyt, tylko dla kont z prawem
+    pobierania gier.
+
+        GET gog/games                                lista gier z kompletnym archiwum (buildy, języki, DLC)
+        GET gog/games/<pid>                          jedna gra
+        GET gog/games/<pid>/builds/<build>/manifest  rekord + meta (bez sekretów) + manifesty, z hashem buildu
+        GET gog/chunks/<md5>?pid=&build=&hash=       skompresowany chunk przypiętego buildu"""
+    from emustart import gogarchive as ga
+    if not _games_ok(handler):
+        return _json(handler, {"error": "To konto nie pobiera gier z serwera."}, 403)
+    q = {k: (v or [""])[0] for k, v in urllib.parse.parse_qs(urllib.parse.urlsplit(handler.path).query).items()}
+    pid_ok = lambda s: bool(ga.PRODUCT_ID.match(s or ""))          # noqa: E731
+    try:
+        if p == ["games"]:
+            return _json(handler, {"games": ga.catalog(), "indexed": ga.INDEX["built"]})
+        if len(p) == 2 and p[0] == "games" and pid_ok(p[1]):
+            g = ga.game(p[1])
+            return _json(handler, g) if g else _json(handler, {"error": "nie ma takiej gry GOG"}, 404)
+        if len(p) == 5 and p[0] == "games" and pid_ok(p[1]) and p[2] == "builds" and ga.BUILD_ID.match(p[3]) \
+                and p[4] == "manifest":
+            return _json(handler, ga.build_manifest(p[1], p[3]))
+        if len(p) == 2 and p[0] == "chunks" and ga.HEX32.match(p[1].lower()) and pid_ok(q.get("pid", "")) \
+                and ga.BUILD_ID.match(q.get("build", "")) and re.match(r"^[0-9a-f]{64}$", q.get("hash", "")):
+            data = ga.chunk_bytes(q["pid"], q["build"], q["hash"], p[1])
+            handler.send_response(200)
+            handler.send_header("Content-Type", "application/octet-stream")
+            handler.send_header("Content-Length", str(len(data)))
+            handler.send_header("Cache-Control", "no-store")
+            handler.end_headers()
+            handler.wfile.write(data)
+            from emustart import srvadmin
+            e = ga.INDEX["builds"].get((q["pid"], q["build"])) or {}
+            srvadmin.sent(handler.client_address[0], -(int(q["pid"]) % 10**9), f"GOG: {e.get('title') or q['pid']}", len(data))
+            return None
+        return _json(handler, {"error": "nieznany adres"}, 404)
+    except ga.Changed as ex:
+        return _json(handler, {"error": str(ex), "changed": True}, 409)
+    except FileNotFoundError:
+        return _json(handler, {"error": "obiekt zniknął z archiwum serwera", "changed": True}, 409)
+    except ga.ArchiveError as ex:
+        return _json(handler, {"error": str(ex)}, 404)
 
 
 def _send_file(handler, gid: int, rel: str) -> None:

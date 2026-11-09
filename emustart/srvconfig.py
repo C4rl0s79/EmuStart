@@ -36,6 +36,10 @@ FIELDS = {
                       "Własne logo systemów do wyboru (np. platform_logos z PyLinks) — dodatkowo do motywów "
                       "z internetu. Serwer wczytuje paczkę do jednego pliku (media/_logopack.media); "
                       "folder może potem zniknąć."),
+    "gog_depots_dir": ("Archiwum depotów GOG (opcjonalnie)", "dir", True,
+                       "Folder _depots z GOG Managera (archive.json, chunks, manifests, products). Serwer tylko "
+                       "czyta archiwum i udostępnia kompletne buildy zalogowanym urządzeniom — nie łączy się z GOG "
+                       "i niczego nie pobiera. Zapisz ponownie, aby odświeżyć indeks."),
     "backup_dir": ("Folder kopii kont", "dir", True,
                    "Kopie zapasowe kont (ZIP). Pusty — folder backup w katalogu serwera."),
     "mame_exe": ("MAME (opcjonalnie)", "file", True,
@@ -85,6 +89,8 @@ def _status(key: str, value: str) -> dict:
             return {"ok": True, "text": f"plików: {n}"}
         if key == "logo_pack_dir":
             return _pack_status()
+        if key == "gog_depots_dir":
+            return gog_status()
         if key == "emu_root":
             ra = any((p / d / "retroarch.exe").is_file() for d in ("", "RetroArch", "retroarch")) or \
                 any(p.glob("*/retroarch.exe"))
@@ -109,6 +115,21 @@ def _pack_status(empty: str = "") -> dict:
     if imp["error"]:
         return {"ok": False, "text": f"{imp['error']} (logo w magazynie: {n})"}
     return {"ok": True, "text": f"logo w magazynie: {n}" if n or not empty else empty}
+
+
+def gog_status() -> dict:
+    """Archiwum GOG: indeksowanie w toku, błąd albo liczba udostępnianych gier i pominiętych buildów (z powodem)."""
+    from emustart import gogarchive
+    st = gogarchive.status()
+    if st["running"]:
+        return {"ok": True, "text": f"indeksuję archiwum GOG: {st['done']} / {st['total'] or '…'}", "busy": True}
+    if st["error"]:
+        return {"ok": False, "text": st["error"]}
+    text = f"gry GOG: {st['games']} (buildów: {st['builds']})"
+    if st["rejected"]:
+        why = "; ".join(f"{r.get('title') or r.get('product_id')}: {r.get('reason')}" for r in st["rejected"][:3])
+        text += f" · pominięte: {len(st['rejected'])} — {why}" + (" …" if len(st["rejected"]) > 3 else "")
+    return {"ok": True, "text": text}
 
 
 def _mapped(value: str) -> bool:
@@ -174,7 +195,7 @@ def set_value(api, key: str, value) -> dict:
         cfg[key] = v
     config.save(cfg)
     log.info("panel: %s = %s", key, cfg.get(key))
-    if changed or key == "logo_pack_dir":            # ta sama ścieżka paczki — wczytaj ponownie
+    if changed or key in ("logo_pack_dir", "gog_depots_dir"):   # ta sama ścieżka — wczytaj / zindeksuj ponownie
         _apply(api, key)
     return {"ok": True, **get(cfg)}
 
@@ -185,6 +206,12 @@ def _apply(api, key: str) -> None:
     elif key == "profiles_nas":
         from emustart import remote
         remote.init_nas(api._cfg)
+    elif key == "gog_depots_dir":
+        from emustart import gogarchive
+        if api._cfg.get("gog_depots_dir"):
+            gogarchive.refresh(api._cfg["gog_depots_dir"])
+        else:
+            gogarchive.INDEX.update(root="", builds={}, rejected=[], error="")   # nic nie udostępniamy
     elif key == "logo_pack_dir" and api._cfg.get("logo_pack_dir"):
         if logos_import()["running"]:
             return

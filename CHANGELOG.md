@@ -11,6 +11,39 @@ nowym urządzeniu — do sprawdzenia na żywo), Play! (miejsce kart), APK (te sa
 budowania), adaptery pozostałych samodzielnych emulatorów przy pierwszym użyciu, sprawdzenie na żywo (niżej);
 jedno zapytanie przygotowujące grę — po pomiarach kroków z prawdziwych startów.
 
+### Plan: biblioteka hierarchiczna i gry GOG z serwera (gałąź `gog-library`, EmuStart + Lumen)
+
+**Co się zmieni.**
+- *Serwer:* nowe ustawienie w panelu „Archiwum depotów GOG” (`gog_depots_dir`) + „Odśwież indeks”; indeks
+  istniejącego archiwum `goggui-depot-archive` v1 (tworzy je GOG Manager, `D:\GIT\GogGui\depot_archive.py`) — tylko
+  odczyt, odtwarzalny; autoryzowane `GET /v1/gog/…` (lista, szczegóły, manifest buildu przypięty hashem, chunki
+  wyłącznie z przypiętego buildu). Serwer nie łączy się z GOG.
+- *Silnik (klient Windows / Lumen):* instalator GOG z serwera (`emustart/gog*.py`): plan → chunk z serwera →
+  MD5 → dekompresja → zapis wprost do katalogu gry → weryfikacja → finalizacja (`supportData`, `setIni`, rejestr
+  HKCU; HKLM tylko jawnie, z UAC) → rejestr instalacji. Wznowienie, anulowanie, weryfikacja, uruchamianie bez
+  serwera, odinstalowanie tylko plików z manifestu. Metody `gog_*` w `Api`.
+- *Systemy:* rodzina platformy (`pc` / `computer` / `console` / `arcade` / `other`) w katalogu `systems.py`,
+  podawana w `/v1/systems` i bibliotece Lumen.
+- *Lumen:* źródło `gog`, hierarchia PC / Komputery / Konsole / Arcade / Pozostałe / Kolekcje / Ulubione /
+  Ostatnio grane w obu trybach, przypinanie podgrup, ustawienia GOG (katalog, języki), zadania, akcja główna,
+  szczegóły, ręczna klasyfikacja skrótów Steam.
+
+**Czego NIE dotyka.** Steam (wykrywanie, instalacja, uruchamianie), zapisy i stany emulatorów (gry GOG nie mają
+synchronizacji zapisów), cache ROM-ów (gry GOG są poza nim), istniejące identyfikatory gier, ulubione, kolekcje
+Steam, własne kategorie, grafiki, archiwum GOG na serwerze (tylko odczyt), APK (brak klienta GOG na Androidzie —
+gry PC Windows), aktualizacja zainstalowanej gry GOG do nowego buildu (pierwsza wersja: uczciwy komunikat).
+
+| Etap | Zakres | Testy (fixture'y) | Na żywo | Stan |
+|---|---|---|---|---|
+| 1 | analiza archiwum, kontrakt formatu | — | archiwum `D:\GOGInstall\_depots` (2 gry) przeczytane | zrobione |
+| 2 | rodzina platformy w `systems.py`, `/v1/systems` | `test_platform_family.py` (3) | — | zrobione |
+| 3 | indeks GOG + API serwera + panel | `test_gog_server.py` (22) | indeks prawdziwego archiwum: 2 gry, 0 pominiętych, bez sekretów; panel — nie oglądany | testy zrobione |
+| 4 | instalator jednej gry bez UI (pionowy przepływ) | | | |
+| 5 | wznowienie, weryfikacja, odinstalowanie, uruchamianie | | | |
+| 6 | Lumen: model, biblioteka, zadania, akcje, IPC | | | |
+| 7 | Lumen: pulpit i TV | | | |
+| 8 | regresja, dokumentacja | | | |
+
 ## [0.56.6] — 2026-11-04
 
 Zakres: klient Windows i Lumen (skróty pada w grze, `hotkey.py`, `xinput.py`, `hidpad.py`, `ingame.Dolphin`). Serwer

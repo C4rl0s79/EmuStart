@@ -539,13 +539,20 @@ function renderConfig() {
     }
     return `<div class="field"><b>${esc(f.label)}</b><div class="muted">${esc(f.hint)}</div>` +
       `<div class="row"><input value="${esc(f.value)}" data-f="${i}" placeholder="${f.optional ? "(puste)" : ""}">${pick}` +
-      `<button class="primary" data-save="${i}">Zapisz</button></div><div>${stHtml(f.status)}</div></div>`;
+      `<button class="primary" data-save="${i}">Zapisz</button>` +
+      (f.key === "gog_depots_dir" && f.value ? `<button data-reindex="${i}">Odśwież indeks</button>` : "") +
+      `</div><div>${stHtml(f.status)}</div></div>`;
   }).join("");
   const box = $("cfgFields");
   const values = (i) => [...box.querySelectorAll(`input[data-f="${i}"]`)].map((x) => x.value.trim());
   box.querySelectorAll("[data-save]").forEach((b) => b.addEventListener("click", () => {
     const i = +b.dataset.save, f = cfgFields[i];
     saveField(f, f.kind === "dirs" ? values(i).filter(Boolean) : values(i)[0]);
+  }));
+  // archiwum GOG: ponowny odczyt archiwum (nowe / usunięte buildy z GOG Managera) — zapisana ścieżka bez zmian
+  box.querySelectorAll("[data-reindex]").forEach((b) => b.addEventListener("click", () => {
+    const f = cfgFields[+b.dataset.reindex];
+    saveField(f, f.value);
   }));
   box.querySelectorAll("[data-pick],[data-add]").forEach((b) => b.addEventListener("click", async () => {
     const i = +(b.dataset.pick ?? b.dataset.add), f = cfgFields[i];

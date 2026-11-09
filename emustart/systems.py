@@ -132,6 +132,26 @@ def info(es_name: str) -> dict:
             "libretro": es_name, "exts": "", "kind": "mixed"}
 
 
+# Rodzina platformy (nawigacja Lumen: PC / Komputery / Konsole / Arcade / Pozostałe) — jawna mapa, nie zgadywanie
+# z nazwy. Konsole przenośne (Game Boy, PSP, Lynx…) należą do konsol. Nieznany folder → „other” (Pozostałe —
+# widoczny, nie ukryty). Rodzina „pc” jest dla gier PC (Steam, GOG), nie dla systemów emulowanych.
+FAMILIES = ("pc", "computer", "console", "arcade", "other")
+_COMPUTERS = {"amiga", "amigawhdgames", "amigawhddemos", "c64", "vic20", "plus4", "zxspectrum", "msx", "msx2",
+              "atari800", "atarist", "pc88", "pc98"}
+
+
+def family(es_name: str) -> str:
+    """Rodzina systemu: computer | console | arcade | other (nieznany folder)."""
+    key = es_name if es_name in SYSTEMS else _LOWER_KEY.get(es_name.lower(), "")
+    if not key:
+        return "other"
+    if key.lower() in _COMPUTERS:
+        return "computer"
+    if SYSTEMS[key]["kind"] == "arcade":
+        return "arcade"
+    return "console"
+
+
 def _plat_guess(name: str) -> str:
     return re.sub(r"[^A-Z0-9]+", "", name.upper())[:16]
 
@@ -327,3 +347,4 @@ COMPUTER_PLATS = {"AMIGA", "C64", "VIC20", "PLUS4", "MSX", "MSX2", "ATARIST", "A
 
 
 _LOWER.update({k.lower(): v for k, v in SYSTEMS.items()})
+_LOWER_KEY = {k.lower(): k for k in SYSTEMS}

@@ -414,11 +414,17 @@ class Api:
                         "cached": s["cached"], "logo": lg["url"], "logo_glow": lg["glow"],
                         "logo_pixel": int(lg.get("pixel") or 0),
                         "console": cn["url"], "console_credit": cn["credit"], "console_lum": cn["lum"],
-                        "emulator": emu.get("label", ""), "kind": systems.info(s["es"])["kind"]})
+                        "emulator": emu.get("label", ""), "kind": systems.info(s["es"])["kind"],
+                        "family": systems.family(s["es"]), "plat": systems.info(s["es"])["plat"]})
         return out
 
     def list_games(self, es: str) -> list:
         return catalog.list_games(self._cfg, es, self._profile)
+
+    def platform_catalog(self) -> list:
+        """Wszystkie znane systemy z rodziną platformy (Lumen: klasyfikacja skrótów Steam po oznaczeniach)."""
+        return [{"es": es, "display": s["display"], "plat": s["plat"], "family": systems.family(es)}
+                for es, s in systems.SYSTEMS.items()]
 
     def request_art(self, game_ids: list, logo: bool = False) -> None:
         if logo and game_ids:
