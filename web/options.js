@@ -128,6 +128,15 @@ function variantItem() {
   return [{ label: "Wersja", value: det.variant ? det.variant_label : `oryginał · ${det.variants.length} ${plural(det.variants.length, "inna wersja", "inne wersje", "innych wersji")}`,
     act: () => goPage("variants") }];
 }
+/** Każdy użytkownik: własna okładka, zrzut i logo — tylko dla niego; domyślne grafiki z serwera zostają. */
+function ownArtItems() {
+  if (S.platform === "android") return [];
+  return [
+    { label: "Moja okładka", value: "z serwera albo z sieci", act: () => openArtPicker("box", "", true) },
+    { label: "Mój zrzut ekranu", value: "z serwera albo z sieci", act: () => openArtPicker("snap", "", true) },
+    { label: "Moje logo gry", value: "z serwera albo z sieci", act: () => openArtPicker("logo", "", true) },
+  ];
+}
 /** Administrator: grafiki i opis gry — zapis na serwerze, widoczny na wszystkich urządzeniach. */
 function adminItems() {
   if (!S.state?.admin) return [];
@@ -173,6 +182,7 @@ function goptItems() {
     syncItem(d),
     { label: "Zapisy i stany", value: "z komputera i telefonu", act: openSaveManager },
     { label: "Metadane i opis", value: [det.meta.developer, det.meta.year].filter(Boolean).join(" · "), act: () => goPage("meta") },
+    ...ownArtItems(),
     ...adminItems(),
     { label: g.pinned ? "Odepnij (pozwól usunąć z dysku)" : "Przypnij (trzymaj na dysku)", act: async () => { await togglePin(); closeGopt(); } },
     ...removeItem(),
@@ -562,11 +572,11 @@ function trashItems() {
 }
 
 /* ── wybór grafiki ── */
-async function openArtPicker(kind, query = "") {
-  GO.art = { kind, query, list: null, idx: 0 };
+async function openArtPicker(kind, query = "", own = false) {
+  GO.art = { kind, query, list: null, idx: 0, own };
   GO.page = "art";
   renderGopt();
-  const list = await api().art_candidates(GO.id, kind, query);
+  const list = await (own ? api().art_own_list(GO.id, kind, query) : api().art_candidates(GO.id, kind, query));
   if (GO.page !== "art" || GO.art.kind !== kind) return;
   GO.art.list = list;
   renderGopt();
@@ -593,7 +603,7 @@ function renderArtPicker() {
     renderArtPicker();
   }, { once: true }));
   grid.querySelector("figure.sel")?.scrollIntoView({ block: "nearest" });
-  setHints([["a", "Wybierz"], ["x", "Szukaj inną nazwą"], ["y", "Usuń grafikę"], ["b", "Wstecz"]], $("goHints"));
+  setHints([["a", "Wybierz"], ["x", "Szukaj inną nazwą"], ["y", A_.own ? "Przywróć domyślną" : "Usuń grafikę"], ["b", "Wstecz"]], $("goHints"));
 }
 function artCols() {
   return gridCols($("goArtGrid"));
@@ -601,7 +611,14 @@ function artCols() {
 async function artPickInput(a) {
   const A_ = GO.art, n = (A_.list || []).length, cols = artCols();
   if (a === "b") return goPage("main");
-  if (a === "x") return oskOpen("Szukaj grafiki", A_.query || (S.games[S.gameIdx]?.title || ""), (q) => openArtPicker(A_.kind, q));
+  if (a === "x") return oskOpen("Szukaj grafiki", A_.query || (S.games[S.gameIdx]?.title || ""), (q) => openArtPicker(A_.kind, q, A_.own));
+  if (a === "y" && A_.own) {
+    const r = await api().art_own_clear(GO.id, A_.kind);
+    if (!r.ok) return toast(r.reason);
+    const g = S.games.find((x) => x.id === GO.id);
+    if (g) g[A_.kind] = r.url;
+    toast("Przywrócono grafikę domyślną."); schedulePreview(); return goPage("main");
+  }
   if (a === "y") {
     await api().art_clear(GO.id, A_.kind);
     const g = S.games.find((x) => x.id === GO.id);
@@ -616,7 +633,7 @@ async function artPickInput(a) {
   else if (a === "a") {
     const c = A_.list[A_.idx];
     toast("Pobieram grafikę…");
-    const r = await api().art_choose(GO.id, A_.kind, c.url);
+    const r = await (A_.own ? api().art_own_choose(GO.id, A_.kind, c.url, c.sha || "", c.ext || "") : api().art_choose(GO.id, A_.kind, c.url));
     if (!r.ok) return toast(r.reason);
     const g = S.games.find((x) => x.id === GO.id);
     if (g) g[A_.kind] = r.url;

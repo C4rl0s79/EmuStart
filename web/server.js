@@ -507,6 +507,14 @@ $("bKeys").addEventListener("click", async () => {
   ["kSgdb", "kIgdbId", "kIgdbSecret", "kTgdb"].forEach((id) => { $(id).value = ""; });
   refreshArt();
 });
+async function importArtKeys(args) {
+  const r = await admin("art_keys_import", args).catch(() => null);
+  artMsg(r?.ok ? `Zaimportowano klucze serwera (${r.count}).` : r?.reason || "Serwer nie odpowiada.", !!r?.ok);
+  $("kFilePw").value = "";
+  refreshArt();
+}
+$("bKeysFile").addEventListener("click", () => importArtKeys({ path: $("kFilePath").value, password: $("kFilePw").value }));
+$("bKeysPy").addEventListener("click", () => importArtKeys({ source: "pylinks" }));
 document.querySelectorAll("#tabs button").forEach((b) => b.addEventListener("click", () => showTab(b.dataset.tab)));
 
 /* ── konfiguracja: foldery (emustart/srvconfig.py) ── */

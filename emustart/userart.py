@@ -26,6 +26,10 @@ from emustart import paths
 MAX_FILE = 40 << 20
 MAX_UPLOADS = 5000                     # na konto
 MAX_ITEMS = 20000                      # wyborów na konto / w jednym zapytaniu
+MAX_ALL = 300                          # galeria całego serwera
+# źródła grafik wybieranych kluczami użytkownika i z sieci (klient Windows, Lumen)
+WEB_HOSTS = ("https://images.igdb.com/", "https://cdn.thegamesdb.net/", "https://cdn2.steamgriddb.com/",
+             "https://images.launchbox-app.com/", "https://thumbnails.libretro.com/")
 SHA = re.compile(r"^[0-9a-f]{64}$")
 GAME = re.compile(r"^[A-Za-z0-9:_./-]{1,200}$")
 KINDS = ("grid", "hero", "logo", "icon")
@@ -119,16 +123,20 @@ def remove(account: str, game: str, kind: str, sha: str) -> dict:
 
 
 def gallery(account: str, game: str, kind: str) -> dict:
-    """Grafiki wgrane dla tej gry i rodzaju przez wszystkie konta; własne pierwsze."""
-    _check(game, kind)
+    """Grafiki danego rodzaju wgrane przez wszystkie konta, dla tej gry; bez `game` — cały serwer (najnowsze, najwyżej
+    MAX_ALL). Własne pierwsze."""
+    _check(game or "x", kind)
     d = _load()
     seen, out = set(), []
     for name, a in sorted((d.get("accounts") or {}).items(), key=lambda x: x[0].lower() != account.lower()):
         for u in a.get("uploads") or []:
-            if u["game"] == game and u["kind"] == kind and u["sha"] not in seen:
+            if (not game or u["game"] == game) and u["kind"] == kind and u["sha"] not in seen:
                 seen.add(u["sha"])
                 out.append({"sha": u["sha"], "ext": u["ext"], "size": u["size"], "at": u["at"], "by": name,
-                            "mine": name.lower() == account.lower()})
+                            "mine": name.lower() == account.lower(), "game": u["game"]})
+    if not game:
+        out.sort(key=lambda x: (not x["mine"], -float(x["at"])))
+        out = out[:MAX_ALL]
     return {"ok": True, "items": out}
 
 
@@ -156,6 +164,8 @@ def _valid_choice(c) -> dict | None:
         return {"type": t, "url": c["url"]}
     if t == "sgdb" and https(c.get("url")) and isinstance(c.get("imageId"), int):
         return {"type": t, "url": c["url"], "imageId": c["imageId"], **({"thumb": c["thumb"]} if https(c.get("thumb")) else {})}
+    if t == "web" and https(c.get("url")) and c["url"].startswith(WEB_HOSTS):
+        return {"type": t, "url": c["url"]}
     if t == "user" and file_path(c.get("sha"))[0] is not None and c.get("ext") in CTYPE:
         return {"type": t, "sha": c["sha"], "ext": c["ext"]}
     raise ArtError("zły wybór")

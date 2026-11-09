@@ -75,3 +75,21 @@ def test_http_auth_identity_and_file(srv, tmp_path, monkeypatch):  # noqa: F811
     st, c = _req(srv, "POST", "/v1/userart/choices", bob, body={"items": [{"key": "tv|gog:1|grid", "at": 5, "choice": {"type": "user", "sha": r["sha"], "ext": "png"}}]})
     assert st == 200 and c["choices"]["tv|gog:1|grid"]["choice"]["sha"] == r["sha"]        # kopia cudzej grafiki
     assert json.loads((paths.DATA / "userart" / "index.json").read_text(encoding="utf-8"))["accounts"]["Ala"]["choices"] == {}
+
+
+def test_gallery_without_game_lists_whole_server(data):
+    png = b"\x89PNG\r\n\x1a\n"
+    userart.upload("Ala", "gog:1", "logo", png + b"a")
+    userart.upload("Bob", "navgrp:grp:pc", "logo", png + b"b")
+    userart.upload("Bob", "gog:2", "grid", png + b"c")
+    items = userart.gallery("Ala", "", "logo")["items"]
+    assert [(i["by"], i["game"]) for i in items] == [("Ala", "gog:1"), ("Bob", "navgrp:grp:pc")]
+    with pytest.raises(userart.ArtError):
+        userart.gallery("Ala", "", "zly")
+
+
+def test_web_choice_only_from_known_hosts(data):
+    ok = {"type": "web", "url": "https://images.igdb.com/igdb/image/upload/t_cover_big/x.jpg"}
+    assert userart._valid_choice(ok) == ok
+    with pytest.raises(userart.ArtError):
+        userart._valid_choice({"type": "web", "url": "https://zly.example/x.jpg"})

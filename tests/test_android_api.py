@@ -17,7 +17,10 @@ BRIDGE = ROOT / "android" / "app" / "src" / "main" / "java" / "io" / "github" / 
 # menu i ustawienia) albo zablokowane w interfejsie; Bridge odpowiada komunikatem „na komputerze”
 WINDOWS_ONLY = {
     # emulatory na komputerze, odświeżenie biblioteki z serwera
-    "autodetect", "scan_status", "set_game_emulator", "emulator_options", "emu_sync_status", "art_keys_push",
+    "autodetect", "scan_status", "set_game_emulator", "emulator_options", "emu_sync_status",
+    # własne grafiki i klucze użytkownika: tylko klient Windows (blokada S.platform w interfejsie)
+    "art_keys_clear", "art_keys_export", "art_keys_import", "art_keys_save", "art_own_choose", "art_own_clear",
+    "art_own_list", "art_own_sync",
     "emu_settings_history", "emu_settings_restore", "set_shader_off",
     # opcje gier i systemów (openGameOptions / openSystemOptions zablokowane na Androidzie)
     "game_options",

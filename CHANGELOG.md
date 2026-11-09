@@ -45,12 +45,25 @@ dokumentacji Lumena, wydanie.
     przełącza się między nimi bez końca.
 11. Tryb TV: gdy po filtrowaniu jest mało gier, powielać okładki, żeby wypełnić ekran.
 
-### Plan: grafiki użytkowników na serwerze i synchronizacja wyborów grafik (gałąź `user-art`)
-**Co się zmieni.** Serwer: `emustart/userart.py` — pliki wgrane przez konta (po skrócie, tylko obrazy), wybory grafik konta
-(nowszy wygrywa), galeria grafik gry dla wszystkich kont; `/v1/userart/…`. Silnik: `artsync.py`, `Api.art_user_*`. Lumen:
-własny plik grafiki wgrywa się na serwer (typ wyboru `user`), wybory (także tryb TV i grupy) synchronizują się między
-urządzeniami, w oknie wyboru i „Grafice grupy” nowe źródło „Wgrane przez użytkowników”.
-**Czego NIE dotyka.** Grafiki gier z panelu serwera, SteamGridDB, LaunchBox, cache grafik; bez serwera wszystko działa jak dotąd.
+## [0.60.0] — 2026-11-09
+
+Zakres: serwer, klient Windows, silnik w Lumen. APK bez zmian (nowe opcje ukryte), emulatory bez zmian.
+Serwer trzeba zaktualizować razem z klientami.
+
+### Dodane
+- Grafiki użytkowników na serwerze: wgrywanie własnych plików na konto, galeria widoczna dla wszystkich kont serwera
+  (dla gry albo cały serwer), kopiowanie cudzej grafiki do własnych wyborów, synchronizacja wyborów grafik między
+  urządzeniami (`/v1/userart/…`, `emustart/userart.py`, `emustart/artsync.py`).
+- Własne klucze źródeł grafik użytkownika (SteamGridDB, IGDB, TheGamesDB): zostają na jego urządzeniu, zapytania idą
+  wprost do usług, nie przez serwer. Import z PyLinks na tym samym komputerze, eksport i import pliku
+  `klucze-grafik.emustart` zaszyfrowanego hasłem.
+- Klient Windows: każdy użytkownik może zmienić u siebie okładkę, zrzut i logo gry (z serwera albo z sieci) i wrócić do
+  domyślnej (`emustart/ownart.py`). Grafiki domyślne z serwera zostają nietknięte.
+- Panel serwera: import kluczy serwera z pliku `klucze-grafik.emustart` (ścieżka i hasło) i z PyLinks.
+
+### Zmienione
+- Klucze serwera można ustawić wyłącznie na komputerze serwera (panel lub `art_keys.json`). Usunięto zdalny zapis
+  `PUT /v1/admin/art_keys` i „Wyślij klucze źródeł grafik z PyLinks na serwer”, także dla administratora.
 
 ## [0.59.1] — 2026-11-09
 
