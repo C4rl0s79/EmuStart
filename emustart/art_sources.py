@@ -299,6 +299,22 @@ class Igdb:
         except ValueError:
             return []
 
+    def gallery(self, title: str, plat: str, kind: str) -> list:
+        """Wszystkie grafiki rodzaju `kind` dla najlepiej pasującej gry: okładka albo zrzuty i grafiki promocyjne."""
+        pid = IGDB_PLATFORMS.get(plat)
+        esc = title.replace('"', '\\"')
+        where = f" where platforms = ({pid});" if pid else ""
+        games = self._query(f'search "{esc}"; fields name,cover.url,screenshots.url,artworks.url;{where} limit 10;')
+        games = [g for g in games if similarity(title, g.get("name", "")) >= MATCH_MIN]
+        if not games:
+            return []
+        g = max(games, key=lambda g: similarity(title, g.get("name", "")))
+        if kind == "box":
+            return ["https:" + g["cover"]["url"].replace("t_thumb", "t_cover_big")] if (g.get("cover") or {}).get("url") else []
+        if kind == "snap":
+            return ["https:" + x["url"].replace("t_thumb", "t_1080p") for x in (g.get("artworks") or []) + (g.get("screenshots") or []) if x.get("url")]
+        return []
+
     def images(self, title: str, plat: str) -> dict:
         """{'box': url, 'snap': url} dla najlepiej pasującej gry."""
         pid = IGDB_PLATFORMS.get(plat)
@@ -350,6 +366,20 @@ class Tgdb:
         games = self._get(url).get("data", {}).get("games", [])
         games = [g for g in games if similarity(title, g.get("game_title", "")) >= MATCH_MIN]
         return max(games, key=lambda g: similarity(title, g.get("game_title", ""))) if games else None
+
+    def gallery(self, title: str, plat: str, kind: str) -> list:
+        """Wszystkie grafiki rodzaju `kind` z TheGamesDB dla najlepiej pasującej gry."""
+        g = self.game(title, plat)
+        if not g:
+            return []
+        gid = str(g["id"])
+        data = self._get(f"{self.API}/Games/Images?apikey={self.key}&games_id={gid}").get("data", {})
+        base = data.get("base_url", {}).get("original", "https://cdn.thegamesdb.net/images/original/")
+        want = {"box": ("boxart",), "snap": ("fanart", "screenshot", "titlescreen"), "logo": ("clearlogo",)}[kind]
+        imgs = [i for i in data.get("images", {}).get(gid, []) if i.get("type") in want and i.get("filename")
+                and i.get("side") in ("front", None, "")]
+        imgs.sort(key=lambda i: want.index(i["type"]))
+        return [base + i["filename"] for i in imgs]
 
     def images(self, title: str, plat: str) -> dict:
         g = self.game(title, plat)
@@ -433,7 +463,7 @@ def open_keys(path: str, password: str) -> dict:
     try:
         d = json.loads(p.read_text(encoding="ascii"))
     except (OSError, ValueError):
-        raise ValueError(f"Nie ma pliku z kluczami ({KEYS_FILE}).")
+        raise ValueError(f"Nie ma pliku z kluczami: {p}")
     try:
         body = tls._move_cipher(password, base64.b64decode(d["salt"])).decrypt(
             base64.b64decode(d["nonce"]), base64.b64decode(d["data"]), b"emustart-artkeys-1")
@@ -567,7 +597,7 @@ def libretro_ranked(name: str, names: list, limit: int = 8) -> list:
 def own_candidates(own: dict, es: str, title: str, kind: str) -> list:
     """[{url, source}] z IGDB i TheGamesDB kluczami użytkownika (`own`, te same nazwy co KEY_NAMES) — zapytania idą z
     jego urządzenia wprost do usług. Klucze są tylko argumentem: nie zapisujemy ich ani nie wysyłamy na serwer."""
-    if kind not in ("box", "snap"):
+    if kind not in ("box", "snap", "logo"):
         return []
     try:
         plat = systems.info(es)["plat"] if es else ""
@@ -575,11 +605,11 @@ def own_candidates(own: dict, es: str, title: str, kind: str) -> list:
         plat = ""
     out = []
     tg = Tgdb(str(own.get("tgdb_key") or ""))
-    if tg.usable() and (u := tg.images(title, plat).get(kind)):
-        out.append({"url": u, "source": "TheGamesDB"})
+    if tg.usable():
+        out += [{"url": u, "source": "TheGamesDB"} for u in tg.gallery(title, plat, kind)]
     ig = Igdb(str(own.get("igdb_client_id") or ""), str(own.get("igdb_client_secret") or ""))
-    if ig.cid and ig.secret and (u := ig.images(title, plat).get(kind)):
-        out.append({"url": u, "source": "IGDB"})
+    if ig.cid and ig.secret:
+        out += [{"url": u, "source": "IGDB"} for u in ig.gallery(title, plat, kind)]
     return out
 
 

@@ -140,6 +140,27 @@ def gallery(account: str, game: str, kind: str) -> dict:
     return {"ok": True, "items": out}
 
 
+def defaults() -> dict:
+    """Domyślne grafiki grup, ustawione w panelu serwera: {"<grupa>|<logo/hero>": {sha, ext}}."""
+    return {"ok": True, "defaults": _load().get("defaults") or {}}
+
+
+def set_default(game: str, kind: str, sha: str = "", ext: str = "") -> dict:
+    """Panel serwera: domyślna grafika grupy spośród wgranych; bez `sha` — usuwa."""
+    _check(game, kind)
+    if sha and (file_path(sha)[0] is None or ext not in CTYPE):
+        raise ArtError("nie ma takiej grafiki na serwerze")
+    with _lock:
+        d = _load()
+        cur = d.setdefault("defaults", {})
+        if sha:
+            cur[f"{game}|{kind}"] = {"sha": sha, "ext": ext}
+        else:
+            cur.pop(f"{game}|{kind}", None)
+        _save(d)
+    return {"ok": True}
+
+
 def file_path(sha: str) -> tuple:
     """(plik, typ) albo (None, '')."""
     if SHA.match(str(sha or "")):

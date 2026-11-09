@@ -51,6 +51,10 @@ def gallery(cfg: dict, pid: int, game: str, kind: str) -> dict:
     return sc._Client(cfg, pid).json("GET", f"/v1/userart/gallery?{_q(game=game, kind=kind)}")
 
 
+def defaults(cfg: dict, pid: int) -> dict:
+    return sc._Client(cfg, pid).json("GET", "/v1/userart/defaults")
+
+
 def remove(cfg: dict, pid: int, game: str, kind: str, sha: str) -> dict:
     return sc._Client(cfg, pid).json("POST", "/v1/userart/remove", {"game": game, "kind": kind, "sha": sha})
 

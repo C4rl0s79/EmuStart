@@ -93,3 +93,23 @@ def test_web_choice_only_from_known_hosts(data):
     assert userart._valid_choice(ok) == ok
     with pytest.raises(userart.ArtError):
         userart._valid_choice({"type": "web", "url": "https://zly.example/x.jpg"})
+
+
+def test_group_defaults_only_from_uploaded_art(data):
+    up = userart.upload("Ala", "navgrp:grp:pc", "logo", b"\x89PNG\r\n\x1a\n" + b"a")
+    assert userart.defaults()["defaults"] == {}
+    userart.set_default("navgrp:grp:pc", "logo", up["sha"], up["ext"])
+    assert userart.defaults()["defaults"] == {"navgrp:grp:pc|logo": {"sha": up["sha"], "ext": "png"}}
+    with pytest.raises(userart.ArtError):
+        userart.set_default("navgrp:grp:pc", "logo", "0" * 64, "png")
+    userart.set_default("navgrp:grp:pc", "logo")
+    assert userart.defaults()["defaults"] == {}
+
+
+def test_panel_preview_served_locally(data):
+    import urllib.request
+    from emustart import server
+    up = userart.upload("Ala", "navgrp:grp:pc", "logo", b"\x89PNG\r\n\x1a\n" + b"a")
+    base = server.start()
+    with urllib.request.urlopen(f"{base}/panel-art/{up['sha']}") as r:
+        assert r.status == 200 and r.headers["Content-Type"] == "image/png"

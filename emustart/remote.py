@@ -1053,6 +1053,8 @@ def userart_call(handler, method: str, parts: list) -> None:
 
     def run():
         acc, _dev = _sync_identity(handler)
+        if method == "GET" and parts == ["defaults"]:
+            return userart.defaults()
         if method == "GET" and parts == ["gallery"]:
             return userart.gallery(acc, q.get("game", ""), q.get("kind", ""))
         if method == "POST" and parts == ["upload"]:

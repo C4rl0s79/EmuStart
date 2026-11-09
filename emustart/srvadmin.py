@@ -638,6 +638,8 @@ def art_keys_import(api, args: dict) -> dict:
     from emustart import art_sources
     f = Path(str(args.get("path") or "").strip().strip('"') or paths.SERVER)
     f = f / art_sources.KEYS_FILE if f.is_dir() else f
+    if not args.get("path") and not f.is_file() and (paths.APP / art_sources.KEYS_FILE).is_file():
+        f = paths.APP / art_sources.KEYS_FILE                  # obok programu zamiast w folderze `server`
     if args.get("source") == "pylinks":
         plain = art_sources.pylinks_plain()
         if not plain:
@@ -654,6 +656,31 @@ def art_keys_import(api, args: dict) -> dict:
         except OSError as ex:
             log.warning("plik z kluczami %s: %s", f, ex)
     return {"ok": True, "count": len(plain)}
+
+
+# grupy Lumena bez platformy EmuStart (shared/libraryNav.ts, tv/GroupArt.tsx: navgrp:<id>)
+ART_GROUPS = (("navgrp:grp:pc", "PC"), ("navgrp:pc/steam", "PC: Steam"), ("navgrp:pc/gog", "PC: GOG"),
+              ("navgrp:pc/shortcut", "PC: Skróty Steam"), ("navgrp:grp:computer", "Komputery"),
+              ("navgrp:grp:console", "Konsole"), ("navgrp:grp:arcade", "Arcade"), ("navgrp:grp:other", "Pozostałe"),
+              ("navgrp:grp:col", "Kolekcje"), ("navgrp:grp:fav", "Ulubione"), ("navgrp:grp:recent", "Ostatnio grane"))
+
+
+def art_defaults(api, args: dict) -> dict:
+    """Panel: grupy, ich domyślne grafiki i wszystkie wgrane grafiki logo i tła."""
+    from emustart import userart
+    items = {k: userart.gallery("", "", k)["items"] for k in ("logo", "hero")}
+    known = dict(ART_GROUPS)
+    extra = sorted({i["game"] for v in items.values() for i in v if i["game"].startswith("navgrp:") and i["game"] not in known})
+    return {"ok": True, "groups": [{"id": g, "label": n} for g, n in ART_GROUPS] + [{"id": g, "label": g[7:]} for g in extra],
+            "defaults": userart.defaults()["defaults"], "items": items}
+
+
+def art_default_set(api, args: dict) -> dict:
+    from emustart import userart
+    try:
+        return userart.set_default(str(args.get("game") or ""), str(args.get("kind") or ""), str(args.get("sha") or ""), str(args.get("ext") or ""))
+    except userart.ArtError as ex:
+        return {"ok": False, "reason": str(ex)}
 
 
 KEYS_FILE = "art_keys.json"
@@ -766,7 +793,7 @@ GAME_ACTIONS = {
 ACTIONS_ARGS.update(GAME_ACTIONS)
 ACTIONS_ARGS.update({"move_prepare": move_prepare, "move_import": move_import, "update_apply": update_apply})
 ACTIONS.pop("update_apply", None)
-ACTIONS_ARGS.update({"config_set": config_set, "art_start": art_start, "art_keys_set": art_keys_set, "art_keys_import": art_keys_import,
+ACTIONS_ARGS.update({"config_set": config_set, "art_start": art_start, "art_keys_set": art_keys_set, "art_keys_import": art_keys_import, "art_defaults": art_defaults, "art_default_set": art_default_set,
                      "account_files": account_files, "account_backup": account_backup,
                      "account_restore": account_restore, "backup_settings": backup_settings})
 ACTIONS.update({"art": art_overview, "art_cancel": art_cancel, "launchbox_update": launchbox_update})

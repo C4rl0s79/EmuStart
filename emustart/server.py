@@ -240,6 +240,10 @@ class _Handler(BaseHTTPRequestHandler):
             if not remote.authorized(self):
                 return self.send_error(403)
         path = urllib.parse.unquote(urllib.parse.urlsplit(self.path).path)
+        if path.startswith("/panel-art/"):             # podgląd wgranych grafik w panelu (tylko lokalnie — blokada wyżej)
+            from emustart import userart
+            f, ctype = userart.file_path(path[len("/panel-art/"):])
+            return self._send_bytes(f.read_bytes(), ctype) if f else self.send_error(404)
         base, rel = paths.WEB, path.lstrip("/") or "index.html"
         for prefix, root in ROUTES.items():
             if path.startswith(prefix):
