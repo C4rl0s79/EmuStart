@@ -11,27 +11,6 @@ nowym urządzeniu — do sprawdzenia na żywo), Play! (miejsce kart), APK (te sa
 budowania), adaptery pozostałych samodzielnych emulatorów przy pierwszym użyciu, sprawdzenie na żywo (niżej);
 jedno zapytanie przygotowujące grę — po pomiarach kroków z prawdziwych startów.
 
-### Plan: filtry gier PC w Lumenie
-
-Zmieni się (tylko Lumen, tryb TV i okno „Filtry” grup): dla gier PC (Steam, GOG, skróty) działają gatunek, dekada, gracze,
-producent i sortowanie po roku. Dane: pamięć sklepu Steam, opisy GOG z serwera, LaunchBox; brakujące dane Steam pobierają
-się w tle tylko przy otwartych filtrach. Nie zmieni się: filtry gier retro, wygląd list, sterowanie. Region zostaje tylko
-dla retro (gry PC nie mają regionu w nazwie).
-
-### Plan: domyślne grafiki grup z panelu serwera
-
-Zmieni się: panel serwera (tylko lokalny) → Grafiki i opisy → „Domyślne grafiki grup”: dla grupy (PC, Steam, GOG, Komputery,
-Konsole, Arcade, Pozostałe, Kolekcje, Ulubione, Ostatnio grane…) administrator wybiera logo i tło spośród grafik wgranych na
-serwer. Lumen pokazuje: wybór gracza → domyślna z serwera → nazwa grupy. Nie zmieni się: wybór gracza ma pierwszeństwo,
-grafiki gier, klient Windows i APK (nie mają tych grup). Plik kluczy szukany w folderze `server` i obok programu.
-
-### Plan: zacięcia list przy wczytywaniu grafik (punkt 8)
-
-Pomiar śladem renderowania: przy przewijaniu listy zacięcie 3–5 s powodowały animowane plakaty po 40–55 MB (APNG/WebP),
-przetwarzane przez stronę przy każdym fragmencie pliku. Zmieni się: plakaty na listach pulpitu idą jako małe kopie
-(`art_thumb`, Pillow, 540 px wysokości), animacja powyżej 3 MB jest na liście pierwszą klatką; w szczegółach i w trybie TV
-bez zmian.
-
 ### Do zrobienia (zgłoszone 2026-11-09)
 
 Stan: zrobione lokalnie (bez wydania): 1, 5, 6, 7, 9, 10, 11. Grafiki grup (2): panel gotowy (0.61.0), czekają na pliki.
