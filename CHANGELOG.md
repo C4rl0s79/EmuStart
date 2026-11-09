@@ -45,6 +45,16 @@ dokumentacji Lumena, wydanie.
     przełącza się między nimi bez końca.
 11. Tryb TV: gdy po filtrowaniu jest mało gier, powielać okładki, żeby wypełnić ekran.
 
+## [0.59.0] — 2026-11-09
+
+Zakres: serwer (reguły zapisów GOG, dodatki GOG, panel, nowa zależność PyYAML), silnik w Lumen (synchronizacja zapisów
+GOG, dodatki). Klient Windows bez Lumena, APK i emulatory bez zmian zachowania.
+
+### Dodane
+- Zapisy i ustawienia gier GOG synchronizowane przez serwer EmuStart (reguły ludusavi-manifest, bez chmury GOG).
+- Dodatki (extras) gier GOG: lista, wybór jak w GOG Managerze, pobieranie z wznawianiem.
+- Panel: liczba opisów gier GOG.
+
 ### Plan: synchronizacja zapisów i ustawień gier GOG przez serwer EmuStart (gałąź `gog-saves`)
 
 **Co się zmieni.**
