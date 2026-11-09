@@ -29,6 +29,7 @@ import sys
 import threading
 import time
 import urllib.request
+from pathlib import Path
 
 from emustart import __version__, paths
 
@@ -630,6 +631,31 @@ def art_keys_set(api, args: dict) -> dict:
     return {"ok": True, "sources": art_sources.Sources(api._cfg).enabled()}
 
 
+def art_keys_import(api, args: dict) -> dict:
+    """Panel (tylko na komputerze serwera): klucze serwera z PyLinks tego komputera albo z pliku
+    `klucze-grafik.emustart` (zaszyfrowany hasłem, z dowolnego komputera): `path` — plik lub folder z nim, domyślnie
+    folder serwera. Po wczytaniu plik jest usuwany. Klucze szyfruje ten komputer: TPM, bez niego DPAPI."""
+    from emustart import art_sources
+    f = Path(str(args.get("path") or "").strip().strip('"') or paths.SERVER)
+    f = f / art_sources.KEYS_FILE if f.is_dir() else f
+    if args.get("source") == "pylinks":
+        plain = art_sources.pylinks_plain()
+        if not plain:
+            return {"ok": False, "reason": "Nie znaleziono kluczy PyLinks dla konta, na którym działa serwer."}
+    else:
+        try:
+            plain = art_sources.open_keys(str(f), str(args.get("password") or ""))
+        except ValueError as ex:
+            return {"ok": False, "reason": str(ex)}
+    art_keys_set(api, plain)
+    if args.get("source") != "pylinks":
+        try:
+            f.unlink(missing_ok=True)
+        except OSError as ex:
+            log.warning("plik z kluczami %s: %s", f, ex)
+    return {"ok": True, "count": len(plain)}
+
+
 KEYS_FILE = "art_keys.json"
 
 
@@ -740,7 +766,7 @@ GAME_ACTIONS = {
 ACTIONS_ARGS.update(GAME_ACTIONS)
 ACTIONS_ARGS.update({"move_prepare": move_prepare, "move_import": move_import, "update_apply": update_apply})
 ACTIONS.pop("update_apply", None)
-ACTIONS_ARGS.update({"config_set": config_set, "art_start": art_start, "art_keys_set": art_keys_set,
+ACTIONS_ARGS.update({"config_set": config_set, "art_start": art_start, "art_keys_set": art_keys_set, "art_keys_import": art_keys_import,
                      "account_files": account_files, "account_backup": account_backup,
                      "account_restore": account_restore, "backup_settings": backup_settings})
 ACTIONS.update({"art": art_overview, "art_cancel": art_cancel, "launchbox_update": launchbox_update})

@@ -45,6 +45,26 @@ dokumentacji Lumena, wydanie.
     przełącza się między nimi bez końca.
 11. Tryb TV: gdy po filtrowaniu jest mało gier, powielać okładki, żeby wypełnić ekran.
 
+## [0.60.0] — 2026-11-09
+
+Zakres: serwer, klient Windows, silnik w Lumen. APK bez zmian (nowe opcje ukryte), emulatory bez zmian.
+Serwer trzeba zaktualizować razem z klientami.
+
+### Dodane
+- Grafiki użytkowników na serwerze: wgrywanie własnych plików na konto, galeria widoczna dla wszystkich kont serwera
+  (dla gry albo cały serwer), kopiowanie cudzej grafiki do własnych wyborów, synchronizacja wyborów grafik między
+  urządzeniami (`/v1/userart/…`, `emustart/userart.py`, `emustart/artsync.py`).
+- Własne klucze źródeł grafik użytkownika (SteamGridDB, IGDB, TheGamesDB): zostają na jego urządzeniu, zapytania idą
+  wprost do usług, nie przez serwer. Import z PyLinks na tym samym komputerze, eksport i import pliku
+  `klucze-grafik.emustart` zaszyfrowanego hasłem.
+- Klient Windows: każdy użytkownik może zmienić u siebie okładkę, zrzut i logo gry (z serwera albo z sieci) i wrócić do
+  domyślnej (`emustart/ownart.py`). Grafiki domyślne z serwera zostają nietknięte.
+- Panel serwera: import kluczy serwera z pliku `klucze-grafik.emustart` (ścieżka i hasło) i z PyLinks.
+
+### Zmienione
+- Klucze serwera można ustawić wyłącznie na komputerze serwera (panel lub `art_keys.json`). Usunięto zdalny zapis
+  `PUT /v1/admin/art_keys` i „Wyślij klucze źródeł grafik z PyLinks na serwer”, także dla administratora.
+
 ## [0.59.1] — 2026-11-09
 
 Zakres: silnik w Lumen (gry GOG). Serwer, klient Windows bez Lumena, APK i emulatory bez zmian zachowania.

@@ -464,6 +464,132 @@ class Api:
         except ValueError as ex:
             return {"path": "", "reason": str(ex)}
 
+    # ── grafiki użytkowników i wybory grafik konta (emustart/artsync.py, serwer: userart.py) ──
+    def _art_user(self, fn, *args) -> dict:
+        from emustart import artsync, syncclient
+        try:
+            return getattr(artsync, fn)(self._cfg, self._profile, *args)
+        except (syncclient.Offline, syncclient.ConflictError, OSError, ValueError) as ex:
+            return {"ok": False, "reason": str(ex)}
+
+    def art_user_upload(self, path: str, game: str, kind: str) -> dict:
+        return self._art_user("upload", str(path), str(game), str(kind))
+
+    def art_user_sync(self, items: list) -> dict:
+        return self._art_user("sync", items if isinstance(items, list) else [])
+
+    def art_user_gallery(self, game: str, kind: str) -> dict:
+        return self._art_user("gallery", str(game), str(kind))
+
+    def art_user_remove(self, game: str, kind: str, sha: str) -> dict:
+        return self._art_user("remove", str(game), str(kind), str(sha))
+
+    def art_own_candidates(self, game_id: int, title: str, kind: str, keys: dict) -> dict:
+        """Grafiki z IGDB / TheGamesDB kluczami użytkownika, z tego urządzenia, bez serwera (art_sources.own_candidates)."""
+        from emustart import art_sources
+        g = library.game(int(game_id)) if game_id else None
+        art_sources.clear_error()
+        found = art_sources.own_candidates(keys if isinstance(keys, dict) else {}, g["es"] if g else "", str(title), str(kind))
+        return {"ok": True, "options": found, "error": art_sources.last_error()}
+
+    # ── własne grafiki gracza w kliencie Windows (emustart/ownart.py) ──
+    def art_own_list(self, game_id: int, kind: str, query: str = "") -> list:
+        from emustart import ownart
+        g = library.game(int(game_id))
+        return ownart.candidates(self._cfg, self._profile, g["es"], g["name"], kind, str(query or "")) if g and kind in ownart.KINDS else []
+
+    def art_own_choose(self, game_id: int, kind: str, url: str, sha: str = "", ext: str = "") -> dict:
+        from emustart import ownart
+        g = library.game(int(game_id))
+        if not g or kind not in ownart.KINDS:
+            return {"ok": False, "reason": "Nie ma takiej gry."}
+        try:
+            out = ownart.choose(self._cfg, self._profile, g["es"], g["name"], kind, str(url or ""), str(sha or ""), str(ext or ""))
+        except (OSError, ValueError) as ex:
+            return {"ok": False, "reason": str(ex)}
+        threading.Thread(target=self.art_own_sync, daemon=True, name="ownart").start()
+        return {"ok": True, "url": out}
+
+    def art_own_clear(self, game_id: int, kind: str) -> dict:
+        from emustart import ownart
+        g = library.game(int(game_id))
+        if not g or kind not in ownart.KINDS:
+            return {"ok": False, "reason": "Nie ma takiej gry."}
+        ownart.clear(self._profile, g["es"], g["name"], kind)
+        threading.Thread(target=self.art_own_sync, daemon=True, name="ownart").start()
+        return {"ok": True, "url": art.media_url(g["es"], g["name"], kind) if g[f"art_{kind}"] == art.HAS else ""}
+
+    def art_own_sync(self) -> dict:
+        from emustart import ownart, syncclient
+        if not self._cfg.get("server_key"):
+            return {"ok": True, "changed": 0}
+        try:
+            return {"ok": True, "changed": ownart.sync(self._cfg, self._profile)}
+        except (syncclient.Offline, syncclient.ConflictError, OSError, ValueError) as ex:
+            log.info("synchronizacja wyborów grafik: %s", ex)
+            return {"ok": False, "reason": str(ex), "changed": 0}
+
+    # ── klucze źródeł grafik użytkownika: PyLinks, plik zaszyfrowany hasłem, ręcznie ──
+    def art_keys_status(self) -> dict:
+        from emustart import art_sources
+        k = art_sources.keys(self._cfg)
+        return {"sgdb": bool(k.get("sgdb_key")), "igdb": bool(k.get("igdb_client_id") and k.get("igdb_client_secret")),
+                "tgdb": bool(k.get("tgdb_key")), "file": art_sources.KEYS_FILE}
+
+    def _art_keys_store(self, plain: dict) -> dict:
+        from emustart import art_sources, secure
+        cur = dict(self._cfg.get("art_keys") or {})
+        for n in art_sources.KEY_NAMES:
+            if n in plain:
+                cur[n] = secure.protect(str(plain[n]).strip()) if str(plain[n]).strip() else ""
+        self._cfg["art_keys"] = cur
+        config.save(self._cfg)
+        return dict(self.art_keys_status(), ok=True)
+
+    def art_keys_save(self, plain: dict) -> dict:
+        return self._art_keys_store(plain if isinstance(plain, dict) else {})
+
+    def art_keys_clear(self) -> dict:
+        self._cfg.pop("art_keys", None)
+        config.save(self._cfg)
+        return dict(self.art_keys_status(), ok=True)
+
+    def art_keys_pylinks(self) -> dict:
+        """Klucze z PyLinks tego komputera (Lumen zapisuje je u siebie)."""
+        from emustart import art_sources
+        plain = art_sources.pylinks_plain()
+        return {"ok": True, "keys": plain} if plain else {"ok": False, "reason": "Nie znaleziono kluczy PyLinks na tym komputerze."}
+
+    def art_keys_open(self, path: str, password: str) -> dict:
+        from emustart import art_sources
+        try:
+            return {"ok": True, "keys": art_sources.open_keys(str(path), str(password))}
+        except ValueError as ex:
+            return {"ok": False, "reason": str(ex)}
+
+    def art_keys_import(self, source: str, password: str = "") -> dict:
+        """Klient Windows: `source` pusty — PyLinks, inaczej plik lub folder z plikiem."""
+        r = self.art_keys_open(source, password) if source else self.art_keys_pylinks()
+        return self._art_keys_store(r["keys"]) if r.get("ok") else r
+
+    def art_keys_export(self, folder: str, password: str, plain: dict | None = None) -> dict:
+        """Plik z kluczami: podane (Lumen), inaczej z PyLinks, inaczej zapisane na tym urządzeniu."""
+        from emustart import accounts, art_sources
+        why = accounts.policy(str(password or ""))
+        if why:
+            return {"ok": False, "reason": why}
+        keys = {k: v for k, v in (plain or {}).items() if v} or art_sources.pylinks_plain() \
+            or {k: v for k, v in art_sources.keys(self._cfg).items() if v}
+        if not keys:
+            return {"ok": False, "reason": "Nie ma kluczy do wyeksportowania."}
+        try:
+            return {"ok": True, "file": str(art_sources.export_keys(str(folder), str(password), keys)), "count": len(keys)}
+        except OSError as ex:
+            return {"ok": False, "reason": str(ex)}
+
+    def art_user_file(self, sha: str, ext: str) -> dict:
+        return self._art_user("file", str(sha), str(ext))
+
     def gog_extras(self, pid: str, base: str) -> dict:
         """Dodatki gry GOG: lista z serwera, co pobrane, co domyślnie wybrane."""
         try:
@@ -592,17 +718,21 @@ class Api:
 
     def art_for(self, game_ids: list) -> dict:
         """Aktualne adresy grafik dla podanych gier (po dociągnięciu w tle)."""
+        from emustart import ownart
         out = {}
         con = library.db()
         for gid in game_ids:
             r = con.execute("SELECT es,name,art_box,art_snap,art_logo FROM games WHERE id=?",
                             (int(gid),)).fetchone()
             if r:
-                out[str(gid)] = {
-                    "box": art.media_url(r["es"], r["name"], "box") if r["art_box"] == art.HAS else "",
-                    "snap": art.media_url(r["es"], r["name"], "snap") if r["art_snap"] == art.HAS else "",
-                    "logo": art.media_url(r["es"], r["name"], "logo") if r["art_logo"] == art.HAS else "",
-                    "checked": bool(r["art_box"] and r["art_snap"])}
+                row = {"name": r["name"],
+                       "box": art.media_url(r["es"], r["name"], "box") if r["art_box"] == art.HAS else "",
+                       "snap": art.media_url(r["es"], r["name"], "snap") if r["art_snap"] == art.HAS else "",
+                       "logo": art.media_url(r["es"], r["name"], "logo") if r["art_logo"] == art.HAS else "",
+                       "checked": bool(r["art_box"] and r["art_snap"])}
+                ownart.apply([row], r["es"], self._profile)
+                row.pop("name")
+                out[str(gid)] = row
         return out
 
     # ── aktualizacja EmuStart (menu Start; emustart/updater.py) ──
@@ -1474,27 +1604,6 @@ class Api:
     def _is_admin(self) -> bool:
         i = netsrc.info_nowait(self._cfg) or {}
         return bool(i.get("admin"))
-
-    def art_keys_push(self) -> dict:
-        """Administrator: klucze źródeł grafik (SteamGridDB, IGDB, TheGamesDB) z PyLinks na tym
-        komputerze → serwer. PyLinks szyfruje je kluczem tego komputera, więc odszyfrować je
-        da się tylko tutaj; na serwer idą połączeniem szyfrowanym, serwer szyfruje je swoim."""
-        from emustart import art_sources, secure
-        if not self._is_admin():
-            return {"ok": False, "reason": "Tylko na urządzeniu administratora."}
-        found = art_sources.import_pylinks_keys()
-        if not found:
-            return {"ok": False, "reason": "Nie znaleziono config.json PyLinksWeb ("
-                    + ", ".join(art_sources.PYLINKS_CONFIGS) + ")."}
-        plain = {k: secure.unprotect(found.get(k, "")) for k in art_sources.KEY_NAMES}
-        plain = {k: v for k, v in plain.items() if v}
-        if not plain:
-            return {"ok": False, "reason": "W PyLinks nie ma kluczy (albo nie da się ich odszyfrować na tym koncie)."}
-        r = self._admin_call("PUT", "art_keys", plain)
-        if r.get("ok"):
-            log.info("klucze źródeł grafik wysłane na serwer: %s", ", ".join(sorted(plain)))
-            r["sent"] = sorted(plain)
-        return r
 
     def _admin_call(self, method: str, path: str, body: dict | None = None) -> dict:
         """Zapytanie do /v1/admin/… serwera. Po zmianie — biblioteka z serwera w tle (wersja

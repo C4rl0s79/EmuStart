@@ -903,6 +903,30 @@ function logoutAsk() {
   $("menu").classList.remove("hidden");
   renderMenu();
 }
+/** Własne klucze źródeł grafik: zostają na tym urządzeniu, zapytania idą wprost do usług. */
+function artKeyRows(rows) {
+  const done = (r, ok) => { toast(r?.ok ? ok : (r?.reason || "Nie udało się."), 6000); };
+  const entry = (k, name) => rows.push({ k, type: "action", fmt: () => "wpisz", run: () =>
+    oskOpen(k, "", async (v) => done(await api().art_keys_save({ [name]: v }), "Zapisano klucz."), false, true) });
+  rows.push({ head: "Moje klucze źródeł grafik (zostają na tym urządzeniu)" });
+  rows.push({ k: "Importuj z PyLinks", type: "action", fmt: () => "na tym komputerze", run: async () => done(await api().art_keys_import(""), "Zaimportowano klucze.") });
+  rows.push({ k: "Importuj z pliku", type: "action", fmt: () => "folder z plikiem klucze-grafik.emustart", run: async () => {
+    const p = await api().pick_folder("");
+    if (p) oskOpen("Hasło pliku z kluczami", "", async (v) => done(await api().art_keys_import(p, v), "Zaimportowano klucze."), false, true);
+  } });
+  rows.push({ k: "Eksportuj do pliku", type: "action", fmt: () => "zaszyfrowany hasłem, na inne urządzenie", run: async () => {
+    const p = await api().pick_folder("");
+    if (p) oskOpen("Nowe hasło pliku z kluczami", "", async (v) => {
+      const r = await api().art_keys_export(p, v);
+      done(r, `Zapisano: ${r?.file || ""}`);
+    }, false, true);
+  } });
+  entry("Klucz SteamGridDB", "sgdb_key");
+  entry("IGDB: Client ID", "igdb_client_id");
+  entry("IGDB: Client Secret", "igdb_client_secret");
+  entry("Klucz TheGamesDB", "tgdb_key");
+  rows.push({ k: "Usuń moje klucze", type: "action", run: async () => done(await api().art_keys_clear(), "Usunięto klucze.") });
+}
 /** Wiersze „Serwer EmuStart” — te same na komputerze i telefonie. */
 function serverRows(rows, c) {
   if (c.server_key) {
@@ -1124,12 +1148,7 @@ function buildSetRows() {
   rows.push({ k: "Wykryj emulatory", type: "action", run: async () => { toast("Wykrywam emulatory…", 60000); const r = await api().autodetect(); if (!r.ok) return toast(r.reason, 4000); toast(`Przypisano emulatory: ${r.assigned}`); await openSettings(); } });
   rows.push({ k: "Pobierz brakujące emulatory", type: "action", run: () => askInstallMissing() });
   rows.push({ k: "Odśwież bibliotekę z serwera", type: "action", run: () => startScan(async () => { await openSettings(); }) });
-  if (c.is_admin)                                   // klucze PyLinks da się odszyfrować tylko na tym komputerze
-    rows.push({ k: "Wyślij klucze źródeł grafik z PyLinks na serwer", type: "action", run: async () => {
-      const r = await api().art_keys_push();
-      toast(r.ok ? `Klucze na serwerze (${(r.sent || []).length}). Źródła grafik: ${(r.sources || []).join(", ")}.`
-        : r.reason || "Serwer nie odpowiada.", 6000);
-    } });
+  if (S.platform !== "android") artKeyRows(rows);
   rows.push({ k: "Gotowe, przejdź do gier", type: "action", run: async () => { const st = await refreshState(); if (st.setup_needed) openProfiles("setup"); else show("systems"); } });
   rows.push({ head: "Systemy  ·  ←/→ emulator  ·  A włącz/wyłącz" });
   for (const s of c.systems) rows.push({ type: "system", sys: s });
@@ -1357,6 +1376,7 @@ window.addEventListener("pywebviewready", async () => {
   S.padBackend = st.pad_backend || "browser";
   if (S.pyPad) setInterval(pollPyPad, 33);
   setInterval(pollCopies, 1500);
+  if (S.platform !== "android") setTimeout(() => api().art_own_sync().catch(() => {}), 8000);   // wybory grafik konta
   setInterval(() => { if (!S.modal) refreshState().then(() => S.screen === "systems" && renderSystems()); }, 15000);
   requestAnimationFrame(pollPads);
   window.addEventListener("resize", () => show(S.screen));

@@ -290,22 +290,38 @@ def test_logo_candidates_from_web_themes_without_local_files(monkeypatch):
     assert not logos.choose({}, "psx", "url:http://10.0.0.1/admin")              # dowolny adres — nie
 
 
-def test_admin_pc_sends_pylinks_keys_to_server(monkeypatch):
-    """Klucze PyLinks odszyfrowuje komputer administratora, serwer dostaje je połączeniem
-    szyfrowanym i szyfruje swoim kluczem."""
-    from emustart import art_sources, secure
-    a = api.Api.__new__(api.Api)
-    a._cfg = {}
-    sent = {}
-    monkeypatch.setattr(a, "_is_admin", lambda: True, raising=False)
-    monkeypatch.setattr(art_sources, "import_pylinks_keys",
-                        lambda path="": {"source": "x", "sgdb_key": secure.protect("SG"), "tgdb_key": secure.protect("TG"),
-                                         "igdb_client_id": "", "igdb_client_secret": ""})
-    monkeypatch.setattr(a, "_admin_call", lambda m, p, b=None: sent.update(m=m, p=p, b=b) or {"ok": True}, raising=False)
-    r = a.art_keys_push()
-    assert r["ok"] and sent == {"m": "PUT", "p": "art_keys", "b": {"sgdb_key": "SG", "tgdb_key": "TG"}}
-    monkeypatch.setattr(a, "_is_admin", lambda: False, raising=False)
-    assert not a.art_keys_push()["ok"]
+def test_server_keys_cannot_be_set_remotely(monkeypatch):
+    """Klucze serwera tylko z komputera serwera: także administrator nie zapisze ich przez /v1/admin."""
+    import io
+    from emustart import remote
+    got = []
+    monkeypatch.setattr(remote, "_admin", lambda h: True)
+    monkeypatch.setattr(remote, "API", type("A", (), {"art_choose": lambda *a: None})(), raising=False)
+    monkeypatch.setattr(remote, "_json", lambda h, o, st=200: got.append(st))
+
+    class H:
+        headers = {"Content-Length": "2"}
+        rfile = io.BytesIO(b"{}")
+        path = "/v1/admin/art_keys"
+    remote._admin_route(H, "PUT", ["art_keys"])
+    assert got == [404] and not hasattr(api.Api, "art_keys_push")
+
+
+def test_panel_imports_key_file_and_deletes_it(tmp_path, monkeypatch):
+    from emustart import art_sources, paths, secure, srvadmin
+    monkeypatch.setattr(paths, "SERVER", tmp_path)
+    monkeypatch.setattr(config, "save", lambda c: None)
+    monkeypatch.setattr(secure, "protect", lambda v: "enc:" + v)
+    f = art_sources.export_keys(str(tmp_path), "Haslo!123456", {"tgdb_key": "T"})
+    a = type("A", (), {"_cfg": {}})()
+    assert not srvadmin.art_keys_import(a, {"password": "zle"})["ok"] and f.exists()
+    assert srvadmin.art_keys_import(a, {"password": "Haslo!123456"}) == {"ok": True, "count": 1}
+    assert a._cfg["art_keys"]["tgdb_key"] == "enc:T" and not f.exists()
+    other = tmp_path / "kopia"
+    other.mkdir()
+    g = art_sources.export_keys(str(other), "Haslo!123456", {"sgdb_key": "S"})
+    assert srvadmin.art_keys_import(a, {"path": str(g), "password": "Haslo!123456"})["ok"]
+    assert a._cfg["art_keys"]["sgdb_key"] == "enc:S" and not g.exists()
 
 
 def test_server_imports_art_keys_file_and_deletes_it(monkeypatch):

@@ -406,6 +406,51 @@ def keys(cfg: dict) -> dict:
     return {n: secure.unprotect(k.get(n, "")) for n in KEY_NAMES}
 
 
+KEYS_FILE = "klucze-grafik.emustart"
+
+
+def export_keys(folder: str, password: str, plain: dict) -> Path:
+    """Klucze źródeł grafik w pliku zaszyfrowanym hasłem (scrypt + AES-256-GCM), do przeniesienia na inne urządzenie."""
+    import base64
+    import os
+    from emustart import tls
+    body = json.dumps({k: plain[k] for k in KEY_NAMES if plain.get(k)}).encode("utf-8")
+    salt, nonce = os.urandom(16), os.urandom(12)
+    data = tls._move_cipher(password, salt).encrypt(nonce, body, b"emustart-artkeys-1")
+    out = Path(folder) / KEYS_FILE
+    out.write_text(json.dumps({"v": 1, "salt": base64.b64encode(salt).decode(), "nonce": base64.b64encode(nonce).decode(),
+                               "data": base64.b64encode(data).decode()}), encoding="ascii")
+    return out
+
+
+def open_keys(path: str, password: str) -> dict:
+    """Odczyt pliku z export_keys (`path`: plik albo folder z nim). ValueError — brak pliku / złe hasło."""
+    import base64
+    from cryptography.exceptions import InvalidTag
+    from emustart import tls
+    p = Path(path)
+    p = p / KEYS_FILE if p.is_dir() else p
+    try:
+        d = json.loads(p.read_text(encoding="ascii"))
+    except (OSError, ValueError):
+        raise ValueError(f"Nie ma pliku z kluczami ({KEYS_FILE}).")
+    try:
+        body = tls._move_cipher(password, base64.b64decode(d["salt"])).decrypt(
+            base64.b64decode(d["nonce"]), base64.b64decode(d["data"]), b"emustart-artkeys-1")
+    except (InvalidTag, KeyError, ValueError, TypeError):
+        raise ValueError("Złe hasło albo uszkodzony plik.")
+    got = json.loads(body)
+    return {k: str(got[k]) for k in KEY_NAMES if got.get(k)}
+
+
+def pylinks_plain() -> dict:
+    """Odszyfrowane klucze z PyLinksWeb na tym komputerze; {} — nie ma albo nie da się odszyfrować."""
+    from emustart import secure
+    found = import_pylinks_keys()
+    plain = {k: secure.unprotect(found.get(k, "")) for k in KEY_NAMES}
+    return {k: v for k, v in plain.items() if v}
+
+
 class Sources:
     """Łańcuch źródeł skonfigurowany kluczami z config.json EmuStart."""
 
@@ -517,6 +562,25 @@ def libretro_ranked(name: str, names: list, limit: int = 8) -> list:
         scored.append((sc, c))
     scored.sort(reverse=True)
     return [c for _s, c in scored[:limit]]
+
+
+def own_candidates(own: dict, es: str, title: str, kind: str) -> list:
+    """[{url, source}] z IGDB i TheGamesDB kluczami użytkownika (`own`, te same nazwy co KEY_NAMES) — zapytania idą z
+    jego urządzenia wprost do usług. Klucze są tylko argumentem: nie zapisujemy ich ani nie wysyłamy na serwer."""
+    if kind not in ("box", "snap"):
+        return []
+    try:
+        plat = systems.info(es)["plat"] if es else ""
+    except (KeyError, TypeError):
+        plat = ""
+    out = []
+    tg = Tgdb(str(own.get("tgdb_key") or ""))
+    if tg.usable() and (u := tg.images(title, plat).get(kind)):
+        out.append({"url": u, "source": "TheGamesDB"})
+    ig = Igdb(str(own.get("igdb_client_id") or ""), str(own.get("igdb_client_secret") or ""))
+    if ig.cid and ig.secret and (u := ig.images(title, plat).get(kind)):
+        out.append({"url": u, "source": "IGDB"})
+    return out
 
 
 def candidates(cfg: dict, es: str, name: str, kind: str, query: str = "",

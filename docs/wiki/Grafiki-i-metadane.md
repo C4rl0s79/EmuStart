@@ -23,9 +23,9 @@ serwerze trafia do wszystkich urządzeń (PC sprawdza zmiany przy starcie i co 5
 2. libretro (dopasowanie po liście plików: inna wersja nazwy, „, The”, „(Disc 1)”),
 3. LaunchBox,
 4. SteamGridDB, 5. IGDB, 6. TheGamesDB — wymagają kluczy API (panel → Grafiki i opisy →
-   Źródła; zapisane zaszyfrowane na serwerze). Klucze z PyLinks: EmuStart na komputerze
-   administratora → Ustawienia → **Wyślij klucze źródeł grafik z PyLinks na serwer** (PyLinks
-   szyfruje je kluczem tego komputera — odczytać da się je tylko tam).
+   Źródła; zapisane zaszyfrowane na serwerze). Klucze serwera ustawia się wyłącznie na komputerze serwera. Klucze z PyLinks:
+   EmuStart na komputerze z PyLinks → Ustawienia → **Eksportuj do pliku** (plik zaszyfrowany hasłem), skopiuj go na
+   serwer, potem panel → Źródła → **Importuj z pliku** (ścieżka i hasło; plik jest usuwany po wczytaniu).
 
 Dopasowanie po nazwie w zewnętrznych bazach wymaga podobieństwa ≥ 0,8, żeby nie wstawiać
 okładek innych gier.

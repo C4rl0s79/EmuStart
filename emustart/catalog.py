@@ -76,6 +76,8 @@ def list_games(cfg: dict, es: str, profile: int) -> list:
         r["logo"] = art.media_url(es, r["name"], "logo") if r["art_logo"] == art.HAS else ""
         r["box"] = art.media_url(es, r["name"], "box") if r["art_box"] == art.HAS else ""
         r["snap"] = art.media_url(es, r["name"], "snap") if r["art_snap"] == art.HAS else ""
+    from emustart import ownart
+    ownart.apply(rows, es, profile)                # wybory gracza (klient Windows) na grafikach domyślnych
     return rows
 
 
