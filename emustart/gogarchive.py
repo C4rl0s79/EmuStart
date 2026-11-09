@@ -21,6 +21,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import re
 import threading
 import time
@@ -238,7 +239,65 @@ def available_languages(rec: dict) -> list:
     return sorted(set(out))
 
 
-def index_record(arc: Archive, pid: str, build: str, deep: bool = False) -> dict:
+class ChunkSizes:
+    """Rozmiary chunków z listowania folderów `chunks/ab/cd` — jedno listowanie na folder na całe indeksowanie
+    zamiast osobnego zapytania o każdy plik (archiwum ma setki tysięcy chunków; dysk sieciowy / USB)."""
+
+    def __init__(self, arc: Archive):
+        self.arc = arc
+        self.dirs: dict = {}
+        self.relisted: set = set()
+
+    def _list(self, key: str) -> dict:
+        out = {}
+        try:
+            with os.scandir(self.arc.root / "chunks" / key[:2] / key[2:4]) as it:
+                for d in it:
+                    if len(d.name) == 32:
+                        try:
+                            out[d.name.lower()] = d.stat().st_size
+                        except OSError:
+                            pass
+        except OSError:
+            pass
+        self.dirs[key] = out
+        return out
+
+    def get(self, md5: str):
+        """Rozmiar chunka albo None (brak). Brak → folder listowany ponownie raz (GOG Manager mógł go dopisać)."""
+        key = md5[:4]
+        d = self.dirs.get(key)
+        if d is None:
+            d = self._list(key)
+        if md5 not in d and key not in self.relisted:
+            self.relisted.add(key)
+            d = self._list(key)
+        return d.get(md5)
+
+
+def chunk_problem(arc: Archive, chunks: dict, deep: bool = False, sizes: ChunkSizes | None = None) -> str:
+    """'' albo powód: brakujące / uszkodzone chunki buildu (rozmiar; `deep` — także MD5)."""
+    missing = bad = 0
+    sizes = sizes or ChunkSizes(arc)
+    for m, size in chunks.items():
+        have = sizes.get(m)
+        if have is None:
+            missing += 1
+        elif have != size:
+            bad += 1
+        elif deep:
+            try:
+                if hashlib.md5(arc.chunk_path(m).read_bytes()).hexdigest() != m:
+                    bad += 1
+            except FileNotFoundError:
+                missing += 1
+    if missing or bad:
+        return f"brakujące chunki: {missing}, uszkodzone: {bad} — uzupełnij archiwum w GOG Managerze"
+    return ""
+
+
+def index_record(arc: Archive, pid: str, build: str, deep: bool = False, sizes: ChunkSizes | None = None,
+                 check_chunks: bool = True) -> dict:
     """Wpis indeksu jednego rekordu: {"ok": True, …} albo {"ok": False, "reason"}. Sprawdza zawartość — nie
     ufa samemu polu state. `deep` — także MD5 każdego chunka (wolne; panel „Sprawdź dokładnie”)."""
     rp = arc.record_path(pid, build)
@@ -282,18 +341,9 @@ def index_record(arc: Archive, pid: str, build: str, deep: bool = False) -> dict
             if not HEX32.match(m):
                 return {**base, "ok": False, "reason": f"zły identyfikator chunka w manifeście: {m!r}"}
             chunks[m] = int(c.get("compressedSize") or 0)
-    missing = bad = 0
-    for m, size in chunks.items():
-        try:
-            if arc.chunk_path(m).stat().st_size != size:
-                bad += 1
-            elif deep:
-                if hashlib.md5(arc.chunk_path(m).read_bytes()).hexdigest() != m:
-                    bad += 1
-        except FileNotFoundError:
-            missing += 1
-    if missing or bad:
-        return {**base, "ok": False, "reason": f"brakujące chunki: {missing}, uszkodzone: {bad} — uzupełnij archiwum w GOG Managerze"}
+    why = chunk_problem(arc, chunks, deep, sizes) if check_chunks else ""
+    if why:
+        return {**base, "ok": False, "reason": why}
     langs = available_languages(rec)
     if not langs:
         return {**base, "ok": False, "reason": "żaden zarchiwizowany język nie jest kompletny"}
@@ -319,8 +369,13 @@ _want: dict = {"root": "", "deep": False, "gen": 0}     # ostatnie żądanie (pa
 _pin_lock = threading.Lock()
 
 
-def build_index(root: str, deep: bool = False) -> dict:
-    """Pełny indeks archiwum (wywoływany w tle: przy starcie serwera i z panelu)."""
+def build_index(root: str, deep: bool = False, publish=None) -> dict:
+    """Pełny indeks archiwum (wywoływany w tle: przy starcie serwera i z panelu), w dwóch etapach:
+    1. rekordy: stan `complete` (GOG Manager zapisuje go dopiero po sprawdzeniu wszystkich chunków), format,
+       ścieżki, manifesty, hash — taki build jest udostępniany od razu (`publish(e, True)`);
+    2. chunki: każdy istnieje i ma rozmiar z manifestu (listowanie folderów); build, który nie przejdzie,
+       jest wycofywany (`publish(e, False)`) i trafia do pominiętych z powodem.
+    Chunk wysyłany klientowi jest i tak sprawdzany MD5 (`chunk_bytes`) — brak = błąd instalacji, nie zły plik."""
     res = {"root": root, "builds": {}, "rejected": [], "error": "", "built": time.time()}
     if not root:
         res["error"] = "nie ustawiono folderu archiwum"
@@ -332,15 +387,32 @@ def build_index(root: str, deep: bool = False) -> dict:
     except (ArchiveError, OSError) as ex:
         res["error"] = str(ex)
         return res
-    INDEX.update(total=len(recs), done=0)
+    def reject(e):
+        res["rejected"].append({k: e.get(k) for k in ("product_id", "build_id", "title", "reason")})
+        log.info("GOG: pomijam %s/%s (%s): %s", e.get("product_id"), e.get("build_id"), e.get("title"), e.get("reason"))
+
+    INDEX.update(total=len(recs), done=0, phase="records")
+    quick = []
     for pid, build in recs:
-        e = index_record(arc, pid, build, deep)
+        e = index_record(arc, pid, build, deep, check_chunks=False)
         INDEX["done"] += 1
         if e["ok"]:
-            res["builds"][(pid, build)] = e
+            quick.append(e)
+            if publish:
+                publish(e, True)
         else:
-            res["rejected"].append({k: e.get(k) for k in ("product_id", "build_id", "title", "reason")})
-            log.info("GOG: pomijam %s/%s (%s): %s", pid, build, e.get("title"), e.get("reason"))
+            reject(e)
+    INDEX.update(total=len(quick), done=0, phase="chunks")
+    sizes = ChunkSizes(arc)
+    for e in quick:
+        why = chunk_problem(arc, e["chunks"], deep, sizes)
+        INDEX["done"] += 1
+        if why:
+            reject({**e, "reason": why})
+            if publish:
+                publish(e, False)
+        else:
+            res["builds"][(e["product_id"], e["build_id"])] = e
     log.info("GOG: indeks %s — buildów: %d, pominiętych: %d", root, len(res["builds"]), len(res["rejected"]))
     return res
 
@@ -363,8 +435,22 @@ def refresh(root: str, deep: bool = False, wait: bool = False) -> None:
             while True:
                 with _lock:
                     r, d, gen = _want["root"], _want["deep"], _want["gen"]
+                with _lock:
+                    if gen == _want["gen"] and INDEX["root"] != r:
+                        # inna ścieżka niż udostępniana: stare gry znikają od razu, nowe pojawiają się po kolei
+                        INDEX.update(root=r, builds={}, rejected=[], error="")
+
+                def publish(e, add, gen=gen):
+                    with _lock:
+                        if gen == _want["gen"]:
+                            b = dict(INDEX["builds"])
+                            if add:
+                                b[(e["product_id"], e["build_id"])] = e
+                            else:
+                                b.pop((e["product_id"], e["build_id"]), None)
+                            INDEX["builds"] = b
                 try:
-                    res = build_index(r, d) if r else {"root": "", "builds": {}, "rejected": [], "error": ""}
+                    res = build_index(r, d, publish) if r else {"root": "", "builds": {}, "rejected": [], "error": ""}
                 except Exception as ex:
                     log.exception("GOG: indeks")
                     res = {"root": r, "builds": {}, "rejected": [], "error": str(ex)}
@@ -389,7 +475,7 @@ def status() -> dict:
     games = {pid for pid, _b in INDEX["builds"]}
     return {"root": INDEX["root"], "games": len(games), "builds": len(INDEX["builds"]),
             "rejected": list(INDEX["rejected"]), "error": INDEX["error"], "running": INDEX["running"],
-            "done": INDEX["done"], "total": INDEX["total"], "built": INDEX["built"]}
+            "done": INDEX["done"], "total": INDEX["total"], "built": INDEX["built"], "phase": INDEX.get("phase", "")}
 
 
 def _public_build(e: dict) -> dict:

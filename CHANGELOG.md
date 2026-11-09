@@ -11,6 +11,19 @@ nowym urządzeniu — do sprawdzenia na żywo), Play! (miejsce kart), APK (te sa
 budowania), adaptery pozostałych samodzielnych emulatorów przy pierwszym użyciu, sprawdzenie na żywo (niżej);
 jedno zapytanie przygotowujące grę — po pomiarach kroków z prawdziwych startów.
 
+## [0.57.1] — 2026-11-09
+
+Zakres: serwer (indeks archiwum GOG); silnik w Lumen bez zmian zachowania. Klient Windows, APK i emulatory bez zmian.
+
+### Poprawione
+- Archiwum GOG na serwerze: indeks w dwóch etapach. Najpierw rekordy (stan `complete` z GOG Managera, format,
+  ścieżki, manifesty, hash) — gra jest udostępniana od razu; potem w tle sprawdzenie chunków (istnienie i rozmiar),
+  build z brakami jest wycofywany z powodem w panelu. Rozmiary chunków z listowania folderów `chunks/ab/cd`
+  (jedno na folder na całe indeksowanie) zamiast osobnego zapytania o każdy plik — przy 314 buildach indeks trwał
+  godzinami i do końca nic nie było widać. Panel pokazuje etap i liczbę udostępnionych gier.
+
+**Czego NIE dotyka.** Format archiwum, API `/v1/gog`, przypięcie buildu, instalator w kliencie.
+
 ## [0.57.0] — 2026-11-09
 
 Zakres: serwer (archiwum depotów GOG, `/v1/gog`, rodzina platformy w `/v1/systems`), klient Windows i Lumen

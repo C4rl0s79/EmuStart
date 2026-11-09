@@ -122,7 +122,12 @@ def gog_status() -> dict:
     from emustart import gogarchive
     st = gogarchive.status()
     if st["running"]:
-        return {"ok": True, "text": f"indeksuję archiwum GOG: {st['done']} / {st['total'] or '…'}", "busy": True}
+        if st.get("phase") == "chunks":
+            text = (f"gry GOG: {st['games']} udostępnione · sprawdzam chunki w tle: {st['done']} / {st['total']} buildów "
+                    "(build z brakami zostanie wycofany)")
+        else:
+            text = f"czytam rekordy archiwum GOG: {st['done']} / {st['total'] or '…'} · udostępnione: {st['games']}"
+        return {"ok": True, "text": text, "busy": True}
     if st["error"]:
         return {"ok": False, "text": st["error"]}
     text = f"gry GOG: {st['games']} (buildów: {st['builds']})"

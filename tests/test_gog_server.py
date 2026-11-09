@@ -189,10 +189,10 @@ def test_path_change_during_indexing_is_not_lost(arc, tmp_path, monkeypatch):
     gate = threading.Event()
     real = ga.build_index
 
-    def slow(r, deep=False):
+    def slow(r, deep=False, publish=None):
         if r == str(root):
             gate.wait(5)
-        return real(r, deep)
+        return real(r, deep, publish)
     monkeypatch.setattr(ga, "build_index", slow)
     ga.refresh(str(root))                       # indeksowanie A trwa…
     ga.refresh(str(other))                      # …admin zmienia ścieżkę na B
@@ -207,9 +207,9 @@ def test_clearing_path_during_indexing_unpublishes(arc, monkeypatch):
     gate = threading.Event()
     real = ga.build_index
 
-    def slow(r, deep=False):
+    def slow(r, deep=False, publish=None):
         gate.wait(5)
-        return real(r, deep)
+        return real(r, deep, publish)
     monkeypatch.setattr(ga, "build_index", slow)
     ga.refresh(str(root))
     ga.refresh("")                              # admin wyłącza GOG w trakcie indeksowania
@@ -217,3 +217,31 @@ def test_clearing_path_during_indexing_unpublishes(arc, monkeypatch):
     gate.set()
     _wait_index()
     assert ga.status()["root"] == "" and ga.status()["builds"] == 0 and ga.catalog() == []
+
+
+def test_complete_build_is_published_during_indexing(arc):
+    root, _ = arc
+    got = []
+    res = ga.build_index(str(root), publish=lambda e, add: got.append(e))
+    assert [e["build_id"] for e in got] == [BUILD] and (PID, BUILD) in res["builds"]
+
+
+def test_chunk_sizes_listed_per_folder_and_relisted_once(arc):
+    root, _ = arc
+    sizes = ga.ChunkSizes(ga.Archive(root))
+    md5 = next(p.name for p in (root / "chunks").rglob("*") if p.is_file())
+    assert sizes.get(md5) == (root / "chunks" / md5[:2] / md5[2:4] / md5).stat().st_size
+    missing = md5[:4] + "0" * 28
+    late = root / "chunks" / md5[:2] / md5[2:4] / missing
+    late.write_bytes(b"x")                       # dopisany po pierwszym listowaniu (GOG Manager w trakcie)
+    assert sizes.get(missing) == 1               # brak → jedno ponowne listowanie folderu
+    late.unlink()
+
+
+def test_build_with_missing_chunk_is_withdrawn_after_chunk_pass(arc):
+    root, _ = arc
+    next(p for p in (root / "chunks").rglob("*") if p.is_file()).unlink()
+    events = []
+    res = ga.build_index(str(root), publish=lambda e, add: events.append((e["build_id"], add)))
+    assert events == [(BUILD, True), (BUILD, False)]            # najpierw udostępniony, po sprawdzeniu wycofany
+    assert not res["builds"] and "brakujące chunki: 1" in res["rejected"][0]["reason"]
