@@ -172,10 +172,10 @@ def titles() -> dict:
 
 def set_title(game: str, name: str) -> dict:
     """Administrator: nazwa gry w LaunchBox; pusta — usuwa (Lumen szuka znowu po nazwie ze sklepu)."""
-    if not TITLE_GAME.match(game or ""):
+    if not TITLE_GAME.fullmatch(game or ""):
         raise ArtError("nieznana gra")
     name = " ".join(str(name or "").split())
-    if len(name) > 200 or any(ord(c) < 32 for c in name):
+    if len(name) > 200 or not name.isprintable() or any(c in name for c in "​‌‍‎‏⁠﻿"):
         raise ArtError("niedozwolona nazwa")
     with _lock:
         d = _load()

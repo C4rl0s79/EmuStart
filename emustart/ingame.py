@@ -801,6 +801,9 @@ class RetroArch(Adapter):
 
     def apply_policy(self, values: dict) -> None:
         self.policy = {k: v for k, v in (values or {}).items() if "|" not in k}
+        # przycisk skrótów LB (4) z serwera sprzed 0.62.0 albo z zapamiętanego indeksu — skróty są na Select (7)
+        if self.policy.get("input_enable_hotkey_btn") == "4":
+            self.policy["input_enable_hotkey_btn"] = "7"
 
     def launch_args(self, run_dir: Path, resume: bool, pad_order: list | None = None) -> list:
         run_dir.mkdir(parents=True, exist_ok=True)
@@ -935,14 +938,29 @@ class RetroArch(Adapter):
                    "input_state_slot_increase_btn": "h0down", "input_state_slot_decrease_btn": "h0up",
                    "input_toggle_fast_forward_btn": "5", "input_screenshot_btn": "9",
                    "input_recording_toggle_btn": "8", "savestate_auto_index": "true"}
-    _HOTKEYS_MARK = "emustart-skroty-lb-3.txt"     # -2: odwrócone ↑/↓ (0.54.0), -3: Select zamiast LB
+    _HOTKEYS_MARK = "emustart-skroty-select.txt"   # 0.62.0: Select zamiast LB
+    _OLD_MARKS = ("emustart-skroty-lb-2.txt",)      # skróty na LB (0.54.0–0.61.x)
 
     def _pad_hotkeys(self) -> None:
         """Domyślna konfiguracja EmuStart w retroarch.cfg — raz (znacznik obok retroarch.cfg); potem
         gracz może ją zmienić w RetroArchu. Inne skróty RetroArcha na tych samych przyciskach (np.
-        input_exit_emulator_btn = "0" — Select + A wychodziło z gry) — wyłączone."""
+        input_exit_emulator_btn = "0" — LB + A wychodziło z gry) — wyłączone.
+        Po skrótach na LB (znacznik poprzedniej wersji) zmienia się tylko przycisk skrótów, gdy nadal jest LB
+        (4 → 7); pozostałe skróty gracza zostają."""
         cfg, mark = self.home / "retroarch.cfg", self.home / self._HOTKEYS_MARK
         if mark.exists() or not cfg.is_file():
+            return
+        old = [m for m in (self.home / n for n in self._OLD_MARKS) if m.exists()]
+        if old:
+            try:
+                if _cfg_map(cfg).get("input_enable_hotkey_btn", "").strip('"') == "4":
+                    ini_set(cfg, {(None, "input_enable_hotkey_btn"): '"7"'})
+                    log.info("RetroArch: przycisk skrótów LB → Select w retroarch.cfg")
+                mark.write_text("skróty pada Select + … w retroarch.cfg\n", encoding="utf-8")
+                for m in old:
+                    m.unlink(missing_ok=True)
+            except OSError:
+                log.exception("RetroArch: skróty pada (LB → Select)")
             return
         used = set(self.PAD_HOTKEYS.values()) - {"7", "true"}
         changes = {(None, k): f'"{v}"' for k, v in self.PAD_HOTKEYS.items()}

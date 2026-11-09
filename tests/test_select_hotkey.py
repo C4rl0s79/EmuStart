@@ -29,14 +29,19 @@ def test_select_is_the_modifier_and_lb_no_longer_is(monkeypatch):
 
 
 def test_retroarch_old_lb_setup_migrated_once(tmp_path):
-    """Znacznik poprzedniej wersji (LB) nie blokuje wpisania Select; potem zmiana gracza zostaje."""
+    """Po skrótach na LB zmienia się tylko przycisk skrótów (4 → 7); inne skróty gracza zostają, stary znacznik
+    znika; potem zmiana gracza zostaje."""
     home = tmp_path / "RetroArch"
     home.mkdir()
-    (home / "retroarch.cfg").write_text('input_enable_hotkey_btn = "4"\n', encoding="utf-8")
+    (home / "retroarch.cfg").write_text('input_enable_hotkey_btn = "4"\ninput_save_state_btn = "2"\n'
+                                        'input_rewind_btn = "3"\n', encoding="utf-8")
     (home / "emustart-skroty-lb-2.txt").write_text("x", encoding="utf-8")
     ra = ingame.RetroArch(str(home / "retroarch.exe"))
     ra.launch_args(tmp_path / "run", resume=False)
-    assert ingame._cfg_map(home / "retroarch.cfg")["input_enable_hotkey_btn"] == '"7"'
+    cfg = ingame._cfg_map(home / "retroarch.cfg")
+    assert cfg["input_enable_hotkey_btn"] == '"7"'
+    assert cfg["input_save_state_btn"] == '"2"' and cfg["input_rewind_btn"] == '"3"'      # ustawienia gracza
+    assert not (home / "emustart-skroty-lb-2.txt").exists() and (home / "emustart-skroty-select.txt").exists()
     ingame.ini_set(home / "retroarch.cfg", {(None, "input_enable_hotkey_btn"): '"5"'})
     ra.launch_args(tmp_path / "run2", resume=False)
     assert ingame._cfg_map(home / "retroarch.cfg")["input_enable_hotkey_btn"] == '"5"'
@@ -55,3 +60,19 @@ def test_dolphin_conflicts_follow_select():
     assert ingame._dolphin_hotkey_conflict("`XInput/0/Gamepad:Back`")
     assert not ingame._dolphin_hotkey_conflict("@(`Shoulder L`+`Button Y`)")
     assert not ingame._dolphin_hotkey_conflict("@(`Back`+`Start`)")
+
+
+def test_retroarch_lb_from_old_server_policy_becomes_select():
+    """Serwer sprzed 0.62.0 (albo zapamiętany indeks) podaje LB — sesja dostaje Select."""
+    ra = ingame.RetroArch.__new__(ingame.RetroArch)
+    ra.apply_policy({"input_enable_hotkey_btn": "4", "input_save_state_btn": "3", "Main|x": "y"})
+    assert ra.policy == {"input_enable_hotkey_btn": "7", "input_save_state_btn": "3"}
+
+
+def test_launchbox_title_validation_is_strict(tmp_path, monkeypatch):
+    import pytest
+    from emustart import paths, userart
+    monkeypatch.setattr(paths, "SERVER", tmp_path, raising=False)
+    for game, name in (("gog:1\n", "x"), ("gog:1", "a\x7fb"), ("gog:1", "a​b"), ("gog:1", "a\x9bb")):
+        with pytest.raises(userart.ArtError):
+            userart.set_title(game, name)

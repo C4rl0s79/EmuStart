@@ -514,7 +514,8 @@ class Api:
     def art_lb_title_set(self, game: str, name: str) -> dict:
         if not self._is_admin():
             return {"ok": False, "reason": "Nazwy gier w LaunchBox ustala administrator serwera."}
-        return self._admin_call("PUT", "titles", {"game": str(game), "name": str(name)})
+        return self._admin_call("PUT", "titles", {"game": str(game), "name": str(name)}, refresh=False,
+                                forbidden="Nazwy gier w LaunchBox ustala administrator serwera.")
 
     def art_user_remove(self, game: str, kind: str, sha: str) -> dict:
         return self._art_user("remove", str(game), str(kind), str(sha))
@@ -1640,9 +1641,11 @@ class Api:
         i = netsrc.info_nowait(self._cfg) or {}
         return bool(i.get("admin"))
 
-    def _admin_call(self, method: str, path: str, body: dict | None = None) -> dict:
+    def _admin_call(self, method: str, path: str, body: dict | None = None, refresh: bool = True,
+                    forbidden: str = "Zmieniać grafiki i opisy może tylko administrator.") -> dict:
         """Zapytanie do /v1/admin/… serwera. Po zmianie — biblioteka z serwera w tle (wersja
-        systemu na serwerze wzrosła), żeby ten komputer od razu pokazał nową grafikę / opis."""
+        systemu na serwerze wzrosła), żeby ten komputer od razu pokazał nową grafikę / opis;
+        refresh=False — zmiana nie dotyczy biblioteki (nazwy gier w LaunchBox)."""
         import http.client
         import json as _json
         ep = netsrc.endpoint(self._cfg)
@@ -1669,10 +1672,10 @@ class Api:
         except ValueError:
             out = {}
         if r.status == 403:
-            return {"ok": False, "reason": "Zmieniać grafiki i opisy może tylko administrator."}
+            return {"ok": False, "reason": forbidden}
         if r.status != 200:
             return {"ok": False, "reason": out.get("error") or f"Serwer: błąd {r.status}"}
-        if method != "GET":
+        if method != "GET" and refresh:
             threading.Thread(target=self._thin_sync, daemon=True, name="biblioteka-po-zmianie").start()
         return out if isinstance(out, (dict, list)) else {"ok": False}
 

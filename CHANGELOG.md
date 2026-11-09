@@ -53,9 +53,9 @@ na Androidzie ma już Select jako przycisk skrótów). Serwer trzeba zaktualizow
 - **Skróty pada w grze: przytrzymany Select zamiast LB** we wszystkich emulatorach: Select + A menu, Select + Y / X
   zapis, Select + ↑ / ↓ slot, Select + RB przyspieszenie, Select + R3 zrzut, Select + L3 nagrywanie. Akcje bez zmian.
   - DuckStation, PCSX2, PPSSPP, Dolphin: wątek pada EmuStart (`hotkey.py`).
-  - RetroArch: przycisk skrótów 7 (Back/Select) w `retroarch.cfg` — wpisany jeszcze raz przy pierwszej grze (własne
-    zmiany skrótów w `retroarch.cfg` trzeba wtedy powtórzyć). Zapisana w panelu serwera stara wartość 4 (LB) jest
-    czytana jako 7.
+  - RetroArch: przycisk skrótów 7 (Back/Select). Przy pierwszej grze w `retroarch.cfg` zmienia się tylko przycisk
+    skrótów, gdy nadal jest LB; pozostałe skróty gracza zostają. Stara wartość 4 (LB) z panelu serwera, ze starszego
+    serwera albo z zapamiętanego indeksu jest czytana jako 7 — LB nie da się już ustawić jako przycisku skrótów.
   - Dolphin: z `Hotkeys.ini` zdejmowane są teraz skróty zderzające się z Select + …, skróty na LB zostają.
   - Select trafia też do gry (emulator czyta pada sam), tak jak wcześniej LB.
 
