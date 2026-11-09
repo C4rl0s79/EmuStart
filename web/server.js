@@ -131,7 +131,41 @@ let artTimer = null;
 const SRC = { libretro: "libretro (bez klucza)", sgdb: "SteamGridDB", igdb: "IGDB", tgdb: "TheGamesDB" };
 function artMsg(text, ok) { toast(text, ok); }
 let lbWasRunning = false;
+let ART_DEF = null;
+function drawDefaults() {
+  const d = ART_DEF;
+  if (!d) return;
+  const g = $("dGroup").value, k = $("dKind").value, cur = d.defaults[`${g}|${k}`];
+  $("dNow").textContent = cur ? "Domyślna ustawiona (zaznaczona poniżej)." : "Brak domyślnej: gracze zobaczą nazwę grupy.";
+  const items = d.items[k] || [];
+  $("dGrid").innerHTML = items.length ? items.map((i) =>
+    `<button data-sha="${esc(i.sha)}" data-ext="${esc(i.ext)}" title="${esc(i.by + " · " + i.game)}" style="padding:4px;${cur && cur.sha === i.sha ? "outline:2px solid var(--ok,#4caf50)" : ""}">` +
+    `<img src="/panel-art/${esc(i.sha)}" alt="" loading="lazy" style="display:block;height:96px;max-width:220px;object-fit:contain"><small>${esc(i.by)}</small></button>`).join("")
+    : '<div class="muted">Nikt jeszcze nie wgrał grafik tego rodzaju.</div>';
+  $("dGrid").querySelectorAll("button").forEach((b) => b.addEventListener("click", () =>
+    setDefaultArt(b.dataset.sha, b.dataset.ext)));
+}
+async function loadDefaults() {
+  const d = await admin("art_defaults", {}).catch(() => null);
+  if (!d?.ok) return;
+  ART_DEF = d;
+  const keep = $("dGroup").value;
+  $("dGroup").innerHTML = d.groups.map((g) => `<option value="${esc(g.id)}">${esc(g.label)}</option>`).join("");
+  if (keep && d.groups.some((g) => g.id === keep)) $("dGroup").value = keep;
+  drawDefaults();
+}
+async function setDefaultArt(sha, ext) {
+  const r = await admin("art_default_set", { game: $("dGroup").value, kind: $("dKind").value, sha, ext }).catch(() => null);
+  artMsg(r?.ok ? (sha ? "Ustawiono domyślną grafikę." : "Usunięto domyślną grafikę.") : r?.reason || "Serwer nie odpowiada.", !!r?.ok);
+  loadDefaults();
+}
+$("dGroup").addEventListener("change", drawDefaults);
+$("dKind").addEventListener("change", drawDefaults);
+$("dReload").addEventListener("click", loadDefaults);
+$("dClear").addEventListener("click", () => setDefaultArt("", ""));
+let artDefaultsLoaded = false;
 async function refreshArt() {
+  if (!artDefaultsLoaded) { artDefaultsLoaded = true; loadDefaults(); }
   const d = await admin("art").catch(() => null);
   if (!d?.ok) return;
   if ($("ges").options.length <= 1)

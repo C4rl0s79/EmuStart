@@ -112,6 +112,8 @@ class GogService:
 
     ART_KINDS = ("grid", "hero", "logo", "icon")
     ART_MAX_AGE = 7 * 86400
+    _art_lock = threading.Lock()
+    _art_busy: set = set()
 
     def art(self, pid: str, kind: str) -> dict:
         """Grafika gry z serwera (okładka, tło, logo, ikona z folderu GOG Managera) — kopia na dysku, żeby
@@ -127,6 +129,25 @@ class GogService:
             return {"path": str(have)}
         if not have and miss.is_file() and fresh(miss):
             return {"path": ""}
+        if have:                                       # starsza kopia na dysku: od razu, odświeżenie w tle
+            key = f"{pid}/{kind}"
+            with self._art_lock:
+                if key not in self._art_busy:
+                    self._art_busy.add(key)
+                    threading.Thread(target=self._art_refresh, args=(pid, kind, key), daemon=True, name="gog-art").start()
+            return {"path": str(have)}
+        return self._art_fetch(pid, kind, d, have, miss)
+
+    def _art_refresh(self, pid: str, kind: str, key: str) -> None:
+        d = gi.gog_dir() / "art" / pid
+        try:
+            have = next((p for p in (d / f"{kind}.jpg", d / f"{kind}.png") if p.is_file()), None)
+            self._art_fetch(pid, kind, d, have, d / f"{kind}.none")
+        finally:
+            with self._art_lock:
+                self._art_busy.discard(key)
+
+    def _art_fetch(self, pid: str, kind: str, d, have, miss) -> dict:
         try:
             data, ctype = self._source_fn().art(pid, kind)
         except Exception as ex:                        # serwer niedostępny — stara kopia albo nic

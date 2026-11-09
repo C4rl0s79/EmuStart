@@ -30,6 +30,9 @@ log = logging.getLogger("emustart.api")
 KEEP_LIST = 60                     # stanów na liście „Wczytaj zapis”
 PIN_RETRY = 300                 # s — wznowienie pobierania przypiętej gry najwyżej tak często
 
+ANIMATED_ON_LIST_MAX = 3 << 20
+
+
 class Api:
     def __init__(self):
         self._cfg = config.load()
@@ -480,6 +483,29 @@ class Api:
 
     def art_user_gallery(self, game: str, kind: str) -> dict:
         return self._art_user("gallery", str(game), str(kind))
+
+    def art_thumb(self, src: str, dst: str, height: int) -> dict:
+        """Lumen: mała kopia plakatu na listę (dekodowanie i przetwarzanie pełnych plików zacinało przewijanie)."""
+        from PIL import Image
+        tmp = f"{dst}.{threading.get_ident()}.tmp"
+        try:
+            with Image.open(str(src)) as im:
+                # animowana zostaje animowana, chyba że plik jest ogromny (dziesiątki MB APNG/WebP zacinały listę na
+                # sekundy): wtedy na liście pierwsza klatka, animacja dalej w szczegółach
+                if getattr(im, "is_animated", False) and os.path.getsize(src) < ANIMATED_ON_LIST_MAX:
+                    return {"ok": False}
+                im.thumbnail((int(height) * 2, int(height)), Image.Resampling.BILINEAR)
+                Path(dst).parent.mkdir(parents=True, exist_ok=True)
+                im.convert("RGBA").save(tmp, "WEBP", quality=82, method=2)
+            os.replace(tmp, dst)
+            return {"ok": True}
+        except (OSError, ValueError, Image.DecompressionBombError) as ex:
+            log.info("miniatura grafiki: %s", ex)
+            Path(tmp).unlink(missing_ok=True)
+            return {"ok": False}
+
+    def art_user_defaults(self) -> dict:
+        return self._art_user("defaults")
 
     def art_user_remove(self, game: str, kind: str, sha: str) -> dict:
         return self._art_user("remove", str(game), str(kind), str(sha))
