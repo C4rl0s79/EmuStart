@@ -421,6 +421,108 @@ class Api:
     def list_games(self, es: str) -> list:
         return catalog.list_games(self._cfg, es, self._profile)
 
+    # ── gry GOG z archiwum depotów serwera (emustart/goglib.py) ──
+    @property
+    def _gog(self):
+        svc = self.__dict__.get("_gog_svc")
+        if svc is None:
+            from emustart import goglib
+            svc = self.__dict__["_gog_svc"] = goglib.GogService(lambda: self._cfg)
+        return svc
+
+    def gog_library(self, refresh: bool = True) -> dict:
+        """Gry GOG z serwera (kopia offline, gdy serwera nie ma) i lokalne instalacje."""
+        return self._gog.catalog(bool(refresh))
+
+    def gog_status(self) -> dict:
+        return self._gog.status()
+
+    def gog_options(self, pid: str, base_dir: str = "", langs=None) -> dict:
+        try:
+            return self._gog.options(pid, str(base_dir or ""), [str(x) for x in langs or []])
+        except ValueError as ex:
+            return {"ok": False, "reason": str(ex)}
+
+    def gog_install(self, pid: str, build: str, langs: list, primary: str, dlcs: list, target: str) -> dict:
+        """Instalacja z serwera do `target` (pełna ścieżka katalogu gry) — w kolejce zadań."""
+        from emustart import goglib
+        why = goglib.check_target(self._cfg, str(target or ""))
+        if why:
+            return {"ok": False, "reason": why}
+        if not goglib.valid_build(build):
+            return {"ok": False, "reason": "Zły identyfikator buildu."}
+        try:
+            return self._gog.enqueue("install", pid, build=str(build), langs=[str(x) for x in langs or []],
+                                     primary=str(primary or ""), dlcs=[str(x) for x in dlcs or []], target=str(target))
+        except ValueError as ex:
+            return {"ok": False, "reason": str(ex)}
+
+    def gog_resume(self, pid: str) -> dict:
+        """Wznowienie przerwanej instalacji albo naprawa uszkodzonej (dane i wybór z rejestru)."""
+        from emustart import goginstall as gi
+        try:
+            e = gi.load_entry(str(pid))
+            if not e:
+                return {"ok": False, "reason": "Brak przerwanej instalacji tej gry."}
+            if e.get("state") == gi.ST_DAMAGED:
+                return self._gog.enqueue("repair", pid, title=e.get("title"))
+            if e.get("pending_dlc"):
+                return self._gog.enqueue("dlc", pid, dlcs=e["pending_dlc"]["dlcs"], title=e.get("title"))
+            if e.get("state") not in gi.RESUMABLE:
+                return {"ok": False, "reason": "Ta instalacja nie wymaga wznowienia."}
+            return self._gog.enqueue("install", pid, title=e.get("title"))
+        except (ValueError, gi.GogError) as ex:
+            return {"ok": False, "reason": str(ex)}
+
+    def gog_add_dlc(self, pid: str, dlcs: list) -> dict:
+        try:
+            return self._gog.enqueue("dlc", pid, dlcs=[str(x) for x in dlcs or []])
+        except ValueError as ex:
+            return {"ok": False, "reason": str(ex)}
+
+    def gog_cancel(self, pid: str) -> dict:
+        try:
+            return self._gog.cancel(pid)
+        except ValueError as ex:
+            return {"ok": False, "reason": str(ex)}
+
+    def gog_verify(self, pid: str) -> dict:
+        try:
+            return self._gog.verify(pid)
+        except ValueError as ex:
+            return {"ok": False, "reason": str(ex)}
+
+    def gog_launch(self, pid: str, task: int = -1) -> dict:
+        """Zainstalowana gra (bez serwera); `task` — zadanie z gog_play_tasks (-1 = domyślne)."""
+        try:
+            return self._gog.launch(pid, int(task) if int(task) >= 0 else None)
+        except (TypeError, ValueError) as ex:
+            return {"ok": False, "reason": str(ex)}
+
+    def gog_play_tasks(self, pid: str) -> dict:
+        try:
+            return self._gog.play_tasks(pid)
+        except ValueError as ex:
+            return {"ok": False, "reason": str(ex)}
+
+    def gog_uninstall(self, pid: str) -> dict:
+        try:
+            return self._gog.uninstall(pid)
+        except ValueError as ex:
+            return {"ok": False, "reason": str(ex)}
+
+    def gog_finish_admin(self, pid: str) -> dict:
+        try:
+            return self._gog.finish_admin(pid)
+        except ValueError as ex:
+            return {"ok": False, "reason": str(ex)}
+
+    def gog_install_runtimes(self, pid: str) -> dict:
+        try:
+            return self._gog.install_runtimes(pid)
+        except ValueError as ex:
+            return {"ok": False, "reason": str(ex)}
+
     def platform_catalog(self) -> list:
         """Wszystkie znane systemy z rodziną platformy (Lumen: klasyfikacja skrótów Steam po oznaczeniach)."""
         return [{"es": es, "display": s["display"], "plat": s["plat"], "family": systems.family(es)}

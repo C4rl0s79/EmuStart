@@ -38,8 +38,8 @@ gry PC Windows), aktualizacja zainstalowanej gry GOG do nowego buildu (pierwsza 
 | 1 | analiza archiwum, kontrakt formatu | — | archiwum `D:\GOGInstall\_depots` (2 gry) przeczytane | zrobione |
 | 2 | rodzina platformy w `systems.py`, `/v1/systems` | `test_platform_family.py` (3) | — | zrobione |
 | 3 | indeks GOG + API serwera + panel | `test_gog_server.py` (22) | indeks prawdziwego archiwum: 2 gry, 0 pominiętych, bez sekretów; panel — nie oglądany | testy zrobione |
-| 4 | instalator jednej gry bez UI (pionowy przepływ) | | | |
-| 5 | wznowienie, weryfikacja, odinstalowanie, uruchamianie | | | |
+| 4 | instalator jednej gry bez UI (pionowy przepływ) | `test_gog_install.py` (pionowy przepływ przez HTTP, języki, DLC, zależności, finalizacja, bufor) | prawdziwe archiwum: plan obu gier, 589 małych plików z prawdziwych chunków zgodnych MD5, 26 wpisów HKCU WC (atrapa rejestru); pełnej gry nie instalowano | testy zrobione, czeka na pełną instalację na żywo |
+| 5 | wznowienie, weryfikacja, odinstalowanie, uruchamianie | `test_gog_install.py` (przerwanie/wznowienie, zmieniony build, uszkodzony/brakujący obiekt, miejsce, naprawa, uruchamianie bez serwera, launcher, punkty połączenia, cache) | — | testy zrobione, czeka na sprawdzenie na żywo |
 | 6 | Lumen: model, biblioteka, zadania, akcje, IPC | | | |
 | 7 | Lumen: pulpit i TV | | | |
 | 8 | regresja, dokumentacja | | | |
