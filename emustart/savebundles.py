@@ -168,6 +168,9 @@ class Bundle:
 
 
 def from_spec(spec: dict) -> Bundle:
+    if spec.get("emu") == "gog":                     # zbiór plików gry GOG (emustart/gogsaves.py)
+        from emustart import gogsaves
+        return gogsaves.GogBundle.from_spec(spec)
     return Bundle(spec["emu"], spec.get("core", ""), spec["kind"], Path(spec["folder"]),
                   spec["stem"], list(spec.get("names") or []),
                   learn=spec.get("learn", ""), learn_game=spec.get("learn_game", "")).collect()

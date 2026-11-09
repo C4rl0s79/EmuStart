@@ -130,7 +130,11 @@ def gog_status() -> dict:
         return {"ok": True, "text": text, "busy": True}
     if st["error"]:
         return {"ok": False, "text": st["error"]}
+    from emustart import saverules
+    rs = saverules.status()
     text = f"gry GOG: {st['games']} (buildów: {st['builds']})"
+    text += (f" · reguły zapisów: {rs['version']} ({rs['games']} gier GOG)" if rs["version"]
+             else " · reguły zapisów: pobieram…" if rs["running"] else " · reguły zapisów: brak (" + (rs["error"] or "jeszcze nie pobrane") + ")")
     if st["rejected"]:
         why = "; ".join(f"{r.get('title') or r.get('product_id')}: {r.get('reason')}" for r in st["rejected"][:3])
         text += f" · pominięte: {len(st['rejected'])} — {why}" + (" …" if len(st["rejected"]) > 3 else "")
@@ -215,6 +219,9 @@ def _apply(api, key: str) -> None:
         from emustart import gogarchive
         # pusta ścieżka = nic nie udostępniamy (także gdy w tle trwa indeksowanie poprzedniej)
         gogarchive.refresh(api._cfg.get("gog_depots_dir") or "")
+        if api._cfg.get("gog_depots_dir"):
+            from emustart import saverules
+            saverules.update_async(force=True)           # „Odśwież indeks” sprawdza też nową wersję reguł zapisów
     elif key == "logo_pack_dir" and api._cfg.get("logo_pack_dir"):
         if logos_import()["running"]:
             return

@@ -555,3 +555,35 @@ def test_catalog_scans_processes_once(env, monkeypatch):
     monkeypatch.setattr(svc, "running_ids", lambda: calls.append(1) or [])
     svc.catalog(refresh=False)
     assert len(calls) == 1
+
+
+def test_launch_waits_for_conflict_decision_and_uploads_after_game(env, monkeypatch):
+    from emustart import gogsaves, syncclient
+    _install(env)
+    started, after = [], []
+
+    class P:
+        def poll(self):
+            return 0                                    # proces już się zakończył
+    monkeypatch.setattr(gogfinal, "start", lambda spec: started.append(spec) or P())
+    monkeypatch.setattr(gogfinal, "processes_under", lambda d: [])
+    monkeypatch.setattr(gogsaves, "rules", lambda pid, src=None, refresh=False: {
+        "source": "ludusavi", "files": [{"path": "<base>/saves", "tags": ["save"], "when": []}]})
+    seen = []
+    monkeypatch.setattr(gogsaves, "before", lambda cfg, prof, pid, b: seen.append(b[0].key) or
+                        syncclient.Result(conflicts=[syncclient.Conflict(b[0], {"revision": 3})]))
+    resolved = []
+    monkeypatch.setattr(gogsaves, "resolve", lambda cfg, prof, pid, c, choice: resolved.append(choice))
+    monkeypatch.setattr(gogsaves, "after", lambda cfg, prof, pid, b, skip=None: after.append(skip) or syncclient.Result())
+    svc = goglib.GogService(lambda: {}, profile_fn=lambda: 1)
+    r = svc.launch(PID)
+    assert not r["ok"] and r["conflict"][0]["template"] == "<base>/saves" and not started   # gra czeka na decyzję
+    r = svc.launch(PID, sync_choice="skip")
+    assert r["ok"] and started and not resolved
+    svc._running[PID]["started"] -= 10                  # minęła chwila na start gry po launcherze
+    svc.running_ids()                                   # koniec gry → wysłanie zapisów (w tle)
+    for _ in range(50):
+        if after:
+            break
+        time.sleep(0.02)
+    assert after == [{seen[0]}] and seen[0][0] == "gog"   # pominięty konflikt nie jest wysyłany

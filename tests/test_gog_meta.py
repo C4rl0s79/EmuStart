@@ -124,3 +124,16 @@ def test_vertical_art_over_http(srv, arc, tmp_path, monkeypatch):  # noqa: F811
     assert open(p, "rb").read() == JPG
     svc._source_fn = lambda: (_ for _ in ()).throw(OSError("brak serwera"))
     assert svc.art(PID, "grid")["path"] == p
+
+
+def test_http_saverules_requires_auth(srv, arc, tmp_path, monkeypatch):  # noqa: F811
+    from emustart import saverules
+    monkeypatch.setattr(paths, "DATA", tmp_path / "srvdata")
+    monkeypatch.setattr(saverules, "MIN_ENTRIES", 1)
+    monkeypatch.setattr(saverules, "_index", None)
+    saverules.install(f"Testowa Gra:\n  files:\n    <base>/save: {{tags: [save]}}\n  gog: {{id: {PID}}}\n".encode())
+    assert _req(srv, "GET", f"/v1/gog/games/{PID}/saverules")[0] == 401
+    _did, tok = keyhelp.device("Gracz", games=True)
+    st, r = _req(srv, "GET", f"/v1/gog/games/{PID}/saverules", tok)
+    assert st == 200 and r["source"] == "ludusavi" and r["files"][0]["path"] == "<base>/save"
+    assert _req(srv, "GET", "/v1/gog/games/..%2fx/saverules", tok)[0] == 404

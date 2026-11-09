@@ -38,6 +38,8 @@ from emustart import library, savebundles
 log = logging.getLogger("emustart.syncclient")
 
 TIMEOUT = 15
+UNPACK_FILES = 5000                  # paczka z serwera: najwięcej plików i bajtów po rozpakowaniu
+UNPACK_BYTES = 4 << 30
 BACKUPS_KEEP = 20                    # kopie zapasowe plików przed pobraniem (na profil)
 _lock = threading.Lock()
 # trwająca wysyłka / pobieranie paczki (pasek postępu w UI): {op: send|get, done, total, started}
@@ -374,7 +376,7 @@ def _server_bundle(man: dict, b, slot: int = 1) -> dict:
     else:
         return {}
     e = (emus or {}).get(b.emulator_id) or {}
-    if b.emulator_id == "retroarch":
+    if b.emulator_id in ("retroarch", "gog"):          # GOG: core_id = zbiór plików (gogsaves)
         e = (e.get("cores") or {}).get(b.core_id) or {}
     return (e.get("bundles") or {}).get(b.kind) or {}
 
@@ -454,6 +456,9 @@ def _fetch(cl: _Client, srv: dict) -> Path:
         with zipfile.ZipFile(tmp) as z:
             if z.testzip() is not None:
                 raise Offline("pobrana paczka uszkodzona (ZIP)")
+            infos = z.infolist()
+            if len(infos) > UNPACK_FILES or sum(i.file_size for i in infos) > UNPACK_BYTES:
+                raise Offline("pobrana paczka przekracza limit plików / rozmiaru po rozpakowaniu")
         return tmp
     except BaseException:
         tmp.unlink(missing_ok=True)

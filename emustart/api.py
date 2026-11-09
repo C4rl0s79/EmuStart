@@ -427,7 +427,7 @@ class Api:
         svc = self.__dict__.get("_gog_svc")
         if svc is None:
             from emustart import goglib
-            svc = self.__dict__["_gog_svc"] = goglib.GogService(lambda: self._cfg)
+            svc = self.__dict__["_gog_svc"] = goglib.GogService(lambda: self._cfg, profile_fn=lambda: self._profile)
         return svc
 
     def gog_library(self, refresh: bool = True) -> dict:
@@ -499,11 +499,43 @@ class Api:
         except ValueError as ex:
             return {"ok": False, "reason": str(ex)}
 
-    def gog_launch(self, pid: str, task: int = -1) -> dict:
-        """Zainstalowana gra (bez serwera); `task` — zadanie z gog_play_tasks (-1 = domyślne)."""
+    def gog_launch(self, pid: str, task: int = -1, sync_choice: str = "") -> dict:
+        """Zainstalowana gra (bez serwera); `task` — zadanie z gog_play_tasks (-1 = domyślne); `sync_choice` —
+        decyzja gracza przy konflikcie zapisów (local | remote | both | skip)."""
         try:
-            return self._gog.launch(pid, int(task) if int(task) >= 0 else None)
+            return self._gog.launch(pid, int(task) if int(task) >= 0 else None, str(sync_choice or ""))
         except (TypeError, ValueError) as ex:
+            return {"ok": False, "reason": str(ex)}
+
+    def gog_saves(self, pid: str, refresh: bool = False) -> dict:
+        """Zapisy i ustawienia gry GOG: reguły (źródło), ścieżki na tym komputerze, stan synchronizacji."""
+        try:
+            return self._gog.saves_status(pid, bool(refresh))
+        except ValueError as ex:
+            return {"ok": False, "reason": str(ex)}
+
+    def gog_saves_set(self, pid: str, opts: dict) -> dict:
+        try:
+            return self._gog.saves_set(pid, opts if isinstance(opts, dict) else {})
+        except ValueError as ex:
+            return {"ok": False, "reason": str(ex)}
+
+    def gog_saves_sync(self, pid: str, choice: str = "") -> dict:
+        try:
+            return self._gog.saves_sync(pid, str(choice or ""))
+        except ValueError as ex:
+            return {"ok": False, "reason": str(ex)}
+
+    def gog_saves_backups(self, pid: str) -> dict:
+        try:
+            return self._gog.saves_backups(pid)
+        except ValueError as ex:
+            return {"ok": False, "reason": str(ex)}
+
+    def gog_saves_restore(self, pid: str, backup_id: str) -> dict:
+        try:
+            return self._gog.saves_restore(pid, str(backup_id or ""))
+        except ValueError as ex:
             return {"ok": False, "reason": str(ex)}
 
     def gog_play_tasks(self, pid: str) -> dict:

@@ -1143,6 +1143,7 @@ def _gog(handler, p: list) -> None:
         GET gog/games/<pid>                          jedna gra
         GET gog/games/<pid>/builds/<build>/manifest  rekord + meta (bez sekretów) + manifesty, z hashem buildu
         GET gog/games/<pid>/art/<grid|hero|logo|icon>  grafika gry z folderu GOG Managera (emustart/gogmeta.py)
+        GET gog/games/<pid>/saverules[?title=]       reguły zapisów i ustawień gry (emustart/saverules.py)
         GET gog/chunks/<md5>?pid=&build=&hash=       skompresowany chunk przypiętego buildu"""
     from emustart import gogarchive as ga
     if not _games_ok(handler):
@@ -1155,6 +1156,12 @@ def _gog(handler, p: list) -> None:
         if len(p) == 2 and p[0] == "games" and pid_ok(p[1]):
             g = ga.game(p[1])
             return _json(handler, g) if g else _json(handler, {"error": "nie ma takiej gry GOG"}, 404)
+        if len(p) == 3 and p[0] == "games" and pid_ok(p[1]) and p[2] == "saverules":
+            from emustart import saverules
+            title = q.get("title", "")
+            if len(title) > 300:
+                return _json(handler, {"error": "zły tytuł"}, 400)
+            return _json(handler, saverules.rules_for(p[1], title))
         if len(p) == 4 and p[0] == "games" and pid_ok(p[1]) and p[2] == "art":
             from emustart import gogmeta
             f = gogmeta.art_path(p[1], p[3]) if ga.game(p[1]) else None     # tylko gry z archiwum

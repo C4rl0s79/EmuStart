@@ -30,8 +30,11 @@ def _catalog_path() -> Path:
 
 
 class GogService:
-    def __init__(self, cfg_fn, source_fn=None):
+    def __init__(self, cfg_fn, source_fn=None, profile_fn=None):
         self._cfg = cfg_fn
+        self._profile = profile_fn or (lambda: None)        # profil EmuStart (konto) — zapisy gier GOG
+        self._saves: dict = {}              # pid → {"bundles", "skip"} sesji gry (wysłanie po końcu)
+        self._saves_last: dict = {}         # pid → wynik ostatniej synchronizacji (UI)
         self._source_fn = source_fn or (lambda: gi.ServerSource(self._cfg()))
         self._lock = threading.Lock()
         self._queue: deque = deque()
@@ -223,8 +226,10 @@ class GogService:
         return {"jobs": out, "last": self._last, "running": self.running_ids()}
 
     # ── uruchamianie ───────────────────────────────────────────────────────
-    def launch(self, pid: str, task: int | None = None) -> dict:
-        """Zainstalowana gra — bez serwera. Stan ≠ installed (finalizacja, uszkodzenie) → odmowa z powodem."""
+    def launch(self, pid: str, task: int | None = None, sync_choice: str = "") -> dict:
+        """Zainstalowana gra — bez serwera. Stan ≠ installed (finalizacja, uszkodzenie) → odmowa z powodem.
+        Zapisy (emustart/gogsaves.py): przed grą pobranie nowszych z serwera; konflikt → {"conflict": […]} i gracz
+        wybiera (sync_choice: local | remote | skip) przy ponownym wywołaniu."""
         pid = _pid(pid)
         e = gi.load_entry(pid)
         if not e:
@@ -240,6 +245,9 @@ class GogService:
             spec = gogfinal.launch_spec(root, pid, task)
         except gogfinal.FinalizeError as ex:
             return {"ok": False, "reason": str(ex)}
+        sync = self._sync_before(pid, e, sync_choice)
+        if sync.get("conflict"):
+            return {"ok": False, "conflict": sync["conflict"], "reason": "Zapisy tej gry zmieniły się tutaj i na innym urządzeniu."}
         try:
             proc = gogfinal.start(spec)
         except OSError as ex:
@@ -247,7 +255,10 @@ class GogService:
         self._running[pid] = {"proc": proc, "dir": str(root), "started": time.time()}
         e["last_played"] = time.time()
         gi.save_entry(e)
-        return {"ok": True, "message": f"Uruchomiono: {spec['name'] or e.get('title')}"}
+        msg = f"Uruchomiono: {spec['name'] or e.get('title')}"
+        if sync.get("notice"):
+            msg += f" · {sync['notice']}"
+        return {"ok": True, "message": msg}
 
     def running_ids(self) -> list:
         """Gra działa, dopóki żyje jej proces albo dowolny proces z plikiem w katalogu gry (launcher, który
@@ -261,9 +272,148 @@ class GogService:
                 out.append(pid)
             elif time.time() - r["started"] > 5:          # krótka chwila na start procesu gry po launcherze
                 self._running.pop(pid, None)
+                self._game_ended(pid)
             else:
                 out.append(pid)
         return out
+
+    # ── zapisy i ustawienia gier (emustart/gogsaves.py, serwer EmuStart — bez chmury GOG) ──────────
+    def _saves_plan(self, pid: str, e: dict, refresh: bool = False) -> tuple:
+        from emustart import gogsaves
+        st = gogsaves.settings(pid)
+        try:
+            src = self._source_fn()
+        except Exception:
+            src = None                                   # bez połączenia z serwerem — reguły z kopii
+        r = gogsaves.rules(pid, src, refresh)
+        pl = gogsaves.plan(pid, e["install_dir"], r, st["config"])
+        return st, r, pl
+
+    def _sync_before(self, pid: str, e: dict, choice: str = "") -> dict:
+        from emustart import gogsaves
+        self._saves.pop(pid, None)
+        prof = self._profile()
+        try:
+            st, _r, pl = self._saves_plan(pid, e)
+        except Exception as ex:
+            log.exception("GOG %s: reguły zapisów", pid)
+            return {"notice": f"zapisy bez synchronizacji ({ex})"}
+        if not st["enabled"] or not prof or not pl["sets"]:
+            return {}
+        bundles = pl["sets"]
+        res = gogsaves.before(self._cfg(), prof, pid, bundles)
+        skip = set()
+        if res.conflicts:
+            if choice not in ("local", "remote", "both", "skip"):
+                names = {b.core_id: b.template for b in bundles}
+                return {"conflict": [dict(c.describe(), template=names.get(c.bundle.core_id, "")) for c in res.conflicts]}
+            if choice != "skip":
+                try:
+                    gogsaves.resolve(self._cfg(), prof, pid, res.conflicts, choice)
+                except Exception as ex:
+                    log.info("GOG %s: konflikt zapisów: %s", pid, ex)
+                    choice = "skip"
+            if choice == "skip":
+                skip = {c.bundle.key for c in res.conflicts}       # konflikt wróci przy następnej grze
+        self._saves[pid] = {"bundles": bundles, "skip": skip}
+        self._saves_last[pid] = {"at": time.time(), "ok": not res.offline, "message": res.offline or
+                                 f"przed grą: pobrano {res.downloaded}, wysłano {res.uploaded}"}
+        return {"notice": "zapisy bez synchronizacji z serwerem — wyślę je, gdy wróci połączenie"} if res.offline else {}
+
+    def _game_ended(self, pid: str) -> None:
+        sess = self._saves.pop(pid, None)
+        prof = self._profile()
+        if not sess or not prof:
+            return
+
+        def run():
+            from emustart import gogsaves
+            try:
+                res = gogsaves.after(self._cfg(), prof, pid, sess["bundles"], sess["skip"])
+                self._saves_last[pid] = {"at": time.time(), "ok": not res.offline and not res.conflicts,
+                                         "message": res.offline or ("na serwerze nowsza wersja z innego urządzenia — "
+                                                                    "decyzja przy następnej grze" if res.conflicts else
+                                                                    f"po grze: wysłano {res.uploaded}")}
+            except Exception as ex:
+                log.exception("GOG %s: zapisy po grze", pid)
+                self._saves_last[pid] = {"at": time.time(), "ok": False, "message": str(ex)}
+        threading.Thread(target=run, daemon=True, name=f"gog-zapisy-{pid}").start()
+
+    def saves_status(self, pid: str, refresh: bool = False) -> dict:
+        """Stan zapisów gry dla UI: źródło reguł, rozwiązane ścieżki, zbiory, rejestr, ostatnia synchronizacja."""
+        from emustart import gogsaves
+        pid = _pid(pid)
+        e = gi.load_entry(pid)
+        if not e or e.get("state") not in (gi.ST_INSTALLED, gi.ST_NEEDS_ADMIN, gi.ST_DAMAGED):
+            return {"ok": False, "reason": "Gra nie jest zainstalowana."}
+        st, r, pl = self._saves_plan(pid, e, refresh)
+        prof = self._profile()
+        loc = gogsaves.local_state(prof, pid, pl["sets"]) if prof else {"last_sync": 0, "pending": 0}
+        return {"ok": True, "enabled": st["enabled"], "config": st["config"], "user_rules": st["rules"], "pick": st["pick"],
+                "source": r.get("source"), "title": r.get("title") or "", "version": r.get("version") or "",
+                "attribution": r.get("attribution") or "", "candidates": r.get("candidates") or [],
+                "reason": r.get("reason") or "", "offline": r.get("offline") or "",
+                "sets": [{"id": b.core_id, "kind": b.kind, "template": b.template, "folder": str(b.folder),
+                          "pattern": "/".join(b.parts), "files": len(b.files), "exists": b.folder.is_dir(),
+                          "error": b.error} for b in pl["sets"]],
+                "skipped": pl["skipped"], "registry": pl["registry"], "needs_registry": bool(pl["registry"]),
+                "profile": bool(prof), "running": pid in self.running_ids(), **loc,
+                "last": self._saves_last.get(pid) or {}}
+
+    def saves_set(self, pid: str, opts: dict) -> dict:
+        from emustart import gogsaves
+        pid = _pid(pid)
+        allowed = {k: opts[k] for k in ("enabled", "config", "rules", "pick") if k in (opts or {})}
+        try:
+            gogsaves.save_settings(pid, **allowed)
+        except gogsaves.RulesError as ex:
+            return {"ok": False, "reason": str(ex)}
+        return {"ok": True}
+
+    def saves_sync(self, pid: str, choice: str = "") -> dict:
+        """Synchronizacja ręczna (nie podczas gry). Konflikt → {"conflict"} i wybór gracza (choice)."""
+        pid = _pid(pid)
+        e = gi.load_entry(pid)
+        if not e or e.get("state") != gi.ST_INSTALLED:
+            return {"ok": False, "reason": "Gra nie jest zainstalowana."}
+        if pid in self.running_ids():
+            return {"ok": False, "reason": "Gra działa — zapisy zsynchronizują się po jej zamknięciu."}
+        if not self._profile():
+            return {"ok": False, "reason": "Zaloguj to urządzenie do serwera EmuStart."}
+        from emustart import gogsaves
+        st, _r, pl = self._saves_plan(pid, e, refresh=True)
+        if not pl["sets"]:
+            return {"ok": False, "reason": "Brak rozpoznanych lokalizacji zapisów tej gry."}
+        out = self._sync_before(pid, e, choice)
+        self._saves.pop(pid, None)
+        if out.get("conflict"):
+            return {"ok": False, "conflict": out["conflict"], "reason": "Konflikt zapisów."}
+        res = gogsaves.after(self._cfg(), self._profile(), pid, pl["sets"])          # zmiany z tego urządzenia
+        last = self._saves_last.get(pid) or {}
+        msg = res.offline or out.get("notice") or last.get("message") or "Zsynchronizowano."
+        return {"ok": not res.offline and not out.get("notice"), "message": msg}
+
+    def saves_backups(self, pid: str) -> dict:
+        from emustart import gogsaves
+        pid = _pid(pid)
+        prof = self._profile()
+        return {"ok": True, "backups": gogsaves.backups(prof, pid) if prof else []}
+
+    def saves_restore(self, pid: str, backup_id: str) -> dict:
+        from emustart import gogsaves
+        pid = _pid(pid)
+        e = gi.load_entry(pid)
+        prof = self._profile()
+        if not e or not prof:
+            return {"ok": False, "reason": "Gra nie jest zainstalowana albo urządzenie nie jest zalogowane."}
+        if pid in self.running_ids():
+            return {"ok": False, "reason": "Zamknij grę przed przywróceniem zapisów."}
+        _st, _r, pl = self._saves_plan(pid, e)
+        try:
+            n = gogsaves.restore_backup(prof, pid, backup_id, pl["sets"])
+        except ValueError as ex:
+            return {"ok": False, "reason": str(ex)}
+        return {"ok": True, "message": f"Przywrócono {n} plików — wyślę je przy najbliższej synchronizacji."}
 
     # ── pozostałe operacje ─────────────────────────────────────────────────
     def play_tasks(self, pid: str) -> dict:

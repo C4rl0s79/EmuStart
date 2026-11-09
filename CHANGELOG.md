@@ -11,6 +11,27 @@ nowym urządzeniu — do sprawdzenia na żywo), Play! (miejsce kart), APK (te sa
 budowania), adaptery pozostałych samodzielnych emulatorów przy pierwszym użyciu, sprawdzenie na żywo (niżej);
 jedno zapytanie przygotowujące grę — po pomiarach kroków z prawdziwych startów.
 
+### Plan: synchronizacja zapisów i ustawień gier GOG przez serwer EmuStart (gałąź `gog-saves`)
+
+**Co się zmieni.**
+- *Reguły:* serwer trzyma kopię ludusavi-manifest (MIT, dane z PCGamingWiki), aktualizowaną w tle (ETag, plik
+  tymczasowy, walidacja, poprzednia wersja zostaje), i własne poprawki (`saverules/overrides.json`). Dla gry:
+  `GET /v1/gog/games/<pid>/saverules` — źródło (poprawka serwera / ludusavi / brak / niejednoznaczne), reguły
+  plików i rejestru. Dopasowanie wyłącznie po GOG ID (`gog.id`, potem `id.gogExtra`), nigdy po tytule.
+- *Klient (silnik):* pierwszeństwo reguł: ręczne gracza → poprawka serwera → ludusavi; rozwinięcie ścieżek
+  (katalog instalacji, foldery znane systemu przez SHGetKnownFolderPath), warunki os/store, save/config, zbiory
+  plików ze stałym identyfikatorem; synchronizacja istniejącym mechanizmem (`syncclient`: wersje, konflikty,
+  kopia przed przywróceniem, offline, ponawianie) — platforma `gog`, emulator `gog`, rdzeń = zbiór, rodzaj
+  `saves`/`config` (nowy rodzaj na serwerze). Przed grą: pobranie / konflikt (decyzja gracza); po końcu gry
+  (śledzenie procesów z katalogu gry): wysłanie. Ustawienia — osobna opcja, domyślnie wyłączona.
+- *Rejestr:* w tym etapie tylko status „wymaga obsługi rejestru” (bez synchronizacji wpisów, bez fałszywego
+  komunikatu o pełnej synchronizacji).
+- *Lumen:* w szczegółach gry GOG: rozpoznane lokalizacje, źródło reguł, ścieżki, stan, włączanie zapisów /
+  ustawień, synchronizacja ręczna, ręczne reguły, przywrócenie wcześniejszej wersji; konflikt przy uruchomieniu.
+
+**Czego NIE dotyka.** Instalacja z depotów, uruchamianie gier (poza wywołaniem synchronizacji przed i po grze),
+synchronizacja zapisów gier emulowanych (rodzaje i klucze paczek bez zmian), chmura GOG (żadnych zapytań do GOG).
+
 ## [0.58.0] — 2026-11-09
 
 Zakres: serwer (opisy i grafiki gier GOG), silnik w Lumen (`Api.gog_art`). Klient Windows bez Lumena, APK i emulatory bez zmian.

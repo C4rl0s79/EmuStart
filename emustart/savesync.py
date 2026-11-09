@@ -53,7 +53,8 @@ UPLOAD_TTL = 1800                   # wysyłka (init → commit): 30 minut
 MAX_BUNDLE = 1024 * 1024 * 1024     # 1 GB (stany PS2 bywają duże)
 MAX_FILES = 5000
 KEEP_HISTORY = 10                   # poprzednie wersje paczki na serwerze
-KINDS = ("saves", "states", "memcards", "trash")     # trash — kosz slotu: stany usunięte przez gracza
+CORED = ("retroarch", "gog")         # emulatory z osobnymi paczkami per rdzeń / zbiór plików (GOG)
+KINDS = ("saves", "states", "memcards", "trash", "config")   # trash — kosz slotu; config — ustawienia gier GOG
 SLOTS = (1, 2, 3, 4)
 KEEP_REMOVED = 500                  # wpisy „usunięte / przeniesione świadomie” na paczkę stanów
 _ID = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,79}$")        # platforma, gra, emulator, rdzeń
@@ -104,6 +105,13 @@ def _key(emulator_id, core_id, bundle_kind) -> tuple:
     kind = str(bundle_kind or "")
     if kind not in KINDS:
         raise SyncError("nieprawidłowy bundle_kind")
+    if emu == "gog":
+        # gry GOG (emustart/gogsaves.py): core_id = zbiór plików z reguły zapisów, rodzaj zapisy / ustawienia
+        if not core or kind not in ("saves", "config"):
+            raise SyncError("GOG: wymagany zbiór plików (core_id) i rodzaj saves albo config")
+        return emu, core, kind
+    if kind == "config":
+        raise SyncError("rodzaj config jest tylko dla gier GOG")
     if emu == "retroarch" and not core:
         raise SyncError("RetroArch: core_id jest wymagany (dane rdzeni są osobne)")
     if emu != "retroarch":
@@ -188,7 +196,7 @@ def _bundle(m: dict, emu: str, core: str, kind: str, create: bool = False, slot:
     e = emus.setdefault(emu, {}) if create else emus.get(emu)
     if e is None:
         return None
-    if emu == "retroarch":
+    if emu in CORED:
         c = e.setdefault("cores", {}).setdefault(core, {}) if create else (e.get("cores") or {}).get(core)
         if c is None:
             return None
@@ -267,7 +275,7 @@ def _slot_bundles(m: dict):
 
 def _emus_bundles(emus: dict):
     for emu, e in emus.items():
-        if emu == "retroarch":
+        if emu in CORED:
             for core, c in (e.get("cores") or {}).items():
                 for kind, b in (c.get("bundles") or {}).items():
                     yield emu, core, kind, b

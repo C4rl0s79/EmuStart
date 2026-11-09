@@ -28,6 +28,7 @@ import re
 import shutil
 import threading
 import time
+import urllib.parse
 import zlib
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from pathlib import Path
@@ -99,6 +100,11 @@ class ServerSource:
 
     def catalog(self) -> list:
         return self._get_json("/v1/gog/games", 30).get("games") or []
+
+    def save_rules(self, pid: str, pick: str = "") -> dict:
+        """Reguły zapisów gry z serwera (emustart/saverules.py); `pick` — tytuł wybrany z niejednoznacznych."""
+        q = f"?title={urllib.parse.quote(pick)}" if pick else ""
+        return self._get_json(f"/v1/gog/games/{pid}/saverules{q}", 30)
 
     def art(self, pid: str, kind: str) -> tuple:
         """(bajty, typ) grafiki gry z serwera albo (None, "") — brak grafiki / błąd."""

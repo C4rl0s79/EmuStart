@@ -106,6 +106,8 @@ def _server_mode() -> None:
     from emustart import gogarchive
     if api._cfg.get("gog_depots_dir"):
         gogarchive.refresh(api._cfg["gog_depots_dir"])   # indeks archiwum depotów GOG (w tle, tylko odczyt)
+        from emustart import saverules
+        saverules.update_async()                         # reguły zapisów gier GOG (ludusavi-manifest), raz na tydzień
     from emustart import acctbackup
     acctbackup.start_auto(lambda: api._cfg)   # kopie kont raz dziennie
     from emustart import emustore
